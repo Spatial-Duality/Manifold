@@ -1,9 +1,13 @@
 import SwiftUI
+import ManifoldKit
 
 struct ActivityView: View {
     @EnvironmentObject var appState: AppState
     @State private var expandedEntry: UUID?
     @State private var filterAgent: String?
+    @State private var showGuardrail = false
+    @State private var showRefreshConfirm = false
+    @AppStorage("hasSeenGuardrail") private var hasSeenGuardrail = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -31,7 +35,7 @@ struct ActivityView: View {
                 HStack(spacing: 8) {
                     if appState.hasActiveRun {
                         Button("Refresh") {
-                            Task { await appState.refreshAccess() }
+                            showRefreshConfirm = true
                         }
                         .controlSize(.small)
                         .disabled(appState.isGranting)
@@ -44,12 +48,35 @@ struct ActivityView: View {
                         .disabled(appState.isGranting)
                     } else {
                         Button("Grant to Claude") {
-                            Task { await appState.grantAccess() }
+                            if hasSeenGuardrail {
+                                Task { await appState.grantAccess() }
+                            } else {
+                                showGuardrail = true
+                            }
                         }
                         .controlSize(.small)
                         .tint(.blue)
                         .disabled(appState.sources.isEmpty || appState.isGranting)
                     }
+                }
+                .sheet(isPresented: $showGuardrail) {
+                    GuardrailNotice {
+                        hasSeenGuardrail = true
+                        showGuardrail = false
+                        Task { await appState.grantAccess() }
+                    }
+                }
+                .confirmationDialog(
+                    "Refresh workspace?",
+                    isPresented: $showRefreshConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Refresh and Continue") {
+                        Task { await appState.refreshAccess() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This re-syncs from your source files, overwriting agent changes in the workspace. Unpromoted changes are preserved in version history.")
                 }
             }
             .padding(.horizontal, 20)
@@ -151,7 +178,7 @@ struct ActivityRow: View {
 
             // Expanded diff
             if isExpanded {
-                DiffView(beforeHash: nil, afterHash: nil)
+                DiffView()
                     .padding(.leading, 65)
                     .padding(.trailing, 12)
                     .padding(.bottom, 8)
@@ -188,24 +215,22 @@ struct ActivityRow: View {
 }
 
 struct DiffView: View {
-    let beforeHash: String?
-    let afterHash: String?
+    let lines: [ManifoldKit.DiffLine]
+
+    init(lines: [ManifoldKit.DiffLine] = []) {
+        self.lines = lines
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Placeholder diff — will wire to real snapshot data
-            if beforeHash != nil && afterHash != nil {
-                Group {
-                    DiffLine(prefix: " ", text: "async function handleRequest(req: Request) {", type: .context)
-                    DiffLine(prefix: "-", text: "  const token = req.headers.get('auth')", type: .removal)
-                    DiffLine(prefix: "+", text: "  const token = req.headers.get('authorization')", type: .addition)
-                    DiffLine(prefix: "+", text: "  if (!token) return new Response('Unauthorized', { status: 401 })", type: .addition)
-                    DiffLine(prefix: " ", text: "  // ...", type: .context)
-                }
-            } else {
+            if lines.isEmpty {
                 Text("No diff available")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.tertiary)
+            } else {
+                ForEach(lines) { line in
+                    DiffLineView(line: line)
+                }
             }
         }
         .padding(10)
@@ -217,20 +242,14 @@ struct DiffView: View {
     }
 }
 
-struct DiffLine: View {
-    let prefix: String
-    let text: String
-    let type: DiffLineType
-
-    enum DiffLineType {
-        case context, addition, removal
-    }
+struct DiffLineView: View {
+    let line: ManifoldKit.DiffLine
 
     var body: some View {
         HStack(spacing: 0) {
             Text(prefix)
                 .frame(width: 14, alignment: .center)
-            Text(text)
+            Text(line.text)
             Spacer()
         }
         .font(.system(size: 11, design: .monospaced))
@@ -239,8 +258,16 @@ struct DiffLine: View {
         .padding(.vertical, 1)
     }
 
+    private var prefix: String {
+        switch line.type {
+        case .context: return " "
+        case .addition: return "+"
+        case .removal: return "-"
+        }
+    }
+
     private var color: Color {
-        switch type {
+        switch line.type {
         case .context: return .secondary.opacity(0.6)
         case .addition: return .green
         case .removal: return .red
