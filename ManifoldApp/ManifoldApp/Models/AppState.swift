@@ -1,7 +1,9 @@
 import SwiftUI
 import Foundation
+import UserNotifications
+import ManifoldKit
 
-/// Central app state. Drives the UI.
+/// Central app state. Wired to ManifoldKit for real workspace management.
 @MainActor
 class AppState: ObservableObject {
     enum SidebarItem: String, CaseIterable, Identifiable {
@@ -20,10 +22,19 @@ class AppState: ObservableObject {
         }
     }
 
-    enum AgentStatus {
+    enum AgentStatus: Equatable {
         case inactive
         case active(agent: String, runID: String)
         case warning(message: String)
+
+        static func == (lhs: AgentStatus, rhs: AgentStatus) -> Bool {
+            switch (lhs, rhs) {
+            case (.inactive, .inactive): return true
+            case (.active(let a1, let r1), .active(let a2, let r2)): return a1 == a2 && r1 == r2
+            case (.warning(let m1), .warning(let m2)): return m1 == m2
+            default: return false
+            }
+        }
     }
 
     @Published var selectedSidebar: SidebarItem = .sources
@@ -33,6 +44,15 @@ class AppState: ObservableObject {
     @Published var currentRunID: String?
     @Published var currentWorkspaceID: String?
     @Published var currentWorkspacePath: String?
+    @Published var isGranting = false
+    @Published var hasCompletedOnboarding: Bool
+
+    // ManifoldKit stores
+    private var contentStore: ContentStore?
+    private var snapshotStore: SnapshotStore?
+    private var leaseManager: WorkspaceLeaseManager?
+    private var auditStore: AuditStore?
+    private var watcher: FSEventsWatcher?
 
     var menuBarIcon: String {
         switch agentStatus {
@@ -45,6 +65,24 @@ class AppState: ObservableObject {
     var hasActiveRun: Bool {
         if case .active = agentStatus { return true }
         return false
+    }
+
+    init() {
+        self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        Task { await initStores() }
+    }
+
+    private func initStores() async {
+        do {
+            let storeURL = Self.manifoldStoreURL()
+            contentStore = try ContentStore(rootURL: storeURL)
+            let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
+            snapshotStore = try SnapshotStore(db: db, contentStore: contentStore!)
+            leaseManager = try WorkspaceLeaseManager(db: db, snapshotStore: snapshotStore!)
+            auditStore = try AuditStore(db: db)
+        } catch {
+            print("Failed to initialize ManifoldKit stores: \(error)")
+        }
     }
 
     // MARK: - Source Management
@@ -68,45 +106,198 @@ class AppState: ObservableObject {
                 type: isDir ? .directory : .file,
                 fileCount: fileCount,
                 status: .synced,
-                isSensitive: false
+                isSensitive: isSensitivePath(url.path)
             )
             if !sources.contains(where: { $0.path == source.path }) {
                 sources.append(source)
+                Task {
+                    try? await auditStore?.log(action: .sourceAdded, metadata: ["path": source.path])
+                }
             }
         }
     }
 
     func removeSource(_ source: SourceItem) {
         sources.removeAll { $0.id == source.id }
+        Task {
+            try? await auditStore?.log(action: .sourceRemoved, metadata: ["path": source.path])
+        }
     }
 
-    // MARK: - Access Runs
+    // MARK: - Access Runs (wired to ManifoldKit)
 
-    func grantAccess() {
-        // Placeholder — will wire to WorkspaceLeaseManager
-        let runID = "run-\(UUID().uuidString.prefix(8).lowercased())"
-        let workspaceID = "ws-\(UUID().uuidString.prefix(8).lowercased())"
-        currentRunID = runID
-        currentWorkspaceID = workspaceID
-        agentStatus = .active(agent: "Cowork", runID: runID)
+    func grantAccess() async {
+        guard !isGranting, !sources.isEmpty else { return }
+        isGranting = true
+
+        do {
+            let profileID = "default"
+            let workspacesURL = Self.manifoldWorkspacesURL()
+            let workspace = ManagedWorkspace(profileID: profileID, agent: "cowork", baseURL: workspacesURL)
+            try workspace.ensureDirectory()
+            try workspace.syncSources(sources.map { $0.url })
+
+            guard let leaseManager = leaseManager, let snapshotStore = snapshotStore else {
+                isGranting = false
+                return
+            }
+
+            try await leaseManager.registerWorkspace(workspace)
+            let runID = try await leaseManager.startRun(
+                workspaceID: workspace.workspaceID,
+                agent: "cowork",
+                trigger: .userGrant
+            )
+
+            // Baseline snapshot
+            let files = try workspace.allFiles()
+            for fileURL in files {
+                guard let relativePath = workspace.relativePath(for: fileURL) else { continue }
+                let data = try Data(contentsOf: fileURL)
+                try await snapshotStore.recordBaseline(
+                    runID: runID,
+                    workspaceID: workspace.workspaceID,
+                    filePath: relativePath,
+                    data: data
+                )
+            }
+
+            try await leaseManager.markBaselineComplete(runID: runID)
+            try await auditStore?.log(
+                action: .runStart,
+                runID: runID,
+                workspaceID: workspace.workspaceID,
+                agent: "cowork"
+            )
+
+            currentRunID = runID
+            currentWorkspaceID = workspace.workspaceID
+            currentWorkspacePath = workspace.rootPath
+            agentStatus = .active(agent: "Cowork", runID: runID)
+
+            // Start watching the workspace
+            startWatching(workspace: workspace, runID: runID)
+
+            // Reveal in Finder
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: workspace.rootPath)
+
+        } catch {
+            print("Grant failed: \(error)")
+            agentStatus = .warning(message: "Grant failed")
+        }
+
+        isGranting = false
     }
 
-    func endAccess() {
+    func endAccess() async {
+        guard let runID = currentRunID else { return }
+        isGranting = true
+
+        do {
+            try await leaseManager?.endRun(runID: runID)
+            try await auditStore?.log(
+                action: .runEnd,
+                runID: runID,
+                workspaceID: currentWorkspaceID,
+                agent: "cowork"
+            )
+        } catch {
+            print("End access failed: \(error)")
+        }
+
+        watcher?.stop()
+        watcher = nil
         currentRunID = nil
         agentStatus = .inactive
+        isGranting = false
     }
 
-    func refreshAccess() {
-        // End current run, re-sync, start new run
-        endAccess()
-        grantAccess()
+    func refreshAccess() async {
+        await endAccess()
+        await grantAccess()
     }
 
-    // MARK: - Activity
+    // MARK: - FSEvents Watcher
 
-    func addActivityEntry(_ entry: ActivityEntry) {
-        activityEntries.insert(entry, at: 0)
+    private func startWatching(workspace: ManagedWorkspace, runID: String) {
+        watcher?.stop()
+
+        let wsID = workspace.workspaceID
+        let rootPath = workspace.rootPath
+
+        watcher = FSEventsWatcher(paths: [rootPath]) { [weak self] event in
+            Task { @MainActor in
+                guard let self = self, let snapshotStore = self.snapshotStore else { return }
+
+                let relativePath = event.path.replacingOccurrences(
+                    of: rootPath + "/",
+                    with: ""
+                )
+                let activeRunID = self.currentRunID ?? "unscoped"
+
+                do {
+                    switch event.changeType {
+                    case .created:
+                        let data = try Data(contentsOf: URL(fileURLWithPath: event.path))
+                        try await snapshotStore.recordCreation(
+                            runID: activeRunID, workspaceID: wsID,
+                            filePath: relativePath, data: data
+                        )
+                    case .modified:
+                        let data = try Data(contentsOf: URL(fileURLWithPath: event.path))
+                        try await snapshotStore.recordModification(
+                            runID: activeRunID, workspaceID: wsID,
+                            filePath: relativePath, newData: data
+                        )
+                    case .deleted:
+                        try await snapshotStore.recordDeletion(
+                            runID: activeRunID, workspaceID: wsID,
+                            filePath: relativePath
+                        )
+                    case .renamed:
+                        break
+                    }
+
+                    let entry = ActivityEntry(
+                        id: UUID(),
+                        timestamp: Date(),
+                        runID: activeRunID,
+                        agent: "Cowork",
+                        filePath: relativePath,
+                        changeType: ActivityEntry.ChangeType(from: event.changeType),
+                        isSensitive: self.isSensitivePath(event.path)
+                    )
+                    self.activityEntries.insert(entry, at: 0)
+
+                    // macOS notification for sensitive files
+                    if entry.isSensitive {
+                        self.sendSensitiveFileNotification(entry: entry)
+                    }
+                } catch {
+                    print("Error recording change: \(error)")
+                }
+            }
+        }
+        watcher?.start()
     }
+
+    // MARK: - Notifications
+
+    private func sendSensitiveFileNotification(entry: ActivityEntry) {
+        let content = UNMutableNotificationContent()
+        content.title = "Sensitive file modified"
+        content.body = "Agent \(entry.agent) modified \(entry.filePath)"
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Restore
 
     func restoreEntry(_ entry: ActivityEntry) {
         let restoreEntry = ActivityEntry(
@@ -116,18 +307,36 @@ class AppState: ObservableObject {
             agent: "Manifold",
             filePath: entry.filePath,
             changeType: .restored,
-            beforeHash: entry.afterHash,
-            afterHash: entry.beforeHash,
             isSensitive: false
         )
-        addActivityEntry(restoreEntry)
+        activityEntries.insert(restoreEntry, at: 0)
+    }
+
+    // MARK: - Onboarding
+
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+    }
+
+    // MARK: - Sensitivity Detection (basic filename matching)
+
+    private func isSensitivePath(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent.lowercased()
+        let sensitiveNames: Set<String> = [".env", ".env.local", ".env.production", "id_rsa", "id_ed25519", ".gitconfig"]
+        let sensitiveExtensions: Set<String> = ["pem", "key", "p12", "pfx"]
+
+        if sensitiveNames.contains(name) { return true }
+        if let ext = name.split(separator: ".").last, sensitiveExtensions.contains(String(ext)) { return true }
+        if name.hasPrefix(".env") { return true }
+
+        return false
     }
 
     // MARK: - Helpers
 
     private func countFiles(in url: URL) -> Int {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
+        guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
@@ -139,6 +348,16 @@ class AppState: ObservableObject {
             if isFile { count += 1 }
         }
         return count
+    }
+
+    static func manifoldStoreURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return appSupport.appendingPathComponent("Manifold/store")
+    }
+
+    static func manifoldWorkspacesURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return appSupport.appendingPathComponent("Manifold/workspaces")
     }
 }
 
@@ -153,15 +372,8 @@ struct SourceItem: Identifiable {
     var status: SyncStatus
     var isSensitive: Bool
 
-    enum SourceType {
-        case file, directory, email
-    }
-
-    enum SyncStatus: String {
-        case synced = "Synced"
-        case syncing = "Syncing"
-        case error = "Error"
-    }
+    enum SourceType { case file, directory, email }
+    enum SyncStatus: String { case synced = "Synced", syncing = "Syncing", error = "Error" }
 
     var icon: String {
         switch type {
@@ -186,8 +398,6 @@ struct ActivityEntry: Identifiable {
     let agent: String
     let filePath: String
     let changeType: ChangeType
-    let beforeHash: String?
-    let afterHash: String?
     let isSensitive: Bool
 
     enum ChangeType: String {
@@ -195,6 +405,15 @@ struct ActivityEntry: Identifiable {
         case modified = "Modified"
         case deleted = "Deleted"
         case restored = "Restored"
+
+        init(from fsChangeType: ManifoldKit.ChangeType) {
+            switch fsChangeType {
+            case .created: self = .created
+            case .modified: self = .modified
+            case .deleted: self = .deleted
+            case .renamed: self = .modified
+            }
+        }
     }
 
     var timeString: String {

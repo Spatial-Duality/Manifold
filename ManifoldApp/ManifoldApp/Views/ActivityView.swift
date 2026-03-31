@@ -31,22 +31,24 @@ struct ActivityView: View {
                 HStack(spacing: 8) {
                     if appState.hasActiveRun {
                         Button("Refresh") {
-                            appState.refreshAccess()
+                            Task { await appState.refreshAccess() }
                         }
                         .controlSize(.small)
+                        .disabled(appState.isGranting)
 
                         Button("End Access") {
-                            appState.endAccess()
+                            Task { await appState.endAccess() }
                         }
                         .controlSize(.small)
                         .tint(.red)
+                        .disabled(appState.isGranting)
                     } else {
                         Button("Grant to Claude") {
-                            appState.grantAccess()
+                            Task { await appState.grantAccess() }
                         }
                         .controlSize(.small)
                         .tint(.blue)
-                        .disabled(appState.sources.isEmpty)
+                        .disabled(appState.sources.isEmpty || appState.isGranting)
                     }
                 }
             }
@@ -149,7 +151,7 @@ struct ActivityRow: View {
 
             // Expanded diff
             if isExpanded {
-                DiffView(beforeHash: entry.beforeHash, afterHash: entry.afterHash)
+                DiffView(beforeHash: nil, afterHash: nil)
                     .padding(.leading, 65)
                     .padding(.trailing, 12)
                     .padding(.bottom, 8)
