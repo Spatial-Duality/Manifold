@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+*.xcuserstate
+DerivedData/
+ManifoldApp/build/
+ManifoldApp/ManifoldApp.xcodeproj/
+.DS_Store
