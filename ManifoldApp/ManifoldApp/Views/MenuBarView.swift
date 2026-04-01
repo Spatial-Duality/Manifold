@@ -33,7 +33,7 @@ struct MenuBarView: View {
             } else {
                 ForEach(appState.activityEntries.prefix(5)) { entry in
                     MenuBarActivityRow(entry: entry) {
-                        appState.restoreEntry(entry)
+                        Task { await appState.restoreEntry(entry) }
                     }
                 }
             }

@@ -7,6 +7,7 @@ struct ActivityView: View {
     @State private var filterAgent: String?
     @State private var showGuardrail = false
     @State private var showRefreshConfirm = false
+    @State private var diffLines: [UUID: [ManifoldKit.DiffLine]] = [:]
     @AppStorage("hasSeenGuardrail") private var hasSeenGuardrail = false
 
     var body: some View {
@@ -95,12 +96,22 @@ struct ActivityView: View {
                                 isExpanded: expandedEntry == entry.id,
                                 onToggle: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
-                                        expandedEntry = expandedEntry == entry.id ? nil : entry.id
+                                        if expandedEntry == entry.id {
+                                            expandedEntry = nil
+                                        } else {
+                                            expandedEntry = entry.id
+                                            // Load diff when expanding
+                                            Task {
+                                                let lines = await appState.loadDiff(for: entry)
+                                                diffLines[entry.id] = lines
+                                            }
+                                        }
                                     }
                                 },
                                 onRestore: {
-                                    appState.restoreEntry(entry)
-                                }
+                                    Task { await appState.restoreEntry(entry) }
+                                },
+                                diffLines: diffLines[entry.id] ?? []
                             )
                         }
                     }
@@ -121,6 +132,7 @@ struct ActivityRow: View {
     let isExpanded: Bool
     let onToggle: () -> Void
     let onRestore: () -> Void
+    let diffLines: [ManifoldKit.DiffLine]
 
     @State private var isHovered = false
 
@@ -178,7 +190,7 @@ struct ActivityRow: View {
 
             // Expanded diff
             if isExpanded {
-                DiffView()
+                DiffView(lines: diffLines)
                     .padding(.leading, 65)
                     .padding(.trailing, 12)
                     .padding(.bottom, 8)

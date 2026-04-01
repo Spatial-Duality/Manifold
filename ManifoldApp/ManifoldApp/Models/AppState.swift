@@ -124,6 +124,73 @@ class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Apple Mail
+
+    @Published var mailError: String?
+    @Published var mailboxes: [MailboxInfo] = []
+    @Published var isLoadingMail = false
+
+    func connectAppleMail() async {
+        isLoadingMail = true
+        mailError = nil
+
+        let connector = AppleMailConnector()
+        do {
+            let status = try connector.checkAccess()
+            guard status == .available else {
+                mailError = "Mail.app is not running. Please open Mail first."
+                isLoadingMail = false
+                return
+            }
+            mailboxes = try connector.listMailboxes()
+        } catch {
+            mailError = error.localizedDescription
+        }
+        isLoadingMail = false
+    }
+
+    func addMailbox(_ mailbox: MailboxInfo, since: Date? = nil) async {
+        isLoadingMail = true
+        let connector = AppleMailConnector()
+        do {
+            let emails = try connector.fetchMessages(
+                account: mailbox.account,
+                mailbox: mailbox.name,
+                since: since ?? Calendar.current.date(byAdding: .day, value: -30, to: Date()),
+                limit: 100
+            )
+
+            // Render emails to a temp directory, then add as source
+            let emailDir = Self.manifoldStoreURL()
+                .appendingPathComponent("emails")
+                .appendingPathComponent(mailbox.name.replacingOccurrences(of: " ", with: "-").lowercased())
+            let urls = try connector.renderToDirectory(emails: emails, directory: emailDir)
+
+            let source = SourceItem(
+                id: UUID(),
+                path: emailDir.path,
+                url: emailDir,
+                type: .email,
+                fileCount: urls.count,
+                status: .synced,
+                isSensitive: false
+            )
+            if !sources.contains(where: { $0.path == source.path }) {
+                sources.append(source)
+                try? await auditStore?.log(action: .sourceAdded, metadata: [
+                    "path": source.path,
+                    "type": "email",
+                    "account": mailbox.account,
+                    "mailbox": mailbox.name,
+                    "count": "\(urls.count)"
+                ])
+            }
+        } catch {
+            mailError = error.localizedDescription
+        }
+        isLoadingMail = false
+    }
+
     // MARK: - Access Runs (wired to ManifoldKit)
 
     func grantAccess() async {
@@ -297,19 +364,80 @@ class AppState: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
+    // MARK: - Diffs
+
+    func loadDiff(for entry: ActivityEntry) async -> [ManifoldKit.DiffLine] {
+        guard let snapshotStore = snapshotStore else { return [] }
+        guard let runID = currentRunID ?? Optional(entry.runID) else { return [] }
+
+        do {
+            let history = try await snapshotStore.history(runID: runID, filePath: entry.filePath)
+            guard history.count >= 2 else { return [] }
+
+            // Find the two most recent versions
+            let current = history.last!
+            let previous = history[history.count - 2]
+
+            guard let currentHash = current.afterHash,
+                  let previousHash = previous.afterHash else { return [] }
+
+            guard let currentData = try await contentStore?.retrieve(hash: currentHash),
+                  let previousData = try await contentStore?.retrieve(hash: previousHash) else { return [] }
+
+            let engine = DiffEngine()
+            return engine.diff(beforeData: previousData, afterData: currentData) ?? []
+        } catch {
+            return []
+        }
+    }
+
     // MARK: - Restore
 
-    func restoreEntry(_ entry: ActivityEntry) {
-        let restoreEntry = ActivityEntry(
-            id: UUID(),
-            timestamp: Date(),
-            runID: entry.runID,
-            agent: "Manifold",
-            filePath: entry.filePath,
-            changeType: .restored,
-            isSensitive: false
-        )
-        activityEntries.insert(restoreEntry, at: 0)
+    func restoreEntry(_ entry: ActivityEntry) async {
+        guard let snapshotStore = snapshotStore,
+              let workspacePath = currentWorkspacePath else { return }
+
+        do {
+            let history = try await snapshotStore.history(runID: entry.runID, filePath: entry.filePath)
+            guard history.count >= 2 else { return }
+
+            let previous = history[history.count - 2]
+            guard let data = try await snapshotStore.dataForRestore(snapshotID: previous.id) else { return }
+
+            // Write restored content to workspace file
+            let fileURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(entry.filePath)
+            try data.write(to: fileURL, options: .atomic)
+
+            // Record the restore
+            if let wsID = currentWorkspaceID {
+                try await snapshotStore.recordRestore(
+                    runID: entry.runID,
+                    workspaceID: wsID,
+                    filePath: entry.filePath,
+                    restoredData: data
+                )
+            }
+
+            let restoreEntry = ActivityEntry(
+                id: UUID(),
+                timestamp: Date(),
+                runID: entry.runID,
+                agent: "Manifold",
+                filePath: entry.filePath,
+                changeType: .restored,
+                isSensitive: false
+            )
+            activityEntries.insert(restoreEntry, at: 0)
+
+            try? await auditStore?.log(
+                action: .restore,
+                runID: entry.runID,
+                workspaceID: currentWorkspaceID,
+                filePath: entry.filePath
+            )
+        } catch {
+            print("Restore failed: \(error)")
+        }
     }
 
     // MARK: - Onboarding

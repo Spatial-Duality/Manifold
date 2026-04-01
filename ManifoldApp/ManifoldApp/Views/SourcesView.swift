@@ -1,7 +1,9 @@
 import SwiftUI
+import ManifoldKit
 
 struct SourcesView: View {
     @EnvironmentObject var appState: AppState
+    @State private var showMailPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -27,8 +29,15 @@ struct SourcesView: View {
                         }
                     }
 
-                    AddSourceButton {
-                        appState.addFileSources()
+                    // Two add buttons: files and email
+                    HStack(spacing: 8) {
+                        AddSourceButton(icon: "folder.badge.plus", label: "Add files") {
+                            appState.addFileSources()
+                        }
+                        AddSourceButton(icon: "envelope.badge.plus", label: "Connect Apple Mail") {
+                            showMailPicker = true
+                            Task { await appState.connectAppleMail() }
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -36,13 +45,102 @@ struct SourcesView: View {
 
             Spacer()
         }
+        .sheet(isPresented: $showMailPicker) {
+            MailboxPickerSheet(isPresented: $showMailPicker)
+                .environmentObject(appState)
+        }
     }
 }
+
+// MARK: - Mailbox Picker
+
+struct MailboxPickerSheet: View {
+    @EnvironmentObject var appState: AppState
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Select mailbox")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { isPresented = false }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+            }
+            .padding(16)
+
+            Divider()
+
+            if appState.isLoadingMail {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Connecting to Mail...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = appState.mailError {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.yellow)
+                    Text(error)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                    Button("Try again") {
+                        Task { await appState.connectAppleMail() }
+                    }
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if appState.mailboxes.isEmpty {
+                Text("No mailboxes found")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(Array(appState.mailboxes.enumerated()), id: \.offset) { _, mailbox in
+                        Button {
+                            Task {
+                                await appState.addMailbox(mailbox)
+                                isPresented = false
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: "envelope")
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(mailbox.name)
+                                        .font(.system(size: 13))
+                                    Text("\(mailbox.account) \u{00B7} \(mailbox.messageCount) messages")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Spacer()
+                                Text("Last 30 days")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.quaternary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(width: 400, height: 350)
+    }
+}
+
+// MARK: - Source Row
 
 struct SourceRow: View {
     let source: SourceItem
     let onRemove: () -> Void
-
     @State private var isHovered = false
 
     var body: some View {
@@ -57,7 +155,6 @@ struct SourceRow: View {
                     .font(.system(size: 13))
                     .lineLimit(1)
                     .truncationMode(.middle)
-
                 Text(fileCountText)
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
@@ -99,6 +196,8 @@ struct SourceRow: View {
     }
 }
 
+// MARK: - Badges
+
 struct StatusBadge: View {
     let status: SourceItem.SyncStatus
 
@@ -107,10 +206,7 @@ struct StatusBadge: View {
             .font(.system(size: 10, weight: .medium))
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background {
-                Capsule()
-                    .fill(backgroundColor)
-            }
+            .background { Capsule().fill(backgroundColor) }
             .foregroundStyle(foregroundColor)
     }
 
@@ -141,24 +237,25 @@ struct SensitiveBadge: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background {
-            Capsule()
-                .fill(Color.yellow.opacity(0.15))
-        }
+        .background { Capsule().fill(Color.yellow.opacity(0.15)) }
         .foregroundStyle(.yellow)
     }
 }
 
+// MARK: - Add Source Button
+
 struct AddSourceButton: View {
+    let icon: String
+    let label: String
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: "plus")
+                Image(systemName: icon)
                     .font(.system(size: 13, weight: .medium))
-                Text("Add files, folders, or connect email")
+                Text(label)
                     .font(.system(size: 13))
             }
             .foregroundStyle(.secondary)
