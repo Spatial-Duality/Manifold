@@ -4,18 +4,11 @@ import UserNotifications
 @main
 struct ManifoldApp: App {
     @StateObject private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        // Menu bar presence
-        MenuBarExtra {
-            MenuBarView()
-                .environmentObject(appState)
-        } label: {
-            Image(systemName: appState.menuBarIcon)
-        }
-
-        // Main window
-        WindowGroup {
+        // Main window — always openable
+        WindowGroup(id: "main") {
             if appState.hasCompletedOnboarding {
                 ContentView()
                     .environmentObject(appState)
@@ -23,9 +16,20 @@ struct ManifoldApp: App {
             } else {
                 OnboardingView()
                     .environmentObject(appState)
-                    .frame(width: 500, height: 400)
+                    .frame(minWidth: 500, minHeight: 400)
             }
         }
         .defaultSize(width: 900, height: 600)
+
+        // Menu bar — always visible
+        MenuBarExtra {
+            MenuBarView(openMainWindow: {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            })
+            .environmentObject(appState)
+        } label: {
+            Label("Manifold", systemImage: appState.menuBarIcon)
+        }
     }
 }

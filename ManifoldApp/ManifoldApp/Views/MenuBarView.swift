@@ -2,18 +2,16 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
+    let openMainWindow: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Status header
+            // Status + open button
             HStack {
                 statusIndicator
                 Spacer()
                 Button("Open Manifold") {
-                    NSApp.activate(ignoringOtherApps: true)
-                    if let window = NSApp.windows.first(where: { $0.title == "Manifold" || $0.isKeyWindow }) {
-                        window.makeKeyAndOrderFront(nil)
-                    }
+                    openMainWindow()
                 }
                 .font(.callout)
                 .buttonStyle(.plain)
@@ -40,6 +38,27 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Quick actions
+            Button {
+                openMainWindow()
+                appState.selectedSidebar = .activity
+            } label: {
+                Label("View Activity", systemImage: "clock.arrow.circlepath")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+
+            Button {
+                openMainWindow()
+                appState.selectedSidebar = .files
+            } label: {
+                Label("Manage Sources", systemImage: "folder")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+
+            Divider()
+
             Button("Quit Manifold") {
                 NSApplication.shared.terminate(nil)
             }
@@ -48,6 +67,7 @@ struct MenuBarView: View {
             .padding(.vertical, 6)
             .keyboardShortcut("q")
         }
+        .buttonStyle(.plain)
         .frame(width: 280)
     }
 
@@ -112,7 +132,6 @@ struct MenuBarActivityRow: View {
             if isHovered {
                 Button("Restore", action: onRestore)
                     .font(.caption2)
-                    .buttonStyle(.plain)
                     .foregroundStyle(entry.isSensitive ? Color.red : Color.accentColor)
             }
         }
