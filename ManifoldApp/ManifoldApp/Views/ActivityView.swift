@@ -13,149 +13,121 @@ struct ActivityView: View {
     @State private var replayEntries: [ActivityEntry] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Activity")
-                        .font(.title2.weight(.semibold))
+        NavigationStack {
+            Group {
+                let displayEntries = viewMode == 0 ? appState.activityEntries : replayEntries
 
-                    if let runID = appState.currentRunID {
-                        Label("Access run \(runID.prefix(12))", systemImage: "circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    } else {
-                        Text("No active access run")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                if displayEntries.isEmpty {
+                    ContentUnavailableView(
+                        "No Activity",
+                        systemImage: "clock.arrow.circlepath",
+                        description: Text("Grant access to start tracking file modifications.")
+                    )
+                } else {
+                    List {
+                        ForEach(displayEntries) { entry in
+                            ActivityRow(
+                                entry: entry,
+                                isExpanded: expandedEntry == entry.id,
+                                onToggle: {
+                                    withAnimation {
+                                        if expandedEntry == entry.id {
+                                            expandedEntry = nil
+                                        } else {
+                                            expandedEntry = entry.id
+                                            Task {
+                                                diffLines[entry.id] = await appState.loadDiff(for: entry)
+                                            }
+                                        }
+                                    }
+                                },
+                                onRestore: { Task { await appState.restoreEntry(entry) } },
+                                diffLines: diffLines[entry.id] ?? []
+                            )
+                        }
+                    }
+                    .listStyle(.inset)
+                }
+            }
+            .navigationTitle("Activity")
+            .toolbar {
+                // Mode picker in center
+                ToolbarItem(placement: .principal) {
+                    Picker("Mode", selection: $viewMode) {
+                        Text("Live").tag(0)
+                        Text("Replay").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+                }
+
+                // Replay run picker
+                if viewMode == 1 {
+                    ToolbarItem(placement: .automatic) {
+                        Picker("Run", selection: Binding(
+                            get: { selectedReplayRun ?? "" },
+                            set: {
+                                selectedReplayRun = $0.isEmpty ? nil : $0
+                                if let runID = selectedReplayRun {
+                                    Task { replayEntries = await appState.loadSessionReplay(runID: runID) }
+                                }
+                            }
+                        )) {
+                            Text("Select run...").tag("")
+                            ForEach(appState.completedRuns) { run in
+                                Text("\(run.runID.prefix(12))").tag(run.runID)
+                            }
+                        }
+                        .onAppear { Task { await appState.loadCompletedRuns() } }
                     }
                 }
 
-                Spacer()
-
-                // Access run controls
-                HStack(spacing: 8) {
-                    if appState.hasActiveRun {
-                        Button("Refresh") { showRefreshConfirm = true }
-                            .buttonStyle(.glass)
-                            .controlSize(.small)
-                            .disabled(appState.isGranting)
-
-                        Button("End Access") {
+                // Primary action: Grant or End
+                if appState.hasActiveRun {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("End Access", systemImage: "stop.circle") {
                             Task { await appState.endAccess() }
                         }
-                        .buttonStyle(.glass)
-                        .tint(.red)
-                        .controlSize(.small)
                         .disabled(appState.isGranting)
-                    } else {
-                        Button("Grant to Claude") {
+                    }
+
+                    ToolbarItem(placement: .automatic) {
+                        Button("Refresh", systemImage: "arrow.clockwise") {
+                            showRefreshConfirm = true
+                        }
+                        .disabled(appState.isGranting)
+                    }
+                } else {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Grant to Claude", systemImage: "play.circle") {
                             if hasSeenGuardrail {
                                 Task { await appState.grantAccess() }
                             } else {
                                 showGuardrail = true
                             }
                         }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.small)
                         .disabled(appState.sources.isEmpty || appState.isGranting)
                     }
                 }
-                .sheet(isPresented: $showGuardrail) {
-                    GuardrailNotice {
-                        hasSeenGuardrail = true
-                        showGuardrail = false
-                        Task { await appState.grantAccess() }
-                    }
-                }
-                .confirmationDialog("Refresh workspace?", isPresented: $showRefreshConfirm, titleVisibility: .visible) {
-                    Button("Refresh and Continue") { Task { await appState.refreshAccess() } }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("This re-syncs from your source files. Unpromoted changes are preserved in version history.")
+            }
+            .sheet(isPresented: $showGuardrail) {
+                GuardrailNotice {
+                    hasSeenGuardrail = true
+                    showGuardrail = false
+                    Task { await appState.grantAccess() }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 8)
-
-            // Mode picker
-            HStack {
-                Picker("", selection: $viewMode) {
-                    Text("Live").tag(0)
-                    Text("Session Replay").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
-
-                if viewMode == 1 {
-                    Picker("Run", selection: Binding(
-                        get: { selectedReplayRun ?? "" },
-                        set: {
-                            selectedReplayRun = $0.isEmpty ? nil : $0
-                            if let runID = selectedReplayRun {
-                                Task { replayEntries = await appState.loadSessionReplay(runID: runID) }
-                            }
-                        }
-                    )) {
-                        Text("Select run...").tag("")
-                        ForEach(appState.completedRuns) { run in
-                            Text("\(run.runID.prefix(12)) \u{00B7} \(run.startedAt.prefix(10))").tag(run.runID)
-                        }
-                    }
-                    .frame(width: 220)
-                    .onAppear { Task { await appState.loadCompletedRuns() } }
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
-
-            // Content
-            let displayEntries = viewMode == 0 ? filteredEntries : replayEntries
-            if displayEntries.isEmpty {
-                ContentUnavailableView {
-                    Label("No Activity", systemImage: "clock.arrow.circlepath")
-                } description: {
-                    Text("Start an access run to see file modifications here")
-                }
-                .frame(maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(displayEntries) { entry in
-                        ActivityRow(
-                            entry: entry,
-                            isExpanded: expandedEntry == entry.id,
-                            onToggle: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    if expandedEntry == entry.id {
-                                        expandedEntry = nil
-                                    } else {
-                                        expandedEntry = entry.id
-                                        Task {
-                                            let lines = await appState.loadDiff(for: entry)
-                                            diffLines[entry.id] = lines
-                                        }
-                                    }
-                                }
-                            },
-                            onRestore: { Task { await appState.restoreEntry(entry) } },
-                            diffLines: diffLines[entry.id] ?? []
-                        )
-                        .listRowSeparator(.hidden)
-                    }
-                }
-                .listStyle(.plain)
+            .confirmationDialog("Refresh workspace?", isPresented: $showRefreshConfirm, titleVisibility: .visible) {
+                Button("Refresh and Continue") { Task { await appState.refreshAccess() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This re-syncs from your source files. Unpromoted changes are preserved in version history.")
             }
         }
     }
-
-    private var filteredEntries: [ActivityEntry] {
-        appState.activityEntries
-    }
 }
 
-// MARK: - Activity Row
+// MARK: - Activity Row (clean, no glass on content)
 
 struct ActivityRow: View {
     let entry: ActivityEntry
@@ -167,8 +139,8 @@ struct ActivityRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
                 Text(entry.timeString)
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
@@ -177,31 +149,23 @@ struct ActivityRow: View {
                 Text(entry.agent)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(agentColor)
-                    .frame(width: 60, alignment: .leading)
 
-                HStack(spacing: 4) {
-                    if entry.isSensitive {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(.yellow)
-                    }
-                    Text(entry.changeType.rawValue)
-                        .font(.callout)
-                    Text(entry.filePath)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                if entry.isSensitive {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(.yellow)
                 }
+
+                Text(entry.changeType.rawValue)
+                    .font(.callout)
+
+                Text(entry.filePath)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
                 Spacer()
-
-                if isHovered {
-                    Button(restoreLabel) { onRestore() }
-                        .font(.caption)
-                        .buttonStyle(.plain)
-                        .foregroundStyle(entry.isSensitive ? .red : .accentColor)
-                }
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
@@ -209,11 +173,13 @@ struct ActivityRow: View {
 
             if isExpanded {
                 DiffView(lines: diffLines)
-                    .padding(.leading, 65)
-                    .padding(.top, 4)
+                    .padding(.leading, 55)
             }
         }
-        .padding(.vertical, 4)
+        .swipeActions(edge: .trailing) {
+            Button(restoreLabel) { onRestore() }
+                .tint(entry.isSensitive ? .red : .accentColor)
+        }
     }
 
     private var agentColor: Color {
@@ -239,44 +205,32 @@ struct ActivityRow: View {
 struct DiffView: View {
     let lines: [ManifoldKit.DiffLine]
 
-    init(lines: [ManifoldKit.DiffLine] = []) {
-        self.lines = lines
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if lines.isEmpty {
-                Text("No diff available")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
-            } else {
+        if lines.isEmpty {
+            Text("No diff available")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in
-                    DiffLineView(line: line)
+                    HStack(spacing: 0) {
+                        Text(prefix(for: line))
+                            .frame(width: 14, alignment: .center)
+                        Text(line.text)
+                        Spacer()
+                    }
+                    .font(.caption.monospaced())
+                    .foregroundStyle(color(for: line))
+                    .lineLimit(1)
+                    .padding(.vertical, 1)
                 }
             }
+            .padding(8)
+            .background(.quinary, in: .rect(cornerRadius: 6))
         }
-        .padding(10)
-        .background(.quinary, in: .rect(cornerRadius: 6))
-    }
-}
-
-struct DiffLineView: View {
-    let line: ManifoldKit.DiffLine
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Text(prefix)
-                .frame(width: 14, alignment: .center)
-            Text(line.text)
-            Spacer()
-        }
-        .font(.caption.monospaced())
-        .foregroundStyle(color)
-        .lineLimit(1)
-        .padding(.vertical, 1)
     }
 
-    private var prefix: String {
+    private func prefix(for line: ManifoldKit.DiffLine) -> String {
         switch line.type {
         case .context: return " "
         case .addition: return "+"
@@ -284,7 +238,7 @@ struct DiffLineView: View {
         }
     }
 
-    private var color: Color {
+    private func color(for line: ManifoldKit.DiffLine) -> Color {
         switch line.type {
         case .context: return .secondary
         case .addition: return .green

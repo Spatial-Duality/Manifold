@@ -6,40 +6,43 @@ struct SourcesView: View {
     @State private var selectedTab = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header with tab picker
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sources")
-                        .font(.title2.weight(.semibold))
-                    Text("Files and emails your agents can work with")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        NavigationStack {
+            Group {
+                if selectedTab == 0 {
+                    FilesListView()
+                } else {
+                    EmailDashboardView()
                 }
-                Spacer()
-                Picker("", selection: $selectedTab) {
-                    Text("Files").tag(0)
-                    Text("Emails").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
-
-            if selectedTab == 0 {
-                FilesTabView()
-                    .environmentObject(appState)
-            } else {
-                EmailDashboardView()
-                    .environmentObject(appState)
+            .navigationTitle("Sources")
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("Source type", selection: $selectedTab) {
+                        Text("Files").tag(0)
+                        Text("Emails").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if selectedTab == 0 {
+                        Button("Add Files", systemImage: "folder.badge.plus") {
+                            appState.addFileSources()
+                        }
+                    } else {
+                        Button("Connect Mail", systemImage: "envelope.badge.plus") {
+                            Task { await appState.connectAndFetchEmails() }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-struct FilesTabView: View {
+// MARK: - Files List
+
+struct FilesListView: View {
     @EnvironmentObject var appState: AppState
 
     private var fileSources: [SourceItem] {
@@ -48,88 +51,67 @@ struct FilesTabView: View {
 
     var body: some View {
         if fileSources.isEmpty {
-            ContentUnavailableView {
-                Label("No Files", systemImage: "folder")
-            } description: {
-                Text("Add files or folders for your agents to work with.")
-            } actions: {
-                Button {
-                    appState.addFileSources()
-                } label: {
-                    Label("Add Files or Folders", systemImage: "folder.badge.plus")
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-            }
+            ContentUnavailableView(
+                "No Files",
+                systemImage: "folder",
+                description: Text("Add files or folders for your agents to work with. Use the + button in the toolbar.")
+            )
         } else {
             List {
                 ForEach(fileSources) { source in
                     SourceRow(source: source) {
                         appState.removeSource(source)
                     }
-                    .listRowSeparator(.hidden)
                 }
-
-                Button {
-                    appState.addFileSources()
-                } label: {
-                    Label("Add files or folders", systemImage: "folder.badge.plus")
-                        .frame(maxWidth: .infinity)
+                .onDelete { indexSet in
+                    for i in indexSet {
+                        appState.removeSource(fileSources[i])
+                    }
                 }
-                .buttonStyle(.glass)
-                .controlSize(.large)
-                .listRowSeparator(.hidden)
             }
-            .listStyle(.plain)
+            .listStyle(.inset)
         }
     }
 }
 
-// MARK: - Source Row
+// MARK: - Source Row (clean, no glass on content)
 
 struct SourceRow: View {
     let source: SourceItem
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(source.displayName)
-                        .font(.body)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(source.displayName)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 8) {
                     Text(fileCountText)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+
+                    if source.isSensitive {
+                        Label("Sensitive", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                    }
+
+                    Text(source.status.rawValue)
+                        .foregroundStyle(statusColor)
                 }
-            } icon: {
-                Image(systemName: source.icon)
-                    .foregroundStyle(.secondary)
+                .font(.caption)
             }
-
-            Spacer()
-
-            if source.isSensitive {
-                Label("Sensitive", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.yellow)
-                    .glassEffect(in: .capsule)
-            }
-
-            Text(source.status.rawValue)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(statusColor)
-                .glassEffect(in: .capsule)
-
+        } icon: {
+            Image(systemName: source.icon)
+                .foregroundStyle(.secondary)
+        }
+        .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 onRemove()
             } label: {
-                Image(systemName: "xmark.circle.fill")
+                Label("Remove", systemImage: "trash")
             }
-            .buttonStyle(.glass)
         }
-        .padding(.vertical, 4)
     }
 
     private var fileCountText: String {
@@ -143,13 +125,13 @@ struct SourceRow: View {
     private var statusColor: Color {
         switch source.status {
         case .synced: return .green
-        case .syncing: return .blue
+        case .syncing: return .accentColor
         case .error: return .red
         }
     }
 }
 
-#Preview("Sources - Files Tab") {
+#Preview("Sources") {
     SourcesView()
         .environmentObject(AppState())
         .frame(width: 600, height: 500)

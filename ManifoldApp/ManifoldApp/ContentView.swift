@@ -8,6 +8,7 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView()
         } detail: {
+            // Each detail view manages its own NavigationStack
             switch appState.selectedSidebar {
             case .sources:
                 SourcesView()
@@ -19,10 +20,8 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button {
+                Button("What Claude sees", systemImage: "eye") {
                     showAccessSummary.toggle()
-                } label: {
-                    Label("What Claude sees", systemImage: "eye")
                 }
                 .popover(isPresented: $showAccessSummary) {
                     AccessSummaryView()
