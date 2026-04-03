@@ -109,7 +109,7 @@ public enum AuditAction: String, Sendable {
     case mcpConnection = "mcp_connection"
 }
 
-public struct AuditEntry: Sendable {
+public struct AuditEntry: Sendable, Identifiable {
     public let id: Int
     public let timestamp: String
     public let runID: String?

@@ -91,6 +91,11 @@ public struct DiffLine: Sendable, Identifiable {
     public let type: DiffLineType
     public let text: String
 
+    public init(type: DiffLineType, text: String) {
+        self.type = type
+        self.text = text
+    }
+
     public enum DiffLineType: Sendable {
         case context
         case addition

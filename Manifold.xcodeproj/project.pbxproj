@@ -7,36 +7,52 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		23D5AA75573009A74D796EEF /* AccessSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F576FE96083DF5399478860D /* AccessSummaryView.swift */; };
-		27787ED5062B1F508FA98D0C /* EmailDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 584CC311263A2FE62994E022 /* EmailDashboardView.swift */; };
-		3081D5B85821C9077C8A2E47 /* GuardrailNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A290367B0DCB08CA72E7F0C /* GuardrailNotice.swift */; };
+		0FF567F3F5F936AC1CE20BBE /* EmailListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26453B240C59B06341BA4675 /* EmailListView.swift */; };
+		15DA67171F7D440A1374799B /* ManifoldStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */; };
+		17F701EEBA3AA625259D7306 /* TimeLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83794677BF621BEDB36F8287 /* TimeLabel.swift */; };
 		44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E9A816D1C0EB330E125C1D /* ActivityView.swift */; };
 		535DB70D34C4691BE3A190EB /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */; };
+		6108614237351F25329A33EA /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B254DE85A21F139AF88969F6 /* StatusBadge.swift */; };
+		69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050CA6EEFB11452C92977C1 /* DiffView.swift */; };
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
-		827161DCEC469FCB4A1A7623 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C3363187B3815540B0DEF14 /* AppState.swift */; };
-		852E416B114592FCD6923C74 /* ProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E691BBB8D0E7F9FC21119BC7 /* ProfilesView.swift */; };
+		737AC79EB470B57A8C31F07A /* EmailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EE582458D27AB2BA2E2BF9A /* EmailsView.swift */; };
+		7B9535F3BDEE41F8E5B8A115 /* SourceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6470A13DA73184A39BC678 /* SourceDetailView.swift */; };
+		89446B5501B68542C7072D36 /* EmailRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A394D033EE2084DFDDB5F795 /* EmailRulesView.swift */; };
+		9CB3C07F4760781B633BA667 /* VersionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9933890EC077BC50B4DFCB10 /* VersionsView.swift */; };
 		9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76613F3C74A0440934F46E63 /* ManifoldApp.swift */; };
-		A9315186CD33902F1AF8C6FC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C31B0F989EF9C309496345D /* ContentView.swift */; };
+		A7489187D65F554DF7DCCB54 /* VersionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D638F1B2DC7BE0E7F8C41365 /* VersionDetailView.swift */; };
+		A88C1FD90DFC98F36CD04618 /* AgentBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4258FA31C049A293D658A3CE /* AgentBadge.swift */; };
+		AC3AB7A5BEB5FA34CF954282 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8A46BFF05C848EC77C2AF5 /* SetupView.swift */; };
 		AD38C91A03A6916EFE6091C4 /* SourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DC57D59E1A02E8A4A994E1B /* SourcesView.swift */; };
 		E0126357B2851010FAC78928 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */; };
-		E6969965A4F05478E63B44AD /* PromoteDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB080D674C503607B9AC9B1 /* PromoteDiffView.swift */; };
+		E94569E6FA08EDA616D3BAD5 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B9B6990C768F509B885738 /* SidebarView.swift */; };
+		EE4C9D7DA2F4501D85C238E3 /* SummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0AE61AC55BDA9F41494A32 /* SummaryView.swift */; };
+		F1E6236E38A106FEDE8B666A /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FC9F995A8250393B7018353 /* MainView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		4C31B0F989EF9C309496345D /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1EE582458D27AB2BA2E2BF9A /* EmailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailsView.swift; sourceTree = "<group>"; };
+		1F0AE61AC55BDA9F41494A32 /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryView.swift; sourceTree = "<group>"; };
+		26453B240C59B06341BA4675 /* EmailListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailListView.swift; sourceTree = "<group>"; };
+		4258FA31C049A293D658A3CE /* AgentBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBadge.swift; sourceTree = "<group>"; };
+		4B8A46BFF05C848EC77C2AF5 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		564B55046AEBA3B1643FE2FE /* Manifold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manifold.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		584CC311263A2FE62994E022 /* EmailDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailDashboardView.swift; sourceTree = "<group>"; };
+		5A6470A13DA73184A39BC678 /* SourceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceDetailView.swift; sourceTree = "<group>"; };
 		6DC57D59E1A02E8A4A994E1B /* SourcesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourcesView.swift; sourceTree = "<group>"; };
-		6FB080D674C503607B9AC9B1 /* PromoteDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoteDiffView.swift; sourceTree = "<group>"; };
+		72B9B6990C768F509B885738 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		76613F3C74A0440934F46E63 /* ManifoldApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldApp.swift; sourceTree = "<group>"; };
-		7A290367B0DCB08CA72E7F0C /* GuardrailNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardrailNotice.swift; sourceTree = "<group>"; };
-		7C3363187B3815540B0DEF14 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		82E9A816D1C0EB330E125C1D /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
+		83794677BF621BEDB36F8287 /* TimeLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeLabel.swift; sourceTree = "<group>"; };
 		9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		9933890EC077BC50B4DFCB10 /* VersionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionsView.swift; sourceTree = "<group>"; };
+		9FC9F995A8250393B7018353 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		A394D033EE2084DFDDB5F795 /* EmailRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesView.swift; sourceTree = "<group>"; };
 		AAF7A39E9DC920D0FFC0413F /* Manifold */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifold; path = .; sourceTree = SOURCE_ROOT; };
+		B254DE85A21F139AF88969F6 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
-		E691BBB8D0E7F9FC21119BC7 /* ProfilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilesView.swift; sourceTree = "<group>"; };
-		F576FE96083DF5399478860D /* AccessSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessSummaryView.swift; sourceTree = "<group>"; };
+		D050CA6EEFB11452C92977C1 /* DiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffView.swift; sourceTree = "<group>"; };
+		D638F1B2DC7BE0E7F8C41365 /* VersionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionDetailView.swift; sourceTree = "<group>"; };
+		F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,15 +95,20 @@
 		8318F9009B9A6F86C2A68433 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				F576FE96083DF5399478860D /* AccessSummaryView.swift */,
 				82E9A816D1C0EB330E125C1D /* ActivityView.swift */,
-				584CC311263A2FE62994E022 /* EmailDashboardView.swift */,
-				7A290367B0DCB08CA72E7F0C /* GuardrailNotice.swift */,
+				26453B240C59B06341BA4675 /* EmailListView.swift */,
+				A394D033EE2084DFDDB5F795 /* EmailRulesView.swift */,
+				1EE582458D27AB2BA2E2BF9A /* EmailsView.swift */,
+				9FC9F995A8250393B7018353 /* MainView.swift */,
 				9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */,
 				C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */,
-				E691BBB8D0E7F9FC21119BC7 /* ProfilesView.swift */,
-				6FB080D674C503607B9AC9B1 /* PromoteDiffView.swift */,
+				4B8A46BFF05C848EC77C2AF5 /* SetupView.swift */,
+				72B9B6990C768F509B885738 /* SidebarView.swift */,
+				5A6470A13DA73184A39BC678 /* SourceDetailView.swift */,
 				6DC57D59E1A02E8A4A994E1B /* SourcesView.swift */,
+				1F0AE61AC55BDA9F41494A32 /* SummaryView.swift */,
+				D638F1B2DC7BE0E7F8C41365 /* VersionDetailView.swift */,
+				9933890EC077BC50B4DFCB10 /* VersionsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -95,8 +116,8 @@
 		A6F4968BF6A0BCAE922FEE85 /* ManifoldApp */ = {
 			isa = PBXGroup;
 			children = (
-				4C31B0F989EF9C309496345D /* ContentView.swift */,
 				76613F3C74A0440934F46E63 /* ManifoldApp.swift */,
+				F00B9F88805F35215FC8149C /* Components */,
 				F2EC59648DA1B62188DA4583 /* Models */,
 				8318F9009B9A6F86C2A68433 /* Views */,
 			);
@@ -104,10 +125,21 @@
 			path = ManifoldApp/ManifoldApp;
 			sourceTree = "<group>";
 		};
+		F00B9F88805F35215FC8149C /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				4258FA31C049A293D658A3CE /* AgentBadge.swift */,
+				D050CA6EEFB11452C92977C1 /* DiffView.swift */,
+				B254DE85A21F139AF88969F6 /* StatusBadge.swift */,
+				83794677BF621BEDB36F8287 /* TimeLabel.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
 		F2EC59648DA1B62188DA4583 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				7C3363187B3815540B0DEF14 /* AppState.swift */,
+				F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -175,18 +207,26 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				23D5AA75573009A74D796EEF /* AccessSummaryView.swift in Sources */,
 				44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */,
-				827161DCEC469FCB4A1A7623 /* AppState.swift in Sources */,
-				A9315186CD33902F1AF8C6FC /* ContentView.swift in Sources */,
-				27787ED5062B1F508FA98D0C /* EmailDashboardView.swift in Sources */,
-				3081D5B85821C9077C8A2E47 /* GuardrailNotice.swift in Sources */,
+				A88C1FD90DFC98F36CD04618 /* AgentBadge.swift in Sources */,
+				69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */,
+				0FF567F3F5F936AC1CE20BBE /* EmailListView.swift in Sources */,
+				89446B5501B68542C7072D36 /* EmailRulesView.swift in Sources */,
+				737AC79EB470B57A8C31F07A /* EmailsView.swift in Sources */,
+				F1E6236E38A106FEDE8B666A /* MainView.swift in Sources */,
 				9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */,
+				15DA67171F7D440A1374799B /* ManifoldStore.swift in Sources */,
 				535DB70D34C4691BE3A190EB /* MenuBarView.swift in Sources */,
 				E0126357B2851010FAC78928 /* OnboardingView.swift in Sources */,
-				852E416B114592FCD6923C74 /* ProfilesView.swift in Sources */,
-				E6969965A4F05478E63B44AD /* PromoteDiffView.swift in Sources */,
+				AC3AB7A5BEB5FA34CF954282 /* SetupView.swift in Sources */,
+				E94569E6FA08EDA616D3BAD5 /* SidebarView.swift in Sources */,
+				7B9535F3BDEE41F8E5B8A115 /* SourceDetailView.swift in Sources */,
 				AD38C91A03A6916EFE6091C4 /* SourcesView.swift in Sources */,
+				6108614237351F25329A33EA /* StatusBadge.swift in Sources */,
+				EE4C9D7DA2F4501D85C238E3 /* SummaryView.swift in Sources */,
+				17F701EEBA3AA625259D7306 /* TimeLabel.swift in Sources */,
+				A7489187D65F554DF7DCCB54 /* VersionDetailView.swift in Sources */,
+				9CB3C07F4760781B633BA667 /* VersionsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

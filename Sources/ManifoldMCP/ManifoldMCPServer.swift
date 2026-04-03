@@ -1,6 +1,8 @@
 import Foundation
-import MCP
+import os
 import ManifoldKit
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "mcp")
 
 @main
 struct ManifoldMCPServer {
@@ -11,6 +13,7 @@ struct ManifoldMCPServer {
             let writer = ConfigWriter(binaryPath: binaryPath)
             try writer.installAll()
             fputs("Manifold MCP server installed. Restart Claude Desktop to connect.\n", stderr)
+            logger.info("MCP server installed via --install flag")
             return
         }
 
@@ -25,8 +28,9 @@ struct ManifoldMCPServer {
         let auditStore = try AuditStore(db: db)
         let emailFilter = try EmailFilter(db: db)
 
-        // Log MCP connection
+        // Log MCP connection and notify the app
         try? await auditStore.log(action: .mcpConnection, metadata: ["event": "connected"])
+        ManifoldNotification.post(ManifoldNotification.agentConnected, userInfo: ["agent": "cowork"])
 
         // Create bridge
         let bridge = ManifoldBridge(
@@ -39,56 +43,40 @@ struct ManifoldMCPServer {
         )
 
         // Create MCP server
-        let server = Server(
-            name: "manifold",
-            version: "0.2.0",
-            capabilities: .init(
-                resources: .init(listChanged: true),
-                tools: .init(listChanged: false)
-            )
-        )
+        let server = MCPServer(name: "manifold", version: "0.2.0")
 
-        // Register handlers (Server is an actor, need await)
-        await server.withMethodHandler(ListTools.self) { _ in
-            ListTools.Result(tools: ToolHandlers.allTools())
+        // Register tools
+        server.registerTools(ToolHandlers.allTools()) { name, arguments in
+            let result = await ToolHandlers.handle(name: name, arguments: arguments.value, bridge: bridge)
+            return JSONDict(result)
         }
 
-        await server.withMethodHandler(CallTool.self) { params in
-            await ToolHandlers.handle(
-                name: params.name,
-                arguments: params.arguments,
-                bridge: bridge
-            )
-        }
-
-        await server.withMethodHandler(ListResources.self) { _ in
-            ListResources.Result(resources: [
-                Resource(name: "Manifold Status", uri: "manifold://status", description: "Current access status"),
-                Resource(name: "Approved Files", uri: "manifold://files", description: "List of files in workspace"),
-                Resource(name: "Shared Emails", uri: "manifold://emails", description: "Emails available to agent"),
-            ])
-        }
-
-        await server.withMethodHandler(ReadResource.self) { params in
-            switch params.uri {
+        // Register resources
+        server.registerResources([
+            MCPResource(name: "Manifold Status", uri: "manifold://status", description: "Current access status"),
+            MCPResource(name: "Approved Files", uri: "manifold://files", description: "List of files in workspace"),
+            MCPResource(name: "Shared Emails", uri: "manifold://emails", description: "Emails available to agent"),
+        ]) { uri in
+            switch uri {
             case "manifold://status":
                 let status = await bridge.getStatus()
-                return ReadResource.Result(contents: [.text(status.message, uri: "manifold://status")])
+                return status.message
             case "manifold://files":
                 let files = (try? await bridge.listFiles()) ?? []
-                return ReadResource.Result(contents: [.text(files.joined(separator: "\n"), uri: "manifold://files")])
+                return files.joined(separator: "\n")
             case "manifold://emails":
                 let emails = (try? await bridge.listEmails()) ?? []
-                let text = emails.map { "[\($0.id)] \($0.from) — \($0.subject)" }.joined(separator: "\n")
-                return ReadResource.Result(contents: [.text(text, uri: "manifold://emails")])
+                return emails.map { "[\($0.id)] \($0.from) — \($0.subject)" }.joined(separator: "\n")
             default:
-                return ReadResource.Result(contents: [])
+                return ""
             }
         }
 
         // Start stdio transport (blocks until stdin closes)
-        let transport = StdioTransport()
-        try await server.start(transport: transport)
+        defer {
+            ManifoldNotification.post(ManifoldNotification.agentDisconnected, userInfo: ["agent": "cowork"])
+        }
+        try await server.start()
     }
 
     static func manifoldStoreURL() -> URL {

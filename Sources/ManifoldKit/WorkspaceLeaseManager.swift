@@ -50,6 +50,12 @@ public actor WorkspaceLeaseManager {
         """, params: [id, profileID, rootPath, agent, now, now])
     }
 
+    /// Get all workspaces, most recently updated first.
+    public func allWorkspaces() throws -> [WorkspaceRecord] {
+        let rows = try db.queryAll("SELECT * FROM workspaces ORDER BY updated_at DESC")
+        return rows.compactMap { WorkspaceRecord(row: $0) }
+    }
+
     /// Get the workspace for a profile, if one exists.
     public func workspace(forProfile profileID: String) throws -> WorkspaceRecord? {
         let rows = try db.queryAll(
@@ -190,7 +196,8 @@ public enum RunTrigger: String, Sendable {
     case autoResume = "auto_resume"
 }
 
-public struct WorkspaceRecord: Sendable {
+public struct WorkspaceRecord: Sendable, Hashable, Identifiable {
+    public var id: String { workspaceID }
     public let workspaceID: String
     public let profileID: String
     public let rootPath: String

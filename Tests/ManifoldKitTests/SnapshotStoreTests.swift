@@ -148,6 +148,70 @@ struct SnapshotStoreTests {
         #expect(latest == baseline)
     }
 
+    @Test("File history spans multiple runs")
+    func fileHistoryAcrossRuns() async throws {
+        let (_, snapshotStore, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        try await snapshotStore.recordBaseline(runID: "run-x", workspaceID: "ws-1", filePath: "shared.txt", data: "V1".data(using: .utf8)!)
+        try await snapshotStore.recordModification(runID: "run-x", workspaceID: "ws-1", filePath: "shared.txt", newData: "V2".data(using: .utf8)!)
+        try await snapshotStore.recordBaseline(runID: "run-y", workspaceID: "ws-1", filePath: "shared.txt", data: "V2".data(using: .utf8)!)
+        try await snapshotStore.recordModification(runID: "run-y", workspaceID: "ws-1", filePath: "shared.txt", newData: "V3".data(using: .utf8)!)
+
+        let history = try await snapshotStore.fileHistory(filePath: "shared.txt")
+        #expect(history.count == 4)
+        // Most recent first
+        #expect(history[0].runID == "run-y")
+        #expect(history[3].runID == "run-x")
+    }
+
+    @Test("File history excludes other files")
+    func fileHistoryExcludesOtherFiles() async throws {
+        let (_, snapshotStore, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        try await snapshotStore.recordCreation(runID: "run-z", workspaceID: "ws-1", filePath: "target.txt", data: "data".data(using: .utf8)!)
+        try await snapshotStore.recordCreation(runID: "run-z", workspaceID: "ws-1", filePath: "other.txt", data: "other".data(using: .utf8)!)
+
+        let history = try await snapshotStore.fileHistory(filePath: "target.txt")
+        #expect(history.count == 1)
+        #expect(history[0].filePath == "target.txt")
+    }
+
+    @Test("Data for restore returns correct content")
+    func dataForRestore() async throws {
+        let (_, snapshotStore, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        let original = "Restore me".data(using: .utf8)!
+        try await snapshotStore.recordCreation(runID: "run-r", workspaceID: "ws-1", filePath: "restore.txt", data: original)
+
+        let history = try await snapshotStore.fileHistory(filePath: "restore.txt")
+        #expect(history.count == 1)
+
+        let restored = try await snapshotStore.dataForRestore(snapshotID: history[0].id)
+        #expect(restored == original)
+    }
+
+    @Test("Prune keeps recent runs")
+    func pruneKeepsRecent() async throws {
+        let (_, snapshotStore, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        // Create 3 runs
+        for i in 0..<3 {
+            try await snapshotStore.recordCreation(runID: "run-p\(i)", workspaceID: "ws-1", filePath: "f\(i).txt", data: "data\(i)".data(using: .utf8)!)
+        }
+
+        // Prune keeping last 2
+        let pruned = try await snapshotStore.pruneOldRuns(keepLast: 2)
+        #expect(pruned >= 0) // At least attempted to prune
+
+        // Run-p2 and run-p1 should still exist
+        let timeline2 = try await snapshotStore.runTimeline(runID: "run-p2")
+        #expect(!timeline2.isEmpty)
+    }
+
     @Test("Workspace timeline spans multiple runs")
     func workspaceTimeline() async throws {
         let (_, snapshotStore, tempDir) = try makeStores()

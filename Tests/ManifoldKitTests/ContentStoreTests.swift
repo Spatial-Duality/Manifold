@@ -100,4 +100,27 @@ struct ContentStoreTests {
         let retrieved = try await store.retrieve(hash: hash)
         #expect(retrieved == "File content here".data(using: .utf8))
     }
+
+    @Test("Total size tracks ingested data")
+    func totalSize() async throws {
+        let (store, tempDir) = try makeTempStore()
+        defer { cleanup(tempDir) }
+
+        let data1 = "Hello".data(using: .utf8)!
+        let data2 = "World!".data(using: .utf8)!
+        _ = try await store.ingest(data: data1)
+        _ = try await store.ingest(data: data2)
+
+        let size = try await store.totalSize()
+        #expect(size == Int64(data1.count + data2.count))
+    }
+
+    @Test("Exists returns false for missing hash")
+    func existsMissing() async throws {
+        let (store, tempDir) = try makeTempStore()
+        defer { cleanup(tempDir) }
+
+        let exists = await store.exists(hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        #expect(!exists)
+    }
 }

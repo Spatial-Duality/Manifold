@@ -1,150 +1,137 @@
 import Foundation
-import MCP
 import ManifoldKit
 
-/// Registers all Manifold MCP tools with the server.
+/// Registers all Manifold MCP tools and dispatches calls.
 enum ToolHandlers {
-    static func allTools() -> [Tool] {
+
+    // MARK: - Tool Definitions
+
+    static func allTools() -> [MCPTool] {
         [
-            Tool(
+            MCPTool(
                 name: "list_files",
                 description: "List all files the user has approved for this session.",
-                inputSchema: .object([:])
+                inputSchema: emptySchema
             ),
-            Tool(
+            MCPTool(
                 name: "read_file",
                 description: "Read the contents of an approved file.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "path": .object(["type": .string("string"), "description": .string("Relative path within the workspace")])
-                    ]),
-                    "required": .array([.string("path")])
-                ])
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Relative path within the workspace"],
+                ], required: ["path"])
             ),
-            Tool(
+            MCPTool(
                 name: "write_file",
                 description: "Write content to a file. The change is versioned.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "path": .object(["type": .string("string"), "description": .string("Relative path")]),
-                        "content": .object(["type": .string("string"), "description": .string("File content")])
-                    ]),
-                    "required": .array([.string("path"), .string("content")])
-                ])
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Relative path"],
+                    "content": ["type": "string", "description": "File content"],
+                ], required: ["path", "content"])
             ),
-            Tool(
+            MCPTool(
                 name: "search_files",
                 description: "Search for text within approved files.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "query": .object(["type": .string("string"), "description": .string("Text to search for")])
-                    ]),
-                    "required": .array([.string("query")])
-                ])
+                inputSchema: objectSchema(properties: [
+                    "query": ["type": "string", "description": "Text to search for"],
+                ], required: ["query"])
             ),
-            Tool(
+            MCPTool(
                 name: "list_emails",
                 description: "List emails the user has shared. Sensitive emails are auto-hidden.",
-                inputSchema: .object([:])
+                inputSchema: emptySchema
             ),
-            Tool(
+            MCPTool(
                 name: "read_email",
                 description: "Read a specific shared email by ID.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "id": .object(["type": .string("string"), "description": .string("Email message ID")])
-                    ]),
-                    "required": .array([.string("id")])
-                ])
+                inputSchema: objectSchema(properties: [
+                    "id": ["type": "string", "description": "Email message ID"],
+                ], required: ["id"])
             ),
-            Tool(
+            MCPTool(
                 name: "get_status",
                 description: "Check if Manifold access is active and what is available.",
-                inputSchema: .object([:])
+                inputSchema: emptySchema
             ),
-            Tool(
+            MCPTool(
                 name: "list_changes",
                 description: "List recent file modifications in the current access run.",
-                inputSchema: .object([:])
+                inputSchema: emptySchema
             ),
         ]
     }
 
-    static func handle(name: String, arguments: [String: Value]?, bridge: ManifoldBridge) async -> CallTool.Result {
+    // MARK: - Call Handler
+
+    static func handle(name: String, arguments: [String: Any], bridge: ManifoldBridge) async -> [String: Any] {
         do {
             switch name {
             case "get_status":
                 let status = await bridge.getStatus()
-                return result(formatStatus(status))
+                return textResult(formatStatus(status))
 
             case "list_files":
                 let files = try await bridge.listFiles()
-                return result(files.isEmpty ? "No files in workspace." : files.joined(separator: "\n"))
+                return textResult(files.isEmpty ? "No files in workspace." : files.joined(separator: "\n"))
 
             case "read_file":
-                guard let path = arguments?["path"]?.stringValue else {
-                    return error("'path' parameter required")
+                guard let path = arguments["path"] as? String else {
+                    return errorResult("'path' parameter required")
                 }
                 let content = try await bridge.readFile(path: path)
-                return result(content)
+                return textResult(content)
 
             case "write_file":
-                guard let path = arguments?["path"]?.stringValue,
-                      let content = arguments?["content"]?.stringValue else {
-                    return error("'path' and 'content' parameters required")
+                guard let path = arguments["path"] as? String,
+                      let content = arguments["content"] as? String else {
+                    return errorResult("'path' and 'content' parameters required")
                 }
                 let msg = try await bridge.writeFile(path: path, content: content)
-                return result(msg)
+                return textResult(msg)
 
             case "search_files":
-                guard let query = arguments?["query"]?.stringValue else {
-                    return error("'query' parameter required")
+                guard let query = arguments["query"] as? String else {
+                    return errorResult("'query' parameter required")
                 }
                 let results = try await bridge.searchFiles(query: query)
-                if results.isEmpty { return result("No matches found for '\(query)'") }
+                if results.isEmpty { return textResult("No matches found for '\(query)'") }
                 let formatted = results.map { "## \($0.path)\n" + $0.matches.joined(separator: "\n") }
-                return result(formatted.joined(separator: "\n\n"))
+                return textResult(formatted.joined(separator: "\n\n"))
 
             case "list_emails":
                 let emails = try await bridge.listEmails()
-                if emails.isEmpty { return result("No shared emails.") }
+                if emails.isEmpty { return textResult("No shared emails.") }
                 let formatted = emails.map { "[\($0.id)] \($0.from) — \($0.subject) (\($0.date))" }
-                return result(formatted.joined(separator: "\n"))
+                return textResult(formatted.joined(separator: "\n"))
 
             case "read_email":
-                guard let id = arguments?["id"]?.stringValue else {
-                    return error("'id' parameter required")
+                guard let id = arguments["id"] as? String else {
+                    return errorResult("'id' parameter required")
                 }
                 let content = try await bridge.readEmail(id: id)
-                return result(content)
+                return textResult(content)
 
             case "list_changes":
                 let changes = try await bridge.listChanges()
-                if changes.isEmpty { return result("No changes recorded yet.") }
+                if changes.isEmpty { return textResult("No changes recorded yet.") }
                 let formatted = changes.map { "[\($0.timestamp)] \($0.type.uppercased()) \($0.path) (via \($0.source))" }
-                return result(formatted.joined(separator: "\n"))
+                return textResult(formatted.joined(separator: "\n"))
 
             default:
-                return error("Unknown tool: \(name)")
+                return errorResult("Unknown tool: \(name)")
             }
         } catch {
-            return CallTool.Result(
-                content: [.text(text: error.localizedDescription, annotations: nil, _meta: nil)],
-                isError: true
-            )
+            return errorResult(error.localizedDescription)
         }
     }
 
-    private static func result(_ text: String) -> CallTool.Result {
-        CallTool.Result(content: [.text(text: text, annotations: nil, _meta: nil)])
+    // MARK: - Helpers
+
+    private static func textResult(_ text: String) -> [String: Any] {
+        ["content": [["type": "text", "text": text]]]
     }
 
-    private static func error(_ text: String) -> CallTool.Result {
-        CallTool.Result(content: [.text(text: text, annotations: nil, _meta: nil)], isError: true)
+    private static func errorResult(_ text: String) -> [String: Any] {
+        ["content": [["type": "text", "text": text]], "isError": true]
     }
 
     private static func formatStatus(_ status: StatusResult) -> String {
@@ -160,13 +147,18 @@ enum ToolHandlers {
             return status.message
         }
     }
-}
 
-// MARK: - Value helpers
+    // MARK: - Schema Builders
 
-extension Value {
-    var stringValue: String? {
-        if case .string(let s) = self { return s }
-        return nil
+    private static var emptySchema: [String: Any] {
+        ["type": "object"]
+    }
+
+    private static func objectSchema(properties: [String: [String: String]], required: [String]) -> [String: Any] {
+        [
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        ]
     }
 }

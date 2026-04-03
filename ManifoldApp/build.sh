@@ -5,13 +5,17 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 echo "Building Manifold..."
-swift build --product ManifoldApp
+swift build --product ManifoldApp --product manifold-mcp
 
 BINARY="$PROJECT_DIR/.build/debug/ManifoldApp"
+MCP_BINARY="$PROJECT_DIR/.build/debug/manifold-mcp"
 BUNDLE="$PROJECT_DIR/ManifoldApp/build/ManifoldApp.app"
 mkdir -p "$BUNDLE/Contents/MacOS"
+mkdir -p "$BUNDLE/Contents/Resources"
 
 cp "$BINARY" "$BUNDLE/Contents/MacOS/ManifoldApp"
+cp "$MCP_BINARY" "$BUNDLE/Contents/Resources/manifold-mcp"
+chmod +x "$BUNDLE/Contents/Resources/manifold-mcp"
 
 cat > "$BUNDLE/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

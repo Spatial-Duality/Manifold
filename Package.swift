@@ -13,9 +13,7 @@ let package = Package(
         .executable(name: "manifold-mcp", targets: ["ManifoldMCP"]),
         .executable(name: "ManifoldApp", targets: ["ManifoldApp"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "ManifoldKit",
@@ -29,10 +27,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "ManifoldMCP",
-            dependencies: [
-                "ManifoldKit",
-                .product(name: "MCP", package: "swift-sdk"),
-            ],
+            dependencies: ["ManifoldKit"],
             path: "Sources/ManifoldMCP"
         ),
         .executableTarget(

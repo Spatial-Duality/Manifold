@@ -90,30 +90,48 @@ public actor ManifoldBridge {
 
     public func readFile(path: String) async throws -> String {
         let (wsID, runID, rootPath) = try await resolveActiveRun()
-        let fileURL = try validatePath(path, rootPath: rootPath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw ManifoldMCPError.fileNotFound(path)
-        }
-        let data = try Data(contentsOf: fileURL)
 
-        // Audit the read
-        try? await auditStore.log(
-            action: .fileRead,
-            runID: runID,
-            workspaceID: wsID,
-            filePath: path
-        )
+        do {
+            let fileURL = try validatePath(path, rootPath: rootPath)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                throw ManifoldMCPError.fileNotFound(path)
+            }
+            let data = try Data(contentsOf: fileURL)
 
-        if let text = String(data: data, encoding: .utf8) {
-            return text
-        } else {
-            return "<binary file, \(data.count) bytes>"
+            // Audit the read
+            try? await auditStore.log(
+                action: .fileRead,
+                runID: runID,
+                workspaceID: wsID,
+                filePath: path
+            )
+
+            // Notify app of file access + data change
+            ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
+                "path": path, "action": "read", "agent": "cowork"
+            ])
+            ManifoldNotification.post(ManifoldNotification.dataChanged)
+
+            if let text = String(data: data, encoding: .utf8) {
+                return text
+            } else {
+                return "<binary file, \(data.count) bytes>"
+            }
+        } catch let error as ManifoldMCPError where error.isPathError {
+            // Notify app about denied access
+            ManifoldNotification.post(ManifoldNotification.accessDenied, userInfo: [
+                "path": path, "agent": "cowork", "action": "read"
+            ])
+            throw error
         }
     }
 
     public func writeFile(path: String, content: String) async throws -> String {
         let (wsID, runID, rootPath) = try await resolveActiveRun()
         guard !path.hasPrefix("_emails/") else {
+            ManifoldNotification.post(ManifoldNotification.accessDenied, userInfo: [
+                "path": path, "agent": "cowork", "action": "write"
+            ])
             throw ManifoldMCPError.invalidPath("Cannot write to email files (read-only)")
         }
         let fileURL = try validatePath(path, rootPath: rootPath)
@@ -142,12 +160,13 @@ public actor ManifoldBridge {
             )
         }
 
-        // Audit
+        // Audit + notify
         try? await auditStore.log(
             action: existed ? .fileModified : .fileCreated,
             runID: runID, workspaceID: wsID,
             filePath: path
         )
+        ManifoldNotification.post(ManifoldNotification.dataChanged)
 
         return "Wrote \(data.count) bytes to \(path)"
     }
@@ -274,6 +293,13 @@ public enum ManifoldMCPError: Error, LocalizedError {
         case .noActiveRun: return "No active access run. Open Manifold and click 'Grant to Claude' first."
         case .invalidPath(let msg): return "Invalid path: \(msg)"
         case .fileNotFound(let path): return "File not found: \(path)"
+        }
+    }
+
+    public var isPathError: Bool {
+        switch self {
+        case .invalidPath: return true
+        default: return false
         }
     }
 }

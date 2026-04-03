@@ -153,6 +153,33 @@ public actor SnapshotStore {
         return rows.compactMap { SnapshotRecord(row: $0) }
     }
 
+    /// Get all snapshots for a file across ALL runs, most recent first.
+    public func fileHistory(filePath: String) throws -> [SnapshotRecord] {
+        let rows = try db.queryAll("""
+            SELECT id, run_id, workspace_id, timestamp, file_path, after_hash, before_hash, is_baseline, is_delete, source
+            FROM snapshots
+            WHERE file_path = ?
+            ORDER BY id DESC
+        """, params: [filePath])
+
+        return rows.compactMap { SnapshotRecord(row: $0) }
+    }
+
+    /// Get all distinct file paths that have at least one snapshot.
+    public func allTrackedFiles() throws -> [String] {
+        let rows = try db.queryAll("SELECT DISTINCT file_path FROM snapshots ORDER BY file_path")
+        return rows.compactMap { $0["file_path"] }
+    }
+
+    /// Count snapshots for a file path.
+    public func snapshotCount(filePath: String) throws -> Int {
+        let result = try db.queryScalar(
+            "SELECT COUNT(*) FROM snapshots WHERE file_path = ?",
+            params: [filePath]
+        )
+        return Int(result ?? "0") ?? 0
+    }
+
     /// Get all modified files in a run (excludes baselines).
     public func modifiedFiles(runID: String) throws -> [String] {
         let rows = try db.queryAll("""
@@ -213,11 +240,73 @@ public actor SnapshotStore {
 
         return pruned
     }
+
+    /// Prune snapshots older than a number of days.
+    @discardableResult
+    public func pruneByAge(days: Int = 30) throws -> Int {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
+        let cutoffStr = ISO8601DateFormatter().string(from: cutoff)
+
+        // Don't delete if it's the only snapshot for a file
+        let toDelete = try db.queryAll("""
+            SELECT s.id, s.after_hash FROM snapshots s
+            WHERE s.timestamp < ?
+            AND (SELECT COUNT(*) FROM snapshots s2 WHERE s2.file_path = s.file_path) > 1
+        """, params: [cutoffStr])
+
+        var pruned = 0
+        for row in toDelete {
+            guard let idStr = row["id"] else { continue }
+            try db.transaction {
+                try db.execute("DELETE FROM snapshots WHERE id = ?", params: [idStr])
+                if let hash = row["after_hash"], !hash.isEmpty {
+                    try db.execute(
+                        "UPDATE content_meta SET ref_count = ref_count - 1 WHERE hash = ?",
+                        params: [hash]
+                    )
+                }
+            }
+            pruned += 1
+        }
+        return pruned
+    }
+
+    /// Prune excess versions per file, keeping the most recent N.
+    @discardableResult
+    public func pruneByFileCount(maxPerFile: Int = 50) throws -> Int {
+        let files = try db.queryAll("SELECT DISTINCT file_path FROM snapshots")
+        var pruned = 0
+
+        for file in files {
+            guard let filePath = file["file_path"] else { continue }
+            let excess = try db.queryAll("""
+                SELECT id, after_hash FROM snapshots
+                WHERE file_path = ?
+                ORDER BY id DESC
+                LIMIT -1 OFFSET ?
+            """, params: [filePath, "\(maxPerFile)"])
+
+            for row in excess {
+                guard let idStr = row["id"] else { continue }
+                try db.transaction {
+                    try db.execute("DELETE FROM snapshots WHERE id = ?", params: [idStr])
+                    if let hash = row["after_hash"], !hash.isEmpty {
+                        try db.execute(
+                            "UPDATE content_meta SET ref_count = ref_count - 1 WHERE hash = ?",
+                            params: [hash]
+                        )
+                    }
+                }
+                pruned += 1
+            }
+        }
+        return pruned
+    }
 }
 
 // MARK: - SnapshotRecord
 
-public struct SnapshotRecord: Sendable {
+public struct SnapshotRecord: Sendable, Hashable, Identifiable {
     public let id: Int
     public let runID: String
     public let workspaceID: String
