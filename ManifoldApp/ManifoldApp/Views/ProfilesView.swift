@@ -1,7 +1,10 @@
 import SwiftUI
+import ManifoldKit
 
 struct ProfilesView: View {
     @EnvironmentObject var appState: AppState
+    @State private var profiles: [NamedProfile] = []
+    @State private var selectedProfileID: String = "work"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -9,7 +12,7 @@ struct ProfilesView: View {
                 Text("Profiles")
                     .font(.title2)
                     .fontWeight(.semibold)
-                Text("Control what each agent can access")
+                Text("Quick-switch what agents can access")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -17,120 +20,124 @@ struct ProfilesView: View {
             .padding(.top, 20)
             .padding(.bottom, 16)
 
-            ScrollView {
-                VStack(spacing: 16) {
-                    ProfileCard(
-                        agent: "Cowork",
-                        icon: "desktopcomputer",
-                        color: .blue,
-                        sources: appState.sources,
-                        description: "Claude's computer use agent. Runs in a VM with VirtioFS mount."
-                    )
-
-                    ProfileCard(
-                        agent: "Codex",
-                        icon: "terminal",
-                        color: .purple,
-                        sources: appState.sources,
-                        description: "OpenAI's coding agent. Runs directly on your filesystem."
-                    )
-                }
-                .padding(.horizontal, 20)
-            }
-
-            Spacer()
-        }
-    }
-}
-
-struct ProfileCard: View {
-    let agent: String
-    let icon: String
-    let color: Color
-    let sources: [SourceItem]
-    let description: String
-
-    @State private var enabledPaths: Set<String> = []
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Agent header
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 18))
-                    .foregroundStyle(color)
-                    .frame(width: 32, height: 32)
-                    .background {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(color.opacity(0.1))
+            // Preset picker
+            HStack(spacing: 8) {
+                ForEach(profiles) { profile in
+                    PresetButton(
+                        profile: profile,
+                        isSelected: profile.id == selectedProfileID,
+                        isDisabled: appState.hasActiveRun
+                    ) {
+                        if !appState.hasActiveRun {
+                            selectedProfileID = profile.id
+                        }
                     }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agent)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(description)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
                 }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+
+            if appState.hasActiveRun {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 11))
+                    Text("End current access before switching profiles")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
             }
 
             Divider()
 
-            if sources.isEmpty {
-                Text("Add sources first, then assign them to this profile")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .padding(.vertical, 8)
-            } else {
-                // Source toggles
-                ForEach(sources) { source in
-                    HStack {
-                        Toggle(isOn: Binding(
-                            get: { enabledPaths.contains(source.path) },
-                            set: { enabled in
-                                if enabled { enabledPaths.insert(source.path) }
-                                else { enabledPaths.remove(source.path) }
-                            }
-                        )) {
-                            HStack(spacing: 6) {
-                                Image(systemName: source.icon)
+            // Selected profile details
+            if let profile = profiles.first(where: { $0.id == selectedProfileID }) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Sources in this profile
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("File sources")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+
+                            if profile.sourcePaths.isEmpty {
+                                Text("No file sources. Add sources first.")
                                     .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                Text(source.displayName)
-                                    .font(.system(size: 12))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                                    .foregroundStyle(.tertiary)
+                            } else {
+                                ForEach(profile.sourcePaths, id: \.self) { path in
+                                    HStack {
+                                        Image(systemName: "folder")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                        Text(path)
+                                            .font(.system(size: 12))
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                }
                             }
                         }
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
 
-                        Spacer()
+                        Divider()
 
-                        if source.isSensitive && enabledPaths.contains(source.path) {
-                            SensitiveBadge()
-                        }
-
-                        // Access duration picker
-                        if enabledPaths.contains(source.path) {
-                            Picker("", selection: .constant("persistent")) {
-                                Text("Persistent").tag("persistent")
-                                Text("Session only").tag("session")
-                                Text("48 hours").tag("timed")
-                            }
-                            .pickerStyle(.menu)
-                            .frame(width: 120)
-                            .controlSize(.small)
+                        // Email setting
+                        HStack {
+                            Image(systemName: "envelope")
+                                .foregroundStyle(.secondary)
+                            Text("Include emails")
+                                .font(.system(size: 12))
+                            Spacer()
+                            Text(profile.includeEmails ? "Yes (filtered by rules)" : "No")
+                                .font(.system(size: 11))
+                                .foregroundStyle(profile.includeEmails ? .green : .secondary)
                         }
                     }
+                    .padding(20)
                 }
             }
+
+            Spacer()
         }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.primary.opacity(0.02))
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        .onAppear { loadProfiles() }
+    }
+
+    private func loadProfiles() {
+        let manager = ProfileManager(baseURL: AppState.manifoldWorkspacesURL())
+        let sourcePaths = appState.sources.map { $0.path }
+        profiles = manager.seedDefaults(availableSources: sourcePaths)
+        if profiles.isEmpty {
+            profiles = manager.allProfiles()
         }
+    }
+}
+
+struct PresetButton: View {
+    let profile: NamedProfile
+    let isSelected: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: profile.icon)
+                    .font(.system(size: 16))
+                Text(profile.name)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.03))
+                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
+            }
+            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.5 : 1)
     }
 }
