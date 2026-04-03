@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
+    @State private var showAccessSummary = false
 
     var body: some View {
         NavigationSplitView {
@@ -14,6 +15,24 @@ struct ContentView: View {
                 ProfilesView()
             case .activity:
                 ActivityView()
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showAccessSummary.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 11))
+                        Text("What Claude sees")
+                            .font(.system(size: 11))
+                    }
+                }
+                .popover(isPresented: $showAccessSummary) {
+                    AccessSummaryView()
+                        .environmentObject(appState)
+                }
             }
         }
     }

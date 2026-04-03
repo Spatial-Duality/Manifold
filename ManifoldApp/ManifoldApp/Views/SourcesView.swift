@@ -3,51 +3,62 @@ import ManifoldKit
 
 struct SourcesView: View {
     @EnvironmentObject var appState: AppState
-    @State private var showMailPicker = false
+    @State private var selectedTab = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Sources")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Text("Files and emails your agents can work with")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // Header with tab picker
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sources")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("Files and emails your agents can work with")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Picker("", selection: $selectedTab) {
+                    Text("Files").tag(0)
+                    Text("Emails").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 16)
 
-            // Source list
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach(appState.sources) { source in
-                        SourceRow(source: source) {
-                            appState.removeSource(source)
-                        }
-                    }
+            if selectedTab == 0 {
+                // Files tab
+                FilesTabView()
+                    .environmentObject(appState)
+            } else {
+                // Emails tab (Permission Dashboard)
+                EmailDashboardView()
+                    .environmentObject(appState)
+            }
+        }
+    }
+}
 
-                    // Two add buttons: files and email
-                    HStack(spacing: 8) {
-                        AddSourceButton(icon: "folder.badge.plus", label: "Add files") {
-                            appState.addFileSources()
-                        }
-                        AddSourceButton(icon: "envelope.badge.plus", label: "Connect Apple Mail") {
-                            showMailPicker = true
-                            Task { await appState.connectAppleMail() }
-                        }
+struct FilesTabView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 6) {
+                ForEach(appState.sources.filter { $0.type != .email }) { source in
+                    SourceRow(source: source) {
+                        appState.removeSource(source)
                     }
                 }
-                .padding(.horizontal, 20)
-            }
 
-            Spacer()
-        }
-        .sheet(isPresented: $showMailPicker) {
-            MailboxPickerSheet(isPresented: $showMailPicker)
-                .environmentObject(appState)
+                AddSourceButton(icon: "folder.badge.plus", label: "Add files or folders") {
+                    appState.addFileSources()
+                }
+            }
+            .padding(.horizontal, 20)
         }
     }
 }

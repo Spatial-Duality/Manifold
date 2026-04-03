@@ -53,6 +53,11 @@ class AppState: ObservableObject {
     private var leaseManager: WorkspaceLeaseManager?
     private var auditStore: AuditStore?
     private var watcher: FSEventsWatcher?
+    private var emailFilter: EmailFilter?
+
+    // Email state
+    @Published var cachedEmails: [CachedEmail] = []
+    @Published var emailClassification: EmailClassificationResult?
 
     var menuBarIcon: String {
         switch agentStatus {
@@ -80,6 +85,7 @@ class AppState: ObservableObject {
             snapshotStore = try SnapshotStore(db: db, contentStore: contentStore!)
             leaseManager = try WorkspaceLeaseManager(db: db, snapshotStore: snapshotStore!)
             auditStore = try AuditStore(db: db)
+            emailFilter = try EmailFilter(db: db)
         } catch {
             print("Failed to initialize ManifoldKit stores: \(error)")
         }
@@ -189,6 +195,70 @@ class AppState: ObservableObject {
             mailError = error.localizedDescription
         }
         isLoadingMail = false
+    }
+
+    // MARK: - Email Permission Dashboard
+
+    /// Connect to Apple Mail and fetch + classify all emails in background.
+    func connectAndFetchEmails() async {
+        isLoadingMail = true
+        mailError = nil
+
+        let connector = AppleMailConnector()
+        do {
+            let status = try connector.checkAccess()
+            guard status == .available else {
+                mailError = "Mail.app is not running. Please open Mail first."
+                isLoadingMail = false
+                return
+            }
+
+            let mailboxes = try connector.listMailboxes()
+            guard let emailFilter = emailFilter else { isLoadingMail = false; return }
+
+            // Fetch from all mailboxes (last 30 days, cached)
+            for mailbox in mailboxes {
+                let emails = try connector.fetchMessages(
+                    account: mailbox.account,
+                    mailbox: mailbox.name,
+                    since: Calendar.current.date(byAdding: .day, value: -30, to: Date()),
+                    limit: 200
+                )
+                for email in emails {
+                    try await emailFilter.cacheEmail(email, account: mailbox.account, mailbox: mailbox.name)
+                }
+            }
+
+            // Classify all
+            emailClassification = try await emailFilter.classifyAll()
+            cachedEmails = try await emailFilter.allCachedEmails()
+        } catch {
+            mailError = error.localizedDescription
+        }
+        isLoadingMail = false
+    }
+
+    /// Refresh email cache from Mail.app.
+    func refreshEmails() async {
+        guard let emailFilter = emailFilter else { return }
+        try? await emailFilter.clearCache()
+        await connectAndFetchEmails()
+    }
+
+    /// Override an auto-hidden email to shared.
+    func overrideEmailToShared(_ email: CachedEmail) async {
+        guard let emailFilter = emailFilter else { return }
+        try? await emailFilter.overrideToShared(messageID: email.messageID)
+        cachedEmails = (try? await emailFilter.allCachedEmails()) ?? cachedEmails
+        emailClassification = try? await emailFilter.classifyAll()
+    }
+
+    /// Manually hide an email.
+    func hideEmail(_ email: CachedEmail) async {
+        guard let emailFilter = emailFilter else { return }
+        try? await emailFilter.hideEmail(messageID: email.messageID)
+        cachedEmails = (try? await emailFilter.allCachedEmails()) ?? cachedEmails
+        emailClassification = try? await emailFilter.classifyAll()
     }
 
     // MARK: - Access Runs (wired to ManifoldKit)
