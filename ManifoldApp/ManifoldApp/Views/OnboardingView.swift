@@ -47,7 +47,7 @@ struct OnboardingView: View {
                 Button("Back") {
                     currentPage -= 1
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .opacity(currentPage > 0 ? 1 : 0)
                 .disabled(currentPage == 0)
 
@@ -68,13 +68,13 @@ struct OnboardingView: View {
                     Button("Next") {
                         currentPage += 1
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 } else {
                     Button("Get Started") {
                         appState.completeOnboarding()
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 }
             }

@@ -14,7 +14,41 @@ struct ActivityView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            VStack(spacing: 0) {
+                // Inline content filters (not toolbar — these switch what's displayed)
+                HStack {
+                    Picker("Mode", selection: $viewMode) {
+                        Text("Live").tag(0)
+                        Text("Replay").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+
+                    if viewMode == 1 {
+                        Picker("Run", selection: Binding(
+                            get: { selectedReplayRun ?? "" },
+                            set: {
+                                selectedReplayRun = $0.isEmpty ? nil : $0
+                                if let runID = selectedReplayRun {
+                                    Task { replayEntries = await appState.loadSessionReplay(runID: runID) }
+                                }
+                            }
+                        )) {
+                            Text("Select run...").tag("")
+                            ForEach(appState.completedRuns) { run in
+                                Text("\(run.runID.prefix(12))").tag(run.runID)
+                            }
+                        }
+                        .frame(width: 180)
+                        .onAppear { Task { await appState.loadCompletedRuns() } }
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                // Content
                 let displayEntries = viewMode == 0 ? appState.activityEntries : replayEntries
 
                 if displayEntries.isEmpty {
@@ -51,38 +85,7 @@ struct ActivityView: View {
             }
             .navigationTitle("Activity")
             .toolbar {
-                // Mode picker in center
-                ToolbarItem(placement: .principal) {
-                    Picker("Mode", selection: $viewMode) {
-                        Text("Live").tag(0)
-                        Text("Replay").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
-                }
-
-                // Replay run picker
-                if viewMode == 1 {
-                    ToolbarItem(placement: .automatic) {
-                        Picker("Run", selection: Binding(
-                            get: { selectedReplayRun ?? "" },
-                            set: {
-                                selectedReplayRun = $0.isEmpty ? nil : $0
-                                if let runID = selectedReplayRun {
-                                    Task { replayEntries = await appState.loadSessionReplay(runID: runID) }
-                                }
-                            }
-                        )) {
-                            Text("Select run...").tag("")
-                            ForEach(appState.completedRuns) { run in
-                                Text("\(run.runID.prefix(12))").tag(run.runID)
-                            }
-                        }
-                        .onAppear { Task { await appState.loadCompletedRuns() } }
-                    }
-                }
-
-                // Primary action: Grant or End
+                // Only actions in toolbar
                 if appState.hasActiveRun {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("End Access", systemImage: "stop.circle") {
@@ -90,7 +93,6 @@ struct ActivityView: View {
                         }
                         .disabled(appState.isGranting)
                     }
-
                     ToolbarItem(placement: .automatic) {
                         Button("Refresh", systemImage: "arrow.clockwise") {
                             showRefreshConfirm = true
@@ -127,7 +129,7 @@ struct ActivityView: View {
     }
 }
 
-// MARK: - Activity Row (clean, no glass on content)
+// MARK: - Activity Row
 
 struct ActivityRow: View {
     let entry: ActivityEntry
@@ -135,8 +137,6 @@ struct ActivityRow: View {
     let onToggle: () -> Void
     let onRestore: () -> Void
     let diffLines: [ManifoldKit.DiffLine]
-
-    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -169,7 +169,6 @@ struct ActivityRow: View {
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
-            .onHover { isHovered = $0 }
 
             if isExpanded {
                 DiffView(lines: diffLines)

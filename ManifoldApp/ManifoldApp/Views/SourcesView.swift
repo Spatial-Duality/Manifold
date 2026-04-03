@@ -7,7 +7,17 @@ struct SourcesView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            VStack(spacing: 0) {
+                // Inline content filter (not toolbar — this is navigation, not an action)
+                Picker("Source type", selection: $selectedTab) {
+                    Text("Files").tag(0)
+                    Text("Emails").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                // Content
                 if selectedTab == 0 {
                     FilesListView()
                 } else {
@@ -16,14 +26,7 @@ struct SourcesView: View {
             }
             .navigationTitle("Sources")
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("Source type", selection: $selectedTab) {
-                        Text("Files").tag(0)
-                        Text("Emails").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
-                }
+                // Only actions in toolbar
                 ToolbarItem(placement: .primaryAction) {
                     if selectedTab == 0 {
                         Button("Add Files", systemImage: "folder.badge.plus") {
@@ -59,9 +62,7 @@ struct FilesListView: View {
         } else {
             List {
                 ForEach(fileSources) { source in
-                    SourceRow(source: source) {
-                        appState.removeSource(source)
-                    }
+                    SourceRow(source: source)
                 }
                 .onDelete { indexSet in
                     for i in indexSet {
@@ -74,11 +75,10 @@ struct FilesListView: View {
     }
 }
 
-// MARK: - Source Row (clean, no glass on content)
+// MARK: - Source Row
 
 struct SourceRow: View {
     let source: SourceItem
-    let onRemove: () -> Void
 
     var body: some View {
         Label {
@@ -104,13 +104,6 @@ struct SourceRow: View {
         } icon: {
             Image(systemName: source.icon)
                 .foregroundStyle(.secondary)
-        }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                onRemove()
-            } label: {
-                Label("Remove", systemImage: "trash")
-            }
         }
     }
 

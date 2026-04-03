@@ -8,7 +8,7 @@ struct GuardrailNotice: View {
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "shield.checkered")
-                .font(.system(size: 36))
+                .font(.largeTitle)
                 .foregroundStyle(.secondary)
 
             Text("What Manifold controls")
@@ -65,7 +65,7 @@ struct GuardrailNotice: View {
             Button("I understand") {
                 onAccept()
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
         .padding(32)

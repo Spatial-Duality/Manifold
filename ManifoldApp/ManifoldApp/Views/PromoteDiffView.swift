@@ -22,9 +22,9 @@ struct PromoteDiffView: View {
                 }
                 Spacer()
                 Button("Skip") { onSkip() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                 Button("Apply") { onApply() }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.borderedProminent)
             }
             .padding(16)
 
