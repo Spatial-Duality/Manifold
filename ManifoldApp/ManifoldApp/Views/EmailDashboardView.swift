@@ -214,3 +214,9 @@ struct EmailRow: View {
         return .red
     }
 }
+
+#Preview("Email Dashboard - Empty") {
+    EmailDashboardView()
+        .environmentObject(AppState())
+        .frame(width: 600, height: 500)
+}

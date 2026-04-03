@@ -345,3 +345,11 @@ struct EmptyActivityView: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+// MARK: - Previews
+
+#Preview("Activity") {
+    ActivityView()
+        .environmentObject(AppState())
+        .frame(width: 600, height: 500)
+}

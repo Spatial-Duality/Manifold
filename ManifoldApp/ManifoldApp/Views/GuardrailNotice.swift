@@ -84,3 +84,7 @@ struct GuardrailRow: View {
         }
     }
 }
+
+#Preview("Guardrail Notice") {
+    GuardrailNotice { }
+}

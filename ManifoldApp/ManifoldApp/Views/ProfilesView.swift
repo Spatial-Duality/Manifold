@@ -141,3 +141,11 @@ struct PresetButton: View {
         .opacity(isDisabled ? 0.5 : 1)
     }
 }
+
+// MARK: - Previews
+
+#Preview("Profiles") {
+    ProfilesView()
+        .environmentObject(AppState())
+        .frame(width: 600, height: 500)
+}

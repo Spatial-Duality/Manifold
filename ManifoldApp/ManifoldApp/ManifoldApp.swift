@@ -5,11 +5,6 @@ import UserNotifications
 struct ManifoldApp: App {
     @StateObject private var appState = AppState()
 
-    init() {
-        // Request notification permission for sensitive file alerts
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
-
     var body: some Scene {
         // Menu bar presence
         MenuBarExtra {

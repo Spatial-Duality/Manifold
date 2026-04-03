@@ -98,3 +98,9 @@ struct OnboardingPage: View {
         .padding(24)
     }
 }
+
+#Preview("Onboarding") {
+    OnboardingView()
+        .environmentObject(AppState())
+        .frame(width: 500, height: 400)
+}

@@ -50,3 +50,11 @@ struct SidebarView: View {
         .navigationSplitViewColumnWidth(min: 160, ideal: 180)
     }
 }
+
+// MARK: - Previews
+
+#Preview("Main Window") {
+    ContentView()
+        .environmentObject(AppState())
+        .frame(width: 900, height: 600)
+}

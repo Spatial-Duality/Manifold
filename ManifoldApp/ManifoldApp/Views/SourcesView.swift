@@ -284,3 +284,11 @@ struct AddSourceButton: View {
         .onHover { isHovered = $0 }
     }
 }
+
+// MARK: - Previews
+
+#Preview("Sources - Files Tab") {
+    SourcesView()
+        .environmentObject(AppState())
+        .frame(width: 600, height: 500)
+}

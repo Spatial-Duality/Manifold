@@ -95,3 +95,8 @@ struct AccessSummaryView: View {
         .frame(width: 280)
     }
 }
+
+#Preview("Access Summary") {
+    AccessSummaryView()
+        .environmentObject(AppState())
+}

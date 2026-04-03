@@ -487,17 +487,23 @@ class AppState: ObservableObject {
     // MARK: - Notifications
 
     private func sendSensitiveFileNotification(entry: ActivityEntry) {
-        let content = UNMutableNotificationContent()
-        content.title = "Sensitive file modified"
-        content.body = "Agent \(entry.agent) modified \(entry.filePath)"
-        content.sound = .default
+        // Only works in a proper .app bundle, not bare executable
+        guard Bundle.main.bundleIdentifier != nil else { return }
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Sensitive file modified"
+            content.body = "Agent \(entry.agent) modified \(entry.filePath)"
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request)
+        }
     }
 
     // MARK: - Diffs
