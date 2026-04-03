@@ -318,6 +318,9 @@ class AppState: ObservableObject {
             // Reveal in Finder
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: workspace.rootPath)
 
+            // Offer to open Claude Desktop
+            openClaudeDesktop()
+
         } catch {
             print("Grant failed: \(error)")
             agentStatus = .warning(message: "Grant failed")
@@ -416,6 +419,69 @@ class AppState: ObservableObject {
             }
         }
         watcher?.start()
+    }
+
+    // MARK: - Open Claude Desktop
+
+    func openClaudeDesktop() {
+        // Try to open Claude Desktop app by bundle ID
+        let claudeBundleIDs = [
+            "com.anthropic.claudefordesktop",
+            "com.anthropic.claude"
+        ]
+        for bundleID in claudeBundleIDs {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                return
+            }
+        }
+        // Fallback: try by app name
+        let appPaths = [
+            "/Applications/Claude.app",
+            "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/Claude.app"
+        ]
+        for path in appPaths {
+            if FileManager.default.fileExists(atPath: path) {
+                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: NSWorkspace.OpenConfiguration())
+                return
+            }
+        }
+    }
+
+    // MARK: - Session Replay
+
+    @Published var completedRuns: [RunRecord] = []
+
+    func loadCompletedRuns() async {
+        guard let leaseManager = leaseManager, let workspaceID = currentWorkspaceID else { return }
+        completedRuns = (try? await leaseManager.runs(workspaceID: workspaceID).filter { !$0.isActive }) ?? []
+    }
+
+    func loadSessionReplay(runID: String) async -> [ActivityEntry] {
+        guard let snapshotStore = snapshotStore else { return [] }
+        do {
+            let records = try await snapshotStore.runTimeline(runID: runID)
+            return records.reversed().compactMap { record in
+                guard !record.isBaseline else { return nil }
+                let changeType: ActivityEntry.ChangeType
+                if record.isDelete { changeType = .deleted }
+                else if record.beforeHash == nil { changeType = .created }
+                else if record.source == "manifold-restore" { changeType = .restored }
+                else { changeType = .modified }
+
+                return ActivityEntry(
+                    id: UUID(),
+                    timestamp: ISO8601DateFormatter().date(from: record.timestamp) ?? Date(),
+                    runID: record.runID,
+                    agent: "Cowork",
+                    filePath: record.filePath,
+                    changeType: changeType,
+                    isSensitive: isSensitivePath(record.filePath)
+                )
+            }
+        } catch {
+            return []
+        }
     }
 
     // MARK: - Notifications

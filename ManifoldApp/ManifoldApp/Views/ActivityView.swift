@@ -9,6 +9,9 @@ struct ActivityView: View {
     @State private var showRefreshConfirm = false
     @State private var diffLines: [UUID: [ManifoldKit.DiffLine]] = [:]
     @AppStorage("hasSeenGuardrail") private var hasSeenGuardrail = false
+    @State private var viewMode = 0 // 0 = live, 1 = replay
+    @State private var selectedReplayRun: String?
+    @State private var replayEntries: [ActivityEntry] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -82,15 +85,52 @@ struct ActivityView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
-            .padding(.bottom, 16)
+            .padding(.bottom, 8)
 
-            // Timeline
-            if filteredEntries.isEmpty {
+            // Mode picker: Live / Session Replay
+            HStack {
+                Picker("", selection: $viewMode) {
+                    Text("Live").tag(0)
+                    Text("Session Replay").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+
+                if viewMode == 1 {
+                    Picker("Run", selection: Binding(
+                        get: { selectedReplayRun ?? "" },
+                        set: {
+                            selectedReplayRun = $0.isEmpty ? nil : $0
+                            if let runID = selectedReplayRun {
+                                Task {
+                                    replayEntries = await appState.loadSessionReplay(runID: runID)
+                                }
+                            }
+                        }
+                    )) {
+                        Text("Select run...").tag("")
+                        ForEach(appState.completedRuns) { run in
+                            Text("\(run.runID.prefix(12)) \u{00B7} \(run.startedAt.prefix(10))")
+                                .tag(run.runID)
+                        }
+                    }
+                    .frame(width: 220)
+                    .onAppear { Task { await appState.loadCompletedRuns() } }
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
+
+            // Content
+            let displayEntries = viewMode == 0 ? filteredEntries : replayEntries
+            if displayEntries.isEmpty {
                 EmptyActivityView()
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(filteredEntries) { entry in
+                        ForEach(displayEntries) { entry in
                             ActivityRow(
                                 entry: entry,
                                 isExpanded: expandedEntry == entry.id,

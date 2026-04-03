@@ -227,7 +227,8 @@ public struct WorkspaceRecord: Sendable {
     }
 }
 
-public struct RunRecord: Sendable {
+public struct RunRecord: Sendable, Identifiable {
+    public var id: String { runID }
     public let runID: String
     public let workspaceID: String
     public let agent: String
