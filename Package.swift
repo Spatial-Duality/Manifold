@@ -10,7 +10,6 @@ let package = Package(
     products: [
         .library(name: "ManifoldKit", targets: ["ManifoldKit"]),
         .executable(name: "manifold-cli", targets: ["ManifoldCLI"]),
-        .executable(name: "ManifoldApp", targets: ["ManifoldApp"]),
     ],
     dependencies: [],
     targets: [
@@ -23,11 +22,6 @@ let package = Package(
             name: "ManifoldCLI",
             dependencies: ["ManifoldKit"],
             path: "Sources/ManifoldCLI"
-        ),
-        .executableTarget(
-            name: "ManifoldApp",
-            dependencies: ["ManifoldKit"],
-            path: "ManifoldApp/ManifoldApp"
         ),
         .testTarget(
             name: "ManifoldKitTests",

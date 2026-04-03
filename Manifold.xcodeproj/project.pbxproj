@@ -1,0 +1,401 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		23D5AA75573009A74D796EEF /* AccessSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F576FE96083DF5399478860D /* AccessSummaryView.swift */; };
+		27787ED5062B1F508FA98D0C /* EmailDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 584CC311263A2FE62994E022 /* EmailDashboardView.swift */; };
+		3081D5B85821C9077C8A2E47 /* GuardrailNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A290367B0DCB08CA72E7F0C /* GuardrailNotice.swift */; };
+		44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E9A816D1C0EB330E125C1D /* ActivityView.swift */; };
+		535DB70D34C4691BE3A190EB /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */; };
+		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
+		827161DCEC469FCB4A1A7623 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C3363187B3815540B0DEF14 /* AppState.swift */; };
+		852E416B114592FCD6923C74 /* ProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E691BBB8D0E7F9FC21119BC7 /* ProfilesView.swift */; };
+		9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76613F3C74A0440934F46E63 /* ManifoldApp.swift */; };
+		A9315186CD33902F1AF8C6FC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C31B0F989EF9C309496345D /* ContentView.swift */; };
+		AD38C91A03A6916EFE6091C4 /* SourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DC57D59E1A02E8A4A994E1B /* SourcesView.swift */; };
+		E0126357B2851010FAC78928 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */; };
+		E6969965A4F05478E63B44AD /* PromoteDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB080D674C503607B9AC9B1 /* PromoteDiffView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		4C31B0F989EF9C309496345D /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		564B55046AEBA3B1643FE2FE /* Manifold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manifold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		584CC311263A2FE62994E022 /* EmailDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailDashboardView.swift; sourceTree = "<group>"; };
+		6DC57D59E1A02E8A4A994E1B /* SourcesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourcesView.swift; sourceTree = "<group>"; };
+		6FB080D674C503607B9AC9B1 /* PromoteDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoteDiffView.swift; sourceTree = "<group>"; };
+		76613F3C74A0440934F46E63 /* ManifoldApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldApp.swift; sourceTree = "<group>"; };
+		7A290367B0DCB08CA72E7F0C /* GuardrailNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardrailNotice.swift; sourceTree = "<group>"; };
+		7C3363187B3815540B0DEF14 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		82E9A816D1C0EB330E125C1D /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
+		9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		AAF7A39E9DC920D0FFC0413F /* Manifold */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifold; path = .; sourceTree = SOURCE_ROOT; };
+		C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		E691BBB8D0E7F9FC21119BC7 /* ProfilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilesView.swift; sourceTree = "<group>"; };
+		F576FE96083DF5399478860D /* AccessSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessSummaryView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		380E85CDE3445A5CAE94FE21 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		38B4BF091B2E419B65C70EA2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				564B55046AEBA3B1643FE2FE /* Manifold.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		6B2C0FC6E754ABD88C73F783 = {
+			isa = PBXGroup;
+			children = (
+				A6F4968BF6A0BCAE922FEE85 /* ManifoldApp */,
+				745D681E70055A184477B1F0 /* Packages */,
+				38B4BF091B2E419B65C70EA2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		745D681E70055A184477B1F0 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				AAF7A39E9DC920D0FFC0413F /* Manifold */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		8318F9009B9A6F86C2A68433 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				F576FE96083DF5399478860D /* AccessSummaryView.swift */,
+				82E9A816D1C0EB330E125C1D /* ActivityView.swift */,
+				584CC311263A2FE62994E022 /* EmailDashboardView.swift */,
+				7A290367B0DCB08CA72E7F0C /* GuardrailNotice.swift */,
+				9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */,
+				C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */,
+				E691BBB8D0E7F9FC21119BC7 /* ProfilesView.swift */,
+				6FB080D674C503607B9AC9B1 /* PromoteDiffView.swift */,
+				6DC57D59E1A02E8A4A994E1B /* SourcesView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A6F4968BF6A0BCAE922FEE85 /* ManifoldApp */ = {
+			isa = PBXGroup;
+			children = (
+				4C31B0F989EF9C309496345D /* ContentView.swift */,
+				76613F3C74A0440934F46E63 /* ManifoldApp.swift */,
+				F2EC59648DA1B62188DA4583 /* Models */,
+				8318F9009B9A6F86C2A68433 /* Views */,
+			);
+			name = ManifoldApp;
+			path = ManifoldApp/ManifoldApp;
+			sourceTree = "<group>";
+		};
+		F2EC59648DA1B62188DA4583 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				7C3363187B3815540B0DEF14 /* AppState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A6679FE56DC4150E476E48D5 /* Manifold */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA66A054E57B521083135D38 /* Build configuration list for PBXNativeTarget "Manifold" */;
+			buildPhases = (
+				8263F2E00A2E489F2090951C /* Sources */,
+				380E85CDE3445A5CAE94FE21 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Manifold;
+			packageProductDependencies = (
+				59CA05998C5293BB2C2FB2E7 /* ManifoldKit */,
+			);
+			productName = Manifold;
+			productReference = 564B55046AEBA3B1643FE2FE /* Manifold.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		410CD3A96BEA1EBB97FBA054 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					A6679FE56DC4150E476E48D5 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 144A63EFAA67611546BCC811 /* Build configuration list for PBXProject "Manifold" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6B2C0FC6E754ABD88C73F783;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				8F0F29D0EA6B307D3CA09E9D /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 38B4BF091B2E419B65C70EA2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A6679FE56DC4150E476E48D5 /* Manifold */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8263F2E00A2E489F2090951C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				23D5AA75573009A74D796EEF /* AccessSummaryView.swift in Sources */,
+				44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */,
+				827161DCEC469FCB4A1A7623 /* AppState.swift in Sources */,
+				A9315186CD33902F1AF8C6FC /* ContentView.swift in Sources */,
+				27787ED5062B1F508FA98D0C /* EmailDashboardView.swift in Sources */,
+				3081D5B85821C9077C8A2E47 /* GuardrailNotice.swift in Sources */,
+				9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */,
+				535DB70D34C4691BE3A190EB /* MenuBarView.swift in Sources */,
+				E0126357B2851010FAC78928 /* OnboardingView.swift in Sources */,
+				852E416B114592FCD6923C74 /* ProfilesView.swift in Sources */,
+				E6969965A4F05478E63B44AD /* PromoteDiffView.swift in Sources */,
+				AD38C91A03A6916EFE6091C4 /* SourcesView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4C287460DC10AA3FF563DE63 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5D394182223B3858A31EDF7B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		67148C50DFB08F7892ED7479 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_DEBUG_DYLIB = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026 Spatial Duality. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold;
+				PRODUCT_NAME = Manifold;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A14C6E46C7A7D06E0DC68CCD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_DEBUG_DYLIB = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026 Spatial Duality. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold;
+				PRODUCT_NAME = Manifold;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		144A63EFAA67611546BCC811 /* Build configuration list for PBXProject "Manifold" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5D394182223B3858A31EDF7B /* Debug */,
+				4C287460DC10AA3FF563DE63 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BA66A054E57B521083135D38 /* Build configuration list for PBXNativeTarget "Manifold" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				67148C50DFB08F7892ED7479 /* Debug */,
+				A14C6E46C7A7D06E0DC68CCD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		8F0F29D0EA6B307D3CA09E9D /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		59CA05998C5293BB2C2FB2E7 /* ManifoldKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ManifoldKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 410CD3A96BEA1EBB97FBA054 /* Project object */;
+}

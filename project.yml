@@ -1,0 +1,36 @@
+name: Manifold
+options:
+  bundleIdPrefix: com.spatialduality
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "26.4"
+
+packages:
+  ManifoldKit:
+    path: .
+
+targets:
+  Manifold:
+    type: application
+    platform: macOS
+    sources:
+      - path: ManifoldApp/ManifoldApp
+    dependencies:
+      - package: ManifoldKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spatialduality.manifold
+        PRODUCT_NAME: Manifold
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        ENABLE_DEBUG_DYLIB: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright 2026 Spatial Duality. All rights reserved."
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
