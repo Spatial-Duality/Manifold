@@ -22,12 +22,7 @@ struct ContentView: View {
                 Button {
                     showAccessSummary.toggle()
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "eye")
-                            .font(.system(size: 11))
-                        Text("What Claude sees")
-                            .font(.system(size: 11))
-                    }
+                    Label("What Claude sees", systemImage: "eye")
                 }
                 .popover(isPresented: $showAccessSummary) {
                     AccessSummaryView()
@@ -50,8 +45,6 @@ struct SidebarView: View {
         .navigationSplitViewColumnWidth(min: 160, ideal: 180)
     }
 }
-
-// MARK: - Previews
 
 #Preview("Main Window") {
     ContentView()

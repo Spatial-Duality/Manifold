@@ -2,7 +2,7 @@ name: Manifold
 options:
   bundleIdPrefix: com.spatialduality
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "26.0"
   xcodeVersion: "26.4"
 
 packages:

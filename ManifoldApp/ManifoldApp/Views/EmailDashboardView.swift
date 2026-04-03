@@ -1,9 +1,6 @@
 import SwiftUI
 import ManifoldKit
 
-/// Email Permission Dashboard. Tab inside Sources view.
-/// Shows all emails with green/yellow/red status indicators.
-/// Inline category badges + click to expand actions.
 struct EmailDashboardView: View {
     @EnvironmentObject var appState: AppState
     @State private var expandedEmail: String?
@@ -11,62 +8,48 @@ struct EmailDashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if appState.isLoadingMail {
-                VStack(spacing: 12) {
+                ContentUnavailableView {
                     ProgressView()
                         .controlSize(.large)
+                } description: {
                     Text("Loading emails...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } actions: {
                     Text("This may take a moment for large mailboxes")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.caption)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxHeight: .infinity)
             } else if let error = appState.mailError {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.yellow)
+                ContentUnavailableView {
+                    Label("Connection Error", systemImage: "exclamationmark.triangle")
+                } description: {
                     Text(error)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
+                } actions: {
                     Button("Try again") {
                         Task { await appState.connectAppleMail() }
                     }
-                    .controlSize(.small)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxHeight: .infinity)
             } else if appState.cachedEmails.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "envelope.badge.plus")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.quaternary)
+                ContentUnavailableView {
+                    Label("No Emails", systemImage: "envelope.badge.plus")
+                } description: {
                     Text("Connect Apple Mail to see emails here")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                } actions: {
                     Button("Connect Apple Mail") {
                         Task { await appState.connectAndFetchEmails() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxHeight: .infinity)
             } else {
                 // Summary bar
                 HStack {
                     if let result = appState.emailClassification {
-                        Text("\(result.shared) shared")
+                        Label("\(result.shared) shared", systemImage: "checkmark.circle")
                             .foregroundStyle(.green)
-                        Text("\u{00B7}")
-                            .foregroundStyle(.quaternary)
-                        Text("\(result.autoHidden) auto-hidden")
+                        Text("\u{00B7}").foregroundStyle(.quaternary)
+                        Label("\(result.autoHidden) auto-hidden", systemImage: "eye.slash")
                             .foregroundStyle(.yellow)
-                        if !result.reasonBreakdown.isEmpty {
-                            Text("(\(result.reasonBreakdown.map { "\($0.value) \($0.key.lowercased())" }.joined(separator: ", ")))")
-                                .foregroundStyle(.tertiary)
-                        }
                     }
                     Spacer()
                     Button("Refresh") {
@@ -75,36 +58,30 @@ struct EmailDashboardView: View {
                     .controlSize(.small)
                     .disabled(appState.isLoadingMail)
                 }
-                .font(.system(size: 11))
+                .font(.caption)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
 
                 Divider()
 
                 // Email list
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(appState.cachedEmails) { email in
-                            EmailRow(
-                                email: email,
-                                isExpanded: expandedEmail == email.messageID,
-                                onToggle: {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        expandedEmail = expandedEmail == email.messageID ? nil : email.messageID
-                                    }
-                                },
-                                onOverride: {
-                                    Task { await appState.overrideEmailToShared(email) }
-                                },
-                                onHide: {
-                                    Task { await appState.hideEmail(email) }
+                List {
+                    ForEach(appState.cachedEmails) { email in
+                        EmailRow(
+                            email: email,
+                            isExpanded: expandedEmail == email.messageID,
+                            onToggle: {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    expandedEmail = expandedEmail == email.messageID ? nil : email.messageID
                                 }
-                            )
-                        }
+                            },
+                            onOverride: { Task { await appState.overrideEmailToShared(email) } },
+                            onHide: { Task { await appState.hideEmail(email) } }
+                        )
+                        .listRowSeparator(.hidden)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 4)
                 }
+                .listStyle(.plain)
             }
         }
     }
@@ -117,94 +94,82 @@ struct EmailRow: View {
     let onOverride: () -> Void
     let onHide: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 // Status indicator
                 Image(systemName: statusIcon)
-                    .font(.system(size: 10))
                     .foregroundStyle(statusColor)
-                    .frame(width: 14)
+                    .imageScale(.small)
 
                 // Sender + subject
                 VStack(alignment: .leading, spacing: 1) {
                     Text(email.sender)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.body.weight(.medium))
                         .lineLimit(1)
                     Text(email.subject)
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
                 Spacer()
 
-                // Category badge (inline, always visible)
+                // Category badge
                 if let reason = email.hiddenReason {
                     Text(reason)
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.caption2.weight(.medium))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background { Capsule().fill(statusColor.opacity(0.12)) }
+                        .glassEffect()
                         .foregroundStyle(statusColor)
                 }
 
                 // Date
                 Text(email.dateReceived)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.caption2.monospaced())
                     .foregroundStyle(.quaternary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
-            .onHover { isHovered = $0 }
 
             // Expanded actions
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
                     if let preview = email.bodyPreview, !preview.isEmpty {
                         Text(preview)
-                            .font(.system(size: 11))
+                            .font(.caption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(3)
                     }
 
                     HStack(spacing: 12) {
                         if email.isAutoHidden || email.isUserHidden {
-                            Button("Include anyway") {
-                                onOverride()
-                            }
-                            .controlSize(.small)
+                            Button("Include anyway") { onOverride() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                         }
                         if email.isShared {
-                            Button("Hide this email") {
-                                onHide()
-                            }
-                            .controlSize(.small)
+                            Button("Hide this email") { onHide() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                         }
-                        Text("from \(email.senderDomain)")
-                            .font(.system(size: 10))
+                        Spacer()
+                        Text(email.senderDomain)
+                            .font(.caption2)
                             .foregroundStyle(.quaternary)
                     }
                 }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 8)
+                .padding(.top, 8)
+                .padding(.leading, 24)
             }
         }
-        .background {
-            if isHovered {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.primary.opacity(0.03))
-            }
-        }
+        .padding(.vertical, 4)
     }
 
     private var statusIcon: String {
-        if email.isShared { return "circle.fill" }
-        if email.isAutoHidden { return "circle" }
+        if email.isShared { return "checkmark.circle.fill" }
+        if email.isAutoHidden { return "eye.slash.circle" }
         return "xmark.circle"
     }
 

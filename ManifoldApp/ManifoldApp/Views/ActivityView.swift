@@ -4,12 +4,11 @@ import ManifoldKit
 struct ActivityView: View {
     @EnvironmentObject var appState: AppState
     @State private var expandedEntry: UUID?
-    @State private var filterAgent: String?
     @State private var showGuardrail = false
     @State private var showRefreshConfirm = false
     @State private var diffLines: [UUID: [ManifoldKit.DiffLine]] = [:]
     @AppStorage("hasSeenGuardrail") private var hasSeenGuardrail = false
-    @State private var viewMode = 0 // 0 = live, 1 = replay
+    @State private var viewMode = 0
     @State private var selectedReplayRun: String?
     @State private var replayEntries: [ActivityEntry] = []
 
@@ -19,13 +18,12 @@ struct ActivityView: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Activity")
-                        .font(.title2)
-                        .fontWeight(.semibold)
+                        .font(.title2.weight(.semibold))
 
                     if let runID = appState.currentRunID {
-                        Text("Access run \(runID.prefix(12)) — active")
+                        Label("Access run \(runID.prefix(12))", systemImage: "circle.fill")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.green)
                     } else {
                         Text("No active access run")
                             .font(.caption)
@@ -38,17 +36,14 @@ struct ActivityView: View {
                 // Access run controls
                 HStack(spacing: 8) {
                     if appState.hasActiveRun {
-                        Button("Refresh") {
-                            showRefreshConfirm = true
-                        }
-                        .controlSize(.small)
-                        .disabled(appState.isGranting)
+                        Button("Refresh") { showRefreshConfirm = true }
+                            .controlSize(.small)
+                            .disabled(appState.isGranting)
 
-                        Button("End Access") {
+                        Button("End Access", role: .destructive) {
                             Task { await appState.endAccess() }
                         }
                         .controlSize(.small)
-                        .tint(.red)
                         .disabled(appState.isGranting)
                     } else {
                         Button("Grant to Claude") {
@@ -58,8 +53,8 @@ struct ActivityView: View {
                                 showGuardrail = true
                             }
                         }
+                        .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .tint(.blue)
                         .disabled(appState.sources.isEmpty || appState.isGranting)
                     }
                 }
@@ -70,24 +65,18 @@ struct ActivityView: View {
                         Task { await appState.grantAccess() }
                     }
                 }
-                .confirmationDialog(
-                    "Refresh workspace?",
-                    isPresented: $showRefreshConfirm,
-                    titleVisibility: .visible
-                ) {
-                    Button("Refresh and Continue") {
-                        Task { await appState.refreshAccess() }
-                    }
+                .confirmationDialog("Refresh workspace?", isPresented: $showRefreshConfirm, titleVisibility: .visible) {
+                    Button("Refresh and Continue") { Task { await appState.refreshAccess() } }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("This re-syncs from your source files, overwriting agent changes in the workspace. Unpromoted changes are preserved in version history.")
+                    Text("This re-syncs from your source files. Unpromoted changes are preserved in version history.")
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 8)
 
-            // Mode picker: Live / Session Replay
+            // Mode picker
             HStack {
                 Picker("", selection: $viewMode) {
                     Text("Live").tag(0)
@@ -102,22 +91,18 @@ struct ActivityView: View {
                         set: {
                             selectedReplayRun = $0.isEmpty ? nil : $0
                             if let runID = selectedReplayRun {
-                                Task {
-                                    replayEntries = await appState.loadSessionReplay(runID: runID)
-                                }
+                                Task { replayEntries = await appState.loadSessionReplay(runID: runID) }
                             }
                         }
                     )) {
                         Text("Select run...").tag("")
                         ForEach(appState.completedRuns) { run in
-                            Text("\(run.runID.prefix(12)) \u{00B7} \(run.startedAt.prefix(10))")
-                                .tag(run.runID)
+                            Text("\(run.runID.prefix(12)) \u{00B7} \(run.startedAt.prefix(10))").tag(run.runID)
                         }
                     }
                     .frame(width: 220)
                     .onAppear { Task { await appState.loadCompletedRuns() } }
                 }
-
                 Spacer()
             }
             .padding(.horizontal, 20)
@@ -126,46 +111,48 @@ struct ActivityView: View {
             // Content
             let displayEntries = viewMode == 0 ? filteredEntries : replayEntries
             if displayEntries.isEmpty {
-                EmptyActivityView()
+                ContentUnavailableView {
+                    Label("No Activity", systemImage: "clock.arrow.circlepath")
+                } description: {
+                    Text("Start an access run to see file modifications here")
+                }
+                .frame(maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(displayEntries) { entry in
-                            ActivityRow(
-                                entry: entry,
-                                isExpanded: expandedEntry == entry.id,
-                                onToggle: {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        if expandedEntry == entry.id {
-                                            expandedEntry = nil
-                                        } else {
-                                            expandedEntry = entry.id
-                                            // Load diff when expanding
-                                            Task {
-                                                let lines = await appState.loadDiff(for: entry)
-                                                diffLines[entry.id] = lines
-                                            }
+                List {
+                    ForEach(displayEntries) { entry in
+                        ActivityRow(
+                            entry: entry,
+                            isExpanded: expandedEntry == entry.id,
+                            onToggle: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if expandedEntry == entry.id {
+                                        expandedEntry = nil
+                                    } else {
+                                        expandedEntry = entry.id
+                                        Task {
+                                            let lines = await appState.loadDiff(for: entry)
+                                            diffLines[entry.id] = lines
                                         }
                                     }
-                                },
-                                onRestore: {
-                                    Task { await appState.restoreEntry(entry) }
-                                },
-                                diffLines: diffLines[entry.id] ?? []
-                            )
-                        }
+                                }
+                            },
+                            onRestore: { Task { await appState.restoreEntry(entry) } },
+                            diffLines: diffLines[entry.id] ?? []
+                        )
+                        .listRowSeparator(.hidden)
                     }
-                    .padding(.horizontal, 20)
                 }
+                .listStyle(.plain)
             }
         }
     }
 
     private var filteredEntries: [ActivityEntry] {
-        guard let agent = filterAgent else { return appState.activityEntries }
-        return appState.activityEntries.filter { $0.agent == agent }
+        appState.activityEntries
     }
 }
+
+// MARK: - Activity Row
 
 struct ActivityRow: View {
     let entry: ActivityEntry
@@ -178,33 +165,27 @@ struct ActivityRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Main row
             HStack(spacing: 0) {
-                // Timestamp
                 Text(entry.timeString)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
                     .frame(width: 55, alignment: .leading)
 
-                // Agent badge
                 Text(entry.agent)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(agentColor)
                     .frame(width: 60, alignment: .leading)
 
-                // Action + file
                 HStack(spacing: 4) {
                     if entry.isSensitive {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
+                            .imageScale(.small)
                             .foregroundStyle(.yellow)
                     }
-
                     Text(entry.changeType.rawValue)
-                        .font(.system(size: 12))
-
+                        .font(.subheadline)
                     Text(entry.filePath)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -212,47 +193,31 @@ struct ActivityRow: View {
 
                 Spacer()
 
-                // Restore button (on hover)
                 if isHovered {
-                    Button(action: onRestore) {
-                        Text(restoreLabel)
-                            .font(.system(size: 11))
-                            .foregroundStyle(entry.isSensitive ? .red : .blue)
-                    }
-                    .buttonStyle(.plain)
+                    Button(restoreLabel) { onRestore() }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(entry.isSensitive ? .red : .accentColor)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
             .onHover { isHovered = $0 }
 
-            // Expanded diff
             if isExpanded {
                 DiffView(lines: diffLines)
                     .padding(.leading, 65)
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 8)
+                    .padding(.top, 4)
             }
         }
-        .background {
-            if entry.isSensitive {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.yellow.opacity(0.04))
-            } else if isHovered {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(0.03))
-            }
-        }
+        .padding(.vertical, 4)
     }
 
     private var agentColor: Color {
         switch entry.agent.lowercased() {
         case "cowork": return .blue
         case "codex": return .purple
-        case "manifold": return .gray
-        default: return .primary
+        default: return .secondary
         }
     }
 
@@ -266,6 +231,8 @@ struct ActivityRow: View {
     }
 }
 
+// MARK: - Diff View
+
 struct DiffView: View {
     let lines: [ManifoldKit.DiffLine]
 
@@ -277,7 +244,7 @@ struct DiffView: View {
         VStack(alignment: .leading, spacing: 0) {
             if lines.isEmpty {
                 Text("No diff available")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
             } else {
                 ForEach(lines) { line in
@@ -286,11 +253,7 @@ struct DiffView: View {
             }
         }
         .padding(10)
-        .background {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        }
+        .background(.quinary, in: .rect(cornerRadius: 6))
     }
 }
 
@@ -304,7 +267,7 @@ struct DiffLineView: View {
             Text(line.text)
             Spacer()
         }
-        .font(.system(size: 11, design: .monospaced))
+        .font(.caption.monospaced())
         .foregroundStyle(color)
         .lineLimit(1)
         .padding(.vertical, 1)
@@ -320,33 +283,12 @@ struct DiffLineView: View {
 
     private var color: Color {
         switch line.type {
-        case .context: return .secondary.opacity(0.6)
+        case .context: return .secondary
         case .addition: return .green
         case .removal: return .red
         }
     }
 }
-
-struct EmptyActivityView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 36))
-                .foregroundStyle(.quaternary)
-            Text("No activity yet")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-            Text("Start an agent session to see file modifications here")
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Previews
 
 #Preview("Activity") {
     ActivityView()
