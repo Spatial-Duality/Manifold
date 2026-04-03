@@ -204,6 +204,15 @@ public struct RenderedEmail: Sendable {
     public var subject: String = ""
     public var body: String = ""
 
+    public init(messageID: String? = nil, from: String = "", to: String = "", date: String = "", subject: String = "", body: String = "") {
+        self.messageID = messageID
+        self.from = from
+        self.to = to
+        self.date = date
+        self.subject = subject
+        self.body = body
+    }
+
     public var safeFileName: String {
         let dateSlug = date.replacingOccurrences(of: "[^a-zA-Z0-9]", with: "-", options: .regularExpression)
         let subjectSlug = subject

@@ -278,11 +278,41 @@ class AppState: ObservableObject {
         isGranting = true
 
         do {
+            // Workspace lives at ~/Manifold/Workspace/ — the folder you give to Cowork
+            let workspaceURL = Self.coworkFolder
             let profileID = "default"
-            let workspacesURL = Self.manifoldWorkspacesURL()
-            let workspace = ManagedWorkspace(profileID: profileID, agent: "cowork", baseURL: workspacesURL)
-            try workspace.ensureDirectory()
-            try workspace.syncSources(sources.map { $0.url })
+            let workspace = ManagedWorkspace(profileID: profileID, agent: "cowork", baseURL: Self.manifoldWorkspacesURL())
+            try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+            // Sync selected files into the workspace
+            let fileSources = sources.filter { $0.type != .email }.map { $0.url }
+            for source in fileSources {
+                try syncSource(source, into: workspaceURL)
+            }
+
+            // Sync shared emails
+            if let emailFilter = emailFilter {
+                let shared = try await emailFilter.sharedEmails()
+                if !shared.isEmpty {
+                    let emailsDir = workspaceURL.appendingPathComponent("_emails")
+                    try FileManager.default.createDirectory(at: emailsDir, withIntermediateDirectories: true)
+                    let connector = AppleMailConnector()
+                    // Re-render shared emails into workspace
+                    for email in shared {
+                        let rendered = RenderedEmail(
+                            messageID: email.messageID,
+                            from: email.sender,
+                            subject: email.subject,
+                            body: email.bodyPreview ?? ""
+                        )
+                        let md = rendered.toMarkdown()
+                        let fileName = rendered.safeFileName
+                        let fileURL = emailsDir.appendingPathComponent(fileName)
+                        try md.write(to: fileURL, atomically: true, encoding: String.Encoding.utf8)
+                        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: fileURL.path)
+                    }
+                }
+            }
 
             guard let leaseManager = leaseManager, let snapshotStore = snapshotStore else {
                 isGranting = false
@@ -296,10 +326,11 @@ class AppState: ObservableObject {
                 trigger: .userGrant
             )
 
-            // Baseline snapshot
-            let files = try workspace.allFiles()
+            // Baseline snapshot of everything in ~/Manifold/Workspace/
+            let files = try enumerateFiles(in: workspaceURL)
             for fileURL in files {
-                guard let relativePath = workspace.relativePath(for: fileURL) else { continue }
+                let relativePath = fileURL.path.replacingOccurrences(of: workspaceURL.path + "/", with: "")
+                guard !relativePath.isEmpty else { continue }
                 let data = try Data(contentsOf: fileURL)
                 try await snapshotStore.recordBaseline(
                     runID: runID,
@@ -319,16 +350,20 @@ class AppState: ObservableObject {
 
             currentRunID = runID
             currentWorkspaceID = workspace.workspaceID
-            currentWorkspacePath = workspace.rootPath
+            currentWorkspacePath = workspaceURL.path
             agentStatus = .active(agent: "Cowork", runID: runID)
 
-            // Start watching the workspace
-            startWatching(workspace: workspace, runID: runID)
+            // Start watching ~/Manifold/Workspace/
+            startWatching(path: workspaceURL.path, workspaceID: workspace.workspaceID, runID: runID)
+
+            // Copy path to clipboard so user can paste into Cowork
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(workspaceURL.path, forType: .string)
 
             // Reveal in Finder
-            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: workspace.rootPath)
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: workspaceURL.path)
 
-            // Offer to open Claude Desktop
+            // Open Claude Desktop
             openClaudeDesktop()
 
         } catch {
@@ -369,11 +404,8 @@ class AppState: ObservableObject {
 
     // MARK: - FSEvents Watcher
 
-    private func startWatching(workspace: ManagedWorkspace, runID: String) {
+    private func startWatching(path rootPath: String, workspaceID wsID: String, runID: String) {
         watcher?.stop()
-
-        let wsID = workspace.workspaceID
-        let rootPath = workspace.rootPath
 
         watcher = FSEventsWatcher(paths: [rootPath]) { [weak self] event in
             Task { @MainActor in
@@ -613,6 +645,42 @@ class AppState: ObservableObject {
         return false
     }
 
+    // MARK: - File Operations
+
+    /// Copy a source file or directory into the workspace
+    private func syncSource(_ source: URL, into workspace: URL) throws {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: source.path, isDirectory: &isDir) else { return }
+
+        if isDir.boolValue {
+            let dirName = source.lastPathComponent
+            let dest = workspace.appendingPathComponent(dirName)
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try fm.copyItem(at: source, to: dest)
+        } else {
+            let dest = workspace.appendingPathComponent(source.lastPathComponent)
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try fm.copyItem(at: source, to: dest)
+        }
+    }
+
+    /// Enumerate all files in a directory recursively
+    private func enumerateFiles(in directory: URL) throws -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [URL] = []
+        while let url = enumerator.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            if values.isRegularFile == true { files.append(url) }
+        }
+        return files
+    }
+
     // MARK: - Helpers
 
     private func countFiles(in url: URL) -> Int {
@@ -636,8 +704,17 @@ class AppState: ObservableObject {
     }
 
     static func manifoldWorkspacesURL() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("Manifold/workspaces")
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Manifold")
+    }
+
+    /// The ONE folder to give to Cowork. ~/Manifold/Workspace/
+    /// Simple. Memorable. Set it once in Cowork's folder picker.
+    static var coworkFolder: URL {
+        manifoldWorkspacesURL().appendingPathComponent("Workspace")
+    }
+
+    static var coworkFolderPath: String {
+        coworkFolder.path
     }
 }
 
