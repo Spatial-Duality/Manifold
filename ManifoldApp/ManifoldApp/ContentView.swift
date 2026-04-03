@@ -6,12 +6,32 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView()
+            List(selection: $appState.selectedSidebar) {
+                Section("Sources") {
+                    Label("Files", systemImage: "folder")
+                        .tag(AppState.SidebarItem.files)
+                    Label("Emails", systemImage: "envelope")
+                        .tag(AppState.SidebarItem.emails)
+                }
+
+                Section("Setup") {
+                    Label("Profiles", systemImage: "person.2")
+                        .tag(AppState.SidebarItem.profiles)
+                }
+
+                Section("Monitor") {
+                    Label("Activity", systemImage: "clock.arrow.circlepath")
+                        .tag(AppState.SidebarItem.activity)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 190)
         } detail: {
-            // Each detail view manages its own NavigationStack
             switch appState.selectedSidebar {
-            case .sources:
-                SourcesView()
+            case .files:
+                FilesView()
+            case .emails:
+                EmailsView()
             case .profiles:
                 ProfilesView()
             case .activity:
@@ -29,19 +49,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-}
-
-struct SidebarView: View {
-    @EnvironmentObject var appState: AppState
-
-    var body: some View {
-        List(AppState.SidebarItem.allCases, selection: $appState.selectedSidebar) { item in
-            Label(item.rawValue, systemImage: item.icon)
-                .tag(item)
-        }
-        .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 160, ideal: 180)
     }
 }
 

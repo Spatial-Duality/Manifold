@@ -7,7 +7,8 @@ import ManifoldKit
 @MainActor
 class AppState: ObservableObject {
     enum SidebarItem: String, CaseIterable, Identifiable {
-        case sources = "Sources"
+        case files = "Files"
+        case emails = "Emails"
         case profiles = "Profiles"
         case activity = "Activity"
 
@@ -15,9 +16,18 @@ class AppState: ObservableObject {
 
         var icon: String {
             switch self {
-            case .sources: return "folder.badge.plus"
+            case .files: return "folder"
+            case .emails: return "envelope"
             case .profiles: return "person.2"
             case .activity: return "clock.arrow.circlepath"
+            }
+        }
+
+        var section: String {
+            switch self {
+            case .files, .emails: return "Sources"
+            case .profiles: return "Setup"
+            case .activity: return "Monitor"
             }
         }
     }
@@ -37,7 +47,7 @@ class AppState: ObservableObject {
         }
     }
 
-    @Published var selectedSidebar: SidebarItem = .sources
+    @Published var selectedSidebar: SidebarItem = .files
     @Published var agentStatus: AgentStatus = .inactive
     @Published var sources: [SourceItem] = []
     @Published var activityEntries: [ActivityEntry] = []

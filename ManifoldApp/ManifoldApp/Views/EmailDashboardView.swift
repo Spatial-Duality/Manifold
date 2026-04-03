@@ -1,61 +1,68 @@
 import SwiftUI
 import ManifoldKit
 
+/// Email permission dashboard. Shows all emails with status indicators.
+/// Toolbar is provided by the parent EmailsView.
 struct EmailDashboardView: View {
     @EnvironmentObject var appState: AppState
     @State private var expandedEmail: String?
 
     var body: some View {
-        if appState.isLoadingMail {
-            ProgressView("Loading emails...")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = appState.mailError {
-            ContentUnavailableView(
-                "Connection Error",
-                systemImage: "exclamationmark.triangle",
-                description: Text(error)
-            )
-        } else if appState.cachedEmails.isEmpty {
-            ContentUnavailableView(
-                "No Emails",
-                systemImage: "envelope",
-                description: Text("Connect Apple Mail to see emails here. Use the button in the toolbar.")
-            )
-        } else {
-            List {
-                Section {
+        Group {
+            if appState.isLoadingMail {
+                ProgressView("Loading emails...")
+            } else if let error = appState.mailError {
+                ContentUnavailableView(
+                    "Connection Error",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
+            } else if appState.cachedEmails.isEmpty {
+                ContentUnavailableView(
+                    "No Emails",
+                    systemImage: "envelope",
+                    description: Text("Connect Apple Mail using the toolbar button.")
+                )
+            } else {
+                List {
+                    // Summary
                     if let result = appState.emailClassification {
-                        HStack {
-                            Label("\(result.shared) shared", systemImage: "checkmark.circle")
-                                .foregroundStyle(.green)
-                            Spacer()
-                            Label("\(result.autoHidden) auto-hidden", systemImage: "eye.slash")
-                                .foregroundStyle(.yellow)
+                        Section {
+                            HStack {
+                                Label("\(result.shared) shared", systemImage: "checkmark.circle")
+                                    .foregroundStyle(.green)
+                                Spacer()
+                                Label("\(result.autoHidden) auto-hidden", systemImage: "eye.slash")
+                                    .foregroundStyle(.yellow)
+                            }
+                            .font(.caption)
                         }
-                        .font(.caption)
                     }
-                }
 
-                Section {
-                    ForEach(appState.cachedEmails) { email in
-                        EmailRow(
-                            email: email,
-                            isExpanded: expandedEmail == email.messageID,
-                            onToggle: {
-                                withAnimation {
-                                    expandedEmail = expandedEmail == email.messageID ? nil : email.messageID
-                                }
-                            },
-                            onOverride: { Task { await appState.overrideEmailToShared(email) } },
-                            onHide: { Task { await appState.hideEmail(email) } }
-                        )
+                    // Emails
+                    Section {
+                        ForEach(appState.cachedEmails) { email in
+                            EmailRow(
+                                email: email,
+                                isExpanded: expandedEmail == email.messageID,
+                                onToggle: {
+                                    withAnimation {
+                                        expandedEmail = expandedEmail == email.messageID ? nil : email.messageID
+                                    }
+                                },
+                                onOverride: { Task { await appState.overrideEmailToShared(email) } },
+                                onHide: { Task { await appState.hideEmail(email) } }
+                            )
+                        }
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
     }
 }
+
+// MARK: - Email Row
 
 struct EmailRow: View {
     let email: CachedEmail
@@ -73,7 +80,6 @@ struct EmailRow: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(email.sender)
-                        .font(.body)
                         .lineLimit(1)
                     Text(email.subject)
                         .font(.subheadline)
@@ -137,8 +143,10 @@ struct EmailRow: View {
     }
 }
 
-#Preview("Email Dashboard") {
-    EmailDashboardView()
-        .environmentObject(AppState())
-        .frame(width: 600, height: 500)
+#Preview("Emails") {
+    NavigationStack {
+        EmailsView()
+            .environmentObject(AppState())
+    }
+    .frame(width: 600, height: 500)
 }

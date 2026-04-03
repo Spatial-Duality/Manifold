@@ -8,123 +8,124 @@ struct ActivityView: View {
     @State private var showRefreshConfirm = false
     @State private var diffLines: [UUID: [ManifoldKit.DiffLine]] = [:]
     @AppStorage("hasSeenGuardrail") private var hasSeenGuardrail = false
-    @State private var viewMode = 0
+    @State private var showingReplay = false
     @State private var selectedReplayRun: String?
     @State private var replayEntries: [ActivityEntry] = []
 
+    private var displayEntries: [ActivityEntry] {
+        showingReplay ? replayEntries : appState.activityEntries
+    }
+
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Inline content filters (not toolbar — these switch what's displayed)
-                HStack {
-                    Picker("Mode", selection: $viewMode) {
-                        Text("Live").tag(0)
-                        Text("Replay").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
-
-                    if viewMode == 1 {
-                        Picker("Run", selection: Binding(
-                            get: { selectedReplayRun ?? "" },
-                            set: {
-                                selectedReplayRun = $0.isEmpty ? nil : $0
-                                if let runID = selectedReplayRun {
-                                    Task { replayEntries = await appState.loadSessionReplay(runID: runID) }
-                                }
-                            }
-                        )) {
-                            Text("Select run...").tag("")
-                            ForEach(appState.completedRuns) { run in
-                                Text("\(run.runID.prefix(12))").tag(run.runID)
-                            }
-                        }
-                        .frame(width: 180)
-                        .onAppear { Task { await appState.loadCompletedRuns() } }
-                    }
-
-                    Spacer()
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-
-                // Content
-                let displayEntries = viewMode == 0 ? appState.activityEntries : replayEntries
-
-                if displayEntries.isEmpty {
-                    ContentUnavailableView(
-                        "No Activity",
-                        systemImage: "clock.arrow.circlepath",
-                        description: Text("Grant access to start tracking file modifications.")
-                    )
-                } else {
-                    List {
-                        ForEach(displayEntries) { entry in
-                            ActivityRow(
-                                entry: entry,
-                                isExpanded: expandedEntry == entry.id,
-                                onToggle: {
-                                    withAnimation {
-                                        if expandedEntry == entry.id {
-                                            expandedEntry = nil
-                                        } else {
-                                            expandedEntry = entry.id
-                                            Task {
-                                                diffLines[entry.id] = await appState.loadDiff(for: entry)
-                                            }
+        Group {
+            if displayEntries.isEmpty {
+                ContentUnavailableView(
+                    showingReplay ? "No Session Data" : "No Activity",
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text(showingReplay
+                        ? "Select a completed run to replay."
+                        : "Grant access to start tracking file modifications.")
+                )
+            } else {
+                List {
+                    ForEach(displayEntries) { entry in
+                        ActivityRow(
+                            entry: entry,
+                            isExpanded: expandedEntry == entry.id,
+                            onToggle: {
+                                withAnimation {
+                                    if expandedEntry == entry.id {
+                                        expandedEntry = nil
+                                    } else {
+                                        expandedEntry = entry.id
+                                        Task {
+                                            diffLines[entry.id] = await appState.loadDiff(for: entry)
                                         }
                                     }
-                                },
-                                onRestore: { Task { await appState.restoreEntry(entry) } },
-                                diffLines: diffLines[entry.id] ?? []
-                            )
+                                }
+                            },
+                            onRestore: { Task { await appState.restoreEntry(entry) } },
+                            diffLines: diffLines[entry.id] ?? []
+                        )
+                    }
+                }
+                .listStyle(.inset)
+            }
+        }
+        .navigationTitle(showingReplay ? "Session Replay" : "Activity")
+        .toolbar {
+            // Primary action: Grant or End
+            if appState.hasActiveRun {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("End Access", systemImage: "stop.circle") {
+                        Task { await appState.endAccess() }
+                    }
+                    .disabled(appState.isGranting)
+                }
+                ToolbarItem(placement: .automatic) {
+                    Button("Refresh", systemImage: "arrow.clockwise") {
+                        showRefreshConfirm = true
+                    }
+                    .disabled(appState.isGranting)
+                }
+            } else {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Grant to Claude", systemImage: "play.circle") {
+                        if hasSeenGuardrail {
+                            Task { await appState.grantAccess() }
+                        } else {
+                            showGuardrail = true
                         }
                     }
-                    .listStyle(.inset)
+                    .disabled(appState.sources.isEmpty || appState.isGranting)
                 }
             }
-            .navigationTitle("Activity")
-            .toolbar {
-                // Only actions in toolbar
-                if appState.hasActiveRun {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("End Access", systemImage: "stop.circle") {
-                            Task { await appState.endAccess() }
-                        }
-                        .disabled(appState.isGranting)
+
+            // Replay menu
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    Button {
+                        showingReplay = false
+                    } label: {
+                        Label("Live", systemImage: showingReplay ? "" : "checkmark")
                     }
-                    ToolbarItem(placement: .automatic) {
-                        Button("Refresh", systemImage: "arrow.clockwise") {
-                            showRefreshConfirm = true
-                        }
-                        .disabled(appState.isGranting)
-                    }
-                } else {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Grant to Claude", systemImage: "play.circle") {
-                            if hasSeenGuardrail {
-                                Task { await appState.grantAccess() }
-                            } else {
-                                showGuardrail = true
+
+                    Divider()
+
+                    Section("Completed Runs") {
+                        ForEach(appState.completedRuns) { run in
+                            Button {
+                                showingReplay = true
+                                selectedReplayRun = run.runID
+                                Task { replayEntries = await appState.loadSessionReplay(runID: run.runID) }
+                            } label: {
+                                Text("\(run.runID.prefix(12)) \u{00B7} \(run.startedAt.prefix(10))")
                             }
                         }
-                        .disabled(appState.sources.isEmpty || appState.isGranting)
+
+                        if appState.completedRuns.isEmpty {
+                            Text("No completed runs yet")
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                } label: {
+                    Label("View", systemImage: "clock.arrow.circlepath")
                 }
+                .onAppear { Task { await appState.loadCompletedRuns() } }
             }
-            .sheet(isPresented: $showGuardrail) {
-                GuardrailNotice {
-                    hasSeenGuardrail = true
-                    showGuardrail = false
-                    Task { await appState.grantAccess() }
-                }
+        }
+        .sheet(isPresented: $showGuardrail) {
+            GuardrailNotice {
+                hasSeenGuardrail = true
+                showGuardrail = false
+                Task { await appState.grantAccess() }
             }
-            .confirmationDialog("Refresh workspace?", isPresented: $showRefreshConfirm, titleVisibility: .visible) {
-                Button("Refresh and Continue") { Task { await appState.refreshAccess() } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This re-syncs from your source files. Unpromoted changes are preserved in version history.")
-            }
+        }
+        .confirmationDialog("Refresh workspace?", isPresented: $showRefreshConfirm, titleVisibility: .visible) {
+            Button("Refresh and Continue") { Task { await appState.refreshAccess() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This re-syncs from your source files. Unpromoted changes are preserved in version history.")
         }
     }
 }
@@ -247,7 +248,9 @@ struct DiffView: View {
 }
 
 #Preview("Activity") {
-    ActivityView()
-        .environmentObject(AppState())
-        .frame(width: 600, height: 500)
+    NavigationStack {
+        ActivityView()
+            .environmentObject(AppState())
+    }
+    .frame(width: 600, height: 500)
 }

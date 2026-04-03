@@ -1,51 +1,8 @@
 import SwiftUI
 import ManifoldKit
 
-struct SourcesView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var selectedTab = 0
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Inline content filter (not toolbar — this is navigation, not an action)
-                Picker("Source type", selection: $selectedTab) {
-                    Text("Files").tag(0)
-                    Text("Emails").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-
-                // Content
-                if selectedTab == 0 {
-                    FilesListView()
-                } else {
-                    EmailDashboardView()
-                }
-            }
-            .navigationTitle("Sources")
-            .toolbar {
-                // Only actions in toolbar
-                ToolbarItem(placement: .primaryAction) {
-                    if selectedTab == 0 {
-                        Button("Add Files", systemImage: "folder.badge.plus") {
-                            appState.addFileSources()
-                        }
-                    } else {
-                        Button("Connect Mail", systemImage: "envelope.badge.plus") {
-                            Task { await appState.connectAndFetchEmails() }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Files List
-
-struct FilesListView: View {
+/// Files view. Shows file/folder sources. Full-height List, no tabs.
+struct FilesView: View {
     @EnvironmentObject var appState: AppState
 
     private var fileSources: [SourceItem] {
@@ -53,25 +10,53 @@ struct FilesListView: View {
     }
 
     var body: some View {
-        if fileSources.isEmpty {
-            ContentUnavailableView(
-                "No Files",
-                systemImage: "folder",
-                description: Text("Add files or folders for your agents to work with. Use the + button in the toolbar.")
-            )
-        } else {
-            List {
-                ForEach(fileSources) { source in
-                    SourceRow(source: source)
-                }
-                .onDelete { indexSet in
-                    for i in indexSet {
-                        appState.removeSource(fileSources[i])
+        Group {
+            if fileSources.isEmpty {
+                ContentUnavailableView(
+                    "No Files",
+                    systemImage: "folder",
+                    description: Text("Add files or folders for your agents to work with.")
+                )
+            } else {
+                List {
+                    ForEach(fileSources) { source in
+                        SourceRow(source: source)
+                    }
+                    .onDelete { indexSet in
+                        for i in indexSet {
+                            appState.removeSource(fileSources[i])
+                        }
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
+        .navigationTitle("Files")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Add Files", systemImage: "folder.badge.plus") {
+                    appState.addFileSources()
+                }
+            }
+        }
+    }
+}
+
+/// Emails view. Shows the email permission dashboard. Full-height List, no tabs.
+struct EmailsView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        EmailDashboardView()
+            .navigationTitle("Emails")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Connect Mail", systemImage: "envelope.badge.plus") {
+                        Task { await appState.connectAndFetchEmails() }
+                    }
+                    .disabled(appState.isLoadingMail)
+                }
+            }
     }
 }
 
@@ -124,8 +109,10 @@ struct SourceRow: View {
     }
 }
 
-#Preview("Sources") {
-    SourcesView()
-        .environmentObject(AppState())
-        .frame(width: 600, height: 500)
+#Preview("Files") {
+    NavigationStack {
+        FilesView()
+            .environmentObject(AppState())
+    }
+    .frame(width: 600, height: 500)
 }
