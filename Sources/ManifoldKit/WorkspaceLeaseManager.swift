@@ -41,21 +41,13 @@ public actor WorkspaceLeaseManager {
 
     // MARK: - Workspace Management
 
-    /// Register a managed workspace in the database.
-    public func registerWorkspace(_ workspace: ManagedWorkspace) throws {
+    /// Register a workspace in the database.
+    public func registerWorkspace(id: String, profileID: String, rootPath: String, agent: String) throws {
         let now = ISO8601DateFormatter().string(from: Date())
         try db.execute("""
             INSERT OR REPLACE INTO workspaces (workspace_id, profile_id, root_path, agent, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, params: [
-            workspace.workspaceID,
-            workspace.profileID,
-            workspace.rootPath,
-            workspace.agent,
-            workspace.status.rawValue,
-            ISO8601DateFormatter().string(from: workspace.createdAt),
-            now
-        ])
+            VALUES (?, ?, ?, ?, 'idle', ?, ?)
+        """, params: [id, profileID, rootPath, agent, now, now])
     }
 
     /// Get the workspace for a profile, if one exists.
@@ -67,12 +59,12 @@ public actor WorkspaceLeaseManager {
         return rows.first.flatMap { WorkspaceRecord(row: $0) }
     }
 
-    /// Update workspace status.
-    public func updateWorkspaceStatus(workspaceID: String, status: ManagedWorkspace.Status) throws {
+    /// Update workspace status. Values: "active", "idle", "archived"
+    public func updateWorkspaceStatus(workspaceID: String, status: String) throws {
         let now = ISO8601DateFormatter().string(from: Date())
         try db.execute(
             "UPDATE workspaces SET status = ?, updated_at = ? WHERE workspace_id = ?",
-            params: [status.rawValue, now, workspaceID]
+            params: [status, now, workspaceID]
         )
     }
 
@@ -97,7 +89,7 @@ public actor WorkspaceLeaseManager {
             VALUES (?, ?, ?, 'active', ?, ?)
         """, params: [runID, workspaceID, agent, trigger.rawValue, now])
 
-        try updateWorkspaceStatus(workspaceID: workspaceID, status: .active)
+        try updateWorkspaceStatus(workspaceID: workspaceID, status: "active")
 
         return runID
     }
@@ -130,7 +122,7 @@ public actor WorkspaceLeaseManager {
                 params: [wsID]
             )
             if activeCount == "0" || activeCount == nil {
-                try updateWorkspaceStatus(workspaceID: wsID, status: .idle)
+                try updateWorkspaceStatus(workspaceID: wsID, status: "idle")
             }
         }
     }
@@ -185,7 +177,7 @@ public actor WorkspaceLeaseManager {
                 "UPDATE runs SET status = 'idle', ended_at = ? WHERE run_id = ?",
                 params: [now, runID]
             )
-            try updateWorkspaceStatus(workspaceID: wsID, status: .idle)
+            try updateWorkspaceStatus(workspaceID: wsID, status: "idle")
         }
     }
 }
