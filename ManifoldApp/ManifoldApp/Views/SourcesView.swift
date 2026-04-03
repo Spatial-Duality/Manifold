@@ -42,13 +42,32 @@ struct SourcesView: View {
 struct FilesTabView: View {
     @EnvironmentObject var appState: AppState
 
+    private var fileSources: [SourceItem] {
+        appState.sources.filter { $0.type != .email }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 6) {
-                ForEach(appState.sources.filter { $0.type != .email }) { source in
+        if fileSources.isEmpty {
+            ContentUnavailableView {
+                Label("No Files", systemImage: "folder")
+            } description: {
+                Text("Add files or folders for your agents to work with.")
+            } actions: {
+                Button {
+                    appState.addFileSources()
+                } label: {
+                    Label("Add Files or Folders", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+            }
+        } else {
+            List {
+                ForEach(fileSources) { source in
                     SourceRow(source: source) {
                         appState.removeSource(source)
                     }
+                    .listRowSeparator(.hidden)
                 }
 
                 Button {
@@ -57,10 +76,11 @@ struct FilesTabView: View {
                     Label("Add files or folders", systemImage: "folder.badge.plus")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .controlSize(.large)
+                .listRowSeparator(.hidden)
             }
-            .padding(.horizontal, 20)
+            .listStyle(.plain)
         }
     }
 }
@@ -73,17 +93,19 @@ struct SourceRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: source.icon)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(source.displayName)
-                    .font(.body)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(fileCountText)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(source.displayName)
+                        .font(.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(fileCountText)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            } icon: {
+                Image(systemName: source.icon)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -92,22 +114,22 @@ struct SourceRow: View {
                 Label("Sensitive", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
                     .foregroundStyle(.yellow)
+                    .glassEffect(in: .capsule)
             }
 
             Text(source.status.rawValue)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(statusColor)
+                .glassEffect(in: .capsule)
 
             Button(role: .destructive) {
                 onRemove()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tertiary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 4)
     }
 
     private var fileCountText: String {

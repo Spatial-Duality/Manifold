@@ -12,44 +12,48 @@ struct GuardrailNotice: View {
                 .foregroundStyle(.secondary)
 
             Text("What Manifold controls")
-                .font(.title3)
-                .fontWeight(.semibold)
+                .font(.headline)
 
             VStack(alignment: .leading, spacing: 12) {
-                GuardrailRow(
-                    icon: "checkmark.circle.fill",
-                    color: .green,
-                    text: "Local files in the managed workspace"
+                Label(
+                    "Local files in the managed workspace",
+                    systemImage: "checkmark.circle.fill"
                 )
-                GuardrailRow(
-                    icon: "checkmark.circle.fill",
-                    color: .green,
-                    text: "Every file modification is tracked and versioned"
+                .foregroundStyle(.green)
+
+                Label(
+                    "Every file modification is tracked and versioned",
+                    systemImage: "checkmark.circle.fill"
                 )
-                GuardrailRow(
-                    icon: "checkmark.circle.fill",
-                    color: .green,
-                    text: "Restore any previous version with one click"
+                .foregroundStyle(.green)
+
+                Label(
+                    "Restore any previous version with one click",
+                    systemImage: "checkmark.circle.fill"
                 )
+                .foregroundStyle(.green)
 
                 Divider()
 
-                GuardrailRow(
-                    icon: "xmark.circle",
-                    color: .secondary,
-                    text: "Claude connectors and plugins"
+                Label(
+                    "Claude connectors and plugins",
+                    systemImage: "xmark.circle"
                 )
-                GuardrailRow(
-                    icon: "xmark.circle",
-                    color: .secondary,
-                    text: "Computer use and network access"
+                .foregroundStyle(.secondary)
+
+                Label(
+                    "Computer use and network access",
+                    systemImage: "xmark.circle"
                 )
-                GuardrailRow(
-                    icon: "xmark.circle",
-                    color: .secondary,
-                    text: "Actions outside the workspace boundary"
+                .foregroundStyle(.secondary)
+
+                Label(
+                    "Actions outside the workspace boundary",
+                    systemImage: "xmark.circle"
                 )
+                .foregroundStyle(.secondary)
             }
+            .font(.callout)
             .padding(.horizontal, 8)
 
             Text("Manifold applies to local files in the workspace only. External capabilities are outside this boundary.")
@@ -61,27 +65,11 @@ struct GuardrailNotice: View {
             Button("I understand") {
                 onAccept()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .controlSize(.large)
         }
         .padding(32)
         .frame(width: 420)
-    }
-}
-
-struct GuardrailRow: View {
-    let icon: String
-    let color: Color
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
-                .font(.system(size: 14))
-            Text(text)
-                .font(.system(size: 13))
-        }
     }
 }
 

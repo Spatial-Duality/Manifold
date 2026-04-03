@@ -27,6 +27,7 @@ struct EmailDashboardView: View {
                     Button("Try again") {
                         Task { await appState.connectAppleMail() }
                     }
+                    .buttonStyle(.glass)
                 }
                 .frame(maxHeight: .infinity)
             } else if appState.cachedEmails.isEmpty {
@@ -38,7 +39,7 @@ struct EmailDashboardView: View {
                     Button("Connect Apple Mail") {
                         Task { await appState.connectAndFetchEmails() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                 }
                 .frame(maxHeight: .infinity)
             } else {
@@ -55,6 +56,7 @@ struct EmailDashboardView: View {
                     Button("Refresh") {
                         Task { await appState.refreshEmails() }
                     }
+                    .buttonStyle(.glass)
                     .controlSize(.small)
                     .disabled(appState.isLoadingMail)
                 }
@@ -146,12 +148,12 @@ struct EmailRow: View {
                     HStack(spacing: 12) {
                         if email.isAutoHidden || email.isUserHidden {
                             Button("Include anyway") { onOverride() }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.glass)
                                 .controlSize(.small)
                         }
                         if email.isShared {
                             Button("Hide this email") { onHide() }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.glass)
                                 .controlSize(.small)
                         }
                         Spacer()

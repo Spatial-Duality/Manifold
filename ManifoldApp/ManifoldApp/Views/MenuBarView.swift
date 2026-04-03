@@ -15,9 +15,9 @@ struct MenuBarView: View {
                         window.makeKeyAndOrderFront(nil)
                     }
                 }
-                .font(.system(size: 11))
+                .font(.callout)
                 .buttonStyle(.plain)
-                .foregroundStyle(.blue)
+                .foregroundStyle(.tint)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -27,7 +27,7 @@ struct MenuBarView: View {
             // Recent activity
             if appState.activityEntries.isEmpty {
                 Text("No recent activity")
-                    .font(.system(size: 12))
+                    .font(.callout)
                     .foregroundStyle(.tertiary)
                     .padding(12)
             } else {
@@ -43,7 +43,7 @@ struct MenuBarView: View {
             Button("Quit Manifold") {
                 NSApplication.shared.terminate(nil)
             }
-            .font(.system(size: 12))
+            .font(.callout)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .keyboardShortcut("q")
@@ -61,15 +61,15 @@ struct MenuBarView: View {
             switch appState.agentStatus {
             case .inactive:
                 Text("No active access")
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             case .active(let agent, _):
                 Text("\(agent) access granted")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.caption.weight(.medium))
             case .warning(let message):
                 Text(message)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.orange)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.yellow)
             }
         }
     }
@@ -77,8 +77,8 @@ struct MenuBarView: View {
     private var statusColor: Color {
         switch appState.agentStatus {
         case .inactive: return .gray
-        case .active: return .blue
-        case .warning: return .orange
+        case .active: return .accentColor
+        case .warning: return .yellow
         }
     }
 }
@@ -92,18 +92,18 @@ struct MenuBarActivityRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    if entry.isSensitive {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.yellow)
-                    }
+                if entry.isSensitive {
+                    Label(entry.fileName, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .lineLimit(1)
+                        .symbolRenderingMode(.multicolor)
+                } else {
                     Text(entry.fileName)
-                        .font(.system(size: 12))
+                        .font(.callout)
                         .lineLimit(1)
                 }
                 Text("\(entry.changeType.rawValue) \(entry.timeString)")
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
@@ -111,9 +111,9 @@ struct MenuBarActivityRow: View {
 
             if isHovered {
                 Button("Restore", action: onRestore)
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .buttonStyle(.plain)
-                    .foregroundStyle(entry.isSensitive ? .red : .blue)
+                    .foregroundStyle(entry.isSensitive ? Color.red : Color.accentColor)
             }
         }
         .padding(.horizontal, 12)

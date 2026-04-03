@@ -2,6 +2,7 @@ import SwiftUI
 import ManifoldKit
 
 /// Sheet showing side-by-side diff before promoting a file back to source.
+/// On macOS 26 this is presented as a sheet, which receives Liquid Glass chrome automatically.
 struct PromoteDiffView: View {
     let filePath: String
     let diffLines: [ManifoldKit.DiffLine]
@@ -16,15 +17,14 @@ struct PromoteDiffView: View {
                     Text("Promote to source")
                         .font(.headline)
                     Text(filePath)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Skip") { onSkip() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .buttonStyle(.glass)
                 Button("Apply") { onApply() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
             }
             .padding(16)
 
@@ -50,13 +50,16 @@ struct PromoteDiffView: View {
                                 Text(line.text)
                                 Spacer()
                             }
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.caption.monospaced())
                             .foregroundStyle(lineColor(line))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 1)
                             .background(lineBackground(line))
                         }
                     }
+                    .padding(.vertical, 8)
+                    .background(.quinary, in: .rect(cornerRadius: 8))
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
             }

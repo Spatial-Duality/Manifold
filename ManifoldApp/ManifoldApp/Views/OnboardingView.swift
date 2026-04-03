@@ -24,7 +24,7 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Page content with cross-fade transition
+            // Page content
             ZStack {
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                     if index == currentPage {
@@ -44,17 +44,16 @@ struct OnboardingView: View {
 
             // Navigation bar
             HStack {
-                // Back button
                 Button("Back") {
                     currentPage -= 1
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .opacity(currentPage > 0 ? 1 : 0)
                 .disabled(currentPage == 0)
 
                 Spacer()
 
-                // Page indicators
+                // Page indicators using glass
                 HStack(spacing: 8) {
                     ForEach(0..<pages.count, id: \.self) { i in
                         Circle()
@@ -65,18 +64,17 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                // Next / Get Started
                 if currentPage < pages.count - 1 {
                     Button("Next") {
                         currentPage += 1
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .controlSize(.large)
                 } else {
                     Button("Get Started") {
                         appState.completeOnboarding()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .controlSize(.large)
                 }
             }

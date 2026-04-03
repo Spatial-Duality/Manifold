@@ -5,7 +5,7 @@ struct AccessSummaryView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("What Claude can see")
                 .font(.headline)
 
@@ -40,7 +40,7 @@ struct AccessSummaryView: View {
             .font(.subheadline)
 
             // Sensitive files
-            let sensitiveCount = appState.sources.filter { $0.isSensitive }.count
+            let sensitiveCount = appState.sources.filter(\.isSensitive).count
             if sensitiveCount > 0 {
                 Label("\(sensitiveCount) sensitive files exposed", systemImage: "exclamationmark.triangle")
                     .font(.subheadline)
@@ -66,7 +66,7 @@ struct AccessSummaryView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding()
         .frame(width: 280)
     }
 

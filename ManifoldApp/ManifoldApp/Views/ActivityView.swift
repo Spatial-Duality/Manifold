@@ -37,12 +37,15 @@ struct ActivityView: View {
                 HStack(spacing: 8) {
                     if appState.hasActiveRun {
                         Button("Refresh") { showRefreshConfirm = true }
+                            .buttonStyle(.glass)
                             .controlSize(.small)
                             .disabled(appState.isGranting)
 
-                        Button("End Access", role: .destructive) {
+                        Button("End Access") {
                             Task { await appState.endAccess() }
                         }
+                        .buttonStyle(.glass)
+                        .tint(.red)
                         .controlSize(.small)
                         .disabled(appState.isGranting)
                     } else {
@@ -53,7 +56,7 @@ struct ActivityView: View {
                                 showGuardrail = true
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .controlSize(.small)
                         .disabled(appState.sources.isEmpty || appState.isGranting)
                     }
@@ -183,7 +186,7 @@ struct ActivityRow: View {
                             .foregroundStyle(.yellow)
                     }
                     Text(entry.changeType.rawValue)
-                        .font(.subheadline)
+                        .font(.callout)
                     Text(entry.filePath)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)

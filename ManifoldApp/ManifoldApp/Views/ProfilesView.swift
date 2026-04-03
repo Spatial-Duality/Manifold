@@ -3,6 +3,7 @@ import ManifoldKit
 
 struct ProfilesView: View {
     @EnvironmentObject var appState: AppState
+    @Namespace private var presetNamespace
     @State private var profiles: [NamedProfile] = []
     @State private var selectedProfileID: String = "work"
 
@@ -20,16 +21,21 @@ struct ProfilesView: View {
             .padding(.top, 20)
             .padding(.bottom, 16)
 
-            // Preset picker
-            HStack(spacing: 8) {
-                ForEach(profiles) { profile in
-                    PresetButton(
-                        profile: profile,
-                        isSelected: profile.id == selectedProfileID,
-                        isDisabled: appState.hasActiveRun
-                    ) {
-                        if !appState.hasActiveRun {
-                            selectedProfileID = profile.id
+            // Preset picker — grouped glass elements
+            GlassEffectContainer {
+                HStack(spacing: 8) {
+                    ForEach(profiles) { profile in
+                        PresetButton(
+                            profile: profile,
+                            isSelected: profile.id == selectedProfileID,
+                            isDisabled: appState.hasActiveRun,
+                            namespace: presetNamespace
+                        ) {
+                            if !appState.hasActiveRun {
+                                withAnimation(.smooth) {
+                                    selectedProfileID = profile.id
+                                }
+                            }
                         }
                     }
                 }
@@ -40,9 +46,9 @@ struct ProfilesView: View {
             if appState.hasActiveRun {
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
-                        .font(.system(size: 11))
+                        .font(.caption2)
                     Text("End current access before switching profiles")
-                        .font(.system(size: 11))
+                        .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 20)
@@ -58,21 +64,22 @@ struct ProfilesView: View {
                         // Sources in this profile
                         VStack(alignment: .leading, spacing: 8) {
                             Text("File sources")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.caption)
+                                .fontWeight(.semibold)
                                 .foregroundStyle(.secondary)
 
                             if profile.sourcePaths.isEmpty {
                                 Text("No file sources. Add sources first.")
-                                    .font(.system(size: 12))
+                                    .font(.caption)
                                     .foregroundStyle(.tertiary)
                             } else {
                                 ForEach(profile.sourcePaths, id: \.self) { path in
                                     HStack {
                                         Image(systemName: "folder")
-                                            .font(.system(size: 11))
+                                            .font(.caption2)
                                             .foregroundStyle(.secondary)
                                         Text(path)
-                                            .font(.system(size: 12))
+                                            .font(.caption)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                     }
@@ -87,10 +94,10 @@ struct ProfilesView: View {
                             Image(systemName: "envelope")
                                 .foregroundStyle(.secondary)
                             Text("Include emails")
-                                .font(.system(size: 12))
+                                .font(.caption)
                             Spacer()
                             Text(profile.includeEmails ? "Yes (filtered by rules)" : "No")
-                                .font(.system(size: 11))
+                                .font(.caption2)
                                 .foregroundStyle(profile.includeEmails ? .green : .secondary)
                         }
                     }
@@ -117,26 +124,24 @@ struct PresetButton: View {
     let profile: NamedProfile
     let isSelected: Bool
     let isDisabled: Bool
+    var namespace: Namespace.ID
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: profile.icon)
-                    .font(.system(size: 16))
+                    .font(.callout)
                 Text(profile.name)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.caption2)
+                    .fontWeight(.medium)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
-            .background {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.03))
-                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
-            }
-            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
+        .tint(isSelected ? Color.accentColor : nil)
+        .glassEffectID(profile.id, in: namespace)
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.5 : 1)
     }
