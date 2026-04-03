@@ -105,6 +105,8 @@ public enum AuditAction: String, Sendable {
     case restore = "restore"
     case promote = "promote"
     case sensitivityWarning = "sensitivity_warning"
+    case fileRead = "file_read"
+    case mcpConnection = "mcp_connection"
 }
 
 public struct AuditEntry: Sendable {
