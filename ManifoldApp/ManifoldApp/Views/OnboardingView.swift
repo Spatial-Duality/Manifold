@@ -4,56 +4,71 @@ struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
     @State private var currentPage = 0
 
+    private let pages: [(icon: String, title: String, description: String)] = [
+        (
+            "folder.badge.plus",
+            "Pick what Claude can see",
+            "Select files and folders through Finder. Connect Apple Mail for email context. You choose exactly what goes in the workspace."
+        ),
+        (
+            "play.circle",
+            "Grant access, track everything",
+            "Click \"Grant to Claude\" to start a tracked session. Manifold watches every file change and snapshots every version."
+        ),
+        (
+            "arrow.uturn.backward.circle",
+            "Restore any version",
+            "See every modification in the timeline. Restore any previous state with one click. Your originals are never touched."
+        )
+    ]
+
     var body: some View {
         VStack(spacing: 0) {
-            // Pages
-            TabView(selection: $currentPage) {
-                OnboardingPage(
-                    icon: "folder.badge.plus",
-                    title: "Pick what Claude can see",
-                    description: "Select files and folders through Finder. Connect Apple Mail for email context. You choose exactly what goes in the workspace."
-                ).tag(0)
-
-                OnboardingPage(
-                    icon: "play.circle",
-                    title: "Grant access, track everything",
-                    description: "Click \"Grant to Claude\" to start a tracked session. Manifold watches every file change and snapshots every version."
-                ).tag(1)
-
-                OnboardingPage(
-                    icon: "arrow.uturn.backward.circle",
-                    title: "Restore any version",
-                    description: "See every modification in the timeline. Restore any previous state with one click. Your originals are never touched."
-                ).tag(2)
-            }
-            .tabViewStyle(.automatic)
-
-            // Navigation
-            HStack {
-                if currentPage > 0 {
-                    Button("Back") {
-                        withAnimation { currentPage -= 1 }
+            // Page content with cross-fade transition
+            ZStack {
+                ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                    if index == currentPage {
+                        OnboardingPage(
+                            icon: page.icon,
+                            title: page.title,
+                            description: page.description
+                        )
+                        .transition(.opacity)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
                 }
+            }
+            .animation(.easeInOut(duration: 0.25), value: currentPage)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            // Navigation bar
+            HStack {
+                // Back button
+                Button("Back") {
+                    currentPage -= 1
+                }
+                .buttonStyle(.bordered)
+                .opacity(currentPage > 0 ? 1 : 0)
+                .disabled(currentPage == 0)
 
                 Spacer()
 
                 // Page indicators
-                HStack(spacing: 6) {
-                    ForEach(0..<3, id: \.self) { i in
+                HStack(spacing: 8) {
+                    ForEach(0..<pages.count, id: \.self) { i in
                         Circle()
                             .fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.3))
-                            .frame(width: 6, height: 6)
+                            .frame(width: 7, height: 7)
                     }
                 }
 
                 Spacer()
 
-                if currentPage < 2 {
+                // Next / Get Started
+                if currentPage < pages.count - 1 {
                     Button("Next") {
-                        withAnimation { currentPage += 1 }
+                        currentPage += 1
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -65,7 +80,7 @@ struct OnboardingView: View {
                     .controlSize(.large)
                 }
             }
-            .padding(24)
+            .padding(20)
         }
     }
 }
@@ -76,26 +91,28 @@ struct OnboardingPage: View {
     let description: String
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Spacer()
 
             Image(systemName: icon)
-                .font(.system(size: 48))
+                .font(.largeTitle)
+                .imageScale(.large)
                 .foregroundStyle(.tint)
+                .padding(.bottom, 4)
 
             Text(title)
-                .font(.title2)
-                .fontWeight(.semibold)
+                .font(.title2.weight(.semibold))
 
             Text(description)
-                .font(.body)
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
+                .frame(maxWidth: 340)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }
-        .padding(24)
+        .padding(.horizontal, 32)
     }
 }
 
