@@ -54,8 +54,30 @@ enum ToolHandlers {
             ),
             MCPTool(
                 name: "list_changes",
-                description: "List recent file modifications in the current access run.",
+                description: "List recent file modifications across all sources.",
                 inputSchema: emptySchema
+            ),
+            MCPTool(
+                name: "file_info",
+                description: "Get detailed info about a file: size, type, whether it's binary, and archive contents if it's a zip.",
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Relative file path"],
+                ], required: ["path"])
+            ),
+            MCPTool(
+                name: "list_archive",
+                description: "List all files inside a zip archive without extracting it.",
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Path to the zip file"],
+                ], required: ["path"])
+            ),
+            MCPTool(
+                name: "extract_file",
+                description: "Extract and read a single file from inside a zip archive. Returns the text content.",
+                inputSchema: objectSchema(properties: [
+                    "archive_path": ["type": "string", "description": "Path to the zip archive"],
+                    "file_path": ["type": "string", "description": "Path of the file inside the archive"],
+                ], required: ["archive_path", "file_path"])
             ),
         ]
     }
@@ -120,6 +142,40 @@ enum ToolHandlers {
                 if changes.isEmpty { return textResult("No changes recorded yet.") }
                 let formatted = changes.map { "[\($0.timestamp)] \($0.type.uppercased()) [\($0.source)] \($0.path) (by \($0.agent))" }
                 return textResult(formatted.joined(separator: "\n"))
+
+            case "file_info":
+                guard let path = arguments["path"] as? String else {
+                    return errorResult("'path' parameter required")
+                }
+                let info = try await bridge.fileInfo(path: path)
+                let size = ByteCountFormatter.string(fromByteCount: Int64(info.sizeBytes), countStyle: .file)
+                var text = """
+                File: \(info.path)
+                Source: \(info.sourceName)
+                Size: \(size)
+                Type: .\(info.fileExtension)
+                Binary: \(info.isBinary ? "yes" : "no")
+                Modified: \(info.lastModified)
+                """
+                if let contents = info.archiveContents {
+                    text += "\n\nArchive contents (\(contents.count) files):\n" + contents.joined(separator: "\n")
+                }
+                return textResult(text)
+
+            case "list_archive":
+                guard let path = arguments["path"] as? String else {
+                    return errorResult("'path' parameter required")
+                }
+                let contents = try await bridge.listArchive(path: path)
+                return textResult("Archive: \(path)\n\(contents.count) files:\n\n" + contents.joined(separator: "\n"))
+
+            case "extract_file":
+                guard let archivePath = arguments["archive_path"] as? String,
+                      let filePath = arguments["file_path"] as? String else {
+                    return errorResult("'archive_path' and 'file_path' parameters required")
+                }
+                let content = try await bridge.extractFile(archivePath: archivePath, filePath: filePath)
+                return textResult(content)
 
             default:
                 return errorResult("Unknown tool: \(name)")

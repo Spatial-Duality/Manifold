@@ -254,6 +254,147 @@ public actor ManifoldBridge {
         return results
     }
 
+    // MARK: - Binary File Tools
+
+    /// Get detailed info about a file (MIME type, size, is binary, archive contents if zip).
+    public func fileInfo(path: String) async throws -> FileMetadata {
+        await logToolCall(tool: "file_info", arguments: ["path": path])
+        let workspaces = try requireWorkspaces()
+
+        for ws in workspaces {
+            let fileURL = try? validatePath(path, rootPath: ws.rootPath)
+            guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+            let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            let size = (attrs[.size] as? Int) ?? 0
+            let modified = (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) } ?? ""
+            let ext = fileURL.pathExtension.lowercased()
+
+            let isBinary = ["zip", "pdf", "png", "jpg", "jpeg", "gif", "webp", "mp4", "mov",
+                            "mp3", "wav", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+                            "ttf", "otf", "woff", "woff2", "epub"].contains(ext)
+
+            var archiveContents: [String]?
+            if ext == "zip" {
+                archiveContents = listZipContents(at: fileURL)
+            }
+
+            return FileMetadata(
+                path: path,
+                sourceName: URL(fileURLWithPath: ws.rootPath).lastPathComponent,
+                sizeBytes: size,
+                lastModified: modified,
+                fileExtension: ext,
+                isBinary: isBinary,
+                archiveContents: archiveContents
+            )
+        }
+        throw ManifoldMCPError.fileNotFound(path)
+    }
+
+    /// List contents of a zip archive without extracting.
+    public func listArchive(path: String) async throws -> [String] {
+        await logToolCall(tool: "list_archive", arguments: ["path": path])
+        let workspaces = try requireWorkspaces()
+
+        for ws in workspaces {
+            let fileURL = try? validatePath(path, rootPath: ws.rootPath)
+            guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+            guard let contents = listZipContents(at: fileURL) else {
+                throw ManifoldMCPError.invalidPath("Not a valid zip archive: \(path)")
+            }
+            return contents
+        }
+        throw ManifoldMCPError.fileNotFound(path)
+    }
+
+    /// Extract a single file from a zip archive and return its text content.
+    public func extractFile(archivePath: String, filePath: String) async throws -> String {
+        await logToolCall(tool: "extract_file", arguments: ["archive": archivePath, "file": filePath])
+        let workspaces = try requireWorkspaces()
+
+        for ws in workspaces {
+            let archiveURL = try? validatePath(archivePath, rootPath: ws.rootPath)
+            guard let archiveURL, FileManager.default.fileExists(atPath: archiveURL.path) else { continue }
+
+            // Extract to temp directory
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("manifold-extract-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tempDir) }
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            process.arguments = ["-o", "-q", archiveURL.path, filePath, "-d", tempDir.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+
+            let extractedURL = tempDir.appendingPathComponent(filePath)
+            guard FileManager.default.fileExists(atPath: extractedURL.path) else {
+                throw ManifoldMCPError.fileNotFound("'\(filePath)' not found in archive '\(archivePath)'")
+            }
+
+            let data = try Data(contentsOf: extractedURL)
+
+            // Audit
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: "cowork",
+                filePath: "\(archivePath)/\(filePath)"
+            )
+
+            if let text = String(data: data, encoding: .utf8) {
+                return text
+            } else {
+                return "<binary file, \(data.count) bytes>"
+            }
+        }
+        throw ManifoldMCPError.fileNotFound(archivePath)
+    }
+
+    // MARK: - Zip Helpers
+
+    private func listZipContents(at url: URL) -> [String]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-l", url.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch { return nil }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else { return nil }
+
+        // Parse unzip -l output: skip header lines, extract filenames
+        let lines = output.components(separatedBy: "\n")
+        var files: [String] = []
+        var started = false
+        for line in lines {
+            if line.contains("--------") {
+                started = !started
+                continue
+            }
+            guard started else { continue }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            // Format: size date time filename
+            let components = trimmed.split(separator: " ", maxSplits: 3)
+            guard components.count >= 4 else { continue }
+            let filename = String(components[3])
+            guard !filename.hasSuffix("/") else { continue } // skip directories
+            files.append(filename)
+        }
+        return files.isEmpty ? nil : files
+    }
+
+    // MARK: - Email Tools
+
     public func listEmails() async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
         _ = try requireWorkspaces()
@@ -355,6 +496,16 @@ public struct StatusResult: Sendable {
     public let fileCount: Int
     public let emailCount: Int
     public let message: String
+}
+
+public struct FileMetadata: Sendable {
+    public let path: String
+    public let sourceName: String
+    public let sizeBytes: Int
+    public let lastModified: String
+    public let fileExtension: String
+    public let isBinary: Bool
+    public let archiveContents: [String]?
 }
 
 public struct EmailSummary: Sendable {
