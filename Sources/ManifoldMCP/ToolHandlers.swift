@@ -71,7 +71,12 @@ enum ToolHandlers {
 
             case "list_files":
                 let files = try await bridge.listFiles()
-                return textResult(files.isEmpty ? "No files in workspace." : files.joined(separator: "\n"))
+                if files.isEmpty { return textResult("No files available.") }
+                let formatted = files.map { f in
+                    let size = ByteCountFormatter.string(fromByteCount: Int64(f.sizeBytes), countStyle: .file)
+                    return "[\(f.sourceName)] \(f.path)  (\(size), modified: \(f.lastModified.prefix(10)))"
+                }
+                return textResult("Source folders: \(Set(files.map(\.sourceName)).sorted().joined(separator: ", "))\n\n" + formatted.joined(separator: "\n"))
 
             case "read_file":
                 guard let path = arguments["path"] as? String else {
@@ -94,7 +99,7 @@ enum ToolHandlers {
                 }
                 let results = try await bridge.searchFiles(query: query)
                 if results.isEmpty { return textResult("No matches found for '\(query)'") }
-                let formatted = results.map { "## \($0.path)\n" + $0.matches.joined(separator: "\n") }
+                let formatted = results.map { "## [\($0.source)] \($0.path)\n" + $0.matches.joined(separator: "\n") }
                 return textResult(formatted.joined(separator: "\n\n"))
 
             case "list_emails":
@@ -113,7 +118,7 @@ enum ToolHandlers {
             case "list_changes":
                 let changes = try await bridge.listChanges()
                 if changes.isEmpty { return textResult("No changes recorded yet.") }
-                let formatted = changes.map { "[\($0.timestamp)] \($0.type.uppercased()) \($0.path) (via \($0.source))" }
+                let formatted = changes.map { "[\($0.timestamp)] \($0.type.uppercased()) [\($0.source)] \($0.path) (by \($0.agent))" }
                 return textResult(formatted.joined(separator: "\n"))
 
             default:
@@ -138,7 +143,7 @@ enum ToolHandlers {
         if status.active {
             return """
             Status: ACTIVE
-            Run: \(status.runID ?? "unknown")
+            Sources: \(status.sources.joined(separator: ", "))
             Files: \(status.fileCount)
             Emails: \(status.emailCount)
             \(status.message)

@@ -15,6 +15,7 @@ enum ActionFormatting {
         case "restore": "arrow.uturn.backward"
         case "source_added": "plus.circle"
         case "source_removed": "minus.circle"
+        case "tool_call": "terminal"
         default: "circle"
         }
     }
@@ -26,11 +27,22 @@ enum ActionFormatting {
         case "file_deleted": .red
         case "mcp_connection": .accentColor
         case "restore": .orange
+        case "tool_call": .purple
         default: .secondary
         }
     }
 
     static func description(for entry: AuditEntry) -> String {
+        // Tool call entries store tool name in metadata
+        if entry.action == "tool_call" {
+            if let metadata = entry.metadata,
+               let data = metadata.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+               let tool = json["tool"] {
+                return tool
+            }
+            return "tool call"
+        }
         guard let path = entry.filePath else {
             return entry.agent ?? entry.action.replacingOccurrences(of: "_", with: " ")
         }

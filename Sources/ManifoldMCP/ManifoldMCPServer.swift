@@ -63,7 +63,7 @@ struct ManifoldMCPServer {
                 return status.message
             case "manifold://files":
                 let files = (try? await bridge.listFiles()) ?? []
-                return files.joined(separator: "\n")
+                return files.map { "[\($0.sourceName)] \($0.path)" }.joined(separator: "\n")
             case "manifold://emails":
                 let emails = (try? await bridge.listEmails()) ?? []
                 return emails.map { "[\($0.id)] \($0.from) — \($0.subject)" }.joined(separator: "\n")

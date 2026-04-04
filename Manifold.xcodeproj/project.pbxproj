@@ -17,6 +17,7 @@
 		737AC79EB470B57A8C31F07A /* EmailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EE582458D27AB2BA2E2BF9A /* EmailsView.swift */; };
 		7B9535F3BDEE41F8E5B8A115 /* SourceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6470A13DA73184A39BC678 /* SourceDetailView.swift */; };
 		89446B5501B68542C7072D36 /* EmailRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A394D033EE2084DFDDB5F795 /* EmailRulesView.swift */; };
+		95AF5CBC574458C2D1C61AEC /* ActionFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E2BE87F3F8D6D82A5C661A /* ActionFormatting.swift */; };
 		9CB3C07F4760781B633BA667 /* VersionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9933890EC077BC50B4DFCB10 /* VersionsView.swift */; };
 		9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76613F3C74A0440934F46E63 /* ManifoldApp.swift */; };
 		A7489187D65F554DF7DCCB54 /* VersionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D638F1B2DC7BE0E7F8C41365 /* VersionDetailView.swift */; };
@@ -51,6 +52,7 @@
 		D050CA6EEFB11452C92977C1 /* DiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffView.swift; sourceTree = "<group>"; };
 		D638F1B2DC7BE0E7F8C41365 /* VersionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionDetailView.swift; sourceTree = "<group>"; };
 		F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStore.swift; sourceTree = "<group>"; };
+		F6E2BE87F3F8D6D82A5C661A /* ActionFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionFormatting.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -125,6 +127,7 @@
 		F00B9F88805F35215FC8149C /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				F6E2BE87F3F8D6D82A5C661A /* ActionFormatting.swift */,
 				4258FA31C049A293D658A3CE /* AgentBadge.swift */,
 				D050CA6EEFB11452C92977C1 /* DiffView.swift */,
 				B254DE85A21F139AF88969F6 /* StatusBadge.swift */,
@@ -204,6 +207,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				95AF5CBC574458C2D1C61AEC /* ActionFormatting.swift in Sources */,
 				44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */,
 				A88C1FD90DFC98F36CD04618 /* AgentBadge.swift in Sources */,
 				69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */,

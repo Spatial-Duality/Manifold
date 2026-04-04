@@ -107,6 +107,7 @@ public enum AuditAction: String, Sendable {
     case sensitivityWarning = "sensitivity_warning"
     case fileRead = "file_read"
     case mcpConnection = "mcp_connection"
+    case toolCall = "tool_call"
 }
 
 public struct AuditEntry: Sendable, Identifiable {
