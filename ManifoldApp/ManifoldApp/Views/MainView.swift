@@ -9,64 +9,56 @@ struct MainView: View {
         NavigationSplitView {
             SidebarView()
         } detail: {
-            Group {
-                switch store.selectedSection {
-                case .summary:
-                    SummaryView()
-                case .sources:
-                    SourcesSection()
-                case .emails:
-                    EmailsView()
-                case .activity:
-                    ActivityView()
-                case .versions:
-                    VersionsSection()
-                case .setup:
-                    SetupView()
-                case nil:
-                    SummaryView()
+            detailContent
+                .inspector(isPresented: inspectorBinding) {
+                    if let path = store.inspectedFilePath {
+                        VersionDetailView(filePath: path)
+                            .inspectorColumnWidth(min: 320, ideal: 400, max: 500)
+                    }
                 }
-            }
         }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView()
                 .environmentObject(store)
         }
         .task {
-            if !store.hasCompletedOnboarding {
-                showOnboarding = true
-            }
+            if !store.hasCompletedOnboarding { showOnboarding = true }
             await store.loadSummary()
         }
     }
-}
 
-// Wraps SourcesView in its own NavigationStack so back button works
-struct SourcesSection: View {
-    @EnvironmentObject var store: ManifoldStore
-    @State private var selectedWorkspace: WorkspaceRecord?
-
-    var body: some View {
-        NavigationStack {
-            SourcesView(selectedWorkspace: $selectedWorkspace)
-                .navigationDestination(item: $selectedWorkspace) { workspace in
-                    SourceDetailView(workspace: workspace)
-                }
-        }
+    private var inspectorBinding: Binding<Bool> {
+        Binding(
+            get: { store.inspectedFilePath != nil },
+            set: { if !$0 { store.inspectedFilePath = nil } }
+        )
     }
-}
 
-// Wraps VersionsView in its own NavigationStack so back button works
-struct VersionsSection: View {
-    @EnvironmentObject var store: ManifoldStore
-    @State private var selectedFile: String?
-
-    var body: some View {
-        NavigationStack {
-            VersionsView(selectedFile: $selectedFile)
-                .navigationDestination(item: $selectedFile) { filePath in
-                    VersionDetailView(filePath: filePath)
-                }
+    @ViewBuilder
+    private var detailContent: some View {
+        switch store.selectedSidebarItem {
+        case .summary:
+            SummaryView()
+        case .sources:
+            SourcesView()
+        case .sourceDetail(let wsID):
+            if let ws = store.workspaces.first(where: { $0.workspaceID == wsID }) {
+                SourceDetailView(workspace: ws)
+            } else {
+                SourcesView()
+            }
+        case .emailOverview:
+            EmailOverviewView()
+        case .emailInbox:
+            EmailListView()
+        case .emailRules:
+            EmailRulesView()
+        case .activity:
+            ActivityView()
+        case .versions:
+            VersionsView()
+        case nil:
+            SummaryView()
         }
     }
 }

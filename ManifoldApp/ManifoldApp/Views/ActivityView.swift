@@ -5,85 +5,57 @@ struct ActivityView: View {
     @EnvironmentObject var store: ManifoldStore
     @State private var actionFilter = "all"
     @State private var searchText = ""
-    @State private var showVersionHistory = false
-    @State private var selectedFilePath: String?
-
-    private let actionFilters = ["all", "file_read", "file_modified", "file_created", "mcp_connection", "restore"]
 
     private var filteredEntries: [AuditEntry] {
         var entries = store.activityEntries
-        if actionFilter != "all" {
-            entries = entries.filter { $0.action == actionFilter }
-        }
+        if actionFilter != "all" { entries = entries.filter { $0.action == actionFilter } }
         if !searchText.isEmpty {
             entries = entries.filter {
                 ($0.filePath ?? "").localizedCaseInsensitiveContains(searchText) ||
-                $0.action.localizedCaseInsensitiveContains(searchText) ||
-                ($0.agent ?? "").localizedCaseInsensitiveContains(searchText)
+                $0.action.localizedCaseInsensitiveContains(searchText)
             }
         }
         return entries
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Filter bar
-            HStack(spacing: 8) {
-                Picker("Action", selection: $actionFilter) {
-                    Text("All").tag("all")
-                    Text("Reads").tag("file_read")
-                    Text("Writes").tag("file_modified")
-                    Text("Created").tag("file_created")
-                    Text("Connections").tag("mcp_connection")
-                    Text("Restores").tag("restore")
-                }
-                .frame(maxWidth: 200)
-
-                Spacer()
-
-                Text("\(filteredEntries.count) events")
-                    .font(.caption).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-
-            Divider()
-
+        List {
             if filteredEntries.isEmpty {
                 ContentUnavailableView(
                     "No Activity",
                     systemImage: "waveform.path",
                     description: Text(store.mcpInstalled
-                        ? "MCP activity will appear here when agents connect."
-                        : "Install the MCP server first in Setup.")
+                        ? "Activity will appear when agents connect."
+                        : "Install the MCP server in Settings first.")
                 )
+                .listRowSeparator(.hidden)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(filteredEntries) { entry in
-                            ActivityRow(entry: entry)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if let path = entry.filePath {
-                                        selectedFilePath = path
-                                        showVersionHistory = true
-                                    }
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                            Divider().padding(.leading, 12)
+                ForEach(filteredEntries) { entry in
+                    ActivityRow(entry: entry)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if let path = entry.filePath {
+                                store.inspectedFilePath = path
+                            }
                         }
-                    }
                 }
             }
         }
+        .listStyle(.inset(alternatesRowBackgrounds: true))
         .navigationTitle("Activity")
-        .searchable(text: $searchText, prompt: "Search files, agents...")
-        .sheet(isPresented: $showVersionHistory) {
-            if let path = selectedFilePath {
-                VersionDetailView(filePath: path)
-                    .environmentObject(store)
-                    .frame(minWidth: 700, minHeight: 450)
+        .navigationSubtitle("\(filteredEntries.count) events")
+        .searchable(text: $searchText, prompt: "Search files...")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Picker("Filter", selection: $actionFilter) {
+                    Text("All").tag("all")
+                    Divider()
+                    Text("Reads").tag("file_read")
+                    Text("Writes").tag("file_modified")
+                    Text("Connections").tag("mcp_connection")
+                    Text("Restores").tag("restore")
+                }
+                .pickerStyle(.menu)
             }
         }
     }
@@ -99,44 +71,37 @@ struct ActivityRow: View {
                 .imageScale(.small)
                 .frame(width: 16)
 
-            TimeLabel(iso8601: entry.timestamp)
-                .frame(width: 60, alignment: .leading)
-
-            Text(entry.action.replacingOccurrences(of: "_", with: " ").uppercased())
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(actionColor)
-                .frame(width: 80, alignment: .leading)
-
-            if let path = entry.filePath {
-                Text(actionDescription(path: path))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(description)
+                    .font(.callout)
                     .lineLimit(1)
-                    .truncationMode(.middle)
-            } else if let agent = entry.agent, !agent.isEmpty {
-                AgentBadge(agent: agent)
+                Text(entry.action.replacingOccurrences(of: "_", with: " "))
+                    .font(.caption2)
+                    .foregroundStyle(actionColor)
             }
 
             Spacer()
 
+            TimeLabel(iso8601: entry.timestamp)
+
             if entry.filePath != nil {
-                Image(systemName: "clock.arrow.counterclockwise")
+                Image(systemName: "sidebar.right")
                     .foregroundStyle(.quaternary)
                     .imageScale(.small)
             }
         }
     }
 
-    private func actionDescription(path: String) -> String {
-        let name = URL(fileURLWithPath: path).lastPathComponent
-        switch entry.action {
-        case "source_added": return "Folder \"\(name)\" added"
-        case "source_removed": return "Folder \"\(name)\" removed"
-        case "file_read": return path
-        case "file_modified": return path
-        case "file_created": return path
-        default: return path
+    private var description: String {
+        if let path = entry.filePath {
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            switch entry.action {
+            case "source_added": return "Folder \"\(name)\" added"
+            case "source_removed": return "Folder \"\(name)\" removed"
+            default: return name
+            }
         }
+        return entry.agent ?? entry.action.replacingOccurrences(of: "_", with: " ")
     }
 
     private var actionIcon: String {
@@ -161,7 +126,6 @@ struct ActivityRow: View {
         case "file_deleted": return .red
         case "mcp_connection": return .accentColor
         case "restore": return .orange
-        case "sensitivity_warning": return .yellow
         default: return .secondary
         }
     }

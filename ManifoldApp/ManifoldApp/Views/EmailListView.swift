@@ -23,29 +23,12 @@ struct EmailListView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Filter bar
-            HStack {
-                Picker("", selection: $filter) {
-                    Text("All (\(store.cachedEmails.count))").tag("all")
-                    Text("Shared").tag("shared")
-                    Text("Hidden").tag("hidden")
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 300)
-
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-
-            Divider()
-
-            if filteredEmails.isEmpty {
+        Group {
+            if filteredEmails.isEmpty && store.cachedEmails.isEmpty {
                 ContentUnavailableView(
                     "No Emails",
-                    systemImage: "envelope",
-                    description: Text("Fetch emails from the Overview tab to see them here.")
+                    systemImage: "tray",
+                    description: Text("Fetch emails from Email Overview first.")
                 )
             } else {
                 List {
@@ -64,10 +47,23 @@ struct EmailListView: View {
                             }
                     }
                 }
-                .listStyle(.inset)
+                .listStyle(.inset(alternatesRowBackgrounds: true))
                 .searchable(text: $searchText, prompt: "Search emails")
             }
         }
+        .navigationTitle("Inbox")
+        .navigationSubtitle("\(filteredEmails.count) emails")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Picker("Filter", selection: $filter) {
+                    Text("All (\(store.cachedEmails.count))").tag("all")
+                    Text("Shared").tag("shared")
+                    Text("Hidden").tag("hidden")
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+        .task { await store.loadCachedEmails() }
     }
 }
 
@@ -77,21 +73,14 @@ struct EmailRow: View {
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(email.sender)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                Text(email.subject)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Text(email.sender).font(.callout.weight(.medium)).lineLimit(1)
+                Text(email.subject).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             Text(email.dateReceived.prefix(10))
-                .font(.caption2.monospaced())
-                .foregroundStyle(.tertiary)
+                .font(.caption2.monospaced()).foregroundStyle(.tertiary)
             statusBadge
         }
-        .padding(.vertical, 2)
     }
 
     @ViewBuilder
@@ -99,7 +88,7 @@ struct EmailRow: View {
         if email.isShared {
             StatusBadge(text: "SHARED", color: .green)
         } else if email.isAutoHidden {
-            StatusBadge(text: email.hiddenReason?.uppercased() ?? "HIDDEN", color: .yellow)
+            StatusBadge(text: email.hiddenReason?.uppercased() ?? "HIDDEN", color: .orange)
         } else {
             StatusBadge(text: "HIDDEN", color: .gray)
         }
