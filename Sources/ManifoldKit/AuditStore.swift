@@ -129,13 +129,13 @@ public struct AuditEntry: Sendable, Identifiable {
         }
         self.id = id
         self.timestamp = timestamp
-        self.runID = row["run_id"].flatMap { $0.isEmpty ? nil : $0 }
-        self.workspaceID = row["workspace_id"].flatMap { $0.isEmpty ? nil : $0 }
-        self.agent = row["agent"].flatMap { $0.isEmpty ? nil : $0 }
+        self.runID = row["run_id"]?.nilIfEmpty
+        self.workspaceID = row["workspace_id"]?.nilIfEmpty
+        self.agent = row["agent"]?.nilIfEmpty
         self.action = action
-        self.filePath = row["file_path"].flatMap { $0.isEmpty ? nil : $0 }
-        self.beforeHash = row["before_hash"].flatMap { $0.isEmpty ? nil : $0 }
-        self.afterHash = row["after_hash"].flatMap { $0.isEmpty ? nil : $0 }
-        self.metadata = row["metadata"].flatMap { $0.isEmpty ? nil : $0 }
+        self.filePath = row["file_path"]?.nilIfEmpty
+        self.beforeHash = row["before_hash"]?.nilIfEmpty
+        self.afterHash = row["after_hash"]?.nilIfEmpty
+        self.metadata = row["metadata"]?.nilIfEmpty
     }
 }

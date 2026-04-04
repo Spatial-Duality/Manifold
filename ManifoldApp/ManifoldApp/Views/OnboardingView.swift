@@ -203,22 +203,16 @@ struct OnboardingView: View {
 
     private func discoverFolders() {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = ["Developer", "Projects", "Documents", "Desktop"]
-        var found: [String] = []
-        for dir in candidates {
+        discoveredFolders = ["Developer", "Projects", "Documents", "Desktop"].compactMap { dir -> String? in
             let url = home.appendingPathComponent(dir)
             var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                // Check for subdirectories (project folders)
-                if let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey]) {
-                    let subdirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-                    if subdirs.count > 0 && subdirs.count < 50 {
-                        found.append(url.path)
-                    }
-                }
-            }
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+                  isDir.boolValue,
+                  let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey])
+            else { return nil }
+            let subdirCount = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.count
+            return (1..<50).contains(subdirCount) ? url.path : nil
         }
-        discoveredFolders = found
     }
 
     private func shortenPath(_ path: String) -> String {

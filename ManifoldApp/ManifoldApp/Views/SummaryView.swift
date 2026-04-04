@@ -99,11 +99,11 @@ struct SummaryView: View {
                 } else {
                     ForEach(store.activityEntries.prefix(5)) { entry in
                         HStack(spacing: 8) {
-                            Image(systemName: iconFor(entry.action))
-                                .foregroundStyle(colorFor(entry.action))
+                            Image(systemName: ActionFormatting.icon(for: entry.action))
+                                .foregroundStyle(ActionFormatting.color(for: entry.action))
                                 .imageScale(.small)
                                 .frame(width: 16)
-                            Text(descriptionFor(entry))
+                            Text(ActionFormatting.description(for: entry))
                                 .font(.callout)
                                 .lineLimit(1)
                             Spacer()
@@ -124,39 +124,4 @@ struct SummaryView: View {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private func iconFor(_ action: String) -> String {
-        switch action {
-        case "file_read": return "eye"
-        case "file_modified", "file_created": return "pencil"
-        case "file_deleted": return "trash"
-        case "mcp_connection": return "antenna.radiowaves.left.and.right"
-        case "source_added": return "plus.circle"
-        case "source_removed": return "minus.circle"
-        case "restore": return "arrow.uturn.backward"
-        default: return "circle"
-        }
-    }
-
-    private func colorFor(_ action: String) -> Color {
-        switch action {
-        case "file_read": return .blue
-        case "file_modified", "file_created": return .green
-        case "file_deleted": return .red
-        case "mcp_connection": return .accentColor
-        case "restore": return .orange
-        default: return .secondary
-        }
-    }
-
-    private func descriptionFor(_ entry: AuditEntry) -> String {
-        if let path = entry.filePath {
-            let name = URL(fileURLWithPath: path).lastPathComponent
-            switch entry.action {
-            case "source_added": return "Folder \"\(name)\" added"
-            case "source_removed": return "Folder \"\(name)\" removed"
-            default: return "\(entry.action.replacingOccurrences(of: "_", with: " ")) \(name)"
-            }
-        }
-        return entry.action.replacingOccurrences(of: "_", with: " ")
-    }
 }

@@ -66,18 +66,18 @@ struct ActivityRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: actionIcon)
-                .foregroundStyle(actionColor)
+            Image(systemName: ActionFormatting.icon(for: entry.action))
+                .foregroundStyle(ActionFormatting.color(for: entry.action))
                 .imageScale(.small)
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(description)
+                Text(ActionFormatting.description(for: entry))
                     .font(.callout)
                     .lineLimit(1)
                 Text(entry.action.replacingOccurrences(of: "_", with: " "))
                     .font(.caption2)
-                    .foregroundStyle(actionColor)
+                    .foregroundStyle(ActionFormatting.color(for: entry.action))
             }
 
             Spacer()
@@ -89,44 +89,6 @@ struct ActivityRow: View {
                     .foregroundStyle(.quaternary)
                     .imageScale(.small)
             }
-        }
-    }
-
-    private var description: String {
-        if let path = entry.filePath {
-            let name = URL(fileURLWithPath: path).lastPathComponent
-            switch entry.action {
-            case "source_added": return "Folder \"\(name)\" added"
-            case "source_removed": return "Folder \"\(name)\" removed"
-            default: return name
-            }
-        }
-        return entry.agent ?? entry.action.replacingOccurrences(of: "_", with: " ")
-    }
-
-    private var actionIcon: String {
-        switch entry.action {
-        case "file_read": return "eye"
-        case "file_modified", "file_created": return "pencil"
-        case "file_deleted": return "trash"
-        case "mcp_connection": return "antenna.radiowaves.left.and.right"
-        case "run_start": return "play.circle"
-        case "run_end": return "stop.circle"
-        case "restore": return "arrow.uturn.backward"
-        case "source_added": return "plus.circle"
-        case "source_removed": return "minus.circle"
-        default: return "circle"
-        }
-    }
-
-    private var actionColor: Color {
-        switch entry.action {
-        case "file_read": return .blue
-        case "file_modified", "file_created": return .green
-        case "file_deleted": return .red
-        case "mcp_connection": return .accentColor
-        case "restore": return .orange
-        default: return .secondary
         }
     }
 }
