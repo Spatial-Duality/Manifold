@@ -5,8 +5,9 @@ struct ActivityView: View {
     @EnvironmentObject var store: ManifoldStore
     @State private var actionFilter = "all"
     @State private var searchText = ""
+    @State private var filteredEntries: [AuditEntry] = []
 
-    private var filteredEntries: [AuditEntry] {
+    private func refilter() {
         var entries = store.activityEntries
         if actionFilter != "all" { entries = entries.filter { $0.action == actionFilter } }
         if !searchText.isEmpty {
@@ -15,7 +16,7 @@ struct ActivityView: View {
                 $0.action.localizedCaseInsensitiveContains(searchText)
             }
         }
-        return entries
+        filteredEntries = entries
     }
 
     var body: some View {
@@ -58,6 +59,10 @@ struct ActivityView: View {
                 .pickerStyle(.menu)
             }
         }
+        .task { refilter() }
+        .onChange(of: store.activityEntries.count) { _, _ in refilter() }
+        .onChange(of: actionFilter) { _, _ in refilter() }
+        .onChange(of: searchText) { _, _ in refilter() }
     }
 }
 

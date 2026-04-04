@@ -6,9 +6,10 @@ struct EmailRulesView: View {
     @State private var newRuleType: RuleType = .domain
     @State private var newRulePattern = ""
     @State private var newRuleCategory = ""
+    @State private var groupedRules: [(String, [EmailRule])] = []
 
-    private var groupedRules: [(String, [EmailRule])] {
-        Dictionary(grouping: store.emailRules) { $0.category ?? "Other" }
+    private func regroupRules() {
+        groupedRules = Dictionary(grouping: store.emailRules) { $0.category ?? "Other" }
             .sorted { $0.key < $1.key }
     }
 
@@ -67,7 +68,8 @@ struct EmailRulesView: View {
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
         .navigationTitle("Email Rules")
-        .task { await store.loadEmailRules() }
+        .task { await store.loadEmailRules(); regroupRules() }
+        .onChange(of: store.emailRules.count) { _, _ in regroupRules() }
     }
 
     private func ruleIcon(_ type: RuleType) -> String {

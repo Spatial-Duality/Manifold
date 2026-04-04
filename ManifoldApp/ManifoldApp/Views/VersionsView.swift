@@ -4,10 +4,12 @@ import ManifoldKit
 struct VersionsView: View {
     @EnvironmentObject var store: ManifoldStore
     @State private var searchText = ""
+    @State private var filteredFiles: [String] = []
 
-    private var filteredFiles: [String] {
-        if searchText.isEmpty { return store.allTrackedFiles }
-        return store.allTrackedFiles.filter { $0.localizedCaseInsensitiveContains(searchText) }
+    private func refilter() {
+        filteredFiles = searchText.isEmpty
+            ? store.allTrackedFiles
+            : store.allTrackedFiles.filter { $0.localizedCaseInsensitiveContains(searchText) }
     }
 
     var body: some View {
@@ -48,7 +50,10 @@ struct VersionsView: View {
         .task {
             await store.loadTrackedFiles()
             await store.loadStorageStats()
+            refilter()
         }
+        .onChange(of: store.allTrackedFiles.count) { _, _ in refilter() }
+        .onChange(of: searchText) { _, _ in refilter() }
     }
 
     private func formatBytes(_ bytes: Int64) -> String {

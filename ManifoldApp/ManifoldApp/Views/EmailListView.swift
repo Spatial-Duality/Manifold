@@ -5,11 +5,12 @@ struct EmailListView: View {
     @EnvironmentObject var store: ManifoldStore
     @State private var filter = "all"
     @State private var searchText = ""
+    @State private var filteredEmails: [CachedEmail] = []
 
-    private var filteredEmails: [CachedEmail] {
+    private func refilter() {
         var emails = store.cachedEmails
         switch filter {
-        case "shared": emails = emails.filter { $0.isShared }
+        case "shared": emails = emails.filter(\.isShared)
         case "hidden": emails = emails.filter { $0.isAutoHidden || $0.isUserHidden }
         default: break
         }
@@ -19,7 +20,7 @@ struct EmailListView: View {
                 $0.subject.localizedCaseInsensitiveContains(searchText)
             }
         }
-        return emails
+        filteredEmails = emails
     }
 
     var body: some View {
@@ -63,7 +64,10 @@ struct EmailListView: View {
                 .pickerStyle(.segmented)
             }
         }
-        .task { await store.loadCachedEmails() }
+        .task { await store.loadCachedEmails(); refilter() }
+        .onChange(of: store.cachedEmails.count) { _, _ in refilter() }
+        .onChange(of: filter) { _, _ in refilter() }
+        .onChange(of: searchText) { _, _ in refilter() }
     }
 }
 
