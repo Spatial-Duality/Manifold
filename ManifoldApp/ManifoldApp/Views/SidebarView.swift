@@ -5,47 +5,79 @@ struct SidebarView: View {
     @EnvironmentObject var store: ManifoldStore
 
     var body: some View {
-        List(selection: $store.selectedSidebarItem) {
-            // Overview
-            Label("Summary", systemImage: "gauge.open.with.lines.needle.33percent")
-                .tag(SidebarItem.summary as SidebarItem?)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                // Summary
+                SidebarRow(
+                    label: "Summary",
+                    icon: "gauge.open.with.lines.needle.33percent",
+                    isSelected: store.selectedSidebarItem == .summary
+                ) { store.selectedSidebarItem = .summary }
 
-            // Sources (with sub-items for each workspace)
-            Section("Sources") {
-                ForEach(store.workspaces) { ws in
-                    Label(shortenPath(ws.rootPath), systemImage: ws.status == "active" ? "folder.fill" : "folder")
-                        .tag(SidebarItem.sourceDetail(ws.workspaceID) as SidebarItem?)
-                        .badge(ws.status == "active" ? Text("Active").foregroundStyle(.green) : nil)
-                }
+                // Sources
+                SidebarHeader("Sources")
+
                 if store.workspaces.isEmpty {
-                    Label("Add a source...", systemImage: "folder.badge.plus")
-                        .foregroundStyle(.secondary)
-                        .tag(SidebarItem.sources as SidebarItem?)
+                    SidebarRow(
+                        label: "Add a source...",
+                        icon: "folder.badge.plus",
+                        isSelected: store.selectedSidebarItem == .sources,
+                        dimmed: true
+                    ) { store.selectedSidebarItem = .sources }
+                } else {
+                    ForEach(store.workspaces) { ws in
+                        SidebarRow(
+                            label: URL(fileURLWithPath: ws.rootPath).lastPathComponent,
+                            icon: ws.status == "active" ? "folder.fill" : "folder",
+                            isSelected: store.selectedSidebarItem == .sourceDetail(ws.workspaceID),
+                            badge: ws.status == "active" ? "Active" : nil,
+                            badgeColor: .green
+                        ) { store.selectedSidebarItem = .sourceDetail(ws.workspaceID) }
+                    }
                 }
-            }
 
-            // Emails
-            Section("Emails") {
-                Label("Overview", systemImage: "envelope")
-                    .tag(SidebarItem.emailOverview as SidebarItem?)
-                Label("Inbox", systemImage: "tray")
-                    .tag(SidebarItem.emailInbox as SidebarItem?)
-                    .badge(store.cachedEmails.filter(\.isShared).count)
-                Label("Rules", systemImage: "list.bullet.rectangle")
-                    .tag(SidebarItem.emailRules as SidebarItem?)
-            }
+                // Emails
+                SidebarHeader("Emails")
 
-            // Monitor
-            Section("Monitor") {
-                Label("Activity", systemImage: "waveform.path.ecg")
-                    .tag(SidebarItem.activity as SidebarItem?)
-                    .badge(store.activityEntries.count)
-                Label("Versions", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                    .tag(SidebarItem.versions as SidebarItem?)
-                    .badge(store.allTrackedFiles.count)
+                SidebarRow(
+                    label: "Overview",
+                    icon: "envelope",
+                    isSelected: store.selectedSidebarItem == .emailOverview
+                ) { store.selectedSidebarItem = .emailOverview }
+
+                SidebarRow(
+                    label: "Inbox",
+                    icon: "tray",
+                    isSelected: store.selectedSidebarItem == .emailInbox,
+                    count: store.cachedEmails.filter(\.isShared).count
+                ) { store.selectedSidebarItem = .emailInbox }
+
+                SidebarRow(
+                    label: "Rules",
+                    icon: "list.bullet.rectangle",
+                    isSelected: store.selectedSidebarItem == .emailRules
+                ) { store.selectedSidebarItem = .emailRules }
+
+                // Monitor
+                SidebarHeader("Monitor")
+
+                SidebarRow(
+                    label: "Activity",
+                    icon: "waveform.path.ecg",
+                    isSelected: store.selectedSidebarItem == .activity,
+                    count: store.activityEntries.count
+                ) { store.selectedSidebarItem = .activity }
+
+                SidebarRow(
+                    label: "Versions",
+                    icon: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    isSelected: store.selectedSidebarItem == .versions,
+                    count: store.allTrackedFiles.count
+                ) { store.selectedSidebarItem = .versions }
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
         }
-        .listStyle(.sidebar)
         .navigationTitle("Manifold")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -78,10 +110,60 @@ struct SidebarView: View {
             await store.loadCachedEmails()
         }
     }
+}
 
-    private func shortenPath(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let short = path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-        return URL(fileURLWithPath: path).lastPathComponent
+// MARK: - Sidebar Components
+
+struct SidebarHeader: View {
+    let title: String
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
+            .padding(.bottom, 2)
+    }
+}
+
+struct SidebarRow: View {
+    let label: String
+    let icon: String
+    let isSelected: Bool
+    var dimmed: Bool = false
+    var badge: String? = nil
+    var badgeColor: Color = .accentColor
+    var count: Int = 0
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .foregroundStyle(dimmed ? Color.gray : (isSelected ? Color.white : Color.secondary))
+                    .frame(width: 18)
+                Text(label)
+                    .foregroundStyle(dimmed ? Color.gray : (isSelected ? Color.white : Color.primary))
+                Spacer()
+                if let badge {
+                    Text(badge)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(isSelected ? .white.opacity(0.8) : badgeColor)
+                }
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(isSelected ? Color.accentColor : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

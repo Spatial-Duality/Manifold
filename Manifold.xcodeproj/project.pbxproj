@@ -11,7 +11,6 @@
 		15DA67171F7D440A1374799B /* ManifoldStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */; };
 		17F701EEBA3AA625259D7306 /* TimeLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83794677BF621BEDB36F8287 /* TimeLabel.swift */; };
 		44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E9A816D1C0EB330E125C1D /* ActivityView.swift */; };
-		535DB70D34C4691BE3A190EB /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */; };
 		6108614237351F25329A33EA /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B254DE85A21F139AF88969F6 /* StatusBadge.swift */; };
 		69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050CA6EEFB11452C92977C1 /* DiffView.swift */; };
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
@@ -43,7 +42,6 @@
 		76613F3C74A0440934F46E63 /* ManifoldApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldApp.swift; sourceTree = "<group>"; };
 		82E9A816D1C0EB330E125C1D /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		83794677BF621BEDB36F8287 /* TimeLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeLabel.swift; sourceTree = "<group>"; };
-		9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		9933890EC077BC50B4DFCB10 /* VersionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionsView.swift; sourceTree = "<group>"; };
 		9FC9F995A8250393B7018353 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		A394D033EE2084DFDDB5F795 /* EmailRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesView.swift; sourceTree = "<group>"; };
@@ -100,7 +98,6 @@
 				A394D033EE2084DFDDB5F795 /* EmailRulesView.swift */,
 				1EE582458D27AB2BA2E2BF9A /* EmailsView.swift */,
 				9FC9F995A8250393B7018353 /* MainView.swift */,
-				9585F7D62DEB8CC59174AD8E /* MenuBarView.swift */,
 				C3D6299210FB9ECDE43D0CEB /* OnboardingView.swift */,
 				4B8A46BFF05C848EC77C2AF5 /* SetupView.swift */,
 				72B9B6990C768F509B885738 /* SidebarView.swift */,
@@ -216,7 +213,6 @@
 				F1E6236E38A106FEDE8B666A /* MainView.swift in Sources */,
 				9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */,
 				15DA67171F7D440A1374799B /* ManifoldStore.swift in Sources */,
-				535DB70D34C4691BE3A190EB /* MenuBarView.swift in Sources */,
 				E0126357B2851010FAC78928 /* OnboardingView.swift in Sources */,
 				AC3AB7A5BEB5FA34CF954282 /* SetupView.swift in Sources */,
 				E94569E6FA08EDA616D3BAD5 /* SidebarView.swift in Sources */,
