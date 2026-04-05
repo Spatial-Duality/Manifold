@@ -7,6 +7,7 @@ struct ActivityView: View {
     @State private var searchText = ""
     @State private var filteredEntries: [AuditEntry] = []
     @State private var copiedSummary = false
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     private func refilter() {
         var entries = store.activityEntries
@@ -90,7 +91,14 @@ struct ActivityView: View {
         .task { refilter(); await store.loadSessions() }
         .onChange(of: store.activityEntries.count) { _, _ in Task { @MainActor in refilter(); await store.loadSessions() } }
         .onChange(of: actionFilter) { _, _ in Task { @MainActor in refilter() } }
-        .onChange(of: searchText) { _, _ in Task { @MainActor in refilter() } }
+        .onChange(of: searchText) { _, _ in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                refilter()
+            }
+        }
     }
 
     private var filterLabel: String {

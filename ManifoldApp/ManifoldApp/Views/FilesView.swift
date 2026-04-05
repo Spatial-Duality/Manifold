@@ -12,6 +12,7 @@ struct FilesView: View {
     @State private var contentSearchResults: [SearchResult] = []
     @State private var isSearchingContent = false
     @State private var searchIncludeArchived = false
+    @State private var nameFilterTask: Task<Void, Never>?
 
     // Filters
     @State private var filterSource = "All"
@@ -144,7 +145,14 @@ struct FilesView: View {
         .navigationSubtitle("\(allFiles.count) files across \(store.workspaces.filter { $0.status != "archived" }.count) sources")
         .task { reloadFiles() }
         .onChange(of: store.workspaces.count) { _, _ in Task { @MainActor in reloadFiles() } }
-        .onChange(of: searchText) { _, _ in Task { @MainActor in applyFilters() } }
+        .onChange(of: searchText) { _, _ in
+            nameFilterTask?.cancel()
+            nameFilterTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                applyFilters()
+            }
+        }
         .onChange(of: filterSource) { _, _ in Task { @MainActor in applyFilters() } }
         .onChange(of: filterType) { _, _ in Task { @MainActor in applyFilters() } }
         .onChange(of: sortBy) { _, _ in Task { @MainActor in applyFilters() } }
@@ -259,8 +267,15 @@ struct FilesView: View {
     private func searchContent() {
         guard !contentSearchText.isEmpty else { return }
         isSearchingContent = true
-        contentSearchResults = store.searchFileContents(query: contentSearchText, includeArchived: searchIncludeArchived)
-        isSearchingContent = false
+        let query = contentSearchText
+        let includeArchived = searchIncludeArchived
+        Task.detached {
+            let results = await store.searchFileContents(query: query, includeArchived: includeArchived)
+            await MainActor.run {
+                contentSearchResults = results
+                isSearchingContent = false
+            }
+        }
     }
 
     private func iconFor(_ ext: String) -> String {
