@@ -39,6 +39,8 @@ struct MainView: View {
         switch store.selectedSidebarItem {
         case .dashboard, nil:
             DashboardView()
+        case .files:
+            FilesView()
         case .activity:
             ActivityView()
         case .versions:

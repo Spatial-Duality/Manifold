@@ -13,6 +13,13 @@ struct SidebarView: View {
             ) { store.selectedSidebarItem = .dashboard }
 
             SidebarButton(
+                label: "Files",
+                icon: "doc.text.magnifyingglass",
+                item: .files,
+                selected: store.selectedSidebarItem
+            ) { store.selectedSidebarItem = .files }
+
+            SidebarButton(
                 label: "Activity",
                 icon: "waveform.path.ecg",
                 item: .activity,

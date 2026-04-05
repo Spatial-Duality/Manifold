@@ -10,6 +10,7 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 
 enum SidebarItem: Hashable {
     case dashboard
+    case files
     case activity
     case versions
 }
@@ -207,6 +208,87 @@ class ManifoldStore {
         for url in panel.urls { addSource(path: url.path) }
     }
 
+    /// Remove multiple sources at once.
+    func removeSources(paths: Set<String>) {
+        for path in paths { removeSource(path: path) }
+    }
+
+    /// Enumerate all files across all active sources. Returns flat list with metadata.
+    func enumerateAllFiles() -> [SourceFile] {
+        let fm = FileManager.default
+        var result: [SourceFile] = []
+        let activeWorkspaces = workspaces.filter { $0.status != "archived" }
+
+        for ws in activeWorkspaces {
+            let root = URL(fileURLWithPath: ws.rootPath)
+            let sourceName = root.lastPathComponent
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            while let url = enumerator.nextObject() as? URL {
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                      values.isRegularFile == true else { continue }
+                let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                result.append(SourceFile(
+                    name: url.lastPathComponent,
+                    path: url.path,
+                    relativePath: relativePath,
+                    sourceName: sourceName,
+                    sourceWorkspaceID: ws.workspaceID,
+                    fileExtension: url.pathExtension.lowercased(),
+                    sizeBytes: values.fileSize ?? 0,
+                    modifiedDate: values.contentModificationDate ?? Date.distantPast,
+                    isGrantedToClaude: ws.status != "archived"
+                ))
+            }
+        }
+        return result
+    }
+
+    /// Search file contents across all sources.
+    func searchFileContents(query: String, includeArchived: Bool = false) -> [SearchResult] {
+        let fm = FileManager.default
+        let relevantWorkspaces = includeArchived ? workspaces : workspaces.filter { $0.status != "archived" }
+        var results: [SearchResult] = []
+
+        for ws in relevantWorkspaces {
+            let root = URL(fileURLWithPath: ws.rootPath)
+            let sourceName = root.lastPathComponent
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            while let url = enumerator.nextObject() as? URL {
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                      values.isRegularFile == true,
+                      let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+
+                let lines = content.components(separatedBy: "\n")
+                let matches = lines.enumerated()
+                    .filter { $0.element.localizedCaseInsensitiveContains(query) }
+                    .prefix(5)
+                    .map { SearchMatch(lineNumber: $0.offset + 1, lineText: String($0.element.prefix(200))) }
+
+                if !matches.isEmpty {
+                    results.append(SearchResult(
+                        fileName: url.lastPathComponent,
+                        filePath: url.path,
+                        sourceName: sourceName,
+                        isGranted: ws.status != "archived",
+                        matches: Array(matches)
+                    ))
+                }
+                if results.count >= 100 { return results }
+            }
+        }
+        return results
+    }
+
     func loadWorkspaces() async {
         workspaces = (try? await leaseManager?.allWorkspaces()) ?? []
     }
@@ -333,4 +415,34 @@ class ManifoldStore {
     static func mcpBinaryPath() -> String {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Manifold/bin/manifold-mcp").path
     }
+}
+
+// MARK: - File Browser Types
+
+struct SourceFile: Identifiable, Sendable {
+    let id = UUID()
+    let name: String
+    let path: String
+    let relativePath: String
+    let sourceName: String
+    let sourceWorkspaceID: String
+    let fileExtension: String
+    let sizeBytes: Int
+    let modifiedDate: Date
+    let isGrantedToClaude: Bool
+}
+
+struct SearchResult: Identifiable, Sendable {
+    let id = UUID()
+    let fileName: String
+    let filePath: String
+    let sourceName: String
+    let isGranted: Bool
+    let matches: [SearchMatch]
+}
+
+struct SearchMatch: Identifiable, Sendable {
+    let id = UUID()
+    let lineNumber: Int
+    let lineText: String
 }
