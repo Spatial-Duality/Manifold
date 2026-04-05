@@ -43,7 +43,7 @@ struct VersionsView: View {
         .navigationTitle("Versions")
         .navigationSubtitle(store.storageUsed > 0 ? ByteCountFormatter.string(fromByteCount: store.storageUsed, countStyle: .file) : "")
         .task { await store.loadTrackedFiles(); await store.loadStorageStats(); refilter() }
-        .onChange(of: store.allTrackedFiles.count) { _, _ in refilter() }
-        .onChange(of: searchText) { _, _ in refilter() }
+        .onChange(of: store.allTrackedFiles.count) { _, _ in Task { @MainActor in refilter() } }
+        .onChange(of: searchText) { _, _ in Task { @MainActor in refilter() } }
     }
 }

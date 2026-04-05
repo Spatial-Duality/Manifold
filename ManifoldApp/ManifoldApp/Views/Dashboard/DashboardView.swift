@@ -11,14 +11,9 @@ struct DashboardView: View {
             EmailSection()
             RecentActivitySection()
         }
-        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .listStyle(.inset)
         .navigationTitle("Dashboard")
         .navigationSubtitle(store.isConnected ? "Protected" : "Idle")
-        .toolbar {
-            Button("Add Source", systemImage: "folder.badge.plus") {
-                store.addSourceFromPicker()
-            }
-        }
         .task { await store.loadSummary() }
     }
 }

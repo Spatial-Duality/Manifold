@@ -36,15 +36,24 @@ struct MainView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        switch store.selectedSidebarItem {
-        case .dashboard, nil:
-            DashboardView()
-        case .files:
-            FilesView()
-        case .activity:
-            ActivityView()
-        case .versions:
-            VersionsView()
+        Group {
+            switch store.selectedSidebarItem {
+            case .dashboard, nil:
+                DashboardView()
+            case .files:
+                FilesView()
+            case .activity:
+                ActivityView()
+            case .versions:
+                VersionsView()
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Add Source", systemImage: "folder.badge.plus") {
+                    store.addSourceFromPicker()
+                }
+            }
         }
     }
 }

@@ -4,7 +4,7 @@ struct SidebarView: View {
     @Environment(ManifoldStore.self) var store
 
     var body: some View {
-        List {
+        VStack(spacing: 2) {
             SidebarButton(
                 label: "Dashboard",
                 icon: "gauge.open.with.lines.needle.33percent",
@@ -32,10 +32,10 @@ struct SidebarView: View {
                 item: .versions,
                 selected: store.selectedSidebarItem
             ) { store.selectedSidebarItem = .versions }
-        }
-        .listStyle(.sidebar)
-        .navigationTitle("Manifold")
-        .safeAreaInset(edge: .bottom) {
+
+            Spacer()
+
+            // Connection status
             HStack(spacing: 6) {
                 Circle()
                     .fill(store.isConnected ? Color.green : Color.gray)
@@ -48,9 +48,12 @@ struct SidebarView: View {
                         .foregroundStyle(.yellow).imageScale(.small)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 8)
             .padding(.vertical, 10)
         }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        .navigationTitle("Manifold")
     }
 }
 
@@ -70,9 +73,9 @@ struct SidebarButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

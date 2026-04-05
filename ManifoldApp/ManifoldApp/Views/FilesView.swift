@@ -18,8 +18,7 @@ struct FilesView: View {
     @State private var filterType = "All"
     @State private var sortBy: SortOption = .name
 
-    // Selection for bulk operations
-    @State private var selectedFiles: Set<UUID> = []
+    // (bulk selection removed — List doesn't support Table-style multi-select)
 
     enum SortOption: String, CaseIterable {
         case name = "Name"
@@ -102,86 +101,59 @@ struct FilesView: View {
                     description: Text(store.workspaces.isEmpty ? "Add a source folder first." : "No files match your filters.")
                 )
             } else {
-                Table(filteredFiles, selection: $selectedFiles) {
-                    TableColumn("Name") { file in
-                        HStack(spacing: 6) {
-                            Image(systemName: iconFor(file.fileExtension))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 16)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(file.name).font(.callout).lineLimit(1)
-                                Text(file.relativePath)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1).truncationMode(.middle)
-                            }
-                        }
-                        .contextMenu { fileContextMenu(file: file) }
-                    }
-                    .width(min: 200, ideal: 300)
+                List(filteredFiles) { file in
+                    HStack(spacing: 8) {
+                        Image(systemName: iconFor(file.fileExtension))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
 
-                    TableColumn("Source") { file in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(file.name).font(.callout).lineLimit(1)
+                            Text(file.relativePath)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+
+                        Spacer()
+
                         HStack(spacing: 4) {
                             Circle()
                                 .fill(file.isGrantedToClaude ? Color.green : Color.gray)
                                 .frame(width: 6, height: 6)
                             Text(file.sourceName).font(.caption)
                         }
-                    }
-                    .width(min: 80, ideal: 120)
+                        .frame(width: 100, alignment: .leading)
 
-                    TableColumn("Size") { file in
                         Text(ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                    }
-                    .width(min: 60, ideal: 80)
+                            .frame(width: 60, alignment: .trailing)
 
-                    TableColumn("Modified") { file in
                         Text(file.modifiedDate, style: .relative)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    .width(min: 80, ideal: 100)
+                            .frame(width: 80, alignment: .trailing)
 
-                    TableColumn("Type") { file in
-                        Text(file.fileExtension.isEmpty ? "—" : ".\(file.fileExtension)")
+                        Text(file.fileExtension.isEmpty ? "" : ".\(file.fileExtension)")
                             .font(.caption.monospaced())
                             .foregroundStyle(.tertiary)
+                            .frame(width: 45, alignment: .trailing)
                     }
-                    .width(min: 50, ideal: 60)
+                    .contextMenu { fileContextMenu(file: file) }
                 }
+                .listStyle(.inset(alternatesRowBackgrounds: true))
             }
         }
         .navigationTitle("Files")
         .navigationSubtitle("\(allFiles.count) files across \(store.workspaces.filter { $0.status != "archived" }.count) sources")
         .searchable(text: $searchText, prompt: "Filter by name...")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Add Source", systemImage: "folder.badge.plus") {
-                    store.addSourceFromPicker()
-                    reloadFiles()
-                }
-            }
-            if !selectedFiles.isEmpty {
-                ToolbarItem(placement: .automatic) {
-                    Button("Open \(selectedFiles.count) in Finder") {
-                        for id in selectedFiles {
-                            if let file = allFiles.first(where: { $0.id == id }) {
-                                NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
-                            }
-                        }
-                    }
-                    .controlSize(.small)
-                }
-            }
-        }
         .task { reloadFiles() }
-        .onChange(of: store.workspaces.count) { _, _ in reloadFiles() }
-        .onChange(of: searchText) { _, _ in applyFilters() }
-        .onChange(of: filterSource) { _, _ in applyFilters() }
-        .onChange(of: filterType) { _, _ in applyFilters() }
-        .onChange(of: sortBy) { _, _ in applyFilters() }
+        .onChange(of: store.workspaces.count) { _, _ in Task { @MainActor in reloadFiles() } }
+        .onChange(of: searchText) { _, _ in Task { @MainActor in applyFilters() } }
+        .onChange(of: filterSource) { _, _ in Task { @MainActor in applyFilters() } }
+        .onChange(of: filterType) { _, _ in Task { @MainActor in applyFilters() } }
+        .onChange(of: sortBy) { _, _ in Task { @MainActor in applyFilters() } }
     }
 
     // MARK: - Content Search Results

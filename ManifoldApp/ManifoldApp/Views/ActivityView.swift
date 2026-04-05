@@ -21,6 +21,18 @@ struct ActivityView: View {
 
     var body: some View {
         List {
+            // Inline filter
+            Picker("Filter", selection: $actionFilter) {
+                Text("All").tag("all")
+                Text("Reads").tag("file_read")
+                Text("Writes").tag("file_modified")
+                Text("Tool Calls").tag("tool_call")
+                Text("Connections").tag("mcp_connection")
+                Text("Restores").tag("restore")
+            }
+            .pickerStyle(.segmented)
+            .listRowSeparator(.hidden)
+
             if filteredEntries.isEmpty {
                 ContentUnavailableView(
                     "No Activity",
@@ -46,23 +58,9 @@ struct ActivityView: View {
         .navigationTitle("Activity")
         .navigationSubtitle("\(filteredEntries.count) events")
         .searchable(text: $searchText, prompt: "Search files...")
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Picker("Filter", selection: $actionFilter) {
-                    Text("All").tag("all")
-                    Divider()
-                    Text("Reads").tag("file_read")
-                    Text("Writes").tag("file_modified")
-                    Text("Tool Calls").tag("tool_call")
-                    Text("Connections").tag("mcp_connection")
-                    Text("Restores").tag("restore")
-                }
-                .pickerStyle(.menu)
-            }
-        }
         .task { refilter() }
-        .onChange(of: store.activityEntries.count) { _, _ in refilter() }
-        .onChange(of: actionFilter) { _, _ in refilter() }
-        .onChange(of: searchText) { _, _ in refilter() }
+        .onChange(of: store.activityEntries.count) { _, _ in Task { @MainActor in refilter() } }
+        .onChange(of: actionFilter) { _, _ in Task { @MainActor in refilter() } }
+        .onChange(of: searchText) { _, _ in Task { @MainActor in refilter() } }
     }
 }
