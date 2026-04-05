@@ -24,6 +24,7 @@ struct OnboardingView: View {
                 }
             }
             .padding(.horizontal, Spacing.large).padding(.top, Spacing.edge)
+            .accessibilityLabel("Setup progress: step \(step + 1) of \(totalSteps)")
 
             // Step indicator
             Text("Step \(step + 1) of \(totalSteps)")
@@ -73,14 +74,31 @@ struct OnboardingView: View {
         VStack(spacing: 16) {
             Image(systemName: "shield.checkered")
                 .font(.system(size: 48)).foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
             Text("Welcome to Manifold")
                 .font(.title.weight(.semibold))
             Text("Choose exactly what AI agents can see in your files.\nEvery change they make gets automatic version history.")
                 .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Text("Manifold works with Claude Desktop and Codex via a protocol called MCP.")
-                .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+
+            VStack(alignment: .leading, spacing: Spacing.standard) {
+                featurePreview(icon: "folder.badge.gearshape", text: "Control which folders AI can access")
+                featurePreview(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", text: "Undo any AI change with one click")
+                featurePreview(icon: "envelope.badge.shield.half.filled", text: "Share emails safely, sensitive ones auto-hidden")
+            }
+            .padding(Spacing.section)
+            .background(Color(.controlBackgroundColor).opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: Spacing.standard))
         }
         .padding(.horizontal, Spacing.xlarge + Spacing.standard)
+    }
+
+    private func featurePreview(icon: String, text: String) -> some View {
+        HStack(spacing: Spacing.standard) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            Text(text).font(.callout).foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - Step 1: Check Claude Desktop
@@ -97,6 +115,7 @@ struct OnboardingView: View {
             if claudeDesktopFound {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        .accessibilityLabel("Found")
                     Text("Claude Desktop found").font(.callout.weight(.medium))
                 }
                 .padding(.top, Spacing.standard)
@@ -104,6 +123,7 @@ struct OnboardingView: View {
                 VStack(spacing: 8) {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow)
+                            .accessibilityLabel("Warning")
                         Text("Claude Desktop not found").font(.callout)
                     }
                     Text("Download it from Anthropic, then click Check Again.")
@@ -133,9 +153,12 @@ struct OnboardingView: View {
             Text("This copies the Manifold MCP binary and updates your Claude Desktop configuration so they can talk to each other.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
+            activationLabel("Activates: Agent connection, file monitoring, session replay")
+
             if store.mcpInstalled {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        .accessibilityLabel("Installed")
                     Text("Installed").font(.callout.weight(.medium))
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -188,6 +211,8 @@ struct OnboardingView: View {
             Text("Choose a folder to share with AI agents. Claude can read files here. Every change is versioned automatically.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
+            activationLabel("Activates: File browsing, search, version history, one-click revert")
+
             // Auto-discovered folders
             if !discoveredFolders.isEmpty && store.approvedSources.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -196,10 +221,12 @@ struct OnboardingView: View {
                         HStack {
                             Image(systemName: selectedDiscovered.contains(path) ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(selectedDiscovered.contains(path) ? .green : .gray)
+                                .accessibilityLabel(selectedDiscovered.contains(path) ? "Selected" : "Not selected")
                             Text(shortenPath(path)).font(.caption.monospaced()).lineLimit(1)
                             Spacer()
                         }
                         .contentShape(Rectangle())
+                        .accessibilityAddTraits(.isButton)
                         .onTapGesture {
                             if selectedDiscovered.contains(path) { selectedDiscovered.remove(path) }
                             else { selectedDiscovered.insert(path) }
@@ -246,6 +273,8 @@ struct OnboardingView: View {
             Text("Optionally let Claude see your emails. Manifold auto-hides sensitive ones (banking, 2FA, healthcare) and you control what's shared.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
+            activationLabel("Activates: Email sharing with automatic privacy filtering")
+
             switch store.mailAccessStatus {
             case .available:
                 HStack(spacing: 8) {
@@ -273,7 +302,7 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
             }
 
-            Button("Skip") { withAnimation { step += 1 } }
+            Button("I don't use Apple Mail") { withAnimation { step += 1 } }
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, Spacing.xlarge + Spacing.standard)
@@ -315,11 +344,28 @@ struct OnboardingView: View {
         HStack(spacing: 8) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(done ? .green : .gray)
+                .accessibilityLabel(done ? "Complete" : "Incomplete")
             VStack(alignment: .leading, spacing: 1) {
                 Text(label).font(.callout.weight(.medium))
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func activationLabel(_ text: String) -> some View {
+        HStack(spacing: Spacing.tight) {
+            Image(systemName: "bolt.fill")
+                .foregroundStyle(.yellow)
+                .imageScale(.small)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, Spacing.standard)
+        .padding(.vertical, Spacing.tight)
+        .background(Color.yellow.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: Spacing.tight))
     }
 
     private func configLine(_ label: String, path: String) -> some View {
