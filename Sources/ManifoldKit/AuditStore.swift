@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "audit")
 
 /// Records all user and system actions for accountability.
 /// Every grant, end-access, restore, promote, and source change is logged.
@@ -125,9 +128,13 @@ public actor AuditStore {
         let timestamp = ISO8601DateFormatter().string(from: now)
         let sessionID = try resolveSessionID(agent: agent, timestamp: now)
         let metadataJSON: String? = metadata.flatMap { dict in
-            guard let data = try? JSONSerialization.data(withJSONObject: dict),
-                  let str = String(data: data, encoding: .utf8) else { return nil }
-            return str
+            do {
+                let data = try JSONSerialization.data(withJSONObject: dict)
+                return String(data: data, encoding: .utf8)
+            } catch {
+                logger.warning("Failed to serialize audit metadata: \(error.localizedDescription)")
+                return nil
+            }
         }
 
         try db.execute("""

@@ -55,6 +55,9 @@ class ManifoldStore {
     var storageUsed: Int64 = 0
     var blobCount: Int = 0
 
+    // Errors
+    var lastError: String?
+
     // Setup
     var mcpInstalled = false
     var installError: String?
@@ -159,7 +162,14 @@ class ManifoldStore {
 
     func refresh() async {
         guard let auditStore else { return }
-        activityEntries = (try? await auditStore.recentEntries(limit: 100)) ?? []
+        do {
+            activityEntries = try await auditStore.recentEntries(limit: 100)
+            lastError = nil
+        } catch {
+            logger.error("Failed to load activity: \(error.localizedDescription)")
+            lastError = "Unable to load activity data"
+            activityEntries = []
+        }
         if !isConnected {
             if let recent = activityEntries.first(where: { $0.action == "mcp_connection" }),
                let ts = ISO8601DateFormatter().date(from: recent.timestamp) {
@@ -168,7 +178,11 @@ class ManifoldStore {
             }
         }
         if let db {
-            approvedSources = (try? db.queryAll("SELECT root_path FROM workspaces WHERE status IN ('idle', 'active')"))?.compactMap { $0["root_path"] } ?? []
+            do {
+                approvedSources = try db.queryAll("SELECT root_path FROM workspaces WHERE status IN ('idle', 'active')").compactMap { $0["root_path"] }
+            } catch {
+                logger.error("Failed to load sources: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -179,9 +193,14 @@ class ManifoldStore {
         approvedSources.append(path)
         let folderName = URL(fileURLWithPath: path).lastPathComponent
         Task {
-            let wsID = "ws-\(UUID().uuidString.prefix(8).lowercased())"
-            try? await leaseManager?.registerWorkspace(id: wsID, profileID: "default", rootPath: path, agent: "cowork")
-            try? await auditStore?.log(action: .sourceAdded, filePath: path, metadata: ["folder": folderName])
+            do {
+                let wsID = "ws-\(UUID().uuidString.prefix(8).lowercased())"
+                try await leaseManager?.registerWorkspace(id: wsID, profileID: "default", rootPath: path, agent: "cowork")
+                try? await auditStore?.log(action: .sourceAdded, filePath: path, metadata: ["folder": folderName])
+            } catch {
+                logger.error("Failed to register source \(folderName): \(error.localizedDescription)")
+                lastError = "Failed to add \(folderName)"
+            }
             await loadWorkspaces()
         }
     }
@@ -190,24 +209,38 @@ class ManifoldStore {
         approvedSources.removeAll { $0 == path }
         let folderName = URL(fileURLWithPath: path).lastPathComponent
         Task {
-            // Mark as removed — distinct from "archived" (paused) so it hides from dashboard
-            if let ws = workspaces.first(where: { $0.rootPath == path }) {
-                try? await leaseManager?.updateWorkspaceStatus(workspaceID: ws.workspaceID, status: "removed")
+            do {
+                if let ws = workspaces.first(where: { $0.rootPath == path }) {
+                    try await leaseManager?.updateWorkspaceStatus(workspaceID: ws.workspaceID, status: "removed")
+                }
+                try? await auditStore?.log(action: .sourceRemoved, filePath: path, metadata: ["folder": folderName])
+            } catch {
+                logger.error("Failed to remove source \(folderName): \(error.localizedDescription)")
+                lastError = "Failed to remove \(folderName)"
             }
-            try? await auditStore?.log(action: .sourceRemoved, filePath: path, metadata: ["folder": folderName])
             await loadWorkspaces()
             await refresh()
         }
     }
 
     func pauseSource(workspaceID: String) async {
-        try? await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "archived")
+        do {
+            try await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "archived")
+        } catch {
+            logger.error("Failed to pause source: \(error.localizedDescription)")
+            lastError = "Failed to pause source"
+        }
         await loadWorkspaces()
         await refresh()
     }
 
     func resumeSource(workspaceID: String) async {
-        try? await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "idle")
+        do {
+            try await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "idle")
+        } catch {
+            logger.error("Failed to resume source: \(error.localizedDescription)")
+            lastError = "Failed to resume source"
+        }
         await loadWorkspaces()
         await refresh()
     }
@@ -304,7 +337,13 @@ class ManifoldStore {
     }
 
     func loadWorkspaces() async {
-        workspaces = (try? await leaseManager?.allWorkspaces()) ?? []
+        do {
+            workspaces = try await leaseManager?.allWorkspaces() ?? []
+        } catch {
+            logger.error("Failed to load workspaces: \(error.localizedDescription)")
+            lastError = "Unable to load sources"
+            workspaces = []
+        }
     }
 
     func activeRunForWorkspace(_ workspaceID: String) async -> RunRecord? {
@@ -316,14 +355,24 @@ class ManifoldStore {
     }
 
     func startRun(workspaceID: String, agent: String) async {
-        _ = try? await leaseManager?.startRun(workspaceID: workspaceID, agent: agent, trigger: .userGrant)
-        try? await auditStore?.log(action: .runStart, workspaceID: workspaceID, agent: agent)
+        do {
+            _ = try await leaseManager?.startRun(workspaceID: workspaceID, agent: agent, trigger: .userGrant)
+            try? await auditStore?.log(action: .runStart, workspaceID: workspaceID, agent: agent)
+        } catch {
+            logger.error("Failed to start run: \(error.localizedDescription)")
+            lastError = "Failed to grant access"
+        }
         await loadWorkspaces(); await refresh()
     }
 
     func endRun(runID: String) async {
-        try? await leaseManager?.endRun(runID: runID)
-        try? await auditStore?.log(action: .runEnd)
+        do {
+            try await leaseManager?.endRun(runID: runID)
+            try? await auditStore?.log(action: .runEnd)
+        } catch {
+            logger.error("Failed to end run: \(error.localizedDescription)")
+            lastError = "Failed to end access"
+        }
         runTimers[runID]?.invalidate(); runTimers.removeValue(forKey: runID)
         await loadWorkspaces(); await refresh()
     }
@@ -344,7 +393,10 @@ class ManifoldStore {
         for email in emails { try? await emailFilter.cacheEmail(email, account: account, mailbox: mailbox) }
         await reclassifyEmails(); await loadCachedEmails()
     }
-    func loadEmailRules() async { emailRules = (try? await emailFilter?.globalRules()) ?? [] }
+    func loadEmailRules() async {
+        do { emailRules = try await emailFilter?.globalRules() ?? [] }
+        catch { logger.error("Failed to load email rules: \(error.localizedDescription)"); emailRules = [] }
+    }
     func addEmailRule(type: RuleType, pattern: String, category: String) async {
         try? await emailFilter?.addGlobalRule(type: type, pattern: pattern, category: category)
         await loadEmailRules(); await reclassifyEmails()
@@ -363,7 +415,10 @@ class ManifoldStore {
 
     // MARK: - Versions
 
-    func loadTrackedFiles() async { allTrackedFiles = (try? await snapshotStore?.allTrackedFiles()) ?? [] }
+    func loadTrackedFiles() async {
+        do { allTrackedFiles = try await snapshotStore?.allTrackedFiles() ?? [] }
+        catch { logger.error("Failed to load tracked files: \(error.localizedDescription)"); allTrackedFiles = [] }
+    }
     func loadStorageStats() async {
         storageUsed = (try? await contentStore?.totalSize()) ?? 0
         blobCount = (try? await contentStore?.blobCount()) ?? 0
@@ -422,11 +477,22 @@ class ManifoldStore {
     // MARK: - Sessions
 
     func loadSessions() async {
-        sessions = (try? await auditStore?.recentSessions(limit: 20)) ?? []
+        do {
+            sessions = try await auditStore?.recentSessions(limit: 20) ?? []
+        } catch {
+            logger.error("Failed to load sessions: \(error.localizedDescription)")
+            lastError = "Unable to load session history"
+            sessions = []
+        }
     }
 
     func loadSessionEvents(sessionID: String) async {
-        sessionEvents = (try? await auditStore?.sessionEvents(sessionID: sessionID)) ?? []
+        do {
+            sessionEvents = try await auditStore?.sessionEvents(sessionID: sessionID) ?? []
+        } catch {
+            logger.error("Failed to load session events: \(error.localizedDescription)")
+            sessionEvents = []
+        }
     }
 
     func selectSession(_ session: Session?) async {

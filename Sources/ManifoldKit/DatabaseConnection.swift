@@ -1,5 +1,8 @@
 import Foundation
 import SQLite3
+import os
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "database")
 
 /// Minimal SQLite wrapper. All operations are synchronous — callers use actor isolation.
 public final class DatabaseConnection: @unchecked Sendable {
@@ -93,7 +96,8 @@ public final class DatabaseConnection: @unchecked Sendable {
             try block()
             try execute("COMMIT")
         } catch {
-            try? execute("ROLLBACK")
+            do { try execute("ROLLBACK") }
+            catch { logger.error("ROLLBACK failed: \(error.localizedDescription)") }
             throw error
         }
     }
