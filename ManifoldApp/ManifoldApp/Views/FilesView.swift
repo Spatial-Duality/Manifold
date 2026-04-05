@@ -38,30 +38,25 @@ struct FilesView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Filter bar
-            HStack(spacing: 12) {
+            HStack(spacing: Spacing.section) {
                 Picker("Source", selection: $filterSource) {
                     ForEach(sourceNames, id: \.self) { Text($0) }
                 }
                 .frame(maxWidth: 160)
-
-                Picker("Type", selection: $filterType) {
-                    ForEach(fileTypes, id: \.self) { name in
-                        Text(name == "All" ? "All Types" : ".\(name)")
-                    }
-                }
-                .frame(maxWidth: 120)
 
                 Picker("Sort", selection: $sortBy) {
                     ForEach(SortOption.allCases, id: \.self) { Text($0.rawValue) }
                 }
                 .frame(maxWidth: 120)
 
-                Spacer()
+                TextField("Filter by name...", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
 
                 Text("\(filteredFiles.count) files")
                     .font(.caption).foregroundStyle(.tertiary).monospacedDigit()
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
 
             Divider()
 
@@ -84,7 +79,7 @@ struct FilesView: View {
                         .controlSize(.small)
                 }
             }
-            .padding(.horizontal).padding(.vertical, 6)
+            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
 
             Divider()
 
@@ -147,7 +142,6 @@ struct FilesView: View {
         }
         .navigationTitle("Files")
         .navigationSubtitle("\(allFiles.count) files across \(store.workspaces.filter { $0.status != "archived" }.count) sources")
-        .searchable(text: $searchText, prompt: "Filter by name...")
         .task { reloadFiles() }
         .onChange(of: store.workspaces.count) { _, _ in Task { @MainActor in reloadFiles() } }
         .onChange(of: searchText) { _, _ in Task { @MainActor in applyFilters() } }
@@ -167,7 +161,7 @@ struct FilesView: View {
                 Button("Dismiss") { contentSearchResults = [] }
                     .controlSize(.mini)
             }
-            .padding(.horizontal).padding(.vertical, 6)
+            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
             .background(Color.accentColor.opacity(0.08))
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -188,7 +182,7 @@ struct FilesView: View {
                                 }
                             }
                         }
-                        .padding(8)
+                        .padding(Spacing.standard)
                         .frame(width: 280, alignment: .leading)
                         .background(Color(.controlBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -202,7 +196,7 @@ struct FilesView: View {
                         }
                     }
                 }
-                .padding(.horizontal).padding(.vertical, 8)
+                .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
             }
             .frame(height: 120)
 

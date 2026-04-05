@@ -50,10 +50,19 @@ Glass is the navigation layer. Content never uses glass. Do not stack glass on g
 - `.none` — "End Access"
 
 ## Spacing
-- System layout margins and Auto Layout spacing
-- `NSStackView` / `NSGridView` with system spacing
-- Respect safe area insets and corner adaptation regions
-- No custom spacing scale
+
+Base-4 scale. Defined in `Components/Spacing.swift`. No ad-hoc values.
+
+| Token | Value | Use |
+|-------|-------|-----|
+| `tight` | 4pt | Icon-to-text gaps, inline elements |
+| `standard` | 8pt | List row padding, button padding |
+| `section` | 12pt | Spacing within a view section |
+| `edge` | 16pt | View edge padding |
+| `large` | 24pt | Section separation, onboarding |
+| `xlarge` | 32pt | Major section separation |
+
+Respect safe area insets and corner adaptation regions.
 
 ## Layout
 - NavigationSplitView with floating glass sidebar
@@ -75,6 +84,23 @@ Glass is the navigation layer. Content never uses glass. Do not stack glass on g
 - Keyboard navigation on all interactive elements
 - VoiceOver labels on all controls
 - 44px minimum touch targets
+
+## Typography Weights
+
+Three weights only. No bold. No light.
+
+| Weight | Use |
+|--------|-----|
+| Regular (default) | Body text, descriptions, secondary content |
+| Medium (`.weight(.medium)`) | Labels, section headers, source names, email senders |
+| Semibold (`.weight(.semibold)`) | Screen titles in onboarding/welcome only |
+
+## List Styles
+
+| Style | Use |
+|-------|-----|
+| `.inset(alternatesRowBackgrounds: true)` | Data-dense lists: Files, Activity flat mode |
+| `.inset(alternatesRowBackgrounds: false)` | Card-style lists: Sources, session grouped, Emails |
 
 ## Decisions Log
 | Date | Decision | Rationale |

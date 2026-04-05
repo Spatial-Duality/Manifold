@@ -77,18 +77,18 @@ struct SetupView: View {
                 LabeledContent("Files tracked") { Text("\(store.allTrackedFiles.count)") }
 
                 HStack {
-                    Button("Garbage Collect") {
+                    Button("Clean Up Storage") {
                         Task { gcResult = await store.runGarbageCollection(); await store.loadStorageStats() }
                     }.controlSize(.small)
-                    if let gc = gcResult { Text("Removed \(gc)").font(.caption).foregroundStyle(.secondary) }
+                    if let gc = gcResult { Text("Removed \(gc) items").font(.caption).foregroundStyle(.secondary) }
                     Spacer()
-                    Button("Prune Old Runs") {
+                    Button("Remove Old Versions") {
                         Task { pruneResult = await store.pruneOldRuns(); await store.loadStorageStats() }
                     }.controlSize(.small)
-                    if let pr = pruneResult { Text("Pruned \(pr)").font(.caption).foregroundStyle(.secondary) }
+                    if let pr = pruneResult { Text("Removed \(pr)").font(.caption).foregroundStyle(.secondary) }
                 }
                 HStack {
-                    Button("Integrity Check") {
+                    Button("Verify Database") {
                         Task { integrityResult = await store.runIntegrityCheck() }
                     }.controlSize(.small)
                     if let ok = integrityResult {
