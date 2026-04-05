@@ -7,6 +7,8 @@ public enum ManifoldError: Error, LocalizedError {
     case snapshotFailed(String)
     case workspaceError(String)
     case hashMismatch(expected: String, actual: String)
+    case materialization(String)
+    case promotion(String)
 
     public var errorDescription: String? {
         switch self {
@@ -16,6 +18,8 @@ public enum ManifoldError: Error, LocalizedError {
         case .workspaceError(let msg): return "Workspace error: \(msg)"
         case .hashMismatch(let expected, let actual):
             return "Hash mismatch: expected \(expected), got \(actual)"
+        case .materialization(let msg): return "Materialization error: \(msg)"
+        case .promotion(let msg): return "Promotion error: \(msg)"
         }
     }
 }

@@ -9,6 +9,8 @@ struct AuditStoreSessionTests {
             .appendingPathComponent("manifold-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         let db = try DatabaseConnection(url: tempDir.appendingPathComponent("manifold.db"))
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
         let store = try AuditStore(db: db)
         return (store, db, tempDir)
     }
@@ -166,7 +168,11 @@ struct AuditStoreSessionTests {
         try db.execute("INSERT INTO audit_log (timestamp, agent, action, file_path) VALUES (?, ?, ?, ?)", params: [ts2, "cowork", "file_read", "b.txt"])
         try db.execute("INSERT INTO audit_log (timestamp, agent, action, file_path) VALUES (?, ?, ?, ?)", params: [ts3, "cowork", "file_read", "c.txt"])
 
-        // Now init AuditStore — this triggers the migration + backfill
+        // Run migrator — adds session_id column to existing table
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        // Now init AuditStore — this triggers the backfill
         let store = try AuditStore(db: db)
 
         let sessions = try await store.recentSessions(limit: 20)

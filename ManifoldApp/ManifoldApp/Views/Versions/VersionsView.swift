@@ -9,7 +9,7 @@ struct VersionsView: View {
     private func refilter() {
         filteredFiles = searchText.isEmpty
             ? store.allTrackedFiles
-            : store.allTrackedFiles.filter { $0.localizedCaseInsensitiveContains(searchText) }
+            : store.allTrackedFiles.filter { $0.localizedStandardContains(searchText) }
     }
 
     var body: some View {
@@ -22,22 +22,27 @@ struct VersionsView: View {
                 )
             } else {
                 List {
+                    TextField("Search files...", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .listRowSeparator(.hidden)
+
                     ForEach(filteredFiles, id: \.self) { filePath in
-                        HStack(spacing: 8) {
-                            Image(systemName: "doc.text").foregroundStyle(.secondary)
-                            Text(filePath)
-                                .font(.callout.monospaced())
-                                .lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Image(systemName: "sidebar.right")
-                                .foregroundStyle(.quaternary).imageScale(.small)
+                        Button { store.inspectedFilePath = filePath } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "doc.text").foregroundStyle(.secondary)
+                                Text(filePath)
+                                    .font(.callout.monospaced())
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Image(systemName: "sidebar.right")
+                                    .foregroundStyle(.quaternary).imageScale(.small)
+                            }
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { store.inspectedFilePath = filePath }
+                        .buttonStyle(.plain)
                     }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
-                .searchable(text: $searchText, prompt: "Search files")
             }
         }
         .navigationTitle("Versions")

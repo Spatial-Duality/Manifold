@@ -9,6 +9,7 @@ struct ConnectionSection: View {
                 Circle()
                     .fill(store.isConnected ? Color.green : Color.gray)
                     .frame(width: 10, height: 10)
+                    .accessibilityLabel(store.isConnected ? "Connected" : "Disconnected")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(store.isConnected ? "\(store.connectedAgent ?? "Agent") connected" : "No agents connected")
                         .font(.body.weight(.medium))
@@ -22,6 +23,7 @@ struct ConnectionSection: View {
             if !store.mcpInstalled {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                        .accessibilityLabel("Warning")
                     Text("MCP server not installed").foregroundStyle(.secondary)
                     Spacer()
                     Button("Install") { store.installMCP() }.controlSize(.small)

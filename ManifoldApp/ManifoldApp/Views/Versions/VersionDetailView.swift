@@ -53,21 +53,20 @@ struct VersionDetailView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         TimeLabel(iso8601: snap.timestamp)
                         Text(snap.source == "agent" ? "Changed by AI agent" : "Source: \(snap.source)")
-                            .font(.caption2).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if snap.afterHash != nil && !snap.isDelete {
                         Button("Restore") {
                             Task {
                                 restoredSnapshotID = snap.id
-                                if store.workspaces.isEmpty { await store.loadWorkspaces() }
-                                if let ws = store.workspaces.first(where: { $0.workspaceID == snap.workspaceID }) {
-                                    _ = await store.restoreFile(snapshotID: snap.id, filePath: filePath, toDirectory: ws.rootPath)
-                                }
+                                _ = await store.restoreFile(snapshotID: snap.id, filePath: filePath)
                                 try? await Task.sleep(for: .seconds(3))
                                 restoredSnapshotID = nil
                             }
-                        }.controlSize(.small)
+                        }
+                        .controlSize(.small)
+                        .disabled(!store.hasActiveSession)
                     }
                 }
                 .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
@@ -119,49 +118,5 @@ struct VersionDetailView: View {
                 diffLines = [DiffLine(type: .context, text: "(Binary file, \(after.count) bytes)")]
             }
         } else { diffLines = [] }
-    }
-}
-
-struct SnapshotRow: View {
-    let snapshot: SnapshotRecord
-    let isRestored: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(iconColor).imageScale(.small).frame(width: 16)
-            VStack(alignment: .leading, spacing: 2) {
-                TimeLabel(iso8601: snapshot.timestamp)
-                HStack(spacing: 4) {
-                    Text(label).font(.caption2.weight(.medium)).foregroundStyle(iconColor)
-                    if snapshot.source != "agent" {
-                        Text("(\(snapshot.source))").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Spacer()
-            if isRestored {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).imageScale(.small)
-            }
-        }
-        .padding(.vertical, Spacing.tight + 2)
-    }
-
-    private var icon: String {
-        if snapshot.isDelete { return "trash" }
-        if snapshot.isBaseline { return "flag" }
-        if snapshot.source == "manifold-restore" { return "arrow.uturn.backward" }
-        return "pencil"
-    }
-    private var iconColor: Color {
-        if snapshot.isDelete { return .red }
-        if snapshot.isBaseline { return .blue }
-        if snapshot.source == "manifold-restore" { return .orange }
-        return .green
-    }
-    private var label: String {
-        if snapshot.isDelete { return "DELETED" }
-        if snapshot.isBaseline { return "BASELINE" }
-        if snapshot.source == "manifold-restore" { return "RESTORED" }
-        return "MODIFIED"
     }
 }

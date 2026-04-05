@@ -17,6 +17,27 @@ struct MainView: View {
                     }
                 }
         }
+        .overlay(alignment: .top) {
+            if let error = store.lastError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                        .accessibilityHidden(true)
+                    Text(error)
+                        .font(.callout)
+                    Spacer()
+                    Button("Dismiss") { store.lastError = nil }
+                        .buttonStyle(.plain)
+                        .font(.callout.weight(.medium))
+                }
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.25), value: store.lastError)
+            }
+        }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView()
                 .environment(store)

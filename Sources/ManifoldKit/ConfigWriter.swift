@@ -4,21 +4,29 @@ import Foundation
 /// Merges with existing config — never overwrites other servers.
 public struct ConfigWriter {
     private let binaryPath: String
+    private let homeDir: URL
 
     public init(binaryPath: String) {
         self.binaryPath = binaryPath
+        self.homeDir = FileManager.default.homeDirectoryForCurrentUser
     }
 
-    /// Install config for both Claude Desktop and Codex.
+    /// Test-only initializer with custom home directory.
+    public init(binaryPath: String, homeDir: URL) {
+        self.binaryPath = binaryPath
+        self.homeDir = homeDir
+    }
+
+    /// Install config for Claude Desktop, Claude Code, and Codex.
     public func installAll() throws {
         try installClaudeDesktop()
+        try installClaudeCode()
         try installCodex()
     }
 
     /// Write to ~/Library/Application Support/Claude/claude_desktop_config.json
     public func installClaudeDesktop() throws {
-        let configDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Claude")
+        let configDir = homeDir.appendingPathComponent("Library/Application Support/Claude")
         let configFile = configDir.appendingPathComponent("claude_desktop_config.json")
 
         var config: [String: Any] = [:]
@@ -45,10 +53,42 @@ public struct ConfigWriter {
         print("Wrote Claude Desktop config: \(configFile.path)")
     }
 
+    /// Write to ~/.claude/settings.json (Claude Code CLI / IDE extensions)
+    public func installClaudeCode() throws {
+        let configDir = homeDir.appendingPathComponent(".claude")
+        let configFile = configDir.appendingPathComponent("settings.json")
+
+        var config: [String: Any] = [:]
+
+        // Read existing config if present
+        if let data = try? Data(contentsOf: configFile),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            config = existing
+        }
+
+        // Merge manifold MCP server entry
+        var mcpServers = config["mcpServers"] as? [String: Any] ?? [:]
+        if mcpServers["manifold"] != nil {
+            print("Manifold already configured in Claude Code settings. Skipping.")
+            return
+        }
+        mcpServers["manifold"] = [
+            "command": binaryPath,
+            "args": [] as [String],
+        ] as [String: Any]
+        config["mcpServers"] = mcpServers
+
+        // Write back
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configFile, options: .atomic)
+
+        print("Wrote Claude Code config: \(configFile.path)")
+    }
+
     /// Write to ~/.codex/config.toml
     public func installCodex() throws {
-        let configDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex")
+        let configDir = homeDir.appendingPathComponent(".codex")
         let configFile = configDir.appendingPathComponent("config.toml")
 
         // Only install if Codex directory exists

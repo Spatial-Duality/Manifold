@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "audit")
 
 /// Records all user and system actions for accountability.
 /// Every grant, end-access, restore, promote, and source change is logged.
@@ -24,7 +27,9 @@ public actor AuditStore {
                 file_path TEXT,
                 before_hash TEXT,
                 after_hash TEXT,
-                metadata TEXT
+                metadata TEXT,
+                session_id TEXT,
+                grant_id TEXT
             )
         """)
 
@@ -35,16 +40,10 @@ public actor AuditStore {
             CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_log(run_id)
         """)
 
-        // Session replay schema migration — only add column if it doesn't exist
-        let hasSessionID = try db.queryAll(
-            "PRAGMA table_info(audit_log)"
-        ).contains { $0["name"] == "session_id" }
-        if !hasSessionID {
-            try db.execute("ALTER TABLE audit_log ADD COLUMN session_id TEXT")
-        }
-        try db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)
-        """)
+        // session_id column and index are added by DatabaseMigrator v2.
+        // CREATE INDEX IF NOT EXISTS is safe to run as a no-op guard.
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_grant ON audit_log(grant_id)")
 
         // Backfill session_ids for existing entries
         try backfillSessionIDs()
@@ -125,20 +124,25 @@ public actor AuditStore {
         filePath: String? = nil,
         beforeHash: String? = nil,
         afterHash: String? = nil,
-        metadata: [String: String]? = nil
+        metadata: [String: String]? = nil,
+        grantID: String? = nil
     ) throws {
         let now = Date()
         let timestamp = ISO8601DateFormatter().string(from: now)
         let sessionID = try resolveSessionID(agent: agent, timestamp: now)
         let metadataJSON: String? = metadata.flatMap { dict in
-            guard let data = try? JSONSerialization.data(withJSONObject: dict),
-                  let str = String(data: data, encoding: .utf8) else { return nil }
-            return str
+            do {
+                let data = try JSONSerialization.data(withJSONObject: dict)
+                return String(data: data, encoding: .utf8)
+            } catch {
+                logger.warning("Failed to serialize audit metadata: \(error.localizedDescription)")
+                return nil
+            }
         }
 
         try db.execute("""
-            INSERT INTO audit_log (timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO audit_log (timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, params: [
             timestamp,
             runID ?? "",
@@ -149,7 +153,8 @@ public actor AuditStore {
             beforeHash ?? "",
             afterHash ?? "",
             metadataJSON ?? "",
-            sessionID
+            sessionID,
+            grantID ?? ""
         ])
     }
 
@@ -171,11 +176,24 @@ public actor AuditStore {
     /// Query all audit entries across workspaces.
     public func recentEntries(limit: Int = 50) throws -> [AuditEntry] {
         let rows = try db.queryAll("""
-            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id
             FROM audit_log
             ORDER BY id DESC
             LIMIT ?
         """, params: ["\(limit)"])
+
+        return rows.compactMap { AuditEntry(row: $0) }
+    }
+
+    /// Query audit entries by grant ID (uses indexed column from migration v5).
+    public func entriesByGrant(grantID: String, limit: Int = 50) throws -> [AuditEntry] {
+        let rows = try db.queryAll("""
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id
+            FROM audit_log
+            WHERE grant_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        """, params: [grantID, "\(limit)"])
 
         return rows.compactMap { AuditEntry(row: $0) }
     }
@@ -268,6 +286,7 @@ public struct AuditEntry: Sendable, Identifiable {
     public let afterHash: String?
     public let metadata: String?
     public let sessionID: String?
+    public let grantID: String?
 
     init?(row: [String: String]) {
         guard let idStr = row["id"], let id = Int(idStr),
@@ -286,6 +305,7 @@ public struct AuditEntry: Sendable, Identifiable {
         self.afterHash = row["after_hash"]?.nilIfEmpty
         self.metadata = row["metadata"]?.nilIfEmpty
         self.sessionID = row["session_id"]?.nilIfEmpty
+        self.grantID = row["grant_id"]?.nilIfEmpty
     }
 }
 

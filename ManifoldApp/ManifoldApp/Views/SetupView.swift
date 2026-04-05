@@ -13,6 +13,7 @@ struct SetupView: View {
                 HStack {
                     Image(systemName: store.mcpInstalled ? "checkmark.circle.fill" : "xmark.circle")
                         .foregroundStyle(store.mcpInstalled ? .green : .red)
+                        .accessibilityLabel(store.mcpInstalled ? "Installed" : "Not installed")
                     Text(store.mcpInstalled ? "Installed" : "Not installed")
                     Spacer()
                     Button(store.mcpInstalled ? "Reinstall" : "Install") { store.installMCP() }
@@ -28,20 +29,22 @@ struct SetupView: View {
                 LabeledContent("Claude Desktop") {
                     Image(systemName: store.claudeDesktopConfigured ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(store.claudeDesktopConfigured ? .green : .gray)
+                        .accessibilityLabel(store.claudeDesktopConfigured ? "Configured" : "Not configured")
                 }
                 LabeledContent("Codex") {
                     Image(systemName: store.codexConfigured ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(store.codexConfigured ? .green : .gray)
+                        .accessibilityLabel(store.codexConfigured ? "Configured" : "Not configured")
                 }
             }
 
             Section("Apple Mail") {
                 HStack {
                     switch store.mailAccessStatus {
-                    case .available: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("Connected")
-                    case .mailNotRunning: Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow); Text("Mail not running")
-                    case .accessDenied: Image(systemName: "xmark.circle").foregroundStyle(.red); Text("Permission needed")
-                    case nil: Image(systemName: "questionmark.circle").foregroundStyle(.gray); Text("Not checked")
+                    case .available: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel("Connected"); Text("Connected")
+                    case .mailNotRunning: Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow).accessibilityLabel("Warning"); Text("Mail not running")
+                    case .accessDenied: Image(systemName: "xmark.circle").foregroundStyle(.red).accessibilityLabel("Error"); Text("Permission needed")
+                    case nil: Image(systemName: "questionmark.circle").foregroundStyle(.gray).accessibilityLabel("Unknown"); Text("Not checked")
                     }
                     Spacer()
                     Button("Test") { Task { await store.checkMailAccess() } }.controlSize(.small)

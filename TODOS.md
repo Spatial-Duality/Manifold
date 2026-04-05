@@ -1,0 +1,22 @@
+# TODOS
+
+## .manifoldignore support
+**What:** Gitignore-style exclusion file per source folder, filtering paths from materialization and MCP tools.
+**Why:** Users who add large folders (~/Documents, ~/Desktop) need per-path exclusion, not just all-or-nothing pause/resume.
+**Context:** MaterializationEngine currently copies everything. ManifoldBridge listFiles/searchFiles enumerate everything. A .manifoldignore at the source root would exclude matching paths from both. Use gitignore syntax (fnmatch patterns, negation with !).
+**Files:** MaterializationEngine.swift (skip during copy), ManifoldBridge.swift (filter from listFiles/searchFiles), GrantStore.swift (store exclusion patterns per source).
+**Depends on:** Nothing. Can be built independently.
+
+## Materialization cleanup on session end
+**What:** Delete the /tmp/manifold-grant-{id}/ directory after successful promotion.
+**Why:** Each session leaves a full copy of source files in /tmp. 5 sessions x 2GB source = 10GB orphaned. macOS cleans /tmp on reboot but not proactively.
+**Context:** endSession() calls PromoteEngine.promote() but never cleans up. Add `try? FileManager.default.removeItem(at: matRootURL)` after all promotions are recorded. Safety check: verify all grantSources were promoted before deleting.
+**Files:** ManifoldStore.swift (endSession method).
+**Depends on:** Nothing. Can be built independently.
+
+## Pre-session preview
+**What:** Before materializing, show the user: file count per source, total size, email count, and a "Start" confirmation.
+**Why:** Users should see what the agent will access before granting it. Connects to the size guard (warn above 5GB). The product review flagged this as the #3 priority.
+**Context:** Currently startSession() materializes immediately with no preview. Add a pre-session state to ManifoldStore that computes the preview, shows it in DashboardView, and waits for user confirmation before materializing.
+**Files:** ManifoldStore.swift (pre-session state), DashboardView.swift (preview UI), MaterializationEngine.swift (size estimation method).
+**Depends on:** Size guard (Issue 3A from eng review).

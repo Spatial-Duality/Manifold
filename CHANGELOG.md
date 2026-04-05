@@ -2,6 +2,35 @@
 
 All notable changes to Manifold are documented here.
 
+## [0.3.0] - 2026-04-05
+
+### Added
+- Versioned database migration system: numbered migrations tracked in `schema_migrations` table. Replaces ad-hoc ALTER TABLE pattern. Future schema changes slot in as new numbered migrations.
+- Error banners: user-visible error overlay in MainView when database operations fail. No more silent empty screens.
+- os.Logger: structured logging in AuditStore, DatabaseConnection, and ManifoldStore for debugging production issues.
+- Accessibility labels on all color indicators, status icons, and interactive elements across every view. Screen reader support from zero to complete.
+- Raycast-style onboarding: welcome step shows feature preview cards, each setup step shows what it activates ("Activates: file browsing, search, version history..."), "I don't use Apple Mail" skip option.
+- GitHub Actions CI: build + test on every push to main and feat/* branches. Release workflow creates GitHub Release with zip on version tags.
+- Distribution: enhanced build.sh reads VERSION file, supports release mode, creates signed .app bundle with zip archive for GitHub Releases.
+- ConfigWriter: injectable home directory for testing. 7 new tests covering merge safety (preserving existing MCP servers during install).
+- ManifoldBridge: 5 new tests covering write path (modification tracking, auto-run creation, audit logging, email rejection).
+- DatabaseMigrator: 5 new tests (fresh version, migrate all, idempotent, upgrade existing DB, persistence).
+
+### Changed
+- MCP access control: paused/archived sources no longer leak files to agents (positive allowlist filter). Smart path resolution strips source folder name prefix from agent-submitted paths.
+- get_status now reports active vs paused sources with per-source detail, including all-paused warning state.
+- Source removal uses distinct "removed" status, separate from "archived" (paused). Removed sources hidden from both dashboard and MCP.
+- Content search dispatched to background thread. Name and activity filters debounced at 150ms.
+- ManifoldStore: core data loading (refresh, loadWorkspaces, loadSessions) uses proper error handling instead of silent try?.
+- Source management (add, remove, pause, resume) and run lifecycle (start, end) propagate errors to UI.
+
+### Fixed
+- Paused sources were visible to MCP agents (security fix).
+- Nested directory creation on write when AI agents prefix source folder name to paths.
+- Could not remove folders from Manifold (remove and pause used identical status).
+- DatabaseConnection ROLLBACK failure silently swallowed (now logged).
+- AuditStore metadata serialization failure silently swallowed (now logged).
+
 ## [0.2.0] - 2026-04-05
 
 ### Added

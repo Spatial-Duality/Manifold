@@ -50,18 +50,20 @@ struct SidebarView: View {
             // Connection status
             HStack(spacing: Spacing.standard) {
                 ColorIndicator(color: store.isConnected ? .green : .gray)
+                    .accessibilityLabel(store.isConnected ? "Connected" : "Disconnected")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(store.isConnected ? (store.connectedAgent ?? "Connected") : "No agents")
                         .font(.caption.weight(store.isConnected ? .medium : .regular))
                     if store.isConnected {
                         Text("Monitoring")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                            .font(.caption).foregroundStyle(.tertiary)
                     }
                 }
                 Spacer()
                 if !store.mcpInstalled {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.yellow).imageScale(.small)
+                        .accessibilityLabel("MCP server not installed")
                 }
             }
             .padding(.horizontal, Spacing.section)
@@ -89,6 +91,7 @@ struct SidebarButton: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(isSelected ? Color.accentColor : Color.clear)
                     .frame(width: 3, height: 18)
+                    .accessibilityHidden(true)
 
                 Label(label, systemImage: icon)
                     .frame(maxWidth: .infinity, alignment: .leading)

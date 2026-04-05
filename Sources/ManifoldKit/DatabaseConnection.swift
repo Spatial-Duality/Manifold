@@ -1,5 +1,8 @@
 import Foundation
 import SQLite3
+import os
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "database")
 
 /// Minimal SQLite wrapper. All operations are synchronous — callers use actor isolation.
 public final class DatabaseConnection: @unchecked Sendable {
@@ -24,7 +27,8 @@ public final class DatabaseConnection: @unchecked Sendable {
     }
 
     /// Execute a SQL statement with optional string parameters.
-    public func execute(_ sql: String, params: [String] = []) throws {
+    /// Pass nil for SQL NULL values (important for optional foreign key columns).
+    public func execute(_ sql: String, params: [String?] = []) throws {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw ManifoldError.database(errorMessage)
@@ -32,7 +36,11 @@ public final class DatabaseConnection: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
 
         for (i, param) in params.enumerated() {
-            sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
+            if let param {
+                sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, Int32(i + 1))
+            }
         }
 
         let result = sqlite3_step(stmt)
@@ -42,7 +50,7 @@ public final class DatabaseConnection: @unchecked Sendable {
     }
 
     /// Query a single scalar value (first column of first row).
-    public func queryScalar(_ sql: String, params: [String] = []) throws -> String? {
+    public func queryScalar(_ sql: String, params: [String?] = []) throws -> String? {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw ManifoldError.database(errorMessage)
@@ -50,7 +58,11 @@ public final class DatabaseConnection: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
 
         for (i, param) in params.enumerated() {
-            sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
+            if let param {
+                sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, Int32(i + 1))
+            }
         }
 
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
@@ -59,7 +71,7 @@ public final class DatabaseConnection: @unchecked Sendable {
     }
 
     /// Query all rows as [String: String] dictionaries.
-    public func queryAll(_ sql: String, params: [String] = []) throws -> [[String: String]] {
+    public func queryAll(_ sql: String, params: [String?] = []) throws -> [[String: String]] {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw ManifoldError.database(errorMessage)
@@ -67,7 +79,11 @@ public final class DatabaseConnection: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
 
         for (i, param) in params.enumerated() {
-            sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
+            if let param {
+                sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, Int32(i + 1))
+            }
         }
 
         var rows: [[String: String]] = []
@@ -93,7 +109,8 @@ public final class DatabaseConnection: @unchecked Sendable {
             try block()
             try execute("COMMIT")
         } catch {
-            try? execute("ROLLBACK")
+            do { try execute("ROLLBACK") }
+            catch { logger.error("ROLLBACK failed: \(error.localizedDescription)") }
             throw error
         }
     }

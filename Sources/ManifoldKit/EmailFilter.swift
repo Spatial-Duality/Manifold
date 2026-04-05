@@ -139,19 +139,22 @@ public actor EmailFilter {
     // MARK: - Email Cache
 
     /// Cache a fetched email.
-    public func cacheEmail(_ email: RenderedEmail, account: String, mailbox: String) throws {
+    @discardableResult
+    public func cacheEmail(_ email: RenderedEmail, account: String, mailbox: String) throws -> String {
         let now = ISO8601DateFormatter().string(from: Date())
+        let messageID = email.messageID ?? UUID().uuidString
         let preview = String(email.body.prefix(200))
 
         try db.execute("""
             INSERT OR REPLACE INTO email_cache (message_id, account, mailbox, sender, subject, date_received, body_preview, status, fetched_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         """, params: [
-            email.messageID ?? UUID().uuidString,
+            messageID,
             account, mailbox,
             email.from, email.subject, email.date,
             preview, now
         ])
+        return messageID
     }
 
     /// Get all cached emails.
@@ -164,6 +167,14 @@ public actor EmailFilter {
     public func sharedEmails() throws -> [CachedEmail] {
         let rows = try db.queryAll("SELECT * FROM email_cache WHERE status = 'shared' ORDER BY date_received DESC")
         return rows.compactMap { CachedEmail(row: $0) }
+    }
+
+    public func cachedEmail(messageID: String) throws -> CachedEmail? {
+        let rows = try db.queryAll(
+            "SELECT * FROM email_cache WHERE message_id = ? LIMIT 1",
+            params: [messageID]
+        )
+        return rows.first.flatMap { CachedEmail(row: $0) }
     }
 
     /// User override: force-include an auto-hidden email.

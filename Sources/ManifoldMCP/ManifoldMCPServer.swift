@@ -7,6 +7,14 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 @main
 struct ManifoldMCPServer {
     static func main() async throws {
+        let version = "0.4.0"
+
+        // Handle --version flag
+        if CommandLine.arguments.contains("--version") {
+            print("manifold-mcp \(version)")
+            return
+        }
+
         // Handle --install flag
         if CommandLine.arguments.contains("--install") {
             let binaryPath = CommandLine.arguments[0]
@@ -21,29 +29,33 @@ struct ManifoldMCPServer {
         let storeURL = manifoldStoreURL()
         try FileManager.default.createDirectory(at: storeURL, withIntermediateDirectories: true)
 
-        let contentStore = try ContentStore(rootURL: storeURL)
         let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
-        let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
-        let leaseManager = try WorkspaceLeaseManager(db: db, snapshotStore: snapshotStore)
+
+        // Run pending schema migrations before initializing stores
+        let migrator = try DatabaseMigrator(db: db)
+        let migrated = try migrator.migrate()
+        if migrated > 0 {
+            logger.info("Applied \(migrated) database migration(s)")
+        }
+
         let auditStore = try AuditStore(db: db)
         let emailFilter = try EmailFilter(db: db)
+        let grantStore = GrantStore(db: db)
 
         // Log MCP connection and notify the app
         try? await auditStore.log(action: .mcpConnection, metadata: ["event": "connected"])
         ManifoldNotification.post(ManifoldNotification.agentConnected, userInfo: ["agent": "cowork"])
 
-        // Create bridge
+        // Create bridge (grant-only, no legacy workspace access)
         let bridge = ManifoldBridge(
             db: db,
-            contentStore: contentStore,
-            snapshotStore: snapshotStore,
-            leaseManager: leaseManager,
             auditStore: auditStore,
-            emailFilter: emailFilter
+            emailFilter: emailFilter,
+            grantStore: grantStore
         )
 
         // Create MCP server
-        let server = MCPServer(name: "manifold", version: "0.2.0")
+        let server = MCPServer(name: "manifold", version: version)
 
         // Register tools
         server.registerTools(ToolHandlers.allTools()) { name, arguments in
@@ -56,6 +68,7 @@ struct ManifoldMCPServer {
             MCPResource(name: "Manifold Status", uri: "manifold://status", description: "Current access status"),
             MCPResource(name: "Approved Files", uri: "manifold://files", description: "List of files in workspace"),
             MCPResource(name: "Shared Emails", uri: "manifold://emails", description: "Emails available to agent"),
+            MCPResource(name: "Session History", uri: "manifold://sessions", description: "Past session summaries"),
         ]) { uri in
             switch uri {
             case "manifold://status":
@@ -67,6 +80,10 @@ struct ManifoldMCPServer {
             case "manifold://emails":
                 let emails = (try? await bridge.listEmails()) ?? []
                 return emails.map { "[\($0.id)] \($0.from) — \($0.subject)" }.joined(separator: "\n")
+            case "manifold://sessions":
+                let sessions = (try? await bridge.listSessions(limit: 10)) ?? []
+                if sessions.isEmpty { return "No past sessions." }
+                return sessions.map { "[\($0.grantID.prefix(12))...] \($0.targetApp) \($0.startedAt.prefix(10)) → \($0.endedAt.prefix(10))" }.joined(separator: "\n")
             default:
                 return ""
             }
