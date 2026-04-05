@@ -44,6 +44,8 @@ struct MainView: View {
                 FilesView()
             case .activity:
                 ActivityView()
+            case .email:
+                EmailView()
             case .versions:
                 VersionsView()
             }
