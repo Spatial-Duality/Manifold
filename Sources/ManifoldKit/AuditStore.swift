@@ -24,7 +24,8 @@ public actor AuditStore {
                 file_path TEXT,
                 before_hash TEXT,
                 after_hash TEXT,
-                metadata TEXT
+                metadata TEXT,
+                session_id TEXT
             )
         """)
 
@@ -35,16 +36,9 @@ public actor AuditStore {
             CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_log(run_id)
         """)
 
-        // Session replay schema migration — only add column if it doesn't exist
-        let hasSessionID = try db.queryAll(
-            "PRAGMA table_info(audit_log)"
-        ).contains { $0["name"] == "session_id" }
-        if !hasSessionID {
-            try db.execute("ALTER TABLE audit_log ADD COLUMN session_id TEXT")
-        }
-        try db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)
-        """)
+        // session_id column and index are added by DatabaseMigrator v2.
+        // CREATE INDEX IF NOT EXISTS is safe to run as a no-op guard.
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)")
 
         // Backfill session_ids for existing entries
         try backfillSessionIDs()

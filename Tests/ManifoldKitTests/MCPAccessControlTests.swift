@@ -17,6 +17,8 @@ struct MCPAccessControlTests {
 
         let contentStore = try ContentStore(rootURL: tempDir)
         let db = try DatabaseConnection(url: tempDir.appendingPathComponent("manifold.db"))
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
         let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let leaseManager = try WorkspaceLeaseManager(db: db, snapshotStore: snapshotStore)
 

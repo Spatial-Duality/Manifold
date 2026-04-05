@@ -23,6 +23,14 @@ struct ManifoldMCPServer {
 
         let contentStore = try ContentStore(rootURL: storeURL)
         let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
+
+        // Run pending schema migrations before initializing stores
+        let migrator = try DatabaseMigrator(db: db)
+        let migrated = try migrator.migrate()
+        if migrated > 0 {
+            logger.info("Applied \(migrated) database migration(s)")
+        }
+
         let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let leaseManager = try WorkspaceLeaseManager(db: db, snapshotStore: snapshotStore)
         let auditStore = try AuditStore(db: db)

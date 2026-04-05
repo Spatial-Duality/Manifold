@@ -99,6 +99,11 @@ class ManifoldStore {
             self.contentStore = contentStore
             let connection = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
             self.db = connection
+
+            // Run pending schema migrations before initializing stores
+            let migrator = try DatabaseMigrator(db: connection)
+            try migrator.migrate()
+
             self.auditStore = try AuditStore(db: connection)
             self.snapshotStore = try SnapshotStore(db: connection, contentStore: contentStore)
             self.emailFilter = try EmailFilter(db: connection)
