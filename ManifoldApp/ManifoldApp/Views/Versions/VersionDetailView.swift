@@ -14,12 +14,12 @@ struct VersionDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "clock.arrow.counterclockwise").foregroundStyle(.secondary)
+                Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90").foregroundStyle(.secondary)
                 Text(filePath).font(.headline.monospaced()).lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Text("\(snapshots.count) versions").font(.caption).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal).padding(.vertical, 10)
+            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.section)
             Divider()
 
             if snapshots.isEmpty {
@@ -70,7 +70,7 @@ struct VersionDetailView: View {
                         }.controlSize(.small)
                     }
                 }
-                .padding(.horizontal).padding(.vertical, 8)
+                .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
                 Divider()
 
                 if loadingDiff {
@@ -143,7 +143,7 @@ struct SnapshotRow: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).imageScale(.small)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Spacing.tight + 2)
     }
 
     private var icon: String {

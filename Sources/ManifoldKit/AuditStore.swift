@@ -2,8 +2,13 @@ import Foundation
 
 /// Records all user and system actions for accountability.
 /// Every grant, end-access, restore, promote, and source change is logged.
+///
+/// Session grouping: entries are grouped into sessions by agent + 5-min time gap.
+/// A `session_id` column is assigned at write time. Historical entries without
+/// session_id get backfilled on first launch.
 public actor AuditStore {
     private let db: DatabaseConnection
+    private static let sessionGapSeconds: TimeInterval = 300 // 5 minutes
 
     public init(db: DatabaseConnection) throws {
         self.db = db
@@ -29,7 +34,87 @@ public actor AuditStore {
         try db.execute("""
             CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_log(run_id)
         """)
+
+        // Session replay schema migration — only add column if it doesn't exist
+        let hasSessionID = try db.queryAll(
+            "PRAGMA table_info(audit_log)"
+        ).contains { $0["name"] == "session_id" }
+        if !hasSessionID {
+            try db.execute("ALTER TABLE audit_log ADD COLUMN session_id TEXT")
+        }
+        try db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)
+        """)
+
+        // Backfill session_ids for existing entries
+        try backfillSessionIDs()
     }
+
+    // MARK: - Session Assignment
+
+    /// Determine the session_id for a new entry. Reuses the most recent session
+    /// for the same agent if within 5 minutes, otherwise generates a new one.
+    private func resolveSessionID(agent: String?, timestamp: Date) throws -> String {
+        let agentValue = agent ?? ""
+        let isoFormatter = ISO8601DateFormatter()
+
+        if let lastRow = try db.queryAll("""
+            SELECT session_id, timestamp FROM audit_log
+            WHERE agent = ? AND session_id IS NOT NULL AND session_id != ''
+            ORDER BY id DESC LIMIT 1
+        """, params: [agentValue]).first,
+           let lastSessionID = lastRow["session_id"]?.nilIfEmpty,
+           let lastTimestamp = lastRow["timestamp"],
+           let lastDate = isoFormatter.date(from: lastTimestamp) {
+            if timestamp.timeIntervalSince(lastDate) <= Self.sessionGapSeconds {
+                return lastSessionID
+            }
+        }
+
+        return "session-\(UUID().uuidString.prefix(12).lowercased())"
+    }
+
+    /// One-time migration: assign session_ids to historical entries that lack them.
+    private nonisolated func backfillSessionIDs() throws {
+        let needsBackfill = try db.queryScalar("""
+            SELECT COUNT(*) FROM audit_log WHERE session_id IS NULL OR session_id = ''
+        """)
+        guard let countStr = needsBackfill, let count = Int(countStr), count > 0 else { return }
+
+        let rows = try db.queryAll("""
+            SELECT id, timestamp, agent FROM audit_log
+            WHERE session_id IS NULL OR session_id = ''
+            ORDER BY id ASC
+        """)
+
+        let isoFormatter = ISO8601DateFormatter()
+        var currentSessionID: String?
+        var currentAgent: String?
+        var lastDate: Date?
+
+        for row in rows {
+            guard let idStr = row["id"], let ts = row["timestamp"] else { continue }
+            let agent = row["agent"]?.nilIfEmpty ?? ""
+            let date = isoFormatter.date(from: ts) ?? Date.distantPast
+
+            let needsNewSession = currentSessionID == nil
+                || agent != currentAgent
+                || lastDate.map({ date.timeIntervalSince($0) > Self.sessionGapSeconds }) ?? true
+
+            if needsNewSession {
+                currentSessionID = "session-\(UUID().uuidString.prefix(12).lowercased())"
+                currentAgent = agent
+            }
+            lastDate = date
+
+            try db.execute(
+                "UPDATE audit_log SET session_id = ? WHERE id = ?",
+                params: [currentSessionID!, idStr]
+            )
+        }
+    }
+
+    // MARK: - Logging
 
     /// Log an action.
     public func log(
@@ -42,7 +127,9 @@ public actor AuditStore {
         afterHash: String? = nil,
         metadata: [String: String]? = nil
     ) throws {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let now = Date()
+        let timestamp = ISO8601DateFormatter().string(from: now)
+        let sessionID = try resolveSessionID(agent: agent, timestamp: now)
         let metadataJSON: String? = metadata.flatMap { dict in
             guard let data = try? JSONSerialization.data(withJSONObject: dict),
                   let str = String(data: data, encoding: .utf8) else { return nil }
@@ -50,8 +137,8 @@ public actor AuditStore {
         }
 
         try db.execute("""
-            INSERT INTO audit_log (timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO audit_log (timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, params: [
             timestamp,
             runID ?? "",
@@ -61,14 +148,17 @@ public actor AuditStore {
             filePath ?? "",
             beforeHash ?? "",
             afterHash ?? "",
-            metadataJSON ?? ""
+            metadataJSON ?? "",
+            sessionID
         ])
     }
+
+    // MARK: - Entry Queries
 
     /// Query audit entries for a workspace.
     public func entries(workspaceID: String, limit: Int = 100) throws -> [AuditEntry] {
         let rows = try db.queryAll("""
-            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id
             FROM audit_log
             WHERE workspace_id = ?
             ORDER BY id DESC
@@ -81,13 +171,69 @@ public actor AuditStore {
     /// Query all audit entries across workspaces.
     public func recentEntries(limit: Int = 50) throws -> [AuditEntry] {
         let rows = try db.queryAll("""
-            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id
             FROM audit_log
             ORDER BY id DESC
             LIMIT ?
         """, params: ["\(limit)"])
 
         return rows.compactMap { AuditEntry(row: $0) }
+    }
+
+    // MARK: - Session Queries
+
+    /// List recent sessions, newest first.
+    public func recentSessions(limit: Int = 20) throws -> [Session] {
+        let rows = try db.queryAll("""
+            SELECT session_id,
+                   COALESCE(NULLIF(agent, ''), 'Unknown Agent') as agent,
+                   MIN(timestamp) as start_time,
+                   MAX(timestamp) as end_time,
+                   COUNT(*) as action_count,
+                   SUM(CASE WHEN action = 'file_read' THEN 1 ELSE 0 END) as read_count,
+                   SUM(CASE WHEN action IN ('file_modified', 'file_created') THEN 1 ELSE 0 END) as write_count,
+                   SUM(CASE WHEN action = 'tool_call' AND metadata LIKE '%search%' THEN 1 ELSE 0 END) as search_count
+            FROM audit_log
+            WHERE session_id IS NOT NULL AND session_id != ''
+            GROUP BY session_id
+            ORDER BY end_time DESC
+            LIMIT ?
+        """, params: ["\(limit)"])
+
+        return rows.compactMap { Session(row: $0) }
+    }
+
+    /// Get all events for a session, with snapshot data joined for write events.
+    public func sessionEvents(sessionID: String) throws -> [SessionEvent] {
+        // Check if snapshots table exists (it's created by SnapshotStore, which may not be initialized)
+        let hasSnapshots = (try? db.queryScalar(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'"
+        )) != nil
+
+        let sql: String
+        if hasSnapshots {
+            sql = """
+                SELECT a.id, a.timestamp, a.action, a.agent, a.file_path, a.metadata,
+                       s.id as snapshot_id, s.before_hash, s.after_hash
+                FROM audit_log a
+                LEFT JOIN snapshots s
+                    ON a.file_path = s.file_path
+                    AND a.action IN ('file_modified', 'file_created')
+                    AND ABS(julianday(a.timestamp) - julianday(s.timestamp)) * 86400 < 2
+                WHERE a.session_id = ?
+                ORDER BY a.id ASC
+            """
+        } else {
+            sql = """
+                SELECT id, timestamp, action, agent, file_path, metadata
+                FROM audit_log
+                WHERE session_id = ?
+                ORDER BY id ASC
+            """
+        }
+
+        let rows = try db.queryAll(sql, params: [sessionID])
+        return rows.compactMap { SessionEvent(row: $0) }
     }
 }
 
@@ -121,6 +267,7 @@ public struct AuditEntry: Sendable, Identifiable {
     public let beforeHash: String?
     public let afterHash: String?
     public let metadata: String?
+    public let sessionID: String?
 
     init?(row: [String: String]) {
         guard let idStr = row["id"], let id = Int(idStr),
@@ -138,5 +285,69 @@ public struct AuditEntry: Sendable, Identifiable {
         self.beforeHash = row["before_hash"]?.nilIfEmpty
         self.afterHash = row["after_hash"]?.nilIfEmpty
         self.metadata = row["metadata"]?.nilIfEmpty
+        self.sessionID = row["session_id"]?.nilIfEmpty
+    }
+}
+
+// MARK: - Session Types
+
+public struct Session: Sendable, Identifiable, Hashable {
+    public let id: String
+    public let agent: String
+    public let startTime: String
+    public let endTime: String
+    public let actionCount: Int
+    public let readCount: Int
+    public let writeCount: Int
+    public let searchCount: Int
+
+    init?(row: [String: String]) {
+        guard let sessionID = row["session_id"]?.nilIfEmpty,
+              let agent = row["agent"],
+              let startTime = row["start_time"],
+              let endTime = row["end_time"] else {
+            return nil
+        }
+        self.id = sessionID
+        self.agent = agent
+        self.startTime = startTime
+        self.endTime = endTime
+        self.actionCount = Int(row["action_count"] ?? "0") ?? 0
+        self.readCount = Int(row["read_count"] ?? "0") ?? 0
+        self.writeCount = Int(row["write_count"] ?? "0") ?? 0
+        self.searchCount = Int(row["search_count"] ?? "0") ?? 0
+    }
+}
+
+public struct SessionEvent: Sendable, Identifiable {
+    public let id: Int
+    public let timestamp: String
+    public let action: String
+    public let agent: String?
+    public let filePath: String?
+    public let metadata: String?
+    public let snapshotID: Int?
+    public let beforeHash: String?
+    public let afterHash: String?
+
+    init?(row: [String: String]) {
+        guard let idStr = row["id"], let id = Int(idStr),
+              let timestamp = row["timestamp"],
+              let action = row["action"] else {
+            return nil
+        }
+        self.id = id
+        self.timestamp = timestamp
+        self.action = action
+        self.agent = row["agent"]?.nilIfEmpty
+        self.filePath = row["file_path"]?.nilIfEmpty
+        self.metadata = row["metadata"]?.nilIfEmpty
+        self.snapshotID = row["snapshot_id"].flatMap { Int($0) }
+        self.beforeHash = row["before_hash"]?.nilIfEmpty
+        self.afterHash = row["after_hash"]?.nilIfEmpty
+    }
+
+    public var isWriteEvent: Bool {
+        action == "file_modified" || action == "file_created"
     }
 }

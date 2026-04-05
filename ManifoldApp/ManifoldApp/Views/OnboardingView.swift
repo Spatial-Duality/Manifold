@@ -20,15 +20,15 @@ struct OnboardingView: View {
                 ForEach(0..<totalSteps, id: \.self) { i in
                     RoundedRectangle(cornerRadius: 2)
                         .fill(i <= step ? Color.accentColor : Color.gray.opacity(0.2))
-                        .frame(height: 3)
+                        .frame(height: 4)
                 }
             }
-            .padding(.horizontal, 24).padding(.top, 16)
+            .padding(.horizontal, Spacing.large).padding(.top, Spacing.edge)
 
             // Step indicator
             Text("Step \(step + 1) of \(totalSteps)")
                 .font(.caption2).foregroundStyle(.tertiary)
-                .padding(.top, 6)
+                .padding(.top, Spacing.tight + 2)
 
             Spacer()
 
@@ -61,9 +61,9 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
-            .padding(24)
+            .padding(Spacing.large)
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 580, height: 480)
         .interactiveDismissDisabled(step < totalSteps - 1)
     }
 
@@ -80,7 +80,7 @@ struct OnboardingView: View {
             Text("Manifold works with Claude Desktop and Codex via a protocol called MCP.")
                 .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, Spacing.xlarge + Spacing.standard)
     }
 
     // MARK: - Step 1: Check Claude Desktop
@@ -99,7 +99,7 @@ struct OnboardingView: View {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                     Text("Claude Desktop found").font(.callout.weight(.medium))
                 }
-                .padding(.top, 8)
+                .padding(.top, Spacing.standard)
             } else {
                 VStack(spacing: 8) {
                     HStack(spacing: 8) {
@@ -118,7 +118,7 @@ struct OnboardingView: View {
             }
             .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, Spacing.xlarge + Spacing.standard)
         .task { checkClaudeDesktop() }
     }
 
@@ -147,7 +147,7 @@ struct OnboardingView: View {
                         configLine("Codex config", path: "~/.codex/config.toml")
                     }
                 }
-                .padding(8)
+                .padding(Spacing.standard)
                 .background(Color(.controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             } else if installing {
@@ -174,7 +174,7 @@ struct OnboardingView: View {
                 }
             }
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, Spacing.xlarge + Spacing.standard)
     }
 
     // MARK: - Step 3: Add Source
@@ -212,7 +212,7 @@ struct OnboardingView: View {
                         .buttonStyle(.borderedProminent).controlSize(.small)
                     }
                 }
-                .padding(10).background(Color(.controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(Spacing.section).background(Color(.controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: Spacing.standard))
             }
 
             // Already added
@@ -231,7 +231,7 @@ struct OnboardingView: View {
             Button("Skip for Now") { withAnimation { step += 1 } }
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, Spacing.xlarge + Spacing.standard)
         .task { discoverFolders() }
     }
 
@@ -276,7 +276,7 @@ struct OnboardingView: View {
             Button("Skip") { withAnimation { step += 1 } }
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, Spacing.xlarge + Spacing.standard)
         .task { await store.checkMailAccess() }
     }
 
@@ -306,7 +306,7 @@ struct OnboardingView: View {
             }
             .buttonStyle(.borderedProminent)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, Spacing.xlarge + Spacing.standard)
     }
 
     // MARK: - Helpers

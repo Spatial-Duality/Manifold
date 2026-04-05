@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import UserNotifications
+import CommonCrypto
 import os
 import ManifoldKit
 
@@ -12,6 +13,7 @@ enum SidebarItem: Hashable {
     case dashboard
     case files
     case activity
+    case email
     case versions
 }
 
@@ -30,6 +32,12 @@ class ManifoldStore {
 
     // Activity
     var activityEntries: [AuditEntry] = []
+
+    // Sessions
+    var sessions: [Session] = []
+    var selectedSession: Session?
+    var sessionEvents: [SessionEvent] = []
+    var showSessionGrouping: Bool = true
 
     // Sources
     var approvedSources: [String] = []
@@ -405,8 +413,148 @@ class ManifoldStore {
     func pruneOldRuns() async -> Int { (try? await snapshotStore?.pruneOldRuns(keepLast: 10)) ?? 0 }
     func runIntegrityCheck() async -> Bool { (try? db?.integrityCheck()) ?? false }
 
+    // MARK: - Sessions
+
+    func loadSessions() async {
+        sessions = (try? await auditStore?.recentSessions(limit: 20)) ?? []
+    }
+
+    func loadSessionEvents(sessionID: String) async {
+        sessionEvents = (try? await auditStore?.sessionEvents(sessionID: sessionID)) ?? []
+    }
+
+    func selectSession(_ session: Session?) async {
+        selectedSession = session
+        if let session {
+            await loadSessionEvents(sessionID: session.id)
+        } else {
+            sessionEvents = []
+        }
+    }
+
+    /// Revert a file to the state before a specific write event.
+    func revertFile(event: SessionEvent) async -> RevertResult {
+        guard let beforeHash = event.beforeHash else { return .blobPruned }
+        guard let filePath = event.filePath else { return .error("No file path") }
+
+        // 1. Check blob exists
+        guard let blobData = try? await contentStore?.retrieve(hash: beforeHash) else {
+            return .blobPruned
+        }
+
+        // 2. Find the full path via workspaces
+        let activeWorkspaces = workspaces.filter { $0.status != "archived" }
+        var fullPath: String?
+        for ws in activeWorkspaces {
+            let candidate = URL(fileURLWithPath: ws.rootPath).appendingPathComponent(filePath).path
+            if FileManager.default.fileExists(atPath: candidate) {
+                fullPath = candidate
+                break
+            }
+            // File might have been deleted — use first workspace
+            if fullPath == nil { fullPath = candidate }
+        }
+        guard let targetPath = fullPath else { return .error("No workspace found") }
+
+        // 3. Check content drift
+        if FileManager.default.fileExists(atPath: targetPath) {
+            if let afterHash = event.afterHash,
+               let currentData = try? Data(contentsOf: URL(fileURLWithPath: targetPath)) {
+                let currentHash = currentData.sha256Hex
+                if currentHash != afterHash {
+                    return .contentDrift
+                }
+            }
+        } else {
+            // File was deleted — we'll recreate it
+        }
+
+        // 4. Write the reverted content
+        do {
+            let targetURL = URL(fileURLWithPath: targetPath)
+            try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try blobData.write(to: targetURL, options: .atomic)
+
+            // 5. Log the revert
+            try? await auditStore?.log(action: .restore, filePath: filePath, metadata: ["reverted_from": event.afterHash ?? "unknown"])
+
+            await refresh()
+            return .success
+        } catch {
+            return .error(error.localizedDescription)
+        }
+    }
+
+    /// Force revert even when content has drifted.
+    func forceRevertFile(event: SessionEvent) async -> RevertResult {
+        guard let beforeHash = event.beforeHash, let filePath = event.filePath else { return .blobPruned }
+        guard let blobData = try? await contentStore?.retrieve(hash: beforeHash) else { return .blobPruned }
+
+        let activeWorkspaces = workspaces.filter { $0.status != "archived" }
+        guard let ws = activeWorkspaces.first else { return .error("No workspace found") }
+        let targetPath = URL(fileURLWithPath: ws.rootPath).appendingPathComponent(filePath).path
+
+        do {
+            let targetURL = URL(fileURLWithPath: targetPath)
+            try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try blobData.write(to: targetURL, options: .atomic)
+            try? await auditStore?.log(action: .restore, filePath: filePath, metadata: ["reverted_from": event.afterHash ?? "unknown", "forced": "true"])
+            await refresh()
+            return .success
+        } catch {
+            return .error(error.localizedDescription)
+        }
+    }
+
+    /// Generate a Markdown summary of a session.
+    func sessionSummary(session: Session, events: [SessionEvent]) -> String {
+        let formatter = ISO8601DateFormatter()
+        let startDate = formatter.date(from: session.startTime)
+        let endDate = formatter.date(from: session.endTime)
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateStyle = .medium
+        timeFormatter.timeStyle = .short
+
+        let startStr = startDate.map { timeFormatter.string(from: $0) } ?? session.startTime
+        let duration: String
+        if let s = startDate, let e = endDate {
+            let mins = Int(e.timeIntervalSince(s) / 60)
+            duration = mins < 1 ? "< 1 minute" : "\(mins) minutes"
+        } else {
+            duration = "unknown"
+        }
+
+        let eventTimeFormatter = DateFormatter()
+        eventTimeFormatter.timeStyle = .short
+
+        var lines = [
+            "# Session: \(session.agent) — \(startStr)",
+            "Duration: \(duration) | \(session.readCount) reads, \(session.writeCount) writes, \(session.searchCount) searches",
+            "",
+            "## Timeline"
+        ]
+
+        for event in events {
+            let time = formatter.date(from: event.timestamp).map { eventTimeFormatter.string(from: $0) } ?? event.timestamp
+            let path = event.filePath ?? event.action
+            let detail: String
+            switch event.action {
+            case "file_read": detail = "Read \(path)"
+            case "file_modified": detail = "Modified \(path)"
+            case "file_created": detail = "Created \(path)"
+            case "tool_call": detail = "Tool call: \(path)"
+            default: detail = "\(event.action) \(path)"
+            }
+            lines.append("- \(time) — \(detail)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     func loadSummary() async {
         await loadWorkspaces(); await loadStorageStats(); await loadTrackedFiles(); await reclassifyEmails()
+        await loadSessions()
     }
 
     static func storeURL() -> URL {
@@ -445,4 +593,24 @@ struct SearchMatch: Identifiable, Sendable {
     let id = UUID()
     let lineNumber: Int
     let lineText: String
+}
+
+// MARK: - Revert
+
+enum RevertResult {
+    case success
+    case blobPruned
+    case contentDrift
+    case error(String)
+}
+
+extension Data {
+    var sha256Hex: String {
+        let hash = withUnsafeBytes { bytes -> [UInt8] in
+            var hash = [UInt8](repeating: 0, count: 32)
+            CC_SHA256(bytes.baseAddress, CC_LONG(count), &hash)
+            return hash
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
 }

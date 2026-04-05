@@ -4,55 +4,71 @@ struct SidebarView: View {
     @Environment(ManifoldStore.self) var store
 
     var body: some View {
-        VStack(spacing: 2) {
-            SidebarButton(
-                label: "Dashboard",
-                icon: "gauge.open.with.lines.needle.33percent",
-                item: .dashboard,
-                selected: store.selectedSidebarItem
-            ) { store.selectedSidebarItem = .dashboard }
+        VStack(spacing: Spacing.tight) {
+            VStack(spacing: Spacing.tight + 2) {
+                SidebarButton(
+                    label: "Sources",
+                    icon: "folder.badge.gearshape",
+                    item: .dashboard,
+                    selected: store.selectedSidebarItem
+                ) { store.selectedSidebarItem = .dashboard }
 
-            SidebarButton(
-                label: "Files",
-                icon: "doc.text.magnifyingglass",
-                item: .files,
-                selected: store.selectedSidebarItem
-            ) { store.selectedSidebarItem = .files }
+                SidebarButton(
+                    label: "Files",
+                    icon: "doc.text.magnifyingglass",
+                    item: .files,
+                    selected: store.selectedSidebarItem
+                ) { store.selectedSidebarItem = .files }
 
-            SidebarButton(
-                label: "Activity",
-                icon: "waveform.path.ecg",
-                item: .activity,
-                selected: store.selectedSidebarItem
-            ) { store.selectedSidebarItem = .activity }
+                SidebarButton(
+                    label: "Activity",
+                    icon: "waveform.path.ecg",
+                    item: .activity,
+                    selected: store.selectedSidebarItem
+                ) { store.selectedSidebarItem = .activity }
 
-            SidebarButton(
-                label: "Versions",
-                icon: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                item: .versions,
-                selected: store.selectedSidebarItem
-            ) { store.selectedSidebarItem = .versions }
+                SidebarButton(
+                    label: "Emails",
+                    icon: "envelope.badge.shield.half.filled",
+                    item: .email,
+                    selected: store.selectedSidebarItem
+                ) { store.selectedSidebarItem = .email }
+
+                SidebarButton(
+                    label: "Versions",
+                    icon: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    item: .versions,
+                    selected: store.selectedSidebarItem
+                ) { store.selectedSidebarItem = .versions }
+            }
 
             Spacer()
 
+            Divider()
+                .padding(.horizontal, Spacing.standard)
+
             // Connection status
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(store.isConnected ? Color.green : Color.gray)
-                    .frame(width: 7, height: 7)
-                Text(store.isConnected ? (store.connectedAgent ?? "Connected") : "No agents")
-                    .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: Spacing.standard) {
+                ColorIndicator(color: store.isConnected ? .green : .gray)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(store.isConnected ? (store.connectedAgent ?? "Connected") : "No agents")
+                        .font(.caption.weight(store.isConnected ? .medium : .regular))
+                    if store.isConnected {
+                        Text("Monitoring")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
                 Spacer()
                 if !store.mcpInstalled {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.yellow).imageScale(.small)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Spacing.section)
+            .padding(.vertical, Spacing.standard)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
+        .padding(.horizontal, Spacing.standard)
+        .padding(.top, Spacing.standard)
         .navigationTitle("Manifold")
     }
 }
@@ -68,14 +84,21 @@ struct SidebarButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(label, systemImage: icon)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(spacing: Spacing.standard) {
+                // Selection indicator bar (Raycast-inspired)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+                    .frame(width: 3, height: 18)
+
+                Label(label, systemImage: icon)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.vertical, Spacing.standard)
+        .padding(.trailing, Spacing.standard)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: Spacing.standard))
     }
 }
