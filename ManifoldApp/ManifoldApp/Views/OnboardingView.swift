@@ -2,152 +2,220 @@ import SwiftUI
 import ManifoldKit
 
 struct OnboardingView: View {
-    @EnvironmentObject var store: ManifoldStore
+    @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
+
     @State private var step = 0
+    @State private var claudeDesktopFound = false
+    @State private var installing = false
     @State private var discoveredFolders: [String] = []
     @State private var selectedDiscovered: Set<String> = []
 
+    private let totalSteps = 6
+
     var body: some View {
         VStack(spacing: 0) {
-            // Progress
+            // Progress bar
             HStack(spacing: 4) {
-                ForEach(0..<4, id: \.self) { i in
+                ForEach(0..<totalSteps, id: \.self) { i in
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(i <= step ? Color.accentColor : Color.gray.opacity(0.3))
+                        .fill(i <= step ? Color.accentColor : Color.gray.opacity(0.2))
                         .frame(height: 3)
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 16)
+            .padding(.horizontal, 24).padding(.top, 16)
+
+            // Step indicator
+            Text("Step \(step + 1) of \(totalSteps)")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .padding(.top, 6)
 
             Spacer()
 
-            // Step content
-            switch step {
-            case 0: welcomeStep
-            case 1: installStep
-            case 2: sourceStep
-            case 3: doneStep
-            default: EmptyView()
+            Group {
+                switch step {
+                case 0: welcomeStep
+                case 1: claudeCheckStep
+                case 2: installStep
+                case 3: sourceStep
+                case 4: emailStep
+                case 5: doneStep
+                default: EmptyView()
+                }
             }
+            .transition(.opacity)
 
             Spacer()
 
-            // Navigation
+            // Navigation buttons
             HStack {
-                if step > 0 && step < 3 {
-                    Button("Back") { step -= 1 }
+                if step > 0 && step < totalSteps - 1 {
+                    Button("Back") { withAnimation { step -= 1 } }
                         .buttonStyle(.bordered)
                 }
                 Spacer()
-                if step < 3 {
-                    Button(step == 0 ? "Get Started" : "Next") { step += 1 }
-                        .buttonStyle(.borderedProminent)
+                if step < totalSteps - 1 {
+                    Button(step == 0 ? "Get Started" : "Next") {
+                        withAnimation { step += 1 }
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
             }
             .padding(24)
         }
-        .frame(width: 500, height: 380)
-        .interactiveDismissDisabled(step < 3)
+        .frame(width: 520, height: 440)
+        .interactiveDismissDisabled(step < totalSteps - 1)
     }
+
+    // MARK: - Step 0: Welcome
 
     private var welcomeStep: some View {
         VStack(spacing: 16) {
             Image(systemName: "shield.checkered")
-                .font(.system(size: 48))
-                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 48)).foregroundStyle(Color.accentColor)
             Text("Welcome to Manifold")
                 .font(.title.weight(.semibold))
-            Text("Choose what AI agents can see.\nEvery file they touch is versioned automatically.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            Text("Choose exactly what AI agents can see in your files.\nEvery change they make gets automatic version history.")
+                .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text("Manifold works with Claude Desktop and Codex via a protocol called MCP.")
+                .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
         .padding(.horizontal, 40)
     }
 
+    // MARK: - Step 1: Check Claude Desktop
+
+    private var claudeCheckStep: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "app.badge.checkmark")
+                .font(.system(size: 36)).foregroundStyle(Color.accentColor)
+            Text("Check for Claude Desktop")
+                .font(.title2.weight(.semibold))
+            Text("Manifold needs Claude Desktop or Codex installed on your Mac to work.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+
+            if claudeDesktopFound {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("Claude Desktop found").font(.callout.weight(.medium))
+                }
+                .padding(.top, 8)
+            } else {
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow)
+                        Text("Claude Desktop not found").font(.callout)
+                    }
+                    Text("Download it from Anthropic, then click Check Again.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                    Button("Check Again") { checkClaudeDesktop() }
+                        .controlSize(.small)
+                }
+            }
+
+            Button("Skip (I'll install it later)") {
+                withAnimation { step += 1 }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 40)
+        .task { checkClaudeDesktop() }
+    }
+
+    // MARK: - Step 2: Install MCP
+
     private var installStep: some View {
         VStack(spacing: 16) {
             Image(systemName: "arrow.down.circle")
-                .font(.system(size: 36))
-                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 36)).foregroundStyle(Color.accentColor)
             Text("Install MCP Server")
                 .font(.title2.weight(.semibold))
-            Text("Manifold connects to Claude and Codex via the MCP protocol. This installs the server binary and configures both apps.")
-                .font(.callout).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            Text("This copies the Manifold MCP binary and updates your Claude Desktop configuration so they can talk to each other.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
             if store.mcpInstalled {
-                HStack {
+                HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text("Already installed")
+                    Text("Installed").font(.callout.weight(.medium))
                 }
+                VStack(alignment: .leading, spacing: 4) {
+                    configLine("MCP binary", path: ManifoldStore.mcpBinaryPath())
+                    if store.claudeDesktopConfigured {
+                        configLine("Claude config", path: "~/Library/Application Support/Claude/claude_desktop_config.json")
+                    }
+                    if store.codexConfigured {
+                        configLine("Codex config", path: "~/.codex/config.toml")
+                    }
+                }
+                .padding(8)
+                .background(Color(.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else if installing {
+                ProgressView("Installing...")
             } else {
                 Button("Install MCP Server") {
+                    installing = true
                     store.installMCP()
+                    store.checkMCPInstalled()
+                    store.checkAgentConfigs()
+                    installing = false
                 }
                 .buttonStyle(.borderedProminent)
 
                 if let error = store.installError {
                     Text(error).font(.caption).foregroundStyle(.red)
+                    Button("Try Again") {
+                        store.installError = nil
+                        installing = true
+                        store.installMCP()
+                        installing = false
+                    }
+                    .controlSize(.small)
                 }
             }
         }
         .padding(.horizontal, 40)
     }
 
+    // MARK: - Step 3: Add Source
+
     private var sourceStep: some View {
         VStack(spacing: 16) {
             Image(systemName: "folder.badge.plus")
-                .font(.system(size: 36))
-                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 36)).foregroundStyle(Color.accentColor)
             Text("Add Your First Source")
                 .font(.title2.weight(.semibold))
-            Text("Select a folder to share with AI agents. Files are never copied. Manifold versions every change the agent makes.")
-                .font(.callout).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            Text("Choose a folder to share with AI agents. Claude can read files here. Every change is versioned automatically.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
             // Auto-discovered folders
             if !discoveredFolders.isEmpty && store.approvedSources.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Found on your Mac:")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                    Text("Found on your Mac:").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     ForEach(discoveredFolders, id: \.self) { path in
                         HStack {
                             Image(systemName: selectedDiscovered.contains(path) ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(selectedDiscovered.contains(path) ? .green : .gray)
-                            Text(shortenPath(path))
-                                .font(.caption.monospaced())
-                                .lineLimit(1)
+                            Text(shortenPath(path)).font(.caption.monospaced()).lineLimit(1)
                             Spacer()
                         }
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            if selectedDiscovered.contains(path) {
-                                selectedDiscovered.remove(path)
-                            } else {
-                                selectedDiscovered.insert(path)
-                            }
+                            if selectedDiscovered.contains(path) { selectedDiscovered.remove(path) }
+                            else { selectedDiscovered.insert(path) }
                         }
                     }
                     if !selectedDiscovered.isEmpty {
                         Button("Add \(selectedDiscovered.count) folder\(selectedDiscovered.count == 1 ? "" : "s")") {
-                            for path in selectedDiscovered {
-                                store.addSource(path: path)
-                            }
+                            for path in selectedDiscovered { store.addSource(path: path) }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent).controlSize(.small)
                     }
                 }
-                .padding(10)
-                .background(Color(.controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(10).background(Color(.controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
-            // Already added sources
+            // Already added
             if !store.approvedSources.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(store.approvedSources, id: \.self) { path in
@@ -159,29 +227,77 @@ struct OnboardingView: View {
                 }
             }
 
-            Button("Choose Another Folder") {
-                store.addSourceFromPicker()
-            }
-            .buttonStyle(.bordered)
-
-            Button("Skip for Now") { step += 1 }
+            Button("Choose Another Folder") { store.addSourceFromPicker() }.buttonStyle(.bordered)
+            Button("Skip for Now") { withAnimation { step += 1 } }
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 40)
         .task { discoverFolders() }
     }
 
+    // MARK: - Step 4: Email (Optional)
+
+    private var emailStep: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "envelope.badge.shield.half.filled")
+                .font(.system(size: 36)).foregroundStyle(Color.accentColor)
+            Text("Connect Apple Mail")
+                .font(.title2.weight(.semibold))
+            Text("Optionally let Claude see your emails. Manifold auto-hides sensitive ones (banking, 2FA, healthcare) and you control what's shared.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+
+            switch store.mailAccessStatus {
+            case .available:
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("Apple Mail connected").font(.callout.weight(.medium))
+                }
+            case .mailNotRunning:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow)
+                    Text("Mail.app is not running").font(.callout)
+                }
+                Button("Check Again") { Task { await store.checkMailAccess() } }
+                    .controlSize(.small)
+            case .accessDenied:
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.circle").foregroundStyle(.red)
+                    Text("Automation permission needed").font(.callout)
+                }
+                Text("Go to System Settings → Privacy & Security → Automation and enable Manifold for Mail.")
+                    .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                Button("Check Again") { Task { await store.checkMailAccess() } }
+                    .controlSize(.small)
+            case nil:
+                Button("Connect Apple Mail") { Task { await store.checkMailAccess() } }
+                    .buttonStyle(.borderedProminent)
+            }
+
+            Button("Skip") { withAnimation { step += 1 } }
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 40)
+        .task { await store.checkMailAccess() }
+    }
+
+    // MARK: - Step 5: Done
+
     private var doneStep: some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 48))
-                .foregroundStyle(.green)
+                .font(.system(size: 48)).foregroundStyle(.green)
             Text("You're Ready")
                 .font(.title.weight(.semibold))
 
-            VStack(alignment: .leading, spacing: 8) {
-                statusRow("MCP Server", done: store.mcpInstalled)
-                statusRow("Source Folder", done: !store.approvedSources.isEmpty)
+            VStack(alignment: .leading, spacing: 10) {
+                summaryRow("MCP Server", done: store.mcpInstalled, detail: store.mcpInstalled ? "Installed" : "Not installed, set up in Settings")
+                summaryRow("Source Folders", done: !store.approvedSources.isEmpty, detail: store.approvedSources.isEmpty ? "None added yet" : "\(store.approvedSources.count) folder(s)")
+                summaryRow("Apple Mail", done: store.mailAccessStatus == .available, detail: store.mailAccessStatus == .available ? "Connected" : "Not connected")
+            }
+
+            if !store.mcpInstalled || store.approvedSources.isEmpty {
+                Text("You can finish setup anytime in Settings (Cmd+,)")
+                    .font(.caption).foregroundStyle(.tertiary)
             }
 
             Button("Open Manifold") {
@@ -193,12 +309,31 @@ struct OnboardingView: View {
         .padding(.horizontal, 40)
     }
 
-    private func statusRow(_ label: String, done: Bool) -> some View {
+    // MARK: - Helpers
+
+    private func summaryRow(_ label: String, done: Bool, detail: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(done ? .green : .gray)
-            Text(label).font(.callout)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.callout.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private func configLine(_ label: String, path: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark").foregroundStyle(.green).imageScale(.small)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(path).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+        }
+    }
+
+    private func checkClaudeDesktop() {
+        let claudePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Claude")
+        claudeDesktopFound = FileManager.default.fileExists(atPath: claudePath.path)
     }
 
     private func discoverFolders() {
@@ -206,8 +341,7 @@ struct OnboardingView: View {
         discoveredFolders = ["Developer", "Projects", "Documents", "Desktop"].compactMap { dir -> String? in
             let url = home.appendingPathComponent(dir)
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
-                  isDir.boolValue,
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue,
                   let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey])
             else { return nil }
             let subdirCount = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.count

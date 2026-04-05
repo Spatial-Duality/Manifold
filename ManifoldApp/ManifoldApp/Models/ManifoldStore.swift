@@ -9,61 +9,55 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 // MARK: - Navigation
 
 enum SidebarItem: Hashable {
-    case summary
-    case sources
-    case sourceDetail(String) // workspaceID
-    case emailOverview
-    case emailInbox
-    case emailRules
+    case dashboard
     case activity
     case versions
 }
 
 // MARK: - Store
 
+@Observable
 @MainActor
-class ManifoldStore: ObservableObject {
-    // MARK: - Navigation
-    @Published var selectedSidebarItem: SidebarItem? = .summary
+class ManifoldStore {
+    // Navigation
+    var selectedSidebarItem: SidebarItem? = .dashboard
+    var inspectedFilePath: String?
 
-    // MARK: - Connection
-    @Published var isConnected = false
-    @Published var connectedAgent: String?
+    // Connection
+    var isConnected = false
+    var connectedAgent: String?
 
-    // MARK: - Activity
-    @Published var activityEntries: [AuditEntry] = []
+    // Activity
+    var activityEntries: [AuditEntry] = []
 
-    // MARK: - Sources
-    @Published var approvedSources: [String] = []
-    @Published var workspaces: [WorkspaceRecord] = []
+    // Sources
+    var approvedSources: [String] = []
+    var workspaces: [WorkspaceRecord] = []
 
-    // MARK: - Emails
-    @Published var emailRules: [EmailRule] = []
-    @Published var cachedEmails: [CachedEmail] = []
-    @Published var emailClassification: EmailClassificationResult?
-    @Published var mailAccessStatus: MailAccessStatus?
-    @Published var mailboxes: [MailboxInfo] = []
+    // Emails
+    var emailRules: [EmailRule] = []
+    var cachedEmails: [CachedEmail] = []
+    var emailClassification: EmailClassificationResult?
+    var mailAccessStatus: MailAccessStatus?
+    var mailboxes: [MailboxInfo] = []
 
-    // MARK: - Versions
-    @Published var allTrackedFiles: [String] = []
-    @Published var storageUsed: Int64 = 0
-    @Published var blobCount: Int = 0
+    // Versions
+    var allTrackedFiles: [String] = []
+    var storageUsed: Int64 = 0
+    var blobCount: Int = 0
 
-    // MARK: - Setup
-    @Published var mcpInstalled = false
-    @Published var installError: String?
-    @Published var claudeDesktopConfigured = false
-    @Published var codexConfigured = false
+    // Setup
+    var mcpInstalled = false
+    var installError: String?
+    var claudeDesktopConfigured = false
+    var codexConfigured = false
 
-    // MARK: - Onboarding
-    @Published var hasCompletedOnboarding: Bool {
+    // Onboarding
+    var hasCompletedOnboarding: Bool {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "manifold.onboarding.completed") }
     }
 
-    // MARK: - Inspector
-    @Published var inspectedFilePath: String?
-
-    // MARK: - Internal
+    // Internal
     private var auditStore: AuditStore?
     private var emailFilter: EmailFilter?
     private(set) var snapshotStore: SnapshotStore?
@@ -100,16 +94,11 @@ class ManifoldStore: ObservableObject {
             self.snapshotStore = try SnapshotStore(db: connection, contentStore: contentStore)
             self.emailFilter = try EmailFilter(db: connection)
             self.leaseManager = try WorkspaceLeaseManager(db: connection, snapshotStore: self.snapshotStore!)
-
-            checkMCPInstalled()
-            checkAgentConfigs()
+            checkMCPInstalled(); checkAgentConfigs()
             await refresh()
-
-            // Retention pruning on launch
             _ = try? await self.snapshotStore?.pruneByAge(days: 30)
             _ = try? await self.snapshotStore?.pruneByFileCount(maxPerFile: 50)
             _ = try? await self.contentStore?.garbageCollect()
-
             pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.refresh() }
             }
@@ -122,11 +111,7 @@ class ManifoldStore: ObservableObject {
 
     private func setupNotificationObservers() {
         let connected = ManifoldNotification.observe(ManifoldNotification.agentConnected) { [weak self] info in
-            Task { @MainActor in
-                self?.isConnected = true
-                self?.connectedAgent = info["agent"] ?? "Claude"
-                await self?.refresh()
-            }
+            Task { @MainActor in self?.isConnected = true; self?.connectedAgent = info["agent"] ?? "Claude"; await self?.refresh() }
         }
         let disconnected = ManifoldNotification.observe(ManifoldNotification.agentDisconnected) { [weak self] _ in
             Task { @MainActor in self?.isConnected = false; self?.connectedAgent = nil }
@@ -134,13 +119,10 @@ class ManifoldStore: ObservableObject {
         let denied = ManifoldNotification.observe(ManifoldNotification.accessDenied) { [weak self] info in
             Task { @MainActor in self?.showAccessDeniedNotification(info: info) }
         }
-        let accessed = ManifoldNotification.observe(ManifoldNotification.fileAccessed) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
-        }
         let dataChanged = ManifoldNotification.observe(ManifoldNotification.dataChanged) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
         }
-        notificationObservers = [connected, disconnected, denied, accessed, dataChanged]
+        notificationObservers = [connected, disconnected, denied, dataChanged]
     }
 
     private func requestNotificationPermission() {
@@ -172,7 +154,7 @@ class ManifoldStore: ObservableObject {
             }
         }
         if let db {
-            approvedSources = (try? db.queryAll("SELECT root_path FROM workspaces"))?.compactMap { $0["root_path"] } ?? []
+            approvedSources = (try? db.queryAll("SELECT root_path FROM workspaces WHERE status != 'archived'"))?.compactMap { $0["root_path"] } ?? []
         }
     }
 
@@ -193,7 +175,26 @@ class ManifoldStore: ObservableObject {
     func removeSource(path: String) {
         approvedSources.removeAll { $0 == path }
         let folderName = URL(fileURLWithPath: path).lastPathComponent
-        Task { try? await auditStore?.log(action: .sourceRemoved, filePath: path, metadata: ["folder": folderName]) }
+        Task {
+            // Archive the workspace instead of deleting
+            if let ws = workspaces.first(where: { $0.rootPath == path }) {
+                try? await leaseManager?.updateWorkspaceStatus(workspaceID: ws.workspaceID, status: "archived")
+            }
+            try? await auditStore?.log(action: .sourceRemoved, filePath: path, metadata: ["folder": folderName])
+            await loadWorkspaces()
+        }
+    }
+
+    func pauseSource(workspaceID: String) async {
+        try? await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "archived")
+        await loadWorkspaces()
+        await refresh()
+    }
+
+    func resumeSource(workspaceID: String) async {
+        try? await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "idle")
+        await loadWorkspaces()
+        await refresh()
     }
 
     func addSourceFromPicker() {
@@ -210,20 +211,17 @@ class ManifoldStore: ObservableObject {
         workspaces = (try? await leaseManager?.allWorkspaces()) ?? []
     }
 
+    func activeRunForWorkspace(_ workspaceID: String) async -> RunRecord? {
+        try? await leaseManager?.activeRun(workspaceID: workspaceID)
+    }
+
+    func runsForWorkspace(_ workspaceID: String) async -> [RunRecord] {
+        (try? await leaseManager?.runs(workspaceID: workspaceID)) ?? []
+    }
+
     func startRun(workspaceID: String, agent: String) async {
         _ = try? await leaseManager?.startRun(workspaceID: workspaceID, agent: agent, trigger: .userGrant)
         try? await auditStore?.log(action: .runStart, workspaceID: workspaceID, agent: agent)
-        await loadWorkspaces(); await refresh()
-    }
-
-    func startTimeLimitedRun(workspaceID: String, agent: String, duration: TimeInterval) async {
-        let runID = try? await leaseManager?.startRun(workspaceID: workspaceID, agent: agent, trigger: .userGrant)
-        try? await auditStore?.log(action: .runStart, workspaceID: workspaceID, agent: agent)
-        if let runID {
-            runTimers[runID] = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
-                Task { @MainActor [weak self] in await self?.endRun(runID: runID) }
-            }
-        }
         await loadWorkspaces(); await refresh()
     }
 
@@ -234,43 +232,29 @@ class ManifoldStore: ObservableObject {
         await loadWorkspaces(); await refresh()
     }
 
-    func activeRunForWorkspace(_ workspaceID: String) async -> RunRecord? {
-        try? await leaseManager?.activeRun(workspaceID: workspaceID)
-    }
-
-    func runsForWorkspace(_ workspaceID: String) async -> [RunRecord] {
-        (try? await leaseManager?.runs(workspaceID: workspaceID)) ?? []
-    }
-
     // MARK: - Emails
 
     func checkMailAccess() async {
         do { mailAccessStatus = try mailConnector.checkAccess() }
         catch { mailAccessStatus = .accessDenied }
     }
-
     func loadMailboxes() async {
-        do { mailboxes = try mailConnector.listMailboxes() }
-        catch { mailboxes = [] }
+        do { mailboxes = try mailConnector.listMailboxes() } catch { mailboxes = [] }
     }
-
     func fetchAndCacheEmails(account: String, mailbox: String) async {
         guard let emailFilter else { return }
         let emails: [RenderedEmail]
-        do { emails = try mailConnector.fetchMessages(account: account, mailbox: mailbox, limit: 100) }
-        catch { return }
+        do { emails = try mailConnector.fetchMessages(account: account, mailbox: mailbox, limit: 100) } catch { return }
         for email in emails { try? await emailFilter.cacheEmail(email, account: account, mailbox: mailbox) }
         await reclassifyEmails(); await loadCachedEmails()
     }
-
     func loadEmailRules() async { emailRules = (try? await emailFilter?.globalRules()) ?? [] }
     func addEmailRule(type: RuleType, pattern: String, category: String) async {
         try? await emailFilter?.addGlobalRule(type: type, pattern: pattern, category: category)
         await loadEmailRules(); await reclassifyEmails()
     }
     func removeEmailRule(id: Int) async {
-        try? await emailFilter?.removeRule(id: id)
-        await loadEmailRules(); await reclassifyEmails()
+        try? await emailFilter?.removeRule(id: id); await loadEmailRules(); await reclassifyEmails()
     }
     func overrideEmailToShared(messageID: String) async {
         try? await emailFilter?.overrideToShared(messageID: messageID); await loadCachedEmails()
@@ -292,9 +276,6 @@ class ManifoldStore: ObservableObject {
         (try? await snapshotStore?.fileHistory(filePath: filePath)) ?? []
     }
     func snapshotData(hash: String) async -> Data? { try? await contentStore?.retrieve(hash: hash) }
-    func snapshotCountForFile(_ filePath: String) async -> Int {
-        (try? await snapshotStore?.snapshotCount(filePath: filePath)) ?? 0
-    }
     func restoreFile(snapshotID: Int, filePath: String, toDirectory: String) async -> Bool {
         guard let data = try? await snapshotStore?.dataForRestore(snapshotID: snapshotID) else { return false }
         let fullPath = URL(fileURLWithPath: toDirectory).appendingPathComponent(filePath)
@@ -314,7 +295,6 @@ class ManifoldStore: ObservableObject {
         claudeDesktopConfigured = FileManager.default.fileExists(atPath: home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json").path)
         codexConfigured = FileManager.default.fileExists(atPath: home.appendingPathComponent(".codex/config.toml").path)
     }
-
     func installMCP() {
         installError = nil
         do {
@@ -339,17 +319,13 @@ class ManifoldStore: ObservableObject {
             checkMCPInstalled(); checkAgentConfigs()
         } catch { installError = "Install failed: \(error.localizedDescription)" }
     }
-
     func runGarbageCollection() async -> Int { (try? await contentStore?.garbageCollect()) ?? 0 }
     func pruneOldRuns() async -> Int { (try? await snapshotStore?.pruneOldRuns(keepLast: 10)) ?? 0 }
     func runIntegrityCheck() async -> Bool { (try? db?.integrityCheck()) ?? false }
 
     func loadSummary() async {
-        await loadWorkspaces(); await loadStorageStats()
-        await loadTrackedFiles(); await reclassifyEmails()
+        await loadWorkspaces(); await loadStorageStats(); await loadTrackedFiles(); await reclassifyEmails()
     }
-
-    // MARK: - Paths
 
     static func storeURL() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Manifold/store")

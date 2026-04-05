@@ -2,7 +2,7 @@ import SwiftUI
 import ManifoldKit
 
 struct ActivityView: View {
-    @EnvironmentObject var store: ManifoldStore
+    @Environment(ManifoldStore.self) var store
     @State private var actionFilter = "all"
     @State private var searchText = ""
     @State private var filteredEntries: [AuditEntry] = []
@@ -53,6 +53,7 @@ struct ActivityView: View {
                     Divider()
                     Text("Reads").tag("file_read")
                     Text("Writes").tag("file_modified")
+                    Text("Tool Calls").tag("tool_call")
                     Text("Connections").tag("mcp_connection")
                     Text("Restores").tag("restore")
                 }
@@ -63,37 +64,5 @@ struct ActivityView: View {
         .onChange(of: store.activityEntries.count) { _, _ in refilter() }
         .onChange(of: actionFilter) { _, _ in refilter() }
         .onChange(of: searchText) { _, _ in refilter() }
-    }
-}
-
-struct ActivityRow: View {
-    let entry: AuditEntry
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: ActionFormatting.icon(for: entry.action))
-                .foregroundStyle(ActionFormatting.color(for: entry.action))
-                .imageScale(.small)
-                .frame(width: 16)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(ActionFormatting.description(for: entry))
-                    .font(.callout)
-                    .lineLimit(1)
-                Text(entry.action.replacingOccurrences(of: "_", with: " "))
-                    .font(.caption2)
-                    .foregroundStyle(ActionFormatting.color(for: entry.action))
-            }
-
-            Spacer()
-
-            TimeLabel(iso8601: entry.timestamp)
-
-            if entry.filePath != nil {
-                Image(systemName: "sidebar.right")
-                    .foregroundStyle(.quaternary)
-                    .imageScale(.small)
-            }
-        }
     }
 }

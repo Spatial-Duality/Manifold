@@ -2,7 +2,7 @@ import SwiftUI
 import ManifoldKit
 
 struct VersionsView: View {
-    @EnvironmentObject var store: ManifoldStore
+    @Environment(ManifoldStore.self) var store
     @State private var searchText = ""
     @State private var filteredFiles: [String] = []
 
@@ -24,21 +24,16 @@ struct VersionsView: View {
                 List {
                     ForEach(filteredFiles, id: \.self) { filePath in
                         HStack(spacing: 8) {
-                            Image(systemName: "doc.text")
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "doc.text").foregroundStyle(.secondary)
                             Text(filePath)
                                 .font(.callout.monospaced())
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                                .lineLimit(1).truncationMode(.middle)
                             Spacer()
                             Image(systemName: "sidebar.right")
-                                .foregroundStyle(.quaternary)
-                                .imageScale(.small)
+                                .foregroundStyle(.quaternary).imageScale(.small)
                         }
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            store.inspectedFilePath = filePath
-                        }
+                        .onTapGesture { store.inspectedFilePath = filePath }
                     }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
@@ -46,17 +41,9 @@ struct VersionsView: View {
             }
         }
         .navigationTitle("Versions")
-        .navigationSubtitle(store.storageUsed > 0 ? formatBytes(store.storageUsed) : "")
-        .task {
-            await store.loadTrackedFiles()
-            await store.loadStorageStats()
-            refilter()
-        }
+        .navigationSubtitle(store.storageUsed > 0 ? ByteCountFormatter.string(fromByteCount: store.storageUsed, countStyle: .file) : "")
+        .task { await store.loadTrackedFiles(); await store.loadStorageStats(); refilter() }
         .onChange(of: store.allTrackedFiles.count) { _, _ in refilter() }
         .onChange(of: searchText) { _, _ in refilter() }
-    }
-
-    private func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }

@@ -2,7 +2,7 @@ import SwiftUI
 import ManifoldKit
 
 struct SetupView: View {
-    @EnvironmentObject var store: ManifoldStore
+    @Environment(ManifoldStore.self) var store
     @State private var gcResult: Int?
     @State private var pruneResult: Int?
     @State private var integrityResult: Bool?
@@ -11,143 +11,103 @@ struct SetupView: View {
         Form {
             Section("MCP Server") {
                 HStack {
-                    if store.mcpInstalled {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        Text("Installed")
-                    } else {
-                        Image(systemName: "xmark.circle").foregroundStyle(.red)
-                        Text("Not installed")
-                    }
+                    Image(systemName: store.mcpInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(store.mcpInstalled ? .green : .red)
+                    Text(store.mcpInstalled ? "Installed" : "Not installed")
                     Spacer()
-                    Button(store.mcpInstalled ? "Reinstall" : "Install") {
-                        store.installMCP()
-                    }
-                    .buttonStyle(.bordered)
+                    Button(store.mcpInstalled ? "Reinstall" : "Install") { store.installMCP() }
+                        .controlSize(.small)
                 }
                 if let error = store.installError {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
-                Text(ManifoldStore.mcpBinaryPath())
-                    .font(.caption.monospaced()).foregroundStyle(.tertiary)
+                Text(ManifoldStore.mcpBinaryPath()).font(.caption.monospaced()).foregroundStyle(.tertiary)
             }
 
             Section("Agent Configurations") {
-                HStack {
+                LabeledContent("Claude Desktop") {
                     Image(systemName: store.claudeDesktopConfigured ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(store.claudeDesktopConfigured ? .green : .gray)
-                    Text("Claude Desktop")
-                    Spacer()
-                    if !store.claudeDesktopConfigured {
-                        Text("Not found").font(.caption).foregroundStyle(.secondary)
-                    }
                 }
-                HStack {
+                LabeledContent("Codex") {
                     Image(systemName: store.codexConfigured ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(store.codexConfigured ? .green : .gray)
-                    Text("Codex")
-                    Spacer()
-                    if !store.codexConfigured {
-                        Text("Not found").font(.caption).foregroundStyle(.secondary)
-                    }
                 }
             }
 
             Section("Apple Mail") {
                 HStack {
                     switch store.mailAccessStatus {
-                    case .available:
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        Text("Connected")
-                    case .mailNotRunning:
-                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow)
-                        Text("Mail not running")
-                    case .accessDenied:
-                        Image(systemName: "xmark.circle").foregroundStyle(.red)
-                        Text("Permission denied")
-                    case nil:
-                        Image(systemName: "questionmark.circle").foregroundStyle(.gray)
-                        Text("Not checked")
+                    case .available: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("Connected")
+                    case .mailNotRunning: Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow); Text("Mail not running")
+                    case .accessDenied: Image(systemName: "xmark.circle").foregroundStyle(.red); Text("Permission needed")
+                    case nil: Image(systemName: "questionmark.circle").foregroundStyle(.gray); Text("Not checked")
                     }
                     Spacer()
-                    Button("Test") {
-                        Task { await store.checkMailAccess() }
+                    Button("Test") { Task { await store.checkMailAccess() } }.controlSize(.small)
+                }
+            }
+
+            Section("Email Rules") {
+                if store.emailRules.isEmpty {
+                    Text("Default rules for banking, 2FA, healthcare are built in.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.emailRules, id: \.id) { rule in
+                        HStack {
+                            Text(rule.pattern).font(.callout.monospaced())
+                            Spacer()
+                            Text(rule.category ?? "Other").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                Task { await store.removeEmailRule(id: rule.id) }
+                            } label: { Label("Delete", systemImage: "trash") }
+                        }
                     }
-                    .controlSize(.small)
                 }
             }
 
             Section("Storage") {
-                LabeledContent("Store Location") {
-                    Text(ManifoldStore.storeURL().path)
-                        .font(.caption.monospaced()).foregroundStyle(.tertiary)
+                LabeledContent("Location") {
+                    Text(ManifoldStore.storeURL().path).font(.caption.monospaced()).foregroundStyle(.tertiary)
                 }
-                LabeledContent("Size") {
-                    Text(formatBytes(store.storageUsed))
-                }
-                LabeledContent("Versions") {
-                    Text("\(store.blobCount)")
-                }
-                LabeledContent("Tracked Files") {
-                    Text("\(store.allTrackedFiles.count)")
-                }
+                LabeledContent("Size") { Text(ByteCountFormatter.string(fromByteCount: store.storageUsed, countStyle: .file)) }
+                LabeledContent("Versions") { Text("\(store.blobCount)") }
+                LabeledContent("Files tracked") { Text("\(store.allTrackedFiles.count)") }
 
                 HStack {
                     Button("Garbage Collect") {
-                        Task {
-                            gcResult = await store.runGarbageCollection()
-                            await store.loadStorageStats()
-                        }
-                    }
-                    .controlSize(.small)
-                    if let gc = gcResult {
-                        Text("Removed \(gc) blobs").font(.caption).foregroundStyle(.secondary)
-                    }
-
+                        Task { gcResult = await store.runGarbageCollection(); await store.loadStorageStats() }
+                    }.controlSize(.small)
+                    if let gc = gcResult { Text("Removed \(gc)").font(.caption).foregroundStyle(.secondary) }
                     Spacer()
-
                     Button("Prune Old Runs") {
-                        Task {
-                            pruneResult = await store.pruneOldRuns()
-                            await store.loadStorageStats()
-                        }
-                    }
-                    .controlSize(.small)
-                    if let pr = pruneResult {
-                        Text("Pruned \(pr)").font(.caption).foregroundStyle(.secondary)
-                    }
+                        Task { pruneResult = await store.pruneOldRuns(); await store.loadStorageStats() }
+                    }.controlSize(.small)
+                    if let pr = pruneResult { Text("Pruned \(pr)").font(.caption).foregroundStyle(.secondary) }
                 }
-
                 HStack {
                     Button("Integrity Check") {
                         Task { integrityResult = await store.runIntegrityCheck() }
-                    }
-                    .controlSize(.small)
+                    }.controlSize(.small)
                     if let ok = integrityResult {
-                        Text(ok ? "OK" : "FAILED")
-                            .font(.caption)
-                            .foregroundStyle(ok ? .green : .red)
+                        Text(ok ? "OK" : "FAILED").font(.caption).foregroundStyle(ok ? .green : .red)
                     }
                 }
             }
 
             Section("About") {
-                LabeledContent("Version") { Text("0.2.0") }
-                LabeledContent("Bundle ID") { Text("com.spatialduality.manifold") }
-                Text("Spatial Duality")
-                    .font(.caption).foregroundStyle(.tertiary)
+                LabeledContent("Version") { Text("0.3.0") }
+                LabeledContent("Bundle") { Text("com.spatialduality.manifold") }
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Setup")
         .task {
-            store.checkMCPInstalled()
-            store.checkAgentConfigs()
-            await store.loadStorageStats()
-            await store.loadTrackedFiles()
+            store.checkMCPInstalled(); store.checkAgentConfigs()
+            await store.loadStorageStats(); await store.loadTrackedFiles()
+            await store.loadEmailRules(); await store.checkMailAccess()
         }
-    }
-
-    private func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }

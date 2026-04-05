@@ -2,12 +2,12 @@ import SwiftUI
 
 @main
 struct ManifoldApp: App {
-    @StateObject private var store = ManifoldStore()
+    @State private var store = ManifoldStore()
 
     var body: some Scene {
         WindowGroup(id: "main") {
             MainView()
-                .environmentObject(store)
+                .environment(store)
                 .frame(minWidth: 780, minHeight: 520)
         }
         .defaultSize(width: 960, height: 640)
@@ -35,7 +35,7 @@ struct ManifoldApp: App {
 
         Settings {
             SetupView()
-                .environmentObject(store)
+                .environment(store)
                 .frame(minWidth: 500, minHeight: 400)
         }
     }

@@ -2,7 +2,7 @@ import SwiftUI
 import ManifoldKit
 
 struct MainView: View {
-    @EnvironmentObject var store: ManifoldStore
+    @Environment(ManifoldStore.self) var store
     @State private var showOnboarding = false
 
     var body: some View {
@@ -19,7 +19,7 @@ struct MainView: View {
         }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView()
-                .environmentObject(store)
+                .environment(store)
         }
         .task {
             if !store.hasCompletedOnboarding { showOnboarding = true }
@@ -37,28 +37,12 @@ struct MainView: View {
     @ViewBuilder
     private var detailContent: some View {
         switch store.selectedSidebarItem {
-        case .summary:
-            SummaryView()
-        case .sources:
-            SourcesView()
-        case .sourceDetail(let wsID):
-            if let ws = store.workspaces.first(where: { $0.workspaceID == wsID }) {
-                SourceDetailView(workspace: ws)
-            } else {
-                SourcesView()
-            }
-        case .emailOverview:
-            EmailOverviewView()
-        case .emailInbox:
-            EmailListView()
-        case .emailRules:
-            EmailRulesView()
+        case .dashboard, nil:
+            DashboardView()
         case .activity:
             ActivityView()
         case .versions:
             VersionsView()
-        case nil:
-            SummaryView()
         }
     }
 }
