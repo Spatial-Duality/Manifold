@@ -197,11 +197,21 @@ enum ToolHandlers {
 
     private static func formatStatus(_ status: StatusResult) -> String {
         if status.active {
+            var lines = [
+                "Status: ACTIVE",
+                "Active sources: \(status.sources.joined(separator: ", "))",
+            ]
+            if !status.pausedSources.isEmpty {
+                lines.append("Paused sources (not accessible): \(status.pausedSources.joined(separator: ", "))")
+            }
+            lines.append("Files: \(status.fileCount)")
+            lines.append("Emails: \(status.emailCount)")
+            lines.append(status.message)
+            return lines.joined(separator: "\n")
+        } else if !status.pausedSources.isEmpty {
             return """
-            Status: ACTIVE
-            Sources: \(status.sources.joined(separator: ", "))
-            Files: \(status.fileCount)
-            Emails: \(status.emailCount)
+            Status: ALL SOURCES PAUSED
+            Paused sources: \(status.pausedSources.joined(separator: ", "))
             \(status.message)
             """
         } else {

@@ -29,34 +29,92 @@ public actor ManifoldBridge {
 
     // MARK: - Workspace Resolution (Global Access)
 
-    /// Returns all registered workspaces. No active run required.
+    /// Returns all registered workspaces with their status.
     private func allWorkspaces() throws -> [WorkspaceInfo] {
-        let rows = try db.queryAll("SELECT workspace_id, root_path, agent, created_at FROM workspaces")
+        let rows = try db.queryAll("SELECT workspace_id, root_path, agent, status, created_at FROM workspaces")
         return rows.compactMap { row in
             guard let wsID = row["workspace_id"],
                   let rootPath = row["root_path"],
                   let agent = row["agent"],
+                  let status = row["status"] ?? .some("idle"),
                   let createdAt = row["created_at"] else { return nil }
-            return WorkspaceInfo(workspaceID: wsID, rootPath: rootPath, agent: agent, createdAt: createdAt)
+            return WorkspaceInfo(workspaceID: wsID, rootPath: rootPath, agent: agent, status: status, createdAt: createdAt)
         }
     }
 
-    /// Ensure at least one workspace exists.
-    private func requireWorkspaces() throws -> [WorkspaceInfo] {
-        let workspaces = try allWorkspaces()
-        guard !workspaces.isEmpty else {
-            throw ManifoldMCPError.noSources
+    /// Returns only active (non-archived) workspaces. Use this for all agent-facing tools.
+    private func activeWorkspaces() throws -> [WorkspaceInfo] {
+        try allWorkspaces().filter(\.isActive)
+    }
+
+    /// Ensure at least one active workspace exists. Gives a clear error if all are paused.
+    private func requireActiveWorkspaces() throws -> [WorkspaceInfo] {
+        let all = try allWorkspaces()
+        let active = all.filter(\.isActive)
+        if active.isEmpty {
+            if all.isEmpty {
+                throw ManifoldMCPError.noSources
+            } else {
+                throw ManifoldMCPError.allSourcesPaused
+            }
         }
-        return workspaces
+        return active
+    }
+
+    /// Ensure at least one active workspace exists.
+    private func requireWorkspaces() throws -> [WorkspaceInfo] {
+        try requireActiveWorkspaces()
     }
 
     // MARK: - Path Safety
 
+    /// Cleans a relative path: strips leading "./", collapses double slashes,
+    /// and removes trailing slashes.
+    private func cleanPath(_ path: String) -> String {
+        var cleaned = path
+        // Strip leading "./"
+        while cleaned.hasPrefix("./") {
+            cleaned = String(cleaned.dropFirst(2))
+        }
+        // Collapse double slashes
+        while cleaned.contains("//") {
+            cleaned = cleaned.replacingOccurrences(of: "//", with: "/")
+        }
+        // Strip trailing slash
+        while cleaned.hasSuffix("/") && cleaned.count > 1 {
+            cleaned = String(cleaned.dropLast())
+        }
+        return cleaned
+    }
+
+    /// Resolves a path that may include the source folder name as a prefix.
+    /// e.g. if workspaces = ["/Users/x/current"], path = "current/file.md"
+    /// returns (workspace for "current", "file.md") instead of treating
+    /// "current" as a subdirectory.
+    private func resolveWorkspaceAndPath(
+        _ path: String,
+        in workspaces: [WorkspaceInfo]
+    ) -> (workspace: WorkspaceInfo, relativePath: String)? {
+        let cleaned = cleanPath(path)
+        let components = cleaned.split(separator: "/", maxSplits: 1)
+
+        // Check if the first component matches a workspace folder name
+        if components.count >= 2 {
+            let prefix = String(components[0])
+            let rest = String(components[1])
+            if let ws = workspaces.first(where: { $0.folderName == prefix }) {
+                return (ws, rest)
+            }
+        }
+        return nil
+    }
+
     private func validatePath(_ path: String, rootPath: String) throws -> URL {
-        guard !path.hasPrefix("/") else { throw ManifoldMCPError.invalidPath("Absolute paths not allowed") }
-        guard !path.contains("..") else { throw ManifoldMCPError.invalidPath("Path traversal not allowed") }
+        let cleaned = cleanPath(path)
+        guard !cleaned.hasPrefix("/") else { throw ManifoldMCPError.invalidPath("Absolute paths not allowed") }
+        guard !cleaned.contains("..") else { throw ManifoldMCPError.invalidPath("Path traversal not allowed") }
         let root = URL(fileURLWithPath: rootPath)
-        let resolved = root.appendingPathComponent(path).standardizedFileURL
+        let resolved = root.appendingPathComponent(cleaned).standardizedFileURL
         guard resolved.path.hasPrefix(root.standardizedFileURL.path) else {
             throw ManifoldMCPError.invalidPath("Path escapes workspace boundary")
         }
@@ -83,29 +141,52 @@ public actor ManifoldBridge {
             let workspaces = try allWorkspaces()
             guard !workspaces.isEmpty else {
                 return StatusResult(
-                    active: false, sources: [], fileCount: 0, emailCount: 0,
+                    active: false, sources: [], pausedSources: [], fileCount: 0, emailCount: 0,
                     message: "No sources configured. Open Manifold and add a folder."
                 )
             }
+
             var totalFiles = 0
-            var sourceNames: [String] = []
+            var sourceDetails: [SourceDetail] = []
+
             for ws in workspaces {
                 let root = URL(fileURLWithPath: ws.rootPath)
-                let files = (try? enumerateFiles(in: root)) ?? []
-                totalFiles += files.count
-                sourceNames.append(URL(fileURLWithPath: ws.rootPath).lastPathComponent)
+                let fileCount: Int
+                if ws.isActive {
+                    fileCount = (try? enumerateFiles(in: root).count) ?? 0
+                    totalFiles += fileCount
+                } else {
+                    fileCount = 0
+                }
+                sourceDetails.append(SourceDetail(
+                    name: ws.folderName,
+                    status: ws.isActive ? "active" : "paused",
+                    fileCount: fileCount
+                ))
             }
+
+            let activeCount = sourceDetails.filter { $0.status == "active" }.count
+            let pausedCount = sourceDetails.filter { $0.status == "paused" }.count
             let emailCount = (try? await emailFilter.sharedEmails().count) ?? 0
+
+            let sourceSummary = sourceDetails.map { "\($0.name) (\($0.status))" }.joined(separator: ", ")
+            var message = "Manifold active. \(workspaces.count) source(s): \(sourceSummary). \(totalFiles) files"
+            if pausedCount > 0 {
+                message += " (\(pausedCount) source\(pausedCount == 1 ? "" : "s") paused, not accessible)"
+            }
+            message += ", \(emailCount) emails available."
+
             return StatusResult(
-                active: true,
-                sources: sourceNames,
+                active: activeCount > 0,
+                sources: sourceDetails.filter { $0.status == "active" }.map(\.name),
+                pausedSources: sourceDetails.filter { $0.status == "paused" }.map(\.name),
                 fileCount: totalFiles,
                 emailCount: emailCount,
-                message: "Manifold active. \(workspaces.count) source(s): \(sourceNames.joined(separator: ", ")). \(totalFiles) files, \(emailCount) emails available."
+                message: message
             )
         } catch {
             return StatusResult(
-                active: false, sources: [], fileCount: 0, emailCount: 0,
+                active: false, sources: [], pausedSources: [], fileCount: 0, emailCount: 0,
                 message: "Error: \(error.localizedDescription)"
             )
         }
@@ -144,29 +225,21 @@ public actor ManifoldBridge {
     public func readFile(path: String) async throws -> String {
         await logToolCall(tool: "read_file", arguments: ["path": path])
         let workspaces = try requireWorkspaces()
+        let cleaned = cleanPath(path)
 
-        // Try each workspace to find the file
+        // Smart resolve: if path starts with a source folder name, try that workspace first
+        if let match = resolveWorkspaceAndPath(cleaned, in: workspaces) {
+            do {
+                return try await readFileFrom(
+                    resolvedPath: match.relativePath, workspace: match.workspace
+                )
+            } catch { /* fall through to normal resolution */ }
+        }
+
+        // Fall back: try each workspace with the cleaned path
         for ws in workspaces {
             do {
-                let fileURL = try validatePath(path, rootPath: ws.rootPath)
-                guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
-                let data = try Data(contentsOf: fileURL)
-
-                try? await auditStore.log(
-                    action: .fileRead,
-                    workspaceID: ws.workspaceID,
-                    agent: "cowork",
-                    filePath: path
-                )
-                ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
-                    "path": path, "action": "read", "agent": "cowork"
-                ])
-
-                if let text = String(data: data, encoding: .utf8) {
-                    return text
-                } else {
-                    return "<binary file, \(data.count) bytes>"
-                }
+                return try await readFileFrom(resolvedPath: cleaned, workspace: ws)
             } catch is ManifoldMCPError {
                 continue
             }
@@ -174,16 +247,49 @@ public actor ManifoldBridge {
         throw ManifoldMCPError.fileNotFound(path)
     }
 
+    private func readFileFrom(resolvedPath: String, workspace ws: WorkspaceInfo) async throws -> String {
+        let fileURL = try validatePath(resolvedPath, rootPath: ws.rootPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw ManifoldMCPError.fileNotFound(resolvedPath)
+        }
+        let data = try Data(contentsOf: fileURL)
+
+        try? await auditStore.log(
+            action: .fileRead,
+            workspaceID: ws.workspaceID,
+            agent: "cowork",
+            filePath: resolvedPath
+        )
+        ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
+            "path": resolvedPath, "action": "read", "agent": "cowork"
+        ])
+
+        if let text = String(data: data, encoding: .utf8) {
+            return text
+        } else {
+            return "<binary file, \(data.count) bytes>"
+        }
+    }
+
     public func writeFile(path: String, content: String) async throws -> String {
         await logToolCall(tool: "write_file", arguments: ["path": path, "content_length": "\(content.count)"])
         let workspaces = try requireWorkspaces()
-        guard !path.hasPrefix("_emails/") else {
+        let cleaned = cleanPath(path)
+        guard !cleaned.hasPrefix("_emails/") else {
             throw ManifoldMCPError.invalidPath("Cannot write to email files (read-only)")
         }
 
-        // Use first workspace that can resolve the path
-        let ws = workspaces[0]
-        let fileURL = try validatePath(path, rootPath: ws.rootPath)
+        // Smart resolve: if path starts with a source folder name, strip it
+        let ws: WorkspaceInfo
+        let resolvedPath: String
+        if let match = resolveWorkspaceAndPath(cleaned, in: workspaces) {
+            ws = match.workspace
+            resolvedPath = match.relativePath
+        } else {
+            ws = workspaces[0]
+            resolvedPath = cleaned
+        }
+        let fileURL = try validatePath(resolvedPath, rootPath: ws.rootPath)
         let data = content.data(using: .utf8) ?? Data()
         let existed = FileManager.default.fileExists(atPath: fileURL.path)
 
@@ -204,12 +310,12 @@ public actor ManifoldBridge {
         if existed {
             try await snapshotStore.recordModification(
                 runID: runID, workspaceID: ws.workspaceID,
-                filePath: path, newData: data, source: "mcp"
+                filePath: resolvedPath, newData: data, source: "mcp"
             )
         } else {
             try await snapshotStore.recordCreation(
                 runID: runID, workspaceID: ws.workspaceID,
-                filePath: path, data: data
+                filePath: resolvedPath, data: data
             )
         }
 
@@ -217,11 +323,11 @@ public actor ManifoldBridge {
             action: existed ? .fileModified : .fileCreated,
             workspaceID: ws.workspaceID,
             agent: "cowork",
-            filePath: path
+            filePath: resolvedPath
         )
         ManifoldNotification.post(ManifoldNotification.dataChanged)
 
-        return "Wrote \(data.count) bytes to \(path) in \(URL(fileURLWithPath: ws.rootPath).lastPathComponent)"
+        return "Wrote \(data.count) bytes to \(resolvedPath) in \(ws.folderName)"
     }
 
     public func searchFiles(query: String) async throws -> [(path: String, source: String, matches: [String])] {
@@ -260,10 +366,21 @@ public actor ManifoldBridge {
     public func fileInfo(path: String) async throws -> FileMetadata {
         await logToolCall(tool: "file_info", arguments: ["path": path])
         let workspaces = try requireWorkspaces()
+        let cleaned = cleanPath(path)
 
+        // Build resolution order: smart match first, then all workspaces
+        var searchOrder: [(ws: WorkspaceInfo, resolvedPath: String)] = []
+        if let match = resolveWorkspaceAndPath(cleaned, in: workspaces) {
+            searchOrder.append((match.workspace, match.relativePath))
+        }
         for ws in workspaces {
-            let fileURL = try? validatePath(path, rootPath: ws.rootPath)
+            searchOrder.append((ws, cleaned))
+        }
+
+        for entry in searchOrder {
+            let fileURL = try? validatePath(entry.resolvedPath, rootPath: entry.ws.rootPath)
             guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+            let ws = entry.ws
 
             let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             let size = (attrs[.size] as? Int) ?? 0
@@ -479,7 +596,15 @@ struct WorkspaceInfo: Sendable {
     let workspaceID: String
     let rootPath: String
     let agent: String
+    let status: String
     let createdAt: String
+
+    var folderName: String {
+        URL(fileURLWithPath: rootPath).lastPathComponent
+    }
+    var isActive: Bool {
+        status == "idle" || status == "active"
+    }
 }
 
 public struct FileInfo: Sendable {
@@ -490,9 +615,16 @@ public struct FileInfo: Sendable {
     public let lastModified: String
 }
 
+public struct SourceDetail: Sendable {
+    public let name: String
+    public let status: String
+    public let fileCount: Int
+}
+
 public struct StatusResult: Sendable {
     public let active: Bool
     public let sources: [String]
+    public let pausedSources: [String]
     public let fileCount: Int
     public let emailCount: Int
     public let message: String
@@ -525,12 +657,14 @@ public struct ChangeEntry: Sendable {
 
 public enum ManifoldMCPError: Error, LocalizedError {
     case noSources
+    case allSourcesPaused
     case invalidPath(String)
     case fileNotFound(String)
 
     public var errorDescription: String? {
         switch self {
         case .noSources: return "No sources configured. Open Manifold and add a folder."
+        case .allSourcesPaused: return "All sources are paused. Open Manifold and resume at least one source to grant access."
         case .invalidPath(let msg): return "Invalid path: \(msg)"
         case .fileNotFound(let path): return "File not found: \(path)"
         }

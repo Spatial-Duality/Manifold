@@ -163,7 +163,7 @@ class ManifoldStore {
             }
         }
         if let db {
-            approvedSources = (try? db.queryAll("SELECT root_path FROM workspaces WHERE status != 'archived'"))?.compactMap { $0["root_path"] } ?? []
+            approvedSources = (try? db.queryAll("SELECT root_path FROM workspaces WHERE status IN ('idle', 'active')"))?.compactMap { $0["root_path"] } ?? []
         }
     }
 
@@ -185,12 +185,13 @@ class ManifoldStore {
         approvedSources.removeAll { $0 == path }
         let folderName = URL(fileURLWithPath: path).lastPathComponent
         Task {
-            // Archive the workspace instead of deleting
+            // Mark as removed — distinct from "archived" (paused) so it hides from dashboard
             if let ws = workspaces.first(where: { $0.rootPath == path }) {
-                try? await leaseManager?.updateWorkspaceStatus(workspaceID: ws.workspaceID, status: "archived")
+                try? await leaseManager?.updateWorkspaceStatus(workspaceID: ws.workspaceID, status: "removed")
             }
             try? await auditStore?.log(action: .sourceRemoved, filePath: path, metadata: ["folder": folderName])
             await loadWorkspaces()
+            await refresh()
         }
     }
 
@@ -225,7 +226,7 @@ class ManifoldStore {
     func enumerateAllFiles() -> [SourceFile] {
         let fm = FileManager.default
         var result: [SourceFile] = []
-        let activeWorkspaces = workspaces.filter { $0.status != "archived" }
+        let activeWorkspaces = workspaces.filter { $0.status == "idle" || $0.status == "active" }
 
         for ws in activeWorkspaces {
             let root = URL(fileURLWithPath: ws.rootPath)
@@ -249,7 +250,7 @@ class ManifoldStore {
                     fileExtension: url.pathExtension.lowercased(),
                     sizeBytes: values.fileSize ?? 0,
                     modifiedDate: values.contentModificationDate ?? Date.distantPast,
-                    isGrantedToClaude: ws.status != "archived"
+                    isGrantedToClaude: ws.status == "idle" || ws.status == "active"
                 ))
             }
         }
@@ -259,7 +260,7 @@ class ManifoldStore {
     /// Search file contents across all sources.
     func searchFileContents(query: String, includeArchived: Bool = false) -> [SearchResult] {
         let fm = FileManager.default
-        let relevantWorkspaces = includeArchived ? workspaces : workspaces.filter { $0.status != "archived" }
+        let relevantWorkspaces = includeArchived ? workspaces : workspaces.filter { $0.status == "idle" || $0.status == "active" }
         var results: [SearchResult] = []
 
         for ws in relevantWorkspaces {
@@ -287,7 +288,7 @@ class ManifoldStore {
                         fileName: url.lastPathComponent,
                         filePath: url.path,
                         sourceName: sourceName,
-                        isGranted: ws.status != "archived",
+                        isGranted: ws.status == "idle" || ws.status == "active",
                         matches: Array(matches)
                     ))
                 }
@@ -443,7 +444,7 @@ class ManifoldStore {
         }
 
         // 2. Find the full path via workspaces
-        let activeWorkspaces = workspaces.filter { $0.status != "archived" }
+        let activeWorkspaces = workspaces.filter { $0.status == "idle" || $0.status == "active" }
         var fullPath: String?
         for ws in activeWorkspaces {
             let candidate = URL(fileURLWithPath: ws.rootPath).appendingPathComponent(filePath).path
@@ -490,7 +491,7 @@ class ManifoldStore {
         guard let beforeHash = event.beforeHash, let filePath = event.filePath else { return .blobPruned }
         guard let blobData = try? await contentStore?.retrieve(hash: beforeHash) else { return .blobPruned }
 
-        let activeWorkspaces = workspaces.filter { $0.status != "archived" }
+        let activeWorkspaces = workspaces.filter { $0.status == "idle" || $0.status == "active" }
         guard let ws = activeWorkspaces.first else { return .error("No workspace found") }
         let targetPath = URL(fileURLWithPath: ws.rootPath).appendingPathComponent(filePath).path
 

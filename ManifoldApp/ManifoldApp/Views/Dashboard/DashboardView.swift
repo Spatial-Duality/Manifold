@@ -16,17 +16,23 @@ struct DashboardView: View {
     }
 
     private var sourceSummary: String {
-        let active = store.workspaces.filter { $0.status != "archived" }
-        let total = store.workspaces.count
-        if total == 0 { return "No folders added" }
-        return "\(active.count) active, \(total) total"
+        let visible = visibleWorkspaces
+        let active = visible.filter { $0.status != "archived" }
+        if visible.isEmpty { return "No folders added" }
+        if active.count == visible.count { return "\(active.count) source\(active.count == 1 ? "" : "s")" }
+        return "\(active.count) active, \(visible.count - active.count) paused"
     }
 
     // MARK: - Sources
 
+    /// Workspaces visible in the dashboard — excludes removed sources.
+    private var visibleWorkspaces: [WorkspaceRecord] {
+        store.workspaces.filter { $0.status != "removed" }
+    }
+
     @ViewBuilder
     private var sourcesContent: some View {
-        if store.workspaces.isEmpty {
+        if visibleWorkspaces.isEmpty {
             Section {
                 VStack(spacing: 12) {
                     Image(systemName: "folder.badge.plus")
@@ -49,7 +55,7 @@ struct DashboardView: View {
             }
         } else {
             Section {
-                ForEach(store.workspaces, id: \.workspaceID) { ws in
+                ForEach(visibleWorkspaces, id: \.workspaceID) { ws in
                     SourceCardRow(workspace: ws)
                 }
             }
