@@ -4,9 +4,17 @@ import Foundation
 /// Merges with existing config — never overwrites other servers.
 public struct ConfigWriter {
     private let binaryPath: String
+    private let homeDir: URL
 
     public init(binaryPath: String) {
         self.binaryPath = binaryPath
+        self.homeDir = FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    /// Test-only initializer with custom home directory.
+    public init(binaryPath: String, homeDir: URL) {
+        self.binaryPath = binaryPath
+        self.homeDir = homeDir
     }
 
     /// Install config for both Claude Desktop and Codex.
@@ -17,8 +25,7 @@ public struct ConfigWriter {
 
     /// Write to ~/Library/Application Support/Claude/claude_desktop_config.json
     public func installClaudeDesktop() throws {
-        let configDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Claude")
+        let configDir = homeDir.appendingPathComponent("Library/Application Support/Claude")
         let configFile = configDir.appendingPathComponent("claude_desktop_config.json")
 
         var config: [String: Any] = [:]
@@ -47,8 +54,7 @@ public struct ConfigWriter {
 
     /// Write to ~/.codex/config.toml
     public func installCodex() throws {
-        let configDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex")
+        let configDir = homeDir.appendingPathComponent(".codex")
         let configFile = configDir.appendingPathComponent("config.toml")
 
         // Only install if Codex directory exists
