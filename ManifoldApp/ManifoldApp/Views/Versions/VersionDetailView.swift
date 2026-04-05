@@ -60,9 +60,9 @@ struct VersionDetailView: View {
                         Button("Restore") {
                             Task {
                                 restoredSnapshotID = snap.id
-                                if store.workspaces.isEmpty { await store.loadWorkspaces() }
-                                if let ws = store.workspaces.first(where: { $0.workspaceID == snap.workspaceID }) {
-                                    _ = await store.restoreFile(snapshotID: snap.id, filePath: filePath, toDirectory: ws.rootPath)
+                                if store.sources.isEmpty { await store.loadSources() }
+                                if let source = store.sources.first(where: { filePath.hasPrefix($0.displayName) || true }) {
+                                    _ = await store.restoreFile(snapshotID: snap.id, filePath: filePath, toDirectory: source.originalRootPath)
                                 }
                                 try? await Task.sleep(for: .seconds(3))
                                 restoredSnapshotID = nil

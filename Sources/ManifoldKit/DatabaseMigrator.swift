@@ -83,5 +83,151 @@ public struct DatabaseMigrator {
             }
             try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)")
         },
+
+        // v3: Content boundary tables — sources, grants, grant_sources, email_messages,
+        // grant_emails, promotions, session_summaries. These run alongside existing
+        // workspaces/runs tables (old UI keeps working).
+        Migration(version: 3, name: "content_boundary_tables") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS sources (
+                    source_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    original_root_path TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL DEFAULT 'idle',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS grants (
+                    grant_id TEXT PRIMARY KEY,
+                    target_app TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    materialization_root TEXT NOT NULL,
+                    inactivity_deadline TEXT,
+                    refresh_of_grant_id TEXT,
+                    FOREIGN KEY(refresh_of_grant_id) REFERENCES grants(grant_id)
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_grants_status ON grants(status)"
+            )
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_grants_target_profile ON grants(target_app, profile_id)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS grant_sources (
+                    grant_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    mount_name TEXT NOT NULL,
+                    baseline_manifest_hash TEXT,
+                    PRIMARY KEY(grant_id, source_id),
+                    FOREIGN KEY(grant_id) REFERENCES grants(grant_id),
+                    FOREIGN KEY(source_id) REFERENCES sources(source_id)
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_messages (
+                    email_id TEXT PRIMARY KEY,
+                    account TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    recipients TEXT NOT NULL DEFAULT '',
+                    subject TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    content_hash TEXT,
+                    preview TEXT,
+                    classification_status TEXT NOT NULL DEFAULT 'pending',
+                    hidden_reason TEXT
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_emails_classification ON email_messages(classification_status)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS grant_emails (
+                    grant_id TEXT NOT NULL,
+                    email_id TEXT NOT NULL,
+                    materialized_path TEXT NOT NULL,
+                    PRIMARY KEY(grant_id, email_id),
+                    FOREIGN KEY(grant_id) REFERENCES grants(grant_id),
+                    FOREIGN KEY(email_id) REFERENCES email_messages(email_id)
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS promotions (
+                    promotion_id TEXT PRIMARY KEY,
+                    grant_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    result TEXT NOT NULL,
+                    original_before_hash TEXT,
+                    promoted_hash TEXT,
+                    conflict_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(grant_id) REFERENCES grants(grant_id),
+                    FOREIGN KEY(source_id) REFERENCES sources(source_id)
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_promotions_grant ON promotions(grant_id)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS session_summaries (
+                    summary_id TEXT PRIMARY KEY,
+                    grant_id TEXT NOT NULL,
+                    target_app TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    summary_markdown TEXT NOT NULL,
+                    summary_json_hash TEXT,
+                    FOREIGN KEY(grant_id) REFERENCES grants(grant_id)
+                )
+            """)
+        },
+
+        // v4: Migrate existing workspaces into sources.
+        // Each workspace becomes a source. The workspace_id maps to source_id,
+        // root_path to original_root_path. Workspace status maps directly (idle, active, paused, removed).
+        // Skips if sources table already has rows (idempotent).
+        Migration(version: 4, name: "migrate_workspaces_to_sources") { db in
+            let tables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'"
+            )
+            guard !tables.isEmpty else { return }
+
+            let existing = try db.queryScalar(
+                "SELECT COUNT(*) FROM sources"
+            )
+            guard existing == "0" || existing == nil else { return }
+
+            let workspaces = try db.queryAll(
+                "SELECT * FROM workspaces ORDER BY created_at ASC"
+            )
+            for ws in workspaces {
+                guard let wsID = ws["workspace_id"],
+                      let rootPath = ws["root_path"],
+                      let status = ws["status"],
+                      let createdAt = ws["created_at"],
+                      let updatedAt = ws["updated_at"] else { continue }
+                let displayName = URL(fileURLWithPath: rootPath).lastPathComponent
+                try db.execute("""
+                    INSERT OR IGNORE INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, params: [wsID, displayName, rootPath, status, createdAt, updatedAt])
+            }
+            if !workspaces.isEmpty {
+                logger.info("Migrated \(workspaces.count) workspaces to sources")
+            }
+        },
     ]
 }

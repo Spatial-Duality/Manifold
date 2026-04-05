@@ -94,7 +94,7 @@ struct FilesView: View {
                 ContentUnavailableView(
                     "No Files",
                     systemImage: "doc",
-                    description: Text(store.workspaces.isEmpty ? "Add a source folder first." : "No files match your filters.")
+                    description: Text(store.sources.isEmpty ? "Add a source folder first." : "No files match your filters.")
                 )
             } else {
                 List(filteredFiles) { file in
@@ -143,9 +143,9 @@ struct FilesView: View {
             }
         }
         .navigationTitle("Files")
-        .navigationSubtitle("\(allFiles.count) files across \(store.workspaces.filter { $0.status != "archived" }.count) sources")
+        .navigationSubtitle("\(allFiles.count) files across \(store.sources.filter(\.isAccessible).count) sources")
         .task { reloadFiles() }
-        .onChange(of: store.workspaces.count) { _, _ in Task { @MainActor in reloadFiles() } }
+        .onChange(of: store.sources.count) { _, _ in Task { @MainActor in reloadFiles() } }
         .onChange(of: searchText) { _, _ in
             nameFilterTask?.cancel()
             nameFilterTask = Task { @MainActor in

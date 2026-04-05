@@ -161,9 +161,83 @@ struct ConfigWriterTests {
         #expect(content == existing, "Config unchanged when manifold already present")
     }
 
+    // MARK: - Claude Code Config Tests
+
+    @Test("Claude Code fresh install creates settings.json")
+    func freshClaudeCodeInstall() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installClaudeCode()
+
+        let configFile = home.appendingPathComponent(".claude/settings.json")
+        let data = try Data(contentsOf: configFile)
+        let config = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+        let manifold = servers["manifold"] as! [String: Any]
+
+        #expect(manifold["command"] as? String == "/usr/bin/manifold-mcp")
+    }
+
+    @Test("Claude Code install preserves existing settings")
+    func claudeCodePreservesExisting() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let existing: [String: Any] = [
+            "permissions": ["allow": ["Read"]] as [String: Any],
+            "mcpServers": [
+                "other-server": ["command": "other"] as [String: Any],
+            ] as [String: Any],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: existing, options: .prettyPrinted)
+        try data.write(to: configDir.appendingPathComponent("settings.json"))
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installClaudeCode()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("settings.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+
+        #expect(servers.count == 2, "other-server + manifold")
+        #expect(servers["other-server"] != nil)
+        #expect(servers["manifold"] != nil)
+        #expect(config["permissions"] != nil, "Non-MCP settings preserved")
+    }
+
+    @Test("Claude Code install skips when manifold already configured")
+    func claudeCodeSkipDuplicate() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let existing: [String: Any] = [
+            "mcpServers": [
+                "manifold": ["command": "/old/path"] as [String: Any],
+            ] as [String: Any],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: existing, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configDir.appendingPathComponent("settings.json"))
+
+        let writer = ConfigWriter(binaryPath: "/new/path/manifold-mcp", homeDir: home)
+        try writer.installClaudeCode()
+
+        // Should not update existing entry
+        let result = try Data(contentsOf: configDir.appendingPathComponent("settings.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+        let manifold = servers["manifold"] as! [String: Any]
+        #expect(manifold["command"] as? String == "/old/path", "Existing entry not overwritten")
+    }
+
     // MARK: - installAll
 
-    @Test("installAll configures both targets")
+    @Test("installAll configures all targets")
     func installAll() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }
@@ -175,9 +249,11 @@ struct ConfigWriterTests {
         try writer.installAll()
 
         let claudeConfig = home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
+        let claudeCodeConfig = home.appendingPathComponent(".claude/settings.json")
         let codexConfig = home.appendingPathComponent(".codex/config.toml")
 
         #expect(FileManager.default.fileExists(atPath: claudeConfig.path))
+        #expect(FileManager.default.fileExists(atPath: claudeCodeConfig.path))
         #expect(FileManager.default.fileExists(atPath: codexConfig.path))
     }
 }

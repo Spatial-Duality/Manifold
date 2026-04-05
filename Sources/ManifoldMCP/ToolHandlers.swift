@@ -79,6 +79,27 @@ enum ToolHandlers {
                     "file_path": ["type": "string", "description": "Path of the file inside the archive"],
                 ], required: ["archive_path", "file_path"])
             ),
+            MCPTool(
+                name: "list_sessions",
+                description: "List past session summaries. Each session represents a grant lifecycle (start → agent work → promote → end).",
+                inputSchema: objectSchema(properties: [
+                    "limit": ["type": "string", "description": "Max sessions to return (default 20)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "get_session",
+                description: "Get full detail for a past session: summary, files modified, files conflicted, and promotion results.",
+                inputSchema: objectSchema(properties: [
+                    "grant_id": ["type": "string", "description": "The grant ID from list_sessions"],
+                ], required: ["grant_id"])
+            ),
+            MCPTool(
+                name: "save_session_note",
+                description: "Save a note or summary for the current active session. Useful for recording what you accomplished.",
+                inputSchema: objectSchema(properties: [
+                    "note": ["type": "string", "description": "Markdown note about the session"],
+                ], required: ["note"])
+            ),
         ]
     }
 
@@ -177,6 +198,29 @@ enum ToolHandlers {
                 let content = try await bridge.extractFile(archivePath: archivePath, filePath: filePath)
                 return textResult(content)
 
+            case "list_sessions":
+                let limit = (arguments["limit"] as? String).flatMap(Int.init) ?? 20
+                let sessions = try await bridge.listSessions(limit: limit)
+                if sessions.isEmpty { return textResult("No past sessions recorded.") }
+                let formatted = sessions.map { s in
+                    "[\(s.grantID.prefix(12))...] \(s.targetApp) | \(s.startedAt.prefix(10)) → \(s.endedAt.prefix(10))\n  \(s.summaryPreview)"
+                }
+                return textResult("Past sessions (\(sessions.count)):\n\n" + formatted.joined(separator: "\n\n"))
+
+            case "get_session":
+                guard let grantID = arguments["grant_id"] as? String else {
+                    return errorResult("'grant_id' parameter required")
+                }
+                let detail = try await bridge.getSession(grantID: grantID)
+                return textResult(formatSessionDetail(detail))
+
+            case "save_session_note":
+                guard let note = arguments["note"] as? String else {
+                    return errorResult("'note' parameter required")
+                }
+                let msg = try await bridge.saveSessionNote(note: note)
+                return textResult(msg)
+
             default:
                 return errorResult("Unknown tool: \(name)")
             }
@@ -197,10 +241,13 @@ enum ToolHandlers {
 
     private static func formatStatus(_ status: StatusResult) -> String {
         if status.active {
-            var lines = [
-                "Status: ACTIVE",
-                "Active sources: \(status.sources.joined(separator: ", "))",
-            ]
+            var lines: [String] = []
+            if let grantID = status.grantID {
+                lines.append("Status: ACTIVE (grant \(grantID.prefix(12))...)")
+            } else {
+                lines.append("Status: ACTIVE (legacy mode)")
+            }
+            lines.append("Active sources: \(status.sources.joined(separator: ", "))")
             if !status.pausedSources.isEmpty {
                 lines.append("Paused sources (not accessible): \(status.pausedSources.joined(separator: ", "))")
             }
@@ -217,6 +264,37 @@ enum ToolHandlers {
         } else {
             return status.message
         }
+    }
+
+    private static func formatSessionDetail(_ d: SessionDetail) -> String {
+        var lines: [String] = []
+        lines.append("Grant: \(d.grantID)")
+        lines.append("Target: \(d.targetApp)")
+        lines.append("Status: \(d.status)")
+        lines.append("Started: \(d.startedAt)")
+        if let ended = d.endedAt { lines.append("Ended: \(ended)") }
+        lines.append("Sources: \(d.sources.joined(separator: ", "))")
+        lines.append("")
+
+        if let summary = d.summaryMarkdown {
+            lines.append(summary)
+        } else {
+            lines.append("No summary recorded.")
+        }
+
+        if !d.filesApplied.isEmpty {
+            lines.append("\nFiles applied (\(d.filesApplied.count)):")
+            for f in d.filesApplied { lines.append("  ✓ \(f)") }
+        }
+        if !d.filesConflicted.isEmpty {
+            lines.append("\nFiles conflicted (\(d.filesConflicted.count)):")
+            for f in d.filesConflicted { lines.append("  ✗ \(f)") }
+        }
+        if d.totalPromotions == 0 {
+            lines.append("\nNo file promotions recorded.")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Schema Builders

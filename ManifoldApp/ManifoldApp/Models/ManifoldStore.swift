@@ -41,7 +41,7 @@ class ManifoldStore {
 
     // Sources
     var approvedSources: [String] = []
-    var workspaces: [WorkspaceRecord] = []
+    // workspaces removed — source management now uses GrantStore.sources
 
     // Emails
     var emailRules: [EmailRule] = []
@@ -69,16 +69,21 @@ class ManifoldStore {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "manifold.onboarding.completed") }
     }
 
+    // Grant lifecycle
+    var activeGrant: GrantRecord?
+    var activeGrantSources: [GrantSourceRecord] = []
+    var sources: [SourceRecord] = []
+
     // Internal
     private var auditStore: AuditStore?
     private var emailFilter: EmailFilter?
     private(set) var snapshotStore: SnapshotStore?
     private(set) var contentStore: ContentStore?
     private var leaseManager: WorkspaceLeaseManager?
+    private(set) var grantStore: GrantStore?
     private var db: DatabaseConnection?
     private var pollTimer: Timer?
     private var notificationObservers: [NSObjectProtocol] = []
-    private var runTimers: [String: Timer] = [:]
     private let mailConnector = AppleMailConnector()
 
     var menuBarIcon: String { isConnected ? "shield.checkered.fill" : "shield.checkered" }
@@ -111,6 +116,7 @@ class ManifoldStore {
             self.snapshotStore = try SnapshotStore(db: connection, contentStore: contentStore)
             self.emailFilter = try EmailFilter(db: connection)
             self.leaseManager = try WorkspaceLeaseManager(db: connection, snapshotStore: self.snapshotStore!)
+            self.grantStore = GrantStore(db: connection)
             checkMCPInstalled(); checkAgentConfigs()
             await refresh()
             _ = try? await self.snapshotStore?.pruneByAge(days: 30)
@@ -177,13 +183,7 @@ class ManifoldStore {
                 connectedAgent = recent.agent ?? "Claude"
             }
         }
-        if let db {
-            do {
-                approvedSources = try db.queryAll("SELECT root_path FROM workspaces WHERE status IN ('idle', 'active')").compactMap { $0["root_path"] }
-            } catch {
-                logger.error("Failed to load sources: \(error.localizedDescription)")
-            }
-        }
+        await loadSources()
     }
 
     // MARK: - Sources
@@ -194,14 +194,15 @@ class ManifoldStore {
         let folderName = URL(fileURLWithPath: path).lastPathComponent
         Task {
             do {
-                let wsID = "ws-\(UUID().uuidString.prefix(8).lowercased())"
-                try await leaseManager?.registerWorkspace(id: wsID, profileID: "default", rootPath: path, agent: "cowork")
+                if try await grantStore?.source(byPath: path) == nil {
+                    try await grantStore?.addSource(displayName: folderName, rootPath: path)
+                }
                 try? await auditStore?.log(action: .sourceAdded, filePath: path, metadata: ["folder": folderName])
             } catch {
                 logger.error("Failed to register source \(folderName): \(error.localizedDescription)")
                 lastError = "Failed to add \(folderName)"
             }
-            await loadWorkspaces()
+            await loadSources()
         }
     }
 
@@ -210,38 +211,38 @@ class ManifoldStore {
         let folderName = URL(fileURLWithPath: path).lastPathComponent
         Task {
             do {
-                if let ws = workspaces.first(where: { $0.rootPath == path }) {
-                    try await leaseManager?.updateWorkspaceStatus(workspaceID: ws.workspaceID, status: "removed")
+                if let source = try await grantStore?.source(byPath: path) {
+                    try await grantStore?.removeSource(sourceID: source.sourceID)
                 }
                 try? await auditStore?.log(action: .sourceRemoved, filePath: path, metadata: ["folder": folderName])
             } catch {
                 logger.error("Failed to remove source \(folderName): \(error.localizedDescription)")
                 lastError = "Failed to remove \(folderName)"
             }
-            await loadWorkspaces()
+            await loadSources()
             await refresh()
         }
     }
 
-    func pauseSource(workspaceID: String) async {
+    func pauseSource(sourceID: String) async {
         do {
-            try await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "archived")
+            try await grantStore?.pauseSource(sourceID: sourceID)
         } catch {
             logger.error("Failed to pause source: \(error.localizedDescription)")
             lastError = "Failed to pause source"
         }
-        await loadWorkspaces()
+        await loadSources()
         await refresh()
     }
 
-    func resumeSource(workspaceID: String) async {
+    func resumeSource(sourceID: String) async {
         do {
-            try await leaseManager?.updateWorkspaceStatus(workspaceID: workspaceID, status: "idle")
+            try await grantStore?.resumeSource(sourceID: sourceID)
         } catch {
             logger.error("Failed to resume source: \(error.localizedDescription)")
             lastError = "Failed to resume source"
         }
-        await loadWorkspaces()
+        await loadSources()
         await refresh()
     }
 
@@ -264,11 +265,10 @@ class ManifoldStore {
     func enumerateAllFiles() -> [SourceFile] {
         let fm = FileManager.default
         var result: [SourceFile] = []
-        let activeWorkspaces = workspaces.filter { $0.status == "idle" || $0.status == "active" }
+        let activeSources = sources.filter(\.isAccessible)
 
-        for ws in activeWorkspaces {
-            let root = URL(fileURLWithPath: ws.rootPath)
-            let sourceName = root.lastPathComponent
+        for source in activeSources {
+            let root = URL(fileURLWithPath: source.originalRootPath)
             guard let enumerator = fm.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
@@ -283,12 +283,12 @@ class ManifoldStore {
                     name: url.lastPathComponent,
                     path: url.path,
                     relativePath: relativePath,
-                    sourceName: sourceName,
-                    sourceWorkspaceID: ws.workspaceID,
+                    sourceName: source.displayName,
+                    sourceID: source.sourceID,
                     fileExtension: url.pathExtension.lowercased(),
                     sizeBytes: values.fileSize ?? 0,
                     modifiedDate: values.contentModificationDate ?? Date.distantPast,
-                    isGrantedToClaude: ws.status == "idle" || ws.status == "active"
+                    isGrantedToClaude: source.isAccessible
                 ))
             }
         }
@@ -298,12 +298,11 @@ class ManifoldStore {
     /// Search file contents across all sources.
     func searchFileContents(query: String, includeArchived: Bool = false) -> [SearchResult] {
         let fm = FileManager.default
-        let relevantWorkspaces = includeArchived ? workspaces : workspaces.filter { $0.status == "idle" || $0.status == "active" }
+        let relevantSources = includeArchived ? sources : sources.filter(\.isAccessible)
         var results: [SearchResult] = []
 
-        for ws in relevantWorkspaces {
-            let root = URL(fileURLWithPath: ws.rootPath)
-            let sourceName = root.lastPathComponent
+        for source in relevantSources {
+            let root = URL(fileURLWithPath: source.originalRootPath)
             guard let enumerator = fm.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isRegularFileKey],
@@ -325,8 +324,8 @@ class ManifoldStore {
                     results.append(SearchResult(
                         fileName: url.lastPathComponent,
                         filePath: url.path,
-                        sourceName: sourceName,
-                        isGranted: ws.status == "idle" || ws.status == "active",
+                        sourceName: source.displayName,
+                        isGranted: source.isAccessible,
                         matches: Array(matches)
                     ))
                 }
@@ -336,45 +335,196 @@ class ManifoldStore {
         return results
     }
 
-    func loadWorkspaces() async {
+    func loadSources() async {
         do {
-            workspaces = try await leaseManager?.allWorkspaces() ?? []
+            sources = try await grantStore?.activeSources() ?? []
+            approvedSources = sources.filter(\.isAccessible).map(\.originalRootPath)
         } catch {
-            logger.error("Failed to load workspaces: \(error.localizedDescription)")
-            lastError = "Unable to load sources"
-            workspaces = []
+            logger.error("Failed to load sources: \(error.localizedDescription)")
+            sources = []
         }
     }
 
-    func activeRunForWorkspace(_ workspaceID: String) async -> RunRecord? {
-        try? await leaseManager?.activeRun(workspaceID: workspaceID)
-    }
+    // MARK: - Grant Lifecycle
 
-    func runsForWorkspace(_ workspaceID: String) async -> [RunRecord] {
-        (try? await leaseManager?.runs(workspaceID: workspaceID)) ?? []
-    }
-
-    func startRun(workspaceID: String, agent: String) async {
+    /// Start a new session: creates a grant, materializes sources, sets baseline hashes.
+    func startSession(targetApp: TargetApp = .cowork) async {
+        guard let grantStore else { return }
         do {
-            _ = try await leaseManager?.startRun(workspaceID: workspaceID, agent: agent, trigger: .userGrant)
-            try? await auditStore?.log(action: .runStart, workspaceID: workspaceID, agent: agent)
+            let activeSources = try await grantStore.activeSources()
+            guard !activeSources.isEmpty else {
+                lastError = "No active sources. Add a folder first."
+                return
+            }
+
+            let sourceIDs = activeSources.map(\.sourceID)
+            let matRoot = Self.materializationRoot(grantID: "pending")
+            let grant = try await grantStore.startGrant(
+                targetApp: targetApp,
+                profileID: "default",
+                sourceIDs: sourceIDs,
+                materializationRoot: Self.materializationRoot(grantID: "").path
+            )
+
+            // Update materialization root with actual grant ID
+            let actualRoot = Self.materializationRoot(grantID: grant.grantID)
+            try await grantStore.updateMaterializationRoot(grantID: grant.grantID, root: actualRoot.path)
+
+            // Materialize
+            let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+            let mountInputs = grantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
+                guard let source = activeSources.first(where: { $0.sourceID == gs.sourceID }) else { return nil }
+                return (source: source, mountName: gs.mountName)
+            }
+
+            let results = try MaterializationEngine.materialize(
+                grantID: grant.grantID,
+                sources: mountInputs,
+                materializationRoot: actualRoot.path
+            )
+
+            // Store baseline hashes
+            for result in results {
+                try await grantStore.setBaselineHash(
+                    grantID: grant.grantID,
+                    sourceID: result.sourceID,
+                    hash: result.manifestHash
+                )
+            }
+
+            // Update local state
+            activeGrant = try await grantStore.grant(id: grant.grantID)
+            activeGrantSources = grantSources
+            try? await auditStore?.log(action: .runStart, agent: targetApp.rawValue, metadata: ["grant_id": grant.grantID])
+            logger.info("Session started: \(grant.grantID) with \(results.count) sources")
         } catch {
-            logger.error("Failed to start run: \(error.localizedDescription)")
-            lastError = "Failed to grant access"
+            logger.error("Failed to start session: \(error.localizedDescription)")
+            lastError = "Failed to start session: \(error.localizedDescription)"
         }
-        await loadWorkspaces(); await refresh()
+        await refresh()
     }
 
-    func endRun(runID: String) async {
+    /// End the current session: promotes changes, ends grant.
+    func endSession() async {
+        guard let grantStore, let grant = activeGrant else { return }
         do {
-            try await leaseManager?.endRun(runID: runID)
-            try? await auditStore?.log(action: .runEnd)
+            // Promote changes back to originals
+            let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+            let activeSrcs = try await grantStore.activeSources() + (try await grantStore.allSources())
+            let matRoot = URL(fileURLWithPath: grant.materializationRoot)
+
+            for gs in grantSources {
+                guard let source = activeSrcs.first(where: { $0.sourceID == gs.sourceID }) else { continue }
+                let mountURL = matRoot.appendingPathComponent(gs.mountName)
+                let originalURL = URL(fileURLWithPath: source.originalRootPath)
+
+                guard FileManager.default.fileExists(atPath: mountURL.path) else { continue }
+
+                let summary = try PromoteEngine.promote(
+                    sourceID: gs.sourceID,
+                    mountName: gs.mountName,
+                    mountURL: mountURL,
+                    originalURL: originalURL
+                )
+
+                // Record promotions
+                for file in summary.applied + summary.newFiles {
+                    try await grantStore.recordPromotion(
+                        grantID: grant.grantID, sourceID: gs.sourceID,
+                        relativePath: file.relativePath, result: file.result,
+                        originalBeforeHash: file.originalBeforeHash,
+                        promotedHash: file.promotedHash
+                    )
+                }
+                for file in summary.conflicts {
+                    try await grantStore.recordPromotion(
+                        grantID: grant.grantID, sourceID: gs.sourceID,
+                        relativePath: file.relativePath, result: .conflict,
+                        originalBeforeHash: file.originalBeforeHash,
+                        promotedHash: file.promotedHash,
+                        conflictReason: file.conflictReason
+                    )
+                }
+
+                if !summary.conflicts.isEmpty {
+                    lastError = "\(summary.conflicts.count) conflict(s) during promote. Check activity for details."
+                }
+            }
+
+            // Auto-generate session summary
+            try? await generateSessionSummary(grantID: grant.grantID)
+
+            try await grantStore.endGrant(grantID: grant.grantID)
+            try? await auditStore?.log(action: .runEnd, metadata: ["grant_id": grant.grantID])
+            activeGrant = nil
+            activeGrantSources = []
+            logger.info("Session ended: \(grant.grantID)")
         } catch {
-            logger.error("Failed to end run: \(error.localizedDescription)")
-            lastError = "Failed to end access"
+            logger.error("Failed to end session: \(error.localizedDescription)")
+            lastError = "Failed to end session: \(error.localizedDescription)"
         }
-        runTimers[runID]?.invalidate(); runTimers.removeValue(forKey: runID)
-        await loadWorkspaces(); await refresh()
+        await refresh()
+    }
+
+    /// Refresh grant state from database.
+    func refreshGrantState() async {
+        guard let grantStore else { return }
+        do {
+            activeGrant = try await grantStore.activeGrant(targetApp: .cowork, profileID: "default")
+            if let grant = activeGrant {
+                activeGrantSources = try await grantStore.grantSources(grantID: grant.grantID)
+            } else {
+                activeGrantSources = []
+            }
+        } catch {
+            logger.error("Failed to refresh grant state: \(error.localizedDescription)")
+        }
+    }
+
+    var hasActiveSession: Bool { activeGrant?.isActive == true }
+
+    /// Generate and store a Markdown session summary from grant promotions.
+    private func generateSessionSummary(grantID: String) async throws {
+        guard let grantStore else { return }
+        let grant = try await grantStore.grant(id: grantID)
+        let promotions = try await grantStore.promotions(grantID: grantID)
+        let grantSources = try await grantStore.grantSources(grantID: grantID)
+
+        let applied = promotions.filter { $0.result == "applied" }
+        let conflicts = promotions.filter { $0.result == "conflict" }
+
+        var lines: [String] = []
+        lines.append("# Session Summary")
+        lines.append("")
+        lines.append("- **Grant:** \(grantID.prefix(12))...")
+        lines.append("- **Sources:** \(grantSources.map(\.mountName).joined(separator: ", "))")
+        if !applied.isEmpty {
+            lines.append("")
+            lines.append("## Files Modified (\(applied.count))")
+            for p in applied { lines.append("- `\(p.relativePath)`") }
+        }
+        if !conflicts.isEmpty {
+            lines.append("")
+            lines.append("## Conflicts (\(conflicts.count))")
+            for p in conflicts { lines.append("- `\(p.relativePath)` — \(p.conflictReason ?? "original changed")") }
+        }
+        if promotions.isEmpty {
+            lines.append("\n_No file changes recorded._")
+        }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        try await grantStore.saveSummary(
+            grantID: grantID,
+            targetApp: TargetApp(rawValue: grant?.targetApp ?? "cowork") ?? .cowork,
+            startedAt: grant?.startedAt ?? now,
+            endedAt: grant?.endedAt ?? now,
+            markdown: lines.joined(separator: "\n")
+        )
+    }
+
+    static func materializationRoot(grantID: String) -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return appSupport.appendingPathComponent("Manifold/materializations/\(grantID)/workspace")
     }
 
     // MARK: - Emails
@@ -514,19 +664,18 @@ class ManifoldStore {
             return .blobPruned
         }
 
-        // 2. Find the full path via workspaces
-        let activeWorkspaces = workspaces.filter { $0.status == "idle" || $0.status == "active" }
+        // 2. Find the full path via sources
+        let activeSources = sources.filter(\.isAccessible)
         var fullPath: String?
-        for ws in activeWorkspaces {
-            let candidate = URL(fileURLWithPath: ws.rootPath).appendingPathComponent(filePath).path
+        for source in activeSources {
+            let candidate = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(filePath).path
             if FileManager.default.fileExists(atPath: candidate) {
                 fullPath = candidate
                 break
             }
-            // File might have been deleted — use first workspace
             if fullPath == nil { fullPath = candidate }
         }
-        guard let targetPath = fullPath else { return .error("No workspace found") }
+        guard let targetPath = fullPath else { return .error("No sources configured") }
 
         // 3. Check content drift
         if FileManager.default.fileExists(atPath: targetPath) {
@@ -562,9 +711,9 @@ class ManifoldStore {
         guard let beforeHash = event.beforeHash, let filePath = event.filePath else { return .blobPruned }
         guard let blobData = try? await contentStore?.retrieve(hash: beforeHash) else { return .blobPruned }
 
-        let activeWorkspaces = workspaces.filter { $0.status == "idle" || $0.status == "active" }
-        guard let ws = activeWorkspaces.first else { return .error("No workspace found") }
-        let targetPath = URL(fileURLWithPath: ws.rootPath).appendingPathComponent(filePath).path
+        let activeSources = sources.filter(\.isAccessible)
+        guard let source = activeSources.first else { return .error("No sources configured") }
+        let targetPath = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(filePath).path
 
         do {
             let targetURL = URL(fileURLWithPath: targetPath)
@@ -625,7 +774,8 @@ class ManifoldStore {
     }
 
     func loadSummary() async {
-        await loadWorkspaces(); await loadStorageStats(); await loadTrackedFiles(); await reclassifyEmails()
+        await loadSources(); await refreshGrantState()
+        await loadStorageStats(); await loadTrackedFiles(); await reclassifyEmails()
         await loadSessions()
     }
 
@@ -645,7 +795,7 @@ struct SourceFile: Identifiable, Sendable {
     let path: String
     let relativePath: String
     let sourceName: String
-    let sourceWorkspaceID: String
+    let sourceID: String
     let fileExtension: String
     let sizeBytes: Int
     let modifiedDate: Date

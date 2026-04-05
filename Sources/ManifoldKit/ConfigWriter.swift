@@ -17,9 +17,10 @@ public struct ConfigWriter {
         self.homeDir = homeDir
     }
 
-    /// Install config for both Claude Desktop and Codex.
+    /// Install config for Claude Desktop, Claude Code, and Codex.
     public func installAll() throws {
         try installClaudeDesktop()
+        try installClaudeCode()
         try installCodex()
     }
 
@@ -50,6 +51,39 @@ public struct ConfigWriter {
         try data.write(to: configFile, options: .atomic)
 
         print("Wrote Claude Desktop config: \(configFile.path)")
+    }
+
+    /// Write to ~/.claude/settings.json (Claude Code CLI / IDE extensions)
+    public func installClaudeCode() throws {
+        let configDir = homeDir.appendingPathComponent(".claude")
+        let configFile = configDir.appendingPathComponent("settings.json")
+
+        var config: [String: Any] = [:]
+
+        // Read existing config if present
+        if let data = try? Data(contentsOf: configFile),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            config = existing
+        }
+
+        // Merge manifold MCP server entry
+        var mcpServers = config["mcpServers"] as? [String: Any] ?? [:]
+        if mcpServers["manifold"] != nil {
+            print("Manifold already configured in Claude Code settings. Skipping.")
+            return
+        }
+        mcpServers["manifold"] = [
+            "command": binaryPath,
+            "args": [] as [String],
+        ] as [String: Any]
+        config["mcpServers"] = mcpServers
+
+        // Write back
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configFile, options: .atomic)
+
+        print("Wrote Claude Code config: \(configFile.path)")
     }
 
     /// Write to ~/.codex/config.toml

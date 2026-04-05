@@ -6,6 +6,7 @@ struct DashboardView: View {
 
     var body: some View {
         List {
+            sessionBanner
             sourcesContent
             recentActivityGlance
         }
@@ -16,23 +17,83 @@ struct DashboardView: View {
     }
 
     private var sourceSummary: String {
-        let visible = visibleWorkspaces
-        let active = visible.filter { $0.status != "archived" }
+        let visible = visibleSources
+        let active = visible.filter(\.isAccessible)
         if visible.isEmpty { return "No folders added" }
+        if store.hasActiveSession { return "Session active — \(active.count) source\(active.count == 1 ? "" : "s")" }
         if active.count == visible.count { return "\(active.count) source\(active.count == 1 ? "" : "s")" }
         return "\(active.count) active, \(visible.count - active.count) paused"
     }
 
+    // MARK: - Session Banner
+
+    @ViewBuilder
+    private var sessionBanner: some View {
+        if store.hasActiveSession, let grant = store.activeGrant {
+            Section {
+                VStack(alignment: .leading, spacing: Spacing.standard) {
+                    HStack {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("Session Active")
+                            .font(.body.weight(.medium))
+                        Spacer()
+                        Text(grant.grantID.prefix(12) + "...")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                    HStack(spacing: Spacing.section) {
+                        Label("\(store.activeGrantSources.count) sources", systemImage: "folder.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let started = ISO8601DateFormatter().date(from: grant.startedAt) {
+                            Text(started, format: .relative(presentation: .named))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Button("End Session") {
+                        Task { await store.endSession() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.orange)
+                }
+                .padding(.vertical, Spacing.tight)
+            }
+        } else if !visibleSources.isEmpty {
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No active session")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("Start a session to materialize sources for AI access.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    Button("Start Session") {
+                        Task { await store.startSession() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, Spacing.tight)
+            }
+        }
+    }
+
     // MARK: - Sources
 
-    /// Workspaces visible in the dashboard — excludes removed sources.
-    private var visibleWorkspaces: [WorkspaceRecord] {
-        store.workspaces.filter { $0.status != "removed" }
+    private var visibleSources: [SourceRecord] {
+        store.sources.filter { !$0.isRemoved }
     }
 
     @ViewBuilder
     private var sourcesContent: some View {
-        if visibleWorkspaces.isEmpty {
+        if visibleSources.isEmpty {
             Section {
                 VStack(spacing: 12) {
                     Image(systemName: "folder.badge.plus")
@@ -55,8 +116,8 @@ struct DashboardView: View {
             }
         } else {
             Section {
-                ForEach(visibleWorkspaces, id: \.workspaceID) { ws in
-                    SourceCardRow(workspace: ws)
+                ForEach(visibleSources) { source in
+                    SourceCardRow(source: source)
                 }
             }
         }
@@ -101,29 +162,25 @@ struct DashboardView: View {
 
 struct SourceCardRow: View {
     @Environment(ManifoldStore.self) var store
-    let workspace: WorkspaceRecord
+    let source: SourceRecord
 
     @State private var fileCount: Int = 0
     @State private var confirmRemove = false
 
-    private var folderName: String { URL(fileURLWithPath: workspace.rootPath).lastPathComponent }
     private var shortenedPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return workspace.rootPath.hasPrefix(home) ? "~" + workspace.rootPath.dropFirst(home.count) : workspace.rootPath
+        return source.originalRootPath.hasPrefix(home) ? "~" + source.originalRootPath.dropFirst(home.count) : source.originalRootPath
     }
-    private var isActive: Bool { workspace.status != "archived" }
 
     var body: some View {
         HStack(spacing: 12) {
-            // Folder icon
-            Image(systemName: isActive ? "folder.fill" : "folder")
+            Image(systemName: source.isAccessible ? "folder.fill" : "folder")
                 .font(.title2)
-                .foregroundStyle(isActive ? .blue : .secondary)
+                .foregroundStyle(source.isAccessible ? .blue : .secondary)
                 .frame(width: 32)
 
-            // Name + path
             VStack(alignment: .leading, spacing: 2) {
-                Text(folderName)
+                Text(source.displayName)
                     .font(.body.weight(.medium))
                 Text(shortenedPath)
                     .font(.caption)
@@ -134,7 +191,6 @@ struct SourceCardRow: View {
 
             Spacer()
 
-            // File count
             Text("\(fileCount)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.tertiary)
@@ -142,46 +198,43 @@ struct SourceCardRow: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 
-            // Toggle: Active / Paused
             Button {
                 Task {
-                    if isActive {
-                        await store.pauseSource(workspaceID: workspace.workspaceID)
+                    if source.isAccessible {
+                        await store.pauseSource(sourceID: source.sourceID)
                     } else {
-                        await store.resumeSource(workspaceID: workspace.workspaceID)
+                        await store.resumeSource(sourceID: source.sourceID)
                     }
                 }
             } label: {
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(isActive ? Color.green : Color.gray)
+                        .fill(source.isAccessible ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
                         .accessibilityHidden(true)
-                    Text(isActive ? "Active" : "Paused")
+                    Text(source.isAccessible ? "Active" : "Paused")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(isActive ? .primary : .secondary)
-                        .accessibilityLabel("Source \(isActive ? "active" : "paused"), tap to toggle")
+                        .foregroundStyle(source.isAccessible ? .primary : .secondary)
                 }
                 .padding(.horizontal, Spacing.standard)
                 .padding(.vertical, Spacing.tight)
-                .background(isActive ? Color.green.opacity(0.1) : Color.gray.opacity(0.1))
+                .background(source.isAccessible ? Color.green.opacity(0.1) : Color.gray.opacity(0.1))
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
 
-            // Overflow menu
             Menu {
                 Button("Reveal in Finder") {
-                    NSWorkspace.shared.selectFile(workspace.rootPath, inFileViewerRootedAtPath: "")
+                    NSWorkspace.shared.selectFile(source.originalRootPath, inFileViewerRootedAtPath: "")
                 }
                 Divider()
-                if isActive {
+                if source.isAccessible {
                     Button("Pause Access") {
-                        Task { await store.pauseSource(workspaceID: workspace.workspaceID) }
+                        Task { await store.pauseSource(sourceID: source.sourceID) }
                     }
                 } else {
                     Button("Resume Access") {
-                        Task { await store.resumeSource(workspaceID: workspace.workspaceID) }
+                        Task { await store.resumeSource(sourceID: source.sourceID) }
                     }
                 }
                 Divider()
@@ -197,10 +250,10 @@ struct SourceCardRow: View {
         }
         .padding(.vertical, Spacing.tight)
         .alert("Remove Source?", isPresented: $confirmRemove) {
-            Button("Remove", role: .destructive) { store.removeSource(path: workspace.rootPath) }
+            Button("Remove", role: .destructive) { store.removeSource(path: source.originalRootPath) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("File history for \"\(folderName)\" will remain. You can re-add this folder later.")
+            Text("File history for \"\(source.displayName)\" will remain. You can re-add this folder later.")
         }
         .task { await countFiles() }
     }
@@ -208,7 +261,7 @@ struct SourceCardRow: View {
     private func countFiles() async {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
-            at: URL(fileURLWithPath: workspace.rootPath),
+            at: URL(fileURLWithPath: source.originalRootPath),
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return }
