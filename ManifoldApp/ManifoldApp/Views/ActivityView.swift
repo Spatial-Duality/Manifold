@@ -9,13 +9,15 @@ struct ActivityView: View {
     @State private var copiedSummary = false
     @State private var searchDebounceTask: Task<Void, Never>?
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     private func refilter() {
         var entries = store.activityEntries
         if actionFilter != "all" { entries = entries.filter { $0.action == actionFilter } }
         if !searchText.isEmpty {
             entries = entries.filter {
-                ($0.filePath ?? "").localizedCaseInsensitiveContains(searchText) ||
-                $0.action.localizedCaseInsensitiveContains(searchText)
+                ($0.filePath ?? "").localizedStandardContains(searchText) ||
+                $0.action.localizedStandardContains(searchText)
             }
         }
         filteredEntries = entries
@@ -145,7 +147,7 @@ struct ActivityView: View {
     }
 
     private func isActiveSession(_ session: Session) -> Bool {
-        guard let endDate = ISO8601DateFormatter().date(from: session.endTime) else { return false }
+        guard let endDate = Self.isoFormatter.date(from: session.endTime) else { return false }
         return Date().timeIntervalSince(endDate) < 300
     }
 
@@ -154,13 +156,14 @@ struct ActivityView: View {
     @ViewBuilder
     private var flatContent: some View {
         ForEach(filteredEntries) { entry in
-            ActivityRow(entry: entry)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if let path = entry.filePath {
-                        store.inspectedFilePath = path
-                    }
+            Button {
+                if let path = entry.filePath {
+                    store.inspectedFilePath = path
                 }
+            } label: {
+                ActivityRow(entry: entry)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -185,7 +188,10 @@ struct ActivityView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(summary, forType: .string)
                     copiedSummary = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedSummary = false }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(2))
+                        copiedSummary = false
+                    }
                 }
             } label: {
                 Label(copiedSummary ? "Copied!" : "Copy Summary", systemImage: copiedSummary ? "checkmark" : "doc.on.doc")
@@ -265,12 +271,16 @@ struct SessionHeaderButton: View {
         session.agent.lowercased().contains("codex") ? .purple : .blue
     }
 
+    private static let isoFormatter = ISO8601DateFormatter()
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        return f
+    }()
+
     private var formattedTime: String {
-        let formatter = ISO8601DateFormatter()
-        let timeFormatter = DateFormatter()
-        timeFormatter.timeStyle = .short
-        guard let start = formatter.date(from: session.startTime) else { return session.startTime }
-        return timeFormatter.string(from: start)
+        guard let start = Self.isoFormatter.date(from: session.startTime) else { return session.startTime }
+        return Self.timeFormatter.string(from: start)
     }
 }
 
@@ -426,7 +436,10 @@ struct SessionEventRow: View {
         switch result {
         case .success:
             revertSuccess = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { revertSuccess = false }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                revertSuccess = false
+            }
         case .blobPruned:
             diffUnavailable = true
         case .contentDrift:

@@ -56,7 +56,7 @@ struct SidebarView: View {
                         .font(.caption.weight(store.isConnected ? .medium : .regular))
                     if store.isConnected {
                         Text("Monitoring")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                            .font(.caption).foregroundStyle(.tertiary)
                     }
                 }
                 Spacer()

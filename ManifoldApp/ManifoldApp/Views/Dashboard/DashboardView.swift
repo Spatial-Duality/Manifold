@@ -4,6 +4,8 @@ import ManifoldKit
 struct DashboardView: View {
     @Environment(ManifoldStore.self) var store
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     var body: some View {
         List {
             sessionBanner
@@ -47,7 +49,7 @@ struct DashboardView: View {
                         Label("\(store.activeGrantSources.count) sources", systemImage: "folder.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if let started = ISO8601DateFormatter().date(from: grant.startedAt) {
+                        if let started = Self.isoFormatter.date(from: grant.startedAt) {
                             Text(started, format: .relative(presentation: .named))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

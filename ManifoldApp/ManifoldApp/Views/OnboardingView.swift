@@ -178,10 +178,12 @@ struct OnboardingView: View {
             } else {
                 Button("Install MCP Server") {
                     installing = true
-                    store.installMCP()
-                    store.checkMCPInstalled()
-                    store.checkAgentConfigs()
-                    installing = false
+                    Task {
+                        store.installMCP()
+                        store.checkMCPInstalled()
+                        store.checkAgentConfigs()
+                        installing = false
+                    }
                 }
                 .buttonStyle(.borderedProminent)
 
@@ -218,19 +220,19 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Found on your Mac:").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     ForEach(discoveredFolders, id: \.self) { path in
-                        HStack {
-                            Image(systemName: selectedDiscovered.contains(path) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selectedDiscovered.contains(path) ? .green : .gray)
-                                .accessibilityLabel(selectedDiscovered.contains(path) ? "Selected" : "Not selected")
-                            Text(shortenPath(path)).font(.caption.monospaced()).lineLimit(1)
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                        .accessibilityAddTraits(.isButton)
-                        .onTapGesture {
+                        Button {
                             if selectedDiscovered.contains(path) { selectedDiscovered.remove(path) }
                             else { selectedDiscovered.insert(path) }
+                        } label: {
+                            HStack {
+                                Image(systemName: selectedDiscovered.contains(path) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selectedDiscovered.contains(path) ? .green : .gray)
+                                    .accessibilityLabel(selectedDiscovered.contains(path) ? "Selected" : "Not selected")
+                                Text(shortenPath(path)).font(.caption.monospaced()).lineLimit(1)
+                                Spacer()
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
                     if !selectedDiscovered.isEmpty {
                         Button("Add \(selectedDiscovered.count) folder\(selectedDiscovered.count == 1 ? "" : "s")") {
