@@ -22,6 +22,7 @@ struct MainView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.yellow)
+                        .accessibilityHidden(true)
                     Text(error)
                         .font(.callout)
                     Spacer()

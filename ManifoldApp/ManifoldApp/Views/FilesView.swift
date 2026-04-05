@@ -117,6 +117,7 @@ struct FilesView: View {
                             Circle()
                                 .fill(file.isGrantedToClaude ? Color.green : Color.gray)
                                 .frame(width: 6, height: 6)
+                                .accessibilityLabel(file.isGrantedToClaude ? "Shared with AI" : "Not shared")
                             Text(file.sourceName).font(.caption)
                         }
                         .frame(width: 100, alignment: .leading)
@@ -180,6 +181,7 @@ struct FilesView: View {
                                 Circle()
                                     .fill(result.isGranted ? Color.green : Color.gray)
                                     .frame(width: 5, height: 5)
+                                    .accessibilityLabel(result.isGranted ? "Shared" : "Not shared")
                                 Text(result.fileName).font(.caption.weight(.medium)).lineLimit(1)
                                 Text("[\(result.sourceName)]").font(.caption2).foregroundStyle(.tertiary)
                             }

@@ -156,9 +156,11 @@ struct SourceCardRow: View {
                     Circle()
                         .fill(isActive ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
                     Text(isActive ? "Active" : "Paused")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(isActive ? .primary : .secondary)
+                        .accessibilityLabel("Source \(isActive ? "active" : "paused"), tap to toggle")
                 }
                 .padding(.horizontal, Spacing.standard)
                 .padding(.vertical, Spacing.tight)

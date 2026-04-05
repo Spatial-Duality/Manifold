@@ -238,6 +238,7 @@ struct SessionHeaderButton: View {
                 Circle()
                     .fill(isActive ? Color.green : agentColor)
                     .frame(width: 8, height: 8)
+                    .accessibilityLabel(isActive ? "Active session" : "Past session")
 
                 Text(session.agent)
                     .font(.callout).fontWeight(.medium)
