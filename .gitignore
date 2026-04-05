@@ -7,3 +7,4 @@ ManifoldApp/ManifoldApp.xcodeproj/
 .DS_Store
 .gstack/
 default.profraw
+ManifoldApp/build/
