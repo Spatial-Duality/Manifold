@@ -194,7 +194,8 @@ public actor ManifoldBridge {
             action: .fileRead,
             agent: "cowork",
             filePath: relativePath,
-            metadata: ["grant_id": grantID, "mount": mountName]
+            metadata: ["grant_id": grantID, "mount": mountName],
+            grantID: grantID
         )
         ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
             "path": relativePath, "action": "read", "agent": "cowork"
@@ -248,7 +249,8 @@ public actor ManifoldBridge {
             action: existed ? .fileModified : .fileCreated,
             agent: "cowork",
             filePath: resolvedPath,
-            metadata: ["grant_id": grant.grantID, "mount": mountName]
+            metadata: ["grant_id": grant.grantID, "mount": mountName],
+            grantID: grant.grantID
         )
         ManifoldNotification.post(ManifoldNotification.dataChanged)
 
@@ -370,6 +372,15 @@ public actor ManifoldBridge {
                 throw ManifoldMCPError.fileNotFound("'\(filePath)' not found in archive '\(archivePath)'")
             }
 
+            // 50MB extraction size limit
+            let extractedAttrs = try FileManager.default.attributesOfItem(atPath: extractedURL.path)
+            let extractedSize = (extractedAttrs[.size] as? Int64) ?? 0
+            guard extractedSize <= 50_000_000 else {
+                throw ManifoldMCPError.invalidPath(
+                    "Extracted file exceeds 50MB limit (\(extractedSize / 1_000_000)MB)"
+                )
+            }
+
             let data = try Data(contentsOf: extractedURL)
             try? await auditStore.log(action: .fileRead, agent: "cowork", filePath: "\(archivePath)/\(filePath)")
 
@@ -458,9 +469,8 @@ public actor ManifoldBridge {
         await logToolCall(tool: "list_changes")
         let (grant, _) = try await requireGrant()
 
-        let entries = try await auditStore.recentEntries(limit: 50)
+        let entries = try await auditStore.entriesByGrant(grantID: grant.grantID, limit: 50)
         return entries
-            .filter { $0.metadata?.contains(grant.grantID) == true }
             .compactMap { entry -> ChangeEntry? in
                 guard let filePath = entry.filePath else { return nil }
                 let changeType: String
@@ -541,66 +551,6 @@ public actor ManifoldBridge {
         )
 
         return "Session note saved for grant \(grant.grantID.prefix(12))..."
-    }
-
-    /// Auto-generate a session summary from grant activity.
-    public func generateSessionSummary(grantID: String) async throws -> String {
-        let grant = try await grantStore.grant(id: grantID)
-        let promotions = try await grantStore.promotions(grantID: grantID)
-        let grantSources = try await grantStore.grantSources(grantID: grantID)
-
-        let applied = promotions.filter { $0.result == "applied" }
-        let conflicts = promotions.filter { $0.result == "conflict" }
-        let newFiles = promotions.filter { $0.result == "new_file" }
-
-        var lines: [String] = []
-        lines.append("# Session Summary")
-        lines.append("")
-        lines.append("- **Grant:** \(grantID.prefix(12))...")
-        lines.append("- **Target:** \(grant?.targetApp ?? "unknown")")
-        lines.append("- **Started:** \(grant?.startedAt ?? "unknown")")
-        if let ended = grant?.endedAt {
-            lines.append("- **Ended:** \(ended)")
-        }
-        lines.append("- **Sources:** \(grantSources.map(\.mountName).joined(separator: ", "))")
-        lines.append("")
-
-        if !applied.isEmpty {
-            lines.append("## Files Modified (\(applied.count))")
-            for p in applied { lines.append("- `\(p.relativePath)`") }
-            lines.append("")
-        }
-
-        if !newFiles.isEmpty {
-            lines.append("## Files Created (\(newFiles.count))")
-            for p in newFiles { lines.append("- `\(p.relativePath)`") }
-            lines.append("")
-        }
-
-        if !conflicts.isEmpty {
-            lines.append("## Conflicts (\(conflicts.count))")
-            for p in conflicts {
-                lines.append("- `\(p.relativePath)` — \(p.conflictReason ?? "original changed during session")")
-            }
-            lines.append("")
-        }
-
-        if promotions.isEmpty {
-            lines.append("_No file changes recorded._")
-        }
-
-        let markdown = lines.joined(separator: "\n")
-
-        let now = ISO8601DateFormatter().string(from: Date())
-        try await grantStore.saveSummary(
-            grantID: grantID,
-            targetApp: TargetApp(rawValue: grant?.targetApp ?? "cowork") ?? .cowork,
-            startedAt: grant?.startedAt ?? now,
-            endedAt: grant?.endedAt ?? now,
-            markdown: markdown
-        )
-
-        return markdown
     }
 
     // MARK: - Grant Path Resolution

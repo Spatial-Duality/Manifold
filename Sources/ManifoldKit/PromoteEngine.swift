@@ -96,10 +96,10 @@ public struct PromoteEngine: Sendable {
                 } else {
                     // Original changed since baseline → conflict
                     let reason: String
-                    if origHash == nil {
-                        reason = "Original file was deleted since baseline"
+                    if let oh = origHash {
+                        reason = "Original changed since baseline (original: \(oh.prefix(8))..., baseline: \(baseHash.prefix(8))...)"
                     } else {
-                        reason = "Original changed since baseline (original: \(origHash!.prefix(8))..., baseline: \(baseHash.prefix(8))...)"
+                        reason = "Original file was deleted since baseline"
                     }
                     conflicts.append(FileResult(
                         relativePath: path,

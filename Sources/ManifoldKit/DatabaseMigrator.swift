@@ -229,5 +229,20 @@ public struct DatabaseMigrator {
                 logger.info("Migrated \(workspaces.count) workspaces to sources")
             }
         },
+
+        // v5: Add grant_id column to audit_log for direct grant filtering.
+        // Previously grant_id was buried in freeform metadata JSON, requiring string-contains matching.
+        Migration(version: 5, name: "audit_log_grant_id") { db in
+            let tables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
+            )
+            guard !tables.isEmpty else { return }
+            let columns = try db.queryAll("PRAGMA table_info(audit_log)")
+            let hasGrantID = columns.contains { $0["name"] == "grant_id" }
+            if !hasGrantID {
+                try db.execute("ALTER TABLE audit_log ADD COLUMN grant_id TEXT")
+            }
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_grant ON audit_log(grant_id)")
+        },
     ]
 }

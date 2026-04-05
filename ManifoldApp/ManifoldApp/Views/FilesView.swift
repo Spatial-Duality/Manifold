@@ -11,7 +11,6 @@ struct FilesView: View {
     @State private var contentSearchText = ""
     @State private var contentSearchResults: [SearchResult] = []
     @State private var isSearchingContent = false
-    @State private var searchIncludeArchived = false
     @State private var nameFilterTask: Task<Void, Never>?
 
     // Filters
@@ -67,9 +66,6 @@ struct FilesView: View {
                 TextField("Search inside files...", text: $contentSearchText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { searchContent() }
-                Toggle("Include paused", isOn: $searchIncludeArchived)
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
                 if isSearchingContent {
                     ProgressView().controlSize(.small)
                 }
@@ -94,7 +90,9 @@ struct FilesView: View {
                 ContentUnavailableView(
                     "No Files",
                     systemImage: "doc",
-                    description: Text(store.sources.isEmpty ? "Add a source folder first." : "No files match your filters.")
+                    description: Text(store.hasActiveSession
+                        ? "No files match your filters."
+                        : "Start a session to browse the managed workspace.")
                 )
             } else {
                 List(filteredFiles) { file in
@@ -106,7 +104,7 @@ struct FilesView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(file.name).font(.callout).lineLimit(1)
                             Text(file.relativePath)
-                                .font(.caption2.monospaced())
+                                .font(.caption.monospaced())
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1).truncationMode(.middle)
                         }
@@ -143,9 +141,13 @@ struct FilesView: View {
             }
         }
         .navigationTitle("Files")
-        .navigationSubtitle("\(allFiles.count) files across \(store.sources.filter(\.isAccessible).count) sources")
+        .navigationSubtitle(store.hasActiveSession
+            ? "\(allFiles.count) files across \(store.activeGrantSources.count) sources"
+            : "No active session")
         .task { reloadFiles() }
         .onChange(of: store.sources.count) { _, _ in Task { @MainActor in reloadFiles() } }
+        .onChange(of: store.hasActiveSession) { _, _ in Task { @MainActor in reloadFiles() } }
+        .onChange(of: store.activeGrantSources.count) { _, _ in Task { @MainActor in reloadFiles() } }
         .onChange(of: searchText) { _, _ in
             nameFilterTask?.cancel()
             nameFilterTask = Task { @MainActor in
@@ -173,7 +175,7 @@ struct FilesView: View {
             .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
             .background(Color.accentColor.opacity(0.08))
 
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 LazyHStack(spacing: 8) {
                     ForEach(contentSearchResults) { result in
                         VStack(alignment: .leading, spacing: 4) {
@@ -183,19 +185,19 @@ struct FilesView: View {
                                     .frame(width: 5, height: 5)
                                     .accessibilityLabel(result.isGranted ? "Shared" : "Not shared")
                                 Text(result.fileName).font(.caption.weight(.medium)).lineLimit(1)
-                                Text("[\(result.sourceName)]").font(.caption2).foregroundStyle(.tertiary)
+                                Text("[\(result.sourceName)]").font(.caption).foregroundStyle(.tertiary)
                             }
                             ForEach(result.matches) { match in
                                 HStack(spacing: 4) {
-                                    Text("L\(match.lineNumber)").font(.caption2.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 30)
-                                    Text(match.lineText).font(.caption2.monospaced()).lineLimit(1)
+                                    Text("L\(match.lineNumber)").font(.caption.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 30)
+                                    Text(match.lineText).font(.caption.monospaced()).lineLimit(1)
                                 }
                             }
                         }
                         .padding(Spacing.standard)
                         .frame(width: 280, alignment: .leading)
                         .background(Color(.controlBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .clipShape(.rect(cornerRadius: 6))
                         .contextMenu {
                             Button("Reveal in Finder") {
                                 NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "")
@@ -208,6 +210,7 @@ struct FilesView: View {
                 }
                 .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
             }
+            .scrollIndicators(.hidden)
             .frame(height: 120)
 
             Divider()
@@ -253,7 +256,7 @@ struct FilesView: View {
             result = result.filter { $0.fileExtension == filterType }
         }
         if !searchText.isEmpty {
-            result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) || $0.relativePath.localizedCaseInsensitiveContains(searchText) }
+            result = result.filter { $0.name.localizedStandardContains(searchText) || $0.relativePath.localizedStandardContains(searchText) }
         }
 
         switch sortBy {
@@ -268,15 +271,16 @@ struct FilesView: View {
 
     private func searchContent() {
         guard !contentSearchText.isEmpty else { return }
+        guard store.hasActiveSession else {
+            contentSearchResults = []
+            return
+        }
         isSearchingContent = true
         let query = contentSearchText
-        let includeArchived = searchIncludeArchived
-        Task.detached {
-            let results = await store.searchFileContents(query: query, includeArchived: includeArchived)
-            await MainActor.run {
-                contentSearchResults = results
-                isSearchingContent = false
-            }
+        Task {
+            let results = store.searchFileContents(query: query)
+            contentSearchResults = results
+            isSearchingContent = false
         }
     }
 

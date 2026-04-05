@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "grant-types")
 
 // MARK: - Source (persistent pointer to user-approved original folder)
 
@@ -21,7 +24,10 @@ public struct SourceRecord: Sendable, Hashable, Identifiable {
               let originalRootPath = row["original_root_path"],
               let status = row["status"],
               let createdAt = row["created_at"],
-              let updatedAt = row["updated_at"] else { return nil }
+              let updatedAt = row["updated_at"] else {
+            logger.warning("Failed to parse SourceRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.sourceID = sourceID
         self.displayName = displayName
         self.originalRootPath = originalRootPath
@@ -64,7 +70,10 @@ public struct GrantRecord: Sendable, Identifiable {
               let profileID = row["profile_id"],
               let status = row["status"],
               let startedAt = row["started_at"],
-              let materializationRoot = row["materialization_root"] else { return nil }
+              let materializationRoot = row["materialization_root"] else {
+            logger.warning("Failed to parse GrantRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.grantID = grantID
         self.targetApp = targetApp
         self.profileID = profileID
@@ -88,11 +97,26 @@ public struct GrantSourceRecord: Sendable {
     init?(row: [String: String]) {
         guard let grantID = row["grant_id"],
               let sourceID = row["source_id"],
-              let mountName = row["mount_name"] else { return nil }
+              let mountName = row["mount_name"] else {
+            logger.warning("Failed to parse GrantSourceRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.grantID = grantID
         self.sourceID = sourceID
         self.mountName = mountName
         self.baselineManifestHash = row["baseline_manifest_hash"]
+    }
+}
+
+public struct GrantMount: Sendable, Hashable {
+    public let sourceID: String
+    public let mountName: String
+    public let mountPath: String
+
+    public init(sourceID: String, mountName: String, mountPath: String) {
+        self.sourceID = sourceID
+        self.mountName = mountName
+        self.mountPath = mountPath
     }
 }
 
@@ -121,7 +145,10 @@ public struct EmailMessageRecord: Sendable, Identifiable {
               let sender = row["sender"],
               let subject = row["subject"],
               let receivedAt = row["received_at"],
-              let classificationStatus = row["classification_status"] else { return nil }
+              let classificationStatus = row["classification_status"] else {
+            logger.warning("Failed to parse EmailMessageRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.emailID = emailID
         self.account = account
         self.mailbox = mailbox
@@ -146,10 +173,58 @@ public struct GrantEmailRecord: Sendable {
     init?(row: [String: String]) {
         guard let grantID = row["grant_id"],
               let emailID = row["email_id"],
-              let materializedPath = row["materialized_path"] else { return nil }
+              let materializedPath = row["materialized_path"] else {
+            logger.warning("Failed to parse GrantEmailRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.grantID = grantID
         self.emailID = emailID
         self.materializedPath = materializedPath
+    }
+}
+
+public struct GrantEmailMessageRecord: Sendable, Identifiable {
+    public var id: String { emailID }
+    public let grantID: String
+    public let emailID: String
+    public let materializedPath: String
+    public let account: String
+    public let mailbox: String
+    public let sender: String
+    public let recipients: String
+    public let subject: String
+    public let receivedAt: String
+    public let contentHash: String?
+    public let preview: String?
+    public let classificationStatus: String
+    public let hiddenReason: String?
+
+    init?(row: [String: String]) {
+        guard let grantID = row["grant_id"],
+              let emailID = row["email_id"],
+              let materializedPath = row["materialized_path"],
+              let account = row["account"],
+              let mailbox = row["mailbox"],
+              let sender = row["sender"],
+              let subject = row["subject"],
+              let receivedAt = row["received_at"],
+              let classificationStatus = row["classification_status"] else {
+            logger.warning("Failed to parse GrantEmailMessageRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
+        self.grantID = grantID
+        self.emailID = emailID
+        self.materializedPath = materializedPath
+        self.account = account
+        self.mailbox = mailbox
+        self.sender = sender
+        self.recipients = row["recipients"] ?? ""
+        self.subject = subject
+        self.receivedAt = receivedAt
+        self.contentHash = row["content_hash"]
+        self.preview = row["preview"]
+        self.classificationStatus = classificationStatus
+        self.hiddenReason = row["hidden_reason"]
     }
 }
 
@@ -159,6 +234,7 @@ public enum PromotionResult: String, Sendable {
     case applied
     case conflict
     case skipped
+    case newFile = "new_file"
 }
 
 public struct PromotionRecord: Sendable, Identifiable {
@@ -181,7 +257,10 @@ public struct PromotionRecord: Sendable, Identifiable {
               let sourceID = row["source_id"],
               let relativePath = row["relative_path"],
               let result = row["result"],
-              let createdAt = row["created_at"] else { return nil }
+              let createdAt = row["created_at"] else {
+            logger.warning("Failed to parse PromotionRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.promotionID = promotionID
         self.grantID = grantID
         self.sourceID = sourceID
@@ -212,7 +291,10 @@ public struct SessionSummaryRecord: Sendable, Identifiable {
               let targetApp = row["target_app"],
               let startedAt = row["started_at"],
               let endedAt = row["ended_at"],
-              let summaryMarkdown = row["summary_markdown"] else { return nil }
+              let summaryMarkdown = row["summary_markdown"] else {
+            logger.warning("Failed to parse SessionSummaryRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
         self.summaryID = summaryID
         self.grantID = grantID
         self.targetApp = targetApp

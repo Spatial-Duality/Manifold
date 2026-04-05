@@ -21,6 +21,48 @@ public struct MaterializationEngine: Sendable {
         public let manifestHash: String
     }
 
+    // MARK: - Size Estimation
+
+    /// Size thresholds for materialization safety.
+    private static let warnThreshold: Int64 = 5_368_709_120    // 5 GB
+    private static let blockThreshold: Int64 = 53_687_091_200  // 50 GB
+
+    /// Estimate the total size of sources without copying any files.
+    public static func estimateSize(
+        sources: [(source: SourceRecord, mountName: String)]
+    ) throws -> Int64 {
+        let fm = FileManager.default
+        var totalBytes: Int64 = 0
+
+        for (source, _) in sources {
+            let sourceURL = URL(fileURLWithPath: source.originalRootPath)
+            let resolvedSource = sourceURL.resolvingSymlinksInPath()
+            guard let enumerator = fm.enumerator(
+                at: resolvedSource,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            let sourceBasePath = resolvedSource.path + "/"
+            while let fileURL = enumerator.nextObject() as? URL {
+                let resolved = fileURL.resolvingSymlinksInPath()
+                guard resolved.path.hasPrefix(sourceBasePath) else { continue }
+                let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
+
+                if shouldSkip(relativePath: relativePath) {
+                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                    continue
+                }
+
+                guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                      values.isRegularFile == true else { continue }
+                totalBytes += Int64(values.fileSize ?? 0)
+            }
+        }
+
+        return totalBytes
+    }
+
     /// Materialize all sources for a grant into the workspace directory.
     /// Returns one MountResult per source.
     public static func materialize(
@@ -32,6 +74,19 @@ public struct MaterializationEngine: Sendable {
         let workspaceURL = URL(fileURLWithPath: materializationRoot)
 
         try fm.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        // Size guard: estimate total before copying
+        let estimatedBytes = try estimateSize(sources: sources)
+        if estimatedBytes > blockThreshold {
+            let gb = Double(estimatedBytes) / (1024 * 1024 * 1024)
+            throw ManifoldError.materialization(
+                "Source size (\(String(format: "%.1f", gb)) GB) exceeds 50 GB limit. Remove large sources or split into smaller sets."
+            )
+        }
+        if estimatedBytes > warnThreshold {
+            let gb = Double(estimatedBytes) / (1024 * 1024 * 1024)
+            logger.warning("Large materialization: \(String(format: "%.1f", gb)) GB. Consider reducing source scope.")
+        }
 
         var results: [MountResult] = []
 

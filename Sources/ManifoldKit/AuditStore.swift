@@ -28,7 +28,8 @@ public actor AuditStore {
                 before_hash TEXT,
                 after_hash TEXT,
                 metadata TEXT,
-                session_id TEXT
+                session_id TEXT,
+                grant_id TEXT
             )
         """)
 
@@ -42,6 +43,7 @@ public actor AuditStore {
         // session_id column and index are added by DatabaseMigrator v2.
         // CREATE INDEX IF NOT EXISTS is safe to run as a no-op guard.
         try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_grant ON audit_log(grant_id)")
 
         // Backfill session_ids for existing entries
         try backfillSessionIDs()
@@ -122,7 +124,8 @@ public actor AuditStore {
         filePath: String? = nil,
         beforeHash: String? = nil,
         afterHash: String? = nil,
-        metadata: [String: String]? = nil
+        metadata: [String: String]? = nil,
+        grantID: String? = nil
     ) throws {
         let now = Date()
         let timestamp = ISO8601DateFormatter().string(from: now)
@@ -138,8 +141,8 @@ public actor AuditStore {
         }
 
         try db.execute("""
-            INSERT INTO audit_log (timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO audit_log (timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, params: [
             timestamp,
             runID ?? "",
@@ -150,7 +153,8 @@ public actor AuditStore {
             beforeHash ?? "",
             afterHash ?? "",
             metadataJSON ?? "",
-            sessionID
+            sessionID,
+            grantID ?? ""
         ])
     }
 
@@ -172,11 +176,24 @@ public actor AuditStore {
     /// Query all audit entries across workspaces.
     public func recentEntries(limit: Int = 50) throws -> [AuditEntry] {
         let rows = try db.queryAll("""
-            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id
             FROM audit_log
             ORDER BY id DESC
             LIMIT ?
         """, params: ["\(limit)"])
+
+        return rows.compactMap { AuditEntry(row: $0) }
+    }
+
+    /// Query audit entries by grant ID (uses indexed column from migration v5).
+    public func entriesByGrant(grantID: String, limit: Int = 50) throws -> [AuditEntry] {
+        let rows = try db.queryAll("""
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id
+            FROM audit_log
+            WHERE grant_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        """, params: [grantID, "\(limit)"])
 
         return rows.compactMap { AuditEntry(row: $0) }
     }
@@ -269,6 +286,7 @@ public struct AuditEntry: Sendable, Identifiable {
     public let afterHash: String?
     public let metadata: String?
     public let sessionID: String?
+    public let grantID: String?
 
     init?(row: [String: String]) {
         guard let idStr = row["id"], let id = Int(idStr),
@@ -287,6 +305,7 @@ public struct AuditEntry: Sendable, Identifiable {
         self.afterHash = row["after_hash"]?.nilIfEmpty
         self.metadata = row["metadata"]?.nilIfEmpty
         self.sessionID = row["session_id"]?.nilIfEmpty
+        self.grantID = row["grant_id"]?.nilIfEmpty
     }
 }
 

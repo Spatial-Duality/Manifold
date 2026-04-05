@@ -28,10 +28,10 @@ public actor GrantStore {
         return sourceID
     }
 
-    /// All sources, most recently updated first. Excludes removed sources.
+    /// Sources currently available to share with agents.
     public func activeSources() throws -> [SourceRecord] {
         let rows = try db.queryAll(
-            "SELECT * FROM sources WHERE status != 'removed' ORDER BY updated_at DESC"
+            "SELECT * FROM sources WHERE status IN ('idle', 'active') ORDER BY updated_at DESC"
         )
         return rows.compactMap { SourceRecord(row: $0) }
     }
@@ -94,6 +94,7 @@ public actor GrantStore {
         targetApp: TargetApp,
         profileID: String,
         sourceIDs: [String],
+        emailIDs: [String] = [],
         materializationRoot: String,
         inactivityTimeout: TimeInterval = 3600,
         refreshOfGrantID: String? = nil
@@ -107,6 +108,14 @@ public actor GrantStore {
             from: Date().addingTimeInterval(inactivityTimeout)
         )
 
+        var linkedSources: [(String, SourceRecord)] = []
+        for sourceID in sourceIDs {
+            if let source = try source(id: sourceID) {
+                linkedSources.append((sourceID, source))
+            }
+        }
+        let mountNames = Self.uniqueMountNames(for: linkedSources.map(\.1))
+
         try db.transaction {
             try db.execute("""
                 INSERT INTO grants (grant_id, target_app, profile_id, status, started_at,
@@ -118,13 +127,24 @@ public actor GrantStore {
             ])
 
             // Link sources to this grant
-            for sourceID in sourceIDs {
-                guard let source = try source(id: sourceID) else { continue }
-                let mountName = URL(fileURLWithPath: source.originalRootPath).lastPathComponent
+            for (sourceID, source) in linkedSources {
+                let mountName = mountNames[sourceID] ?? URL(fileURLWithPath: source.originalRootPath).lastPathComponent
                 try db.execute("""
                     INSERT INTO grant_sources (grant_id, source_id, mount_name)
                     VALUES (?, ?, ?)
                 """, params: [grantID, sourceID, mountName])
+            }
+
+            for emailID in emailIDs {
+                let exists = try db.queryScalar(
+                    "SELECT email_id FROM email_messages WHERE email_id = ? LIMIT 1",
+                    params: [emailID]
+                )
+                guard exists != nil else { continue }
+                try db.execute("""
+                    INSERT OR REPLACE INTO grant_emails (grant_id, email_id, materialized_path)
+                    VALUES (?, ?, ?)
+                """, params: [grantID, emailID, "_emails/\(emailID).md"])
             }
 
             // Mark linked sources as active
@@ -136,8 +156,11 @@ public actor GrantStore {
             }
         }
 
-        logger.info("Started grant \(grantID) for \(targetApp.rawValue) with \(sourceIDs.count) sources")
-        return try grant(id: grantID)!
+        logger.info("Started grant \(grantID) for \(targetApp.rawValue) with \(sourceIDs.count) sources and \(emailIDs.count) emails")
+        guard let created = try grant(id: grantID) else {
+            throw ManifoldError.database("Grant \(grantID) not found after insert")
+        }
+        return created
     }
 
     /// Get a single grant by ID.
@@ -258,6 +281,86 @@ public actor GrantStore {
         """, params: [hash, grantID, sourceID])
     }
 
+    // MARK: - Grant ↔ Email Links
+
+    public func upsertEmailMessage(
+        emailID: String,
+        account: String,
+        mailbox: String,
+        sender: String,
+        recipients: String,
+        subject: String,
+        receivedAt: String,
+        preview: String?,
+        classificationStatus: String,
+        hiddenReason: String?,
+        contentHash: String?
+    ) throws {
+        try db.execute("""
+            INSERT INTO email_messages (
+                email_id, account, mailbox, sender, recipients, subject, received_at,
+                content_hash, preview, classification_status, hidden_reason
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(email_id) DO UPDATE SET
+                account = excluded.account,
+                mailbox = excluded.mailbox,
+                sender = excluded.sender,
+                recipients = excluded.recipients,
+                subject = excluded.subject,
+                received_at = excluded.received_at,
+                content_hash = COALESCE(excluded.content_hash, email_messages.content_hash),
+                preview = COALESCE(excluded.preview, email_messages.preview),
+                classification_status = excluded.classification_status,
+                hidden_reason = excluded.hidden_reason
+        """, params: [
+            emailID, account, mailbox, sender, recipients, subject, receivedAt,
+            contentHash, preview, classificationStatus, hiddenReason,
+        ])
+    }
+
+    public func emailMessage(id: String) throws -> EmailMessageRecord? {
+        let rows = try db.queryAll(
+            "SELECT * FROM email_messages WHERE email_id = ? LIMIT 1",
+            params: [id]
+        )
+        return rows.first.flatMap { EmailMessageRecord(row: $0) }
+    }
+
+    public func attachEmailsToGrant(
+        grantID: String,
+        emails: [(emailID: String, materializedPath: String)]
+    ) throws {
+        for email in emails {
+            try db.execute("""
+                INSERT OR REPLACE INTO grant_emails (grant_id, email_id, materialized_path)
+                VALUES (?, ?, ?)
+            """, params: [grantID, email.emailID, email.materializedPath])
+        }
+    }
+
+    public func grantEmails(grantID: String) throws -> [GrantEmailRecord] {
+        let rows = try db.queryAll(
+            "SELECT * FROM grant_emails WHERE grant_id = ? ORDER BY materialized_path ASC",
+            params: [grantID]
+        )
+        return rows.compactMap { GrantEmailRecord(row: $0) }
+    }
+
+    public func grantEmailMessages(grantID: String) throws -> [GrantEmailMessageRecord] {
+        let rows = try db.queryAll("""
+            SELECT ge.grant_id, ge.email_id, ge.materialized_path,
+                   em.account, em.mailbox, em.sender, em.recipients, em.subject,
+                   em.received_at, em.content_hash, em.preview,
+                   em.classification_status, em.hidden_reason
+            FROM grant_emails ge
+            JOIN email_messages em ON em.email_id = ge.email_id
+            WHERE ge.grant_id = ?
+            ORDER BY em.received_at DESC, ge.materialized_path ASC
+        """, params: [grantID])
+        return rows.compactMap { GrantEmailMessageRecord(row: $0) }
+    }
+
     // MARK: - Promotions
 
     /// Record a promotion result (write-back from materialized to original).
@@ -333,5 +436,33 @@ public actor GrantStore {
             params: [grantID]
         )
         return rows.compactMap { SessionSummaryRecord(row: $0) }
+    }
+
+    private static func uniqueMountNames(for sources: [SourceRecord]) -> [String: String] {
+        var result: [String: String] = [:]
+        var used: Set<String> = []
+
+        for source in sources {
+            let base = sanitizedMountName(for: source)
+            var candidate = base
+            var suffix = 2
+            while used.contains(candidate) {
+                candidate = "\(base)-\(suffix)"
+                suffix += 1
+            }
+            used.insert(candidate)
+            result[source.sourceID] = candidate
+        }
+
+        return result
+    }
+
+    private static func sanitizedMountName(for source: SourceRecord) -> String {
+        let base = URL(fileURLWithPath: source.originalRootPath).lastPathComponent
+        let sanitized = base
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9._-]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return sanitized.isEmpty ? source.sourceID : sanitized
     }
 }

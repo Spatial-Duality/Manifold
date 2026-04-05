@@ -37,7 +37,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ManifoldKitTests",
-            dependencies: ["ManifoldKit"],
+            dependencies: ["ManifoldKit", "ManifoldMCP"],
             path: "Tests/ManifoldKitTests"
         ),
     ]
