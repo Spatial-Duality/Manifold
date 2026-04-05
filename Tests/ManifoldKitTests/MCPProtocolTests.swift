@@ -63,7 +63,7 @@ struct MCPProtocolTests {
             ] as [String: Any],
             "serverInfo": [
                 "name": "manifold",
-                "version": "0.2.0",
+                "version": "0.3.0",
             ] as [String: Any],
         ]
         #expect(result["protocolVersion"] as? String == "2024-11-05")

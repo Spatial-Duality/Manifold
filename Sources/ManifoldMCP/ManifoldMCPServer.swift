@@ -51,7 +51,7 @@ struct ManifoldMCPServer {
         )
 
         // Create MCP server
-        let server = MCPServer(name: "manifold", version: "0.2.0")
+        let server = MCPServer(name: "manifold", version: "0.3.0")
 
         // Register tools
         server.registerTools(ToolHandlers.allTools()) { name, arguments in
