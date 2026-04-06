@@ -1,5 +1,11 @@
 import SwiftUI
 
+private enum HistoryMode: String, CaseIterable {
+    case sessions = "Sessions"
+    case timeline = "Timeline"
+    case files = "Files"
+}
+
 struct HistoryView: View {
     @Environment(ManifoldStore.self) var store
     @State private var selectedSession: Session?
@@ -7,21 +13,19 @@ struct HistoryView: View {
     @State private var mode: HistoryMode = .sessions
     @State private var isLoading = true
 
-    private enum HistoryMode: String, CaseIterable {
-        case sessions = "Sessions"
-        case timeline = "Timeline"
-        case files = "Files"
-    }
-
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
+            HistoryToolbar(mode: $mode, searchText: $searchText)
             Divider()
 
             Group {
                 switch mode {
                 case .sessions:
-                    sessionContent
+                    SessionListContent(
+                        isLoading: isLoading,
+                        filteredSessions: filteredSessions,
+                        selectedSession: $selectedSession
+                    )
                 case .timeline:
                     ActivityView()
                 case .files:
@@ -43,9 +47,22 @@ struct HistoryView: View {
         "\(store.sessions.count) session\(store.sessions.count == 1 ? "" : "s")"
     }
 
-    // MARK: - Toolbar
+    private var filteredSessions: [Session] {
+        guard !searchText.isEmpty else { return store.sessions }
+        return store.sessions.filter {
+            $0.agent.localizedStandardContains(searchText) ||
+            $0.id.localizedStandardContains(searchText)
+        }
+    }
+}
 
-    private var toolbar: some View {
+// MARK: - Toolbar
+
+private struct HistoryToolbar: View {
+    @Binding var mode: HistoryMode
+    @Binding var searchText: String
+
+    var body: some View {
         HStack(spacing: Spacing.section) {
             Picker("View", selection: $mode) {
                 ForEach(HistoryMode.allCases, id: \.self) { m in
@@ -65,10 +82,17 @@ struct HistoryView: View {
         .padding(.horizontal, Spacing.edge)
         .padding(.vertical, Spacing.standard)
     }
+}
 
-    // MARK: - Session Content
+// MARK: - Session List Content
 
-    private var sessionContent: some View {
+private struct SessionListContent: View {
+    @Environment(ManifoldStore.self) var store
+    let isLoading: Bool
+    let filteredSessions: [Session]
+    @Binding var selectedSession: Session?
+
+    var body: some View {
         Group {
             if isLoading && store.sessions.isEmpty {
                 ProgressView("Loading sessions...")
@@ -88,14 +112,6 @@ struct HistoryView: View {
                     }
                 }
             }
-        }
-    }
-
-    private var filteredSessions: [Session] {
-        guard !searchText.isEmpty else { return store.sessions }
-        return store.sessions.filter {
-            $0.agent.localizedStandardContains(searchText) ||
-            $0.id.localizedStandardContains(searchText)
         }
     }
 }

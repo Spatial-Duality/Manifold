@@ -28,7 +28,7 @@ struct SessionView: View {
     var body: some View {
         Group {
             if activeSources.isEmpty {
-                emptyState
+                SessionEmptyState()
             } else if isLoading && files.isEmpty {
                 ProgressView("Scanning sources...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -40,7 +40,13 @@ struct SessionView: View {
                     ContentUnavailableView.search(text: searchText)
                 }
             } else {
-                fileTable
+                SessionFileTable(
+                    sortedFiles: sortedFiles,
+                    files: files,
+                    selectedFileIDs: $selectedFileIDs,
+                    sortOrder: $sortOrder,
+                    onReload: { Task { await loadFiles() } }
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -75,12 +81,29 @@ struct SessionView: View {
         return "\(count) file\(count == 1 ? "" : "s") across \(sourceCount) source\(sourceCount == 1 ? "" : "s")"
     }
 
+    // MARK: - Loading
+
+    private func loadFiles() async {
+        isLoading = files.isEmpty
+        files = await store.enumerateSourceFiles()
+        isLoading = false
+    }
+}
+
+// MARK: - File Table
+
+private struct SessionFileTable: View {
+    @Environment(ManifoldStore.self) var store
+    let sortedFiles: [SourceFile]
+    let files: [SourceFile]
+    @Binding var selectedFileIDs: Set<UUID>
+    @Binding var sortOrder: [KeyPathComparator<SourceFile>]
+    var onReload: () -> Void
+
     @State private var renamingFileID: UUID?
     @State private var renameText = ""
 
-    // MARK: - File Table
-
-    private var fileTable: some View {
+    var body: some View {
         Table(sortedFiles, selection: $selectedFileIDs, sortOrder: $sortOrder) {
             TableColumn("Name", value: \.name) { file in
                 Label {
@@ -160,9 +183,8 @@ struct SessionView: View {
         let selected = files.filter { ids.contains($0.id) }
 
         if selected.count == 1, let file = selected.first {
-            // Single file actions
             Button("Quick Look") {
-                quickLook(file)
+                NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
             }
 
             Button("Reveal in Finder") {
@@ -198,7 +220,6 @@ struct SessionView: View {
                 NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
             }
         } else if selected.count > 1 {
-            // Multi-file actions
             Button("Reveal \(selected.count) Items in Finder") {
                 let urls = selected.map { URL(fileURLWithPath: $0.path) }
                 NSWorkspace.shared.activateFileViewerSelecting(urls)
@@ -210,11 +231,6 @@ struct SessionView: View {
                 NSPasteboard.general.setString(paths, forType: .string)
             }
         }
-    }
-
-    private func quickLook(_ file: SourceFile) {
-        // Reveal in Finder, which lets the user press Space for Quick Look
-        NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
     }
 
     private func performRename() {
@@ -232,34 +248,11 @@ struct SessionView: View {
                 at: URL(fileURLWithPath: file.path),
                 to: newPath
             )
-            Task { await loadFiles() }
+            onReload()
         } catch {
             store.lastError = "Rename failed: \(error.localizedDescription)"
         }
         renamingFileID = nil
-    }
-
-    // MARK: - Empty State
-
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Sources", systemImage: "folder.badge.plus")
-        } description: {
-            Text("Add a folder in Sources to browse files here.")
-        } actions: {
-            Button("Go to Sources") {
-                store.selectedSidebarItem = .sources
-            }
-            .glassProminentButton()
-        }
-    }
-
-    // MARK: - Loading
-
-    private func loadFiles() async {
-        isLoading = files.isEmpty
-        files = await store.enumerateSourceFiles()
-        isLoading = false
     }
 
     // MARK: - File Appearance
@@ -289,6 +282,25 @@ struct SessionView: View {
         case "json", "yaml", "yml", "toml": Color(nsColor: .systemPurple)
         case "png", "jpg", "jpeg", "gif", "webp", "svg": Color(nsColor: .systemTeal)
         default: .secondary
+        }
+    }
+}
+
+// MARK: - Empty State
+
+private struct SessionEmptyState: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("No Sources", systemImage: "folder.badge.plus")
+        } description: {
+            Text("Add a folder in Sources to browse files here.")
+        } actions: {
+            Button("Go to Sources") {
+                store.selectedSidebarItem = .sources
+            }
+            .glassProminentButton()
         }
     }
 }

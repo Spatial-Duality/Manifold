@@ -17,8 +17,6 @@ struct FilesView: View {
     @State private var filterType = "All"
     @State private var sortBy: SortOption = .name
 
-    // (bulk selection removed — List doesn't support Table-style multi-select)
-
     private enum SortOption: String, CaseIterable {
         case name = "Name"
         case size = "Size"
@@ -81,7 +79,10 @@ struct FilesView: View {
 
             // Content search results
             if !contentSearchResults.isEmpty {
-                contentSearchSection
+                ContentSearchResultsSection(
+                    results: contentSearchResults,
+                    onDismiss: { contentSearchResults = [] }
+                )
             }
 
             // File list
@@ -158,62 +159,6 @@ struct FilesView: View {
         .onChange(of: filterSource) { _, _ in Task { @MainActor in applyFilters() } }
         .onChange(of: filterType) { _, _ in Task { @MainActor in applyFilters() } }
         .onChange(of: sortBy) { _, _ in Task { @MainActor in applyFilters() } }
-    }
-
-    // MARK: - Content Search Results
-
-    private var contentSearchSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Content matches: \(contentSearchResults.count) files")
-                    .font(.caption.weight(.medium))
-                Spacer()
-                Button("Dismiss") { contentSearchResults = [] }
-                    .controlSize(.mini)
-            }
-            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
-            .background(Color.accentColor.opacity(0.08))
-
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 8) {
-                    ForEach(contentSearchResults) { result in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(result.isGranted ? Color.green : Color.gray)
-                                    .frame(width: 5, height: 5)
-                                    .accessibilityLabel(result.isGranted ? "Shared" : "Not shared")
-                                Text(result.fileName).font(.caption.weight(.medium)).lineLimit(1)
-                                Text("[\(result.sourceName)]").font(.caption).foregroundStyle(.tertiary)
-                            }
-                            ForEach(result.matches) { match in
-                                HStack(spacing: 4) {
-                                    Text("L\(match.lineNumber)").font(.caption.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 30)
-                                    Text(match.lineText).font(.caption.monospaced()).lineLimit(1)
-                                }
-                            }
-                        }
-                        .padding(Spacing.standard)
-                        .frame(width: 280, alignment: .leading)
-                        .background(Color(.controlBackgroundColor))
-                        .clipShape(.rect(cornerRadius: 6))
-                        .contextMenu {
-                            Button("Reveal in Finder") {
-                                NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "")
-                            }
-                            Button("Open") {
-                                NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath))
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
-            }
-            .scrollIndicators(.hidden)
-            .frame(height: 120)
-
-            Divider()
-        }
     }
 
     // MARK: - Context Menu
@@ -295,6 +240,77 @@ struct FilesView: View {
         case "mp3", "wav": "music.note"
         case "ttf", "otf", "woff", "woff2": "textformat"
         default: "doc"
+        }
+    }
+}
+
+// MARK: - Content Search Results Section
+
+private struct ContentSearchResultsSection: View {
+    let results: [SearchResult]
+    var onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Content matches: \(results.count) files")
+                    .font(.caption.weight(.medium))
+                Spacer()
+                Button("Dismiss") { onDismiss() }
+                    .controlSize(.mini)
+            }
+            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
+            .background(Color.accentColor.opacity(0.08))
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 8) {
+                    ForEach(results) { result in
+                        ContentSearchResultCard(result: result)
+                    }
+                }
+                .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
+            }
+            .scrollIndicators(.hidden)
+            .frame(height: 120)
+
+            Divider()
+        }
+    }
+}
+
+// MARK: - Content Search Result Card
+
+private struct ContentSearchResultCard: View {
+    let result: SearchResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(result.isGranted ? Color.green : Color.gray)
+                    .frame(width: 5, height: 5)
+                    .accessibilityLabel(result.isGranted ? "Shared" : "Not shared")
+                Text(result.fileName).font(.caption.weight(.medium)).lineLimit(1)
+                Text("[\(result.sourceName)]").font(.caption).foregroundStyle(.tertiary)
+            }
+            ForEach(result.matches) { match in
+                HStack(spacing: 4) {
+                    Text("L\(match.lineNumber)").font(.caption.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 30)
+                    Text(match.lineText).font(.caption.monospaced()).lineLimit(1)
+                }
+            }
+        }
+        .padding(Spacing.standard)
+        .frame(width: 280, alignment: .leading)
+        .background(Color(.controlBackgroundColor))
+        .clipShape(.rect(cornerRadius: 6))
+        .contextMenu {
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "")
+            }
+            Button("Open") {
+                NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath))
+            }
         }
     }
 }

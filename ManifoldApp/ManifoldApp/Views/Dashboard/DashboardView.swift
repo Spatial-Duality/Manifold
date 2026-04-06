@@ -3,13 +3,11 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(ManifoldStore.self) var store
 
-    private static let isoFormatter = ISO8601DateFormatter()
-
     var body: some View {
         List {
-            sessionBanner
-            sourcesContent
-            recentActivityGlance
+            DashboardSessionBanner()
+            DashboardSourcesContent()
+            DashboardRecentActivity()
         }
         .listStyle(.inset(alternatesRowBackgrounds: false))
         .navigationTitle("Sources")
@@ -18,18 +16,27 @@ struct DashboardView: View {
     }
 
     private var sourceSummary: String {
-        let visible = visibleSources
+        let visible = store.sources.filter { !$0.isRemoved }
         let active = visible.filter(\.isAccessible)
         if visible.isEmpty { return "No folders added" }
         if store.hasActiveSession { return "Session active — \(active.count) source\(active.count == 1 ? "" : "s")" }
         if active.count == visible.count { return "\(active.count) source\(active.count == 1 ? "" : "s")" }
         return "\(active.count) active, \(visible.count - active.count) paused"
     }
+}
 
-    // MARK: - Session Banner
+// MARK: - Session Banner
 
-    @ViewBuilder
-    private var sessionBanner: some View {
+private struct DashboardSessionBanner: View {
+    @Environment(ManifoldStore.self) var store
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    private var visibleSources: [SourceRecord] {
+        store.sources.filter { !$0.isRemoved }
+    }
+
+    var body: some View {
         if store.hasActiveSession, let grant = store.activeGrant {
             Section {
                 VStack(alignment: .leading, spacing: Spacing.standard) {
@@ -85,15 +92,18 @@ struct DashboardView: View {
             }
         }
     }
+}
 
-    // MARK: - Sources
+// MARK: - Sources Content
+
+private struct DashboardSourcesContent: View {
+    @Environment(ManifoldStore.self) var store
 
     private var visibleSources: [SourceRecord] {
         store.sources.filter { !$0.isRemoved }
     }
 
-    @ViewBuilder
-    private var sourcesContent: some View {
+    var body: some View {
         if visibleSources.isEmpty {
             Section {
                 VStack(spacing: 12) {
@@ -123,11 +133,14 @@ struct DashboardView: View {
             }
         }
     }
+}
 
-    // MARK: - Recent Activity Glance
+// MARK: - Recent Activity Glance
 
-    @ViewBuilder
-    private var recentActivityGlance: some View {
+private struct DashboardRecentActivity: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
         if !store.activityEntries.isEmpty {
             Section {
                 ForEach(store.activityEntries.prefix(3)) { entry in

@@ -8,8 +8,6 @@ struct ActivityView: View {
     @State private var copiedSummary = false
     @State private var searchDebounceTask: Task<Void, Never>?
 
-    private static let isoFormatter = ISO8601DateFormatter()
-
     private func refilter() {
         var entries = store.activityEntries
         if actionFilter != "all" { entries = entries.filter { $0.action == actionFilter } }
@@ -57,7 +55,7 @@ struct ActivityView: View {
                 .listRowSeparator(.hidden)
 
                 if store.showSessionGrouping && !store.sessions.isEmpty {
-                    sessionGroupedContent
+                    SessionGroupedContent()
                 } else if filteredEntries.isEmpty {
                     ContentUnavailableView(
                         "No Activity",
@@ -68,14 +66,14 @@ struct ActivityView: View {
                     )
                     .listRowSeparator(.hidden)
                 } else {
-                    flatContent
+                    FlatActivityContent(filteredEntries: filteredEntries)
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
 
-            // Contextual bottom bar — only when session grouping is on and a session is selected
+            // Contextual bottom bar
             if store.showSessionGrouping && store.selectedSession != nil {
-                sessionBottomBar
+                SessionBottomBar(copiedSummary: $copiedSummary)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -120,11 +118,16 @@ struct ActivityView: View {
             "\(filteredEntries.count) events"
         }
     }
+}
 
-    // MARK: - Session Grouped Content
+// MARK: - Session Grouped Content
 
-    @ViewBuilder
-    private var sessionGroupedContent: some View {
+private struct SessionGroupedContent: View {
+    @Environment(ManifoldStore.self) var store
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    var body: some View {
         ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
             Section {
                 if store.selectedSession?.id == session.id {
@@ -150,11 +153,15 @@ struct ActivityView: View {
         guard let endDate = Self.isoFormatter.date(from: session.endTime) else { return false }
         return Date().timeIntervalSince(endDate) < 300
     }
+}
 
-    // MARK: - Flat Content
+// MARK: - Flat Activity Content
 
-    @ViewBuilder
-    private var flatContent: some View {
+private struct FlatActivityContent: View {
+    @Environment(ManifoldStore.self) var store
+    let filteredEntries: [AuditEntry]
+
+    var body: some View {
         ForEach(filteredEntries) { entry in
             Button {
                 if let path = entry.filePath {
@@ -166,10 +173,15 @@ struct ActivityView: View {
             .buttonStyle(.plain)
         }
     }
+}
 
-    // MARK: - Bottom Bar
+// MARK: - Session Bottom Bar
 
-    private var sessionBottomBar: some View {
+private struct SessionBottomBar: View {
+    @Environment(ManifoldStore.self) var store
+    @Binding var copiedSummary: Bool
+
+    var body: some View {
         HStack {
             if let session = store.selectedSession {
                 Text("\(session.readCount) reads")
@@ -336,7 +348,13 @@ struct SessionEventRow: View {
 
             // Expandable diff for write events
             if showDiff && event.isWriteEvent {
-                expandedDiffSection
+                ExpandedDiffSection(
+                    event: event,
+                    diffLoading: diffLoading,
+                    diffUnavailable: diffUnavailable,
+                    diffLines: diffLines,
+                    showRevertConfirm: $showRevertConfirm
+                )
             }
         }
         .confirmationDialog("Revert File", isPresented: $showRevertConfirm) {
@@ -357,8 +375,61 @@ struct SessionEventRow: View {
         }
     }
 
-    @ViewBuilder
-    private var expandedDiffSection: some View {
+    private func loadDiff() async {
+        guard event.isWriteEvent else { return }
+        diffLoading = true
+        defer { diffLoading = false }
+
+        guard let beforeHash = event.beforeHash,
+              let afterHash = event.afterHash else {
+            diffUnavailable = true
+            return
+        }
+
+        guard let beforeData = try? await store.contentStore?.retrieve(hash: beforeHash),
+              let afterData = try? await store.contentStore?.retrieve(hash: afterHash) else {
+            diffUnavailable = true
+            return
+        }
+
+        let engine = DiffEngine()
+        diffLines = engine.diff(beforeData: beforeData, afterData: afterData)
+    }
+
+    private func performRevert(force: Bool) async {
+        let result: RevertResult
+        if force {
+            result = await store.forceRevertFile(event: event)
+        } else {
+            result = await store.revertFile(event: event)
+        }
+        switch result {
+        case .success:
+            revertSuccess = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                revertSuccess = false
+            }
+        case .blobPruned:
+            diffUnavailable = true
+        case .contentDrift:
+            showDriftConfirm = true
+        case .error:
+            break
+        }
+    }
+}
+
+// MARK: - Expanded Diff Section
+
+private struct ExpandedDiffSection: View {
+    let event: SessionEvent
+    let diffLoading: Bool
+    let diffUnavailable: Bool
+    let diffLines: [DiffLine]?
+    @Binding var showRevertConfirm: Bool
+
+    var body: some View {
         if diffLoading {
             HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                 .padding(.vertical, Spacing.tight)
@@ -401,51 +472,6 @@ struct SessionEventRow: View {
                 }
             }
             .padding(.vertical, Spacing.tight)
-        }
-    }
-
-    private func loadDiff() async {
-        guard event.isWriteEvent else { return }
-        diffLoading = true
-        defer { diffLoading = false }
-
-        guard let beforeHash = event.beforeHash,
-              let afterHash = event.afterHash else {
-            diffUnavailable = true
-            return
-        }
-
-        guard let beforeData = try? await store.contentStore?.retrieve(hash: beforeHash),
-              let afterData = try? await store.contentStore?.retrieve(hash: afterHash) else {
-            diffUnavailable = true
-            return
-        }
-
-        let engine = DiffEngine()
-        diffLines = engine.diff(beforeData: beforeData, afterData: afterData)
-        // nil means binary — diffLines stays nil, which triggers "Binary file changed"
-    }
-
-    private func performRevert(force: Bool) async {
-        let result: RevertResult
-        if force {
-            result = await store.forceRevertFile(event: event)
-        } else {
-            result = await store.revertFile(event: event)
-        }
-        switch result {
-        case .success:
-            revertSuccess = true
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(1.5))
-                revertSuccess = false
-            }
-        case .blobPruned:
-            diffUnavailable = true
-        case .contentDrift:
-            showDriftConfirm = true
-        case .error:
-            break
         }
     }
 }

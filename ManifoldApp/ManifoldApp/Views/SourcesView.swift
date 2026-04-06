@@ -20,9 +20,13 @@ struct SourcesView: View {
     var body: some View {
         Group {
             if visibleSources.isEmpty {
-                emptyState
+                SourcesEmptyState()
             } else {
-                sourceList
+                SourceListContent(
+                    visibleSources: visibleSources,
+                    selectedSourceIDs: $selectedSourceIDs,
+                    confirmBulkRemove: $confirmBulkRemove
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,10 +62,17 @@ struct SourcesView: View {
         if active == total { return "\(total) source\(total == 1 ? "" : "s")" }
         return "\(active) active, \(total - active) paused"
     }
+}
 
-    // MARK: - Source List
+// MARK: - Source List
 
-    private var sourceList: some View {
+private struct SourceListContent: View {
+    @Environment(ManifoldStore.self) var store
+    let visibleSources: [SourceRecord]
+    @Binding var selectedSourceIDs: Set<String>
+    @Binding var confirmBulkRemove: Bool
+
+    var body: some View {
         List(visibleSources, selection: $selectedSourceIDs) { source in
             SourceCardRow(source: source)
                 .tag(source.sourceID)
@@ -124,10 +135,14 @@ struct SourcesView: View {
             confirmBulkRemove = true
         }
     }
+}
 
-    // MARK: - Empty State
+// MARK: - Empty State
 
-    private var emptyState: some View {
+private struct SourcesEmptyState: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
         ContentUnavailableView {
             Label("No Sources", systemImage: "folder.badge.plus")
         } description: {

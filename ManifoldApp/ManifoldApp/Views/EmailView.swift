@@ -65,19 +65,25 @@ struct EmailView: View {
                 .listRowSeparator(.hidden)
 
                 if store.mailAccessStatus != .available {
-                    mailSetupPrompt
+                    MailSetupPrompt()
                 } else {
-                    mailboxImportSection
+                    MailboxImportSection(
+                        selectedAccount: $selectedAccount,
+                        selectedMailbox: $selectedMailbox,
+                        isFetching: $isFetching,
+                        availableAccounts: availableAccounts,
+                        availableMailboxes: availableMailboxes
+                    )
 
                     if filteredEmails.isEmpty {
-                        emptyState
+                        EmailEmptyState(filter: filter)
                     } else {
-                        emailList
+                        EmailListContent(filteredEmails: filteredEmails)
                     }
                 }
 
                 if !store.emailRules.isEmpty {
-                    rulesSection
+                    EmailRulesSection()
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: false))
@@ -109,8 +115,22 @@ struct EmailView: View {
         return "\(selectedCount) selected"
     }
 
-    @ViewBuilder
-    private var mailSetupPrompt: some View {
+    private func initializeMailboxSelectionIfNeeded() {
+        if selectedAccount.isEmpty {
+            selectedAccount = availableAccounts.first ?? ""
+        }
+        if selectedMailbox.isEmpty {
+            selectedMailbox = availableMailboxes.first?.name ?? ""
+        }
+    }
+}
+
+// MARK: - Mail Setup Prompt
+
+private struct MailSetupPrompt: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
         Section {
             VStack(spacing: Spacing.section) {
                 Image(systemName: "envelope.badge.shield.half.filled")
@@ -150,9 +170,19 @@ struct EmailView: View {
             .padding(.vertical, Spacing.large)
         }
     }
+}
 
-    @ViewBuilder
-    private var mailboxImportSection: some View {
+// MARK: - Mailbox Import Section
+
+private struct MailboxImportSection: View {
+    @Environment(ManifoldStore.self) var store
+    @Binding var selectedAccount: String
+    @Binding var selectedMailbox: String
+    @Binding var isFetching: Bool
+    let availableAccounts: [String]
+    let availableMailboxes: [MailboxInfo]
+
+    var body: some View {
         Section("Mailbox Import") {
             VStack(alignment: .leading, spacing: Spacing.standard) {
                 if store.mailboxes.isEmpty {
@@ -195,8 +225,22 @@ struct EmailView: View {
         }
     }
 
-    @ViewBuilder
-    private var emptyState: some View {
+    private func fetchMailbox() {
+        guard !selectedAccount.isEmpty, !selectedMailbox.isEmpty else { return }
+        isFetching = true
+        Task {
+            await store.fetchAndCacheEmails(account: selectedAccount, mailbox: selectedMailbox)
+            isFetching = false
+        }
+    }
+}
+
+// MARK: - Email Empty State
+
+private struct EmailEmptyState: View {
+    let filter: EmailListFilter
+
+    var body: some View {
         ContentUnavailableView(
             "No Emails",
             systemImage: "envelope",
@@ -206,9 +250,15 @@ struct EmailView: View {
         )
         .listRowSeparator(.hidden)
     }
+}
 
-    @ViewBuilder
-    private var emailList: some View {
+// MARK: - Email List Content
+
+private struct EmailListContent: View {
+    @Environment(ManifoldStore.self) var store
+    let filteredEmails: [CachedEmail]
+
+    var body: some View {
         ForEach(filteredEmails, id: \.messageID) { email in
             EmailRow(
                 email: email,
@@ -216,9 +266,14 @@ struct EmailView: View {
             )
         }
     }
+}
 
-    @ViewBuilder
-    private var rulesSection: some View {
+// MARK: - Rules Section
+
+private struct EmailRulesSection: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
         Section("Auto-Hide Rules") {
             ForEach(store.emailRules, id: \.id) { rule in
                 HStack(spacing: Spacing.standard) {
@@ -240,24 +295,6 @@ struct EmailView: View {
                     }
                 }
             }
-        }
-    }
-
-    private func fetchMailbox() {
-        guard !selectedAccount.isEmpty, !selectedMailbox.isEmpty else { return }
-        isFetching = true
-        Task {
-            await store.fetchAndCacheEmails(account: selectedAccount, mailbox: selectedMailbox)
-            isFetching = false
-        }
-    }
-
-    private func initializeMailboxSelectionIfNeeded() {
-        if selectedAccount.isEmpty {
-            selectedAccount = availableAccounts.first ?? ""
-        }
-        if selectedMailbox.isEmpty {
-            selectedMailbox = availableMailboxes.first?.name ?? ""
         }
     }
 }

@@ -4,7 +4,9 @@ struct HomeView: View {
     @Environment(ManifoldStore.self) var store
     @State private var isLoading = true
 
-    private static let isoFormatter = ISO8601DateFormatter()
+    private var activeSources: [SourceRecord] {
+        store.sources.filter { $0.isAccessible && !$0.isRemoved }
+    }
 
     var body: some View {
         Group {
@@ -14,13 +16,13 @@ struct HomeView: View {
             } else {
                 ScrollView {
                     VStack(spacing: Spacing.large) {
-                        sessionCard
+                        HomeSessionCard(activeSources: activeSources)
                         if let completed = store.lastCompletedSession {
-                            sessionRecap(completed)
+                            SessionRecapCard(session: completed)
                         }
-                        statsRow
+                        HomeStatsRow(activeSources: activeSources)
                         if !store.activityEntries.isEmpty {
-                            recentActivity
+                            RecentActivityCard()
                         }
                     }
                     .padding(Spacing.edge)
@@ -42,26 +44,36 @@ struct HomeView: View {
         if count == 0 { return "No sources configured" }
         return "\(count) source\(count == 1 ? "" : "s") ready"
     }
+}
 
-    private var activeSources: [SourceRecord] {
-        store.sources.filter { $0.isAccessible && !$0.isRemoved }
-    }
+// MARK: - Session Card (Router)
 
-    // MARK: - Session Card
+private struct HomeSessionCard: View {
+    @Environment(ManifoldStore.self) var store
+    let activeSources: [SourceRecord]
 
-    private var sessionCard: some View {
+    var body: some View {
         VStack(spacing: Spacing.section) {
             if store.hasActiveSession, let grant = store.activeGrant {
-                activeSessionCard(grant)
+                ActiveSessionCard(grant: grant)
             } else if activeSources.isEmpty {
-                emptyStateCard
+                HomeEmptyStateCard()
             } else {
-                readyToStartCard
+                ReadyToStartCard(activeSources: activeSources)
             }
         }
     }
+}
 
-    private func activeSessionCard(_ grant: GrantRecord) -> some View {
+// MARK: - Active Session
+
+private struct ActiveSessionCard: View {
+    @Environment(ManifoldStore.self) var store
+    let grant: GrantRecord
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Spacing.section) {
             HStack {
                 ColorIndicator(color: .green, size: 10)
@@ -99,11 +111,18 @@ struct HomeView: View {
         .padding(Spacing.edge)
         .contentCard()
     }
+}
 
-    private var readyToStartCard: some View {
+// MARK: - Ready to Start
+
+private struct ReadyToStartCard: View {
+    @Environment(ManifoldStore.self) var store
+    let activeSources: [SourceRecord]
+
+    var body: some View {
         @Bindable var store = store
 
-        return VStack(alignment: .leading, spacing: Spacing.section) {
+        VStack(alignment: .leading, spacing: Spacing.section) {
             Text("Ready to start")
                 .font(.title3.weight(.medium))
 
@@ -128,8 +147,14 @@ struct HomeView: View {
         .padding(Spacing.edge)
         .contentCard()
     }
+}
 
-    private var emptyStateCard: some View {
+// MARK: - Empty State
+
+private struct HomeEmptyStateCard: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
         VStack(spacing: Spacing.section) {
             Image(systemName: "folder.badge.plus")
                 .font(.system(size: 36))
@@ -150,10 +175,15 @@ struct HomeView: View {
         .padding(Spacing.xlarge)
         .contentCard()
     }
+}
 
-    // MARK: - Session Recap
+// MARK: - Session Recap
 
-    private func sessionRecap(_ session: Session) -> some View {
+private struct SessionRecapCard: View {
+    @Environment(ManifoldStore.self) var store
+    let session: Session
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Spacing.standard) {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
@@ -187,10 +217,15 @@ struct HomeView: View {
         .contentCard(tint: Color(nsColor: .systemGreen))
         .transition(.move(edge: .top).combined(with: .opacity))
     }
+}
 
-    // MARK: - Stats
+// MARK: - Stats Row
 
-    private var statsRow: some View {
+private struct HomeStatsRow: View {
+    @Environment(ManifoldStore.self) var store
+    let activeSources: [SourceRecord]
+
+    var body: some View {
         HStack(spacing: Spacing.edge) {
             Button { store.selectedSidebarItem = .sources } label: {
                 Label("\(activeSources.count) sources", systemImage: "folder.fill")
@@ -219,10 +254,14 @@ struct HomeView: View {
         .font(.callout)
         .padding(.horizontal, Spacing.tight)
     }
+}
 
-    // MARK: - Recent Activity
+// MARK: - Recent Activity
 
-    private var recentActivity: some View {
+private struct RecentActivityCard: View {
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Spacing.standard) {
             HStack {
                 Text("Recent Activity")
