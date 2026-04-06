@@ -5,8 +5,8 @@ struct AgentBadge: View {
 
     private var color: Color {
         switch agent.lowercased() {
-        case "codex": return .purple
-        default: return .blue
+        case "codex": .purple
+        default: .blue
         }
     }
 

@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import ManifoldKit
 
 struct FilesView: View {
     @Environment(ManifoldStore.self) var store
@@ -20,7 +19,7 @@ struct FilesView: View {
 
     // (bulk selection removed — List doesn't support Table-style multi-select)
 
-    enum SortOption: String, CaseIterable {
+    private enum SortOption: String, CaseIterable {
         case name = "Name"
         case size = "Size"
         case modified = "Modified"
@@ -286,16 +285,16 @@ struct FilesView: View {
 
     private func iconFor(_ ext: String) -> String {
         switch ext {
-        case "swift", "py", "js", "ts", "rb", "go", "rs", "c", "cpp", "h": return "doc.text"
-        case "html", "css", "xml", "json", "yaml", "yml", "toml": return "doc.text"
-        case "md", "txt", "rtf": return "doc.plaintext"
-        case "png", "jpg", "jpeg", "gif", "webp", "svg": return "photo"
-        case "pdf": return "doc.richtext"
-        case "zip", "tar", "gz": return "doc.zipper"
-        case "mp4", "mov": return "film"
-        case "mp3", "wav": return "music.note"
-        case "ttf", "otf", "woff", "woff2": return "textformat"
-        default: return "doc"
+        case "swift", "py", "js", "ts", "rb", "go", "rs", "c", "cpp", "h": "doc.text"
+        case "html", "css", "xml", "json", "yaml", "yml", "toml": "doc.text"
+        case "md", "txt", "rtf": "doc.plaintext"
+        case "png", "jpg", "jpeg", "gif", "webp", "svg": "photo"
+        case "pdf": "doc.richtext"
+        case "zip", "tar", "gz": "doc.zipper"
+        case "mp4", "mov": "film"
+        case "mp3", "wav": "music.note"
+        case "ttf", "otf", "woff", "woff2": "textformat"
+        default: "doc"
         }
     }
 }

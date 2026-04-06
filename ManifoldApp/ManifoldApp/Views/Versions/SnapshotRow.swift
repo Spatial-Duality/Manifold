@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct SnapshotRow: View {
     let snapshot: SnapshotRecord
@@ -26,21 +25,23 @@ struct SnapshotRow: View {
     }
 
     private var icon: String {
-        if snapshot.isDelete { return "trash" }
-        if snapshot.isBaseline { return "flag" }
-        if snapshot.source == "manifold-restore" { return "arrow.uturn.backward" }
-        return "pencil"
+        if snapshot.isDelete { "trash" }
+        else if snapshot.isBaseline { "flag" }
+        else if snapshot.source == "manifold-restore" { "arrow.uturn.backward" }
+        else { "pencil" }
     }
+
     private var iconColor: Color {
-        if snapshot.isDelete { return .red }
-        if snapshot.isBaseline { return .blue }
-        if snapshot.source == "manifold-restore" { return .orange }
-        return .green
+        if snapshot.isDelete { .red }
+        else if snapshot.isBaseline { .blue }
+        else if snapshot.source == "manifold-restore" { .orange }
+        else { .green }
     }
+
     private var label: String {
-        if snapshot.isDelete { return "DELETED" }
-        if snapshot.isBaseline { return "BASELINE" }
-        if snapshot.source == "manifold-restore" { return "RESTORED" }
-        return "MODIFIED"
+        if snapshot.isDelete { "DELETED" }
+        else if snapshot.isBaseline { "BASELINE" }
+        else if snapshot.source == "manifold-restore" { "RESTORED" }
+        else { "MODIFIED" }
     }
 }

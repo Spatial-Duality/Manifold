@@ -7,11 +7,11 @@ struct SidebarView: View {
         VStack(spacing: Spacing.tight) {
             VStack(spacing: Spacing.tight + 2) {
                 SidebarButton(
-                    label: "Sources",
-                    icon: "folder.badge.gearshape",
-                    item: .dashboard,
+                    label: "Home",
+                    icon: "house",
+                    item: .home,
                     selected: store.selectedSidebarItem
-                ) { store.selectedSidebarItem = .dashboard }
+                ) { store.selectedSidebarItem = .home }
 
                 SidebarButton(
                     label: "Files",
@@ -21,25 +21,25 @@ struct SidebarView: View {
                 ) { store.selectedSidebarItem = .files }
 
                 SidebarButton(
-                    label: "Activity",
-                    icon: "waveform.path.ecg",
-                    item: .activity,
-                    selected: store.selectedSidebarItem
-                ) { store.selectedSidebarItem = .activity }
-
-                SidebarButton(
                     label: "Emails",
                     icon: "envelope.badge.shield.half.filled",
-                    item: .email,
+                    item: .emails,
                     selected: store.selectedSidebarItem
-                ) { store.selectedSidebarItem = .email }
+                ) { store.selectedSidebarItem = .emails }
 
                 SidebarButton(
-                    label: "Versions",
-                    icon: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                    item: .versions,
+                    label: "History",
+                    icon: "clock.arrow.circlepath",
+                    item: .history,
                     selected: store.selectedSidebarItem
-                ) { store.selectedSidebarItem = .versions }
+                ) { store.selectedSidebarItem = .history }
+
+                SidebarButton(
+                    label: "Sources",
+                    icon: "folder.badge.gearshape",
+                    item: .sources,
+                    selected: store.selectedSidebarItem
+                ) { store.selectedSidebarItem = .sources }
             }
 
             Spacer()
@@ -75,7 +75,7 @@ struct SidebarView: View {
     }
 }
 
-struct SidebarButton: View {
+private struct SidebarButton: View {
     let label: String
     let icon: String
     let item: SidebarItem
@@ -87,7 +87,6 @@ struct SidebarButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Spacing.standard) {
-                // Selection indicator bar (Raycast-inspired)
                 RoundedRectangle(cornerRadius: 2)
                     .fill(isSelected ? Color.accentColor : Color.clear)
                     .frame(width: 3, height: 18)

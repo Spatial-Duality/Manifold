@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct DiffView: View {
     let lines: [DiffLine]
@@ -17,7 +16,7 @@ struct DiffView: View {
     }
 }
 
-struct DiffLineRow: View {
+private struct DiffLineRow: View {
     let line: DiffLine
     let lineNumber: Int
 
@@ -50,25 +49,25 @@ struct DiffLineRow: View {
 
     private var prefix: String {
         switch line.type {
-        case .addition: return "+"
-        case .removal: return "-"
-        case .context: return " "
+        case .addition: "+"
+        case .removal: "-"
+        case .context: " "
         }
     }
 
     private var color: Color {
         switch line.type {
-        case .addition: return .green
-        case .removal: return .red
-        case .context: return .secondary
+        case .addition: .green
+        case .removal: .red
+        case .context: .secondary
         }
     }
 
     private var background: Color {
         switch line.type {
-        case .addition: return .green.opacity(0.08)
-        case .removal: return .red.opacity(0.08)
-        case .context: return .clear
+        case .addition: .green.opacity(0.08)
+        case .removal: .red.opacity(0.08)
+        case .context: .clear
         }
     }
 }

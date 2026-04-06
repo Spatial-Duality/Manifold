@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct EmailRow: View {
     @Environment(ManifoldStore.self) var store

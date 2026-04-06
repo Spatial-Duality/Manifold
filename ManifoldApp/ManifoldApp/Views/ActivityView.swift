@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct ActivityView: View {
     @Environment(ManifoldStore.self) var store
@@ -105,20 +104,21 @@ struct ActivityView: View {
 
     private var filterLabel: String {
         switch actionFilter {
-        case "file_read": return "Reads"
-        case "file_modified": return "Writes"
-        case "tool_call": return "Tool Calls"
-        case "mcp_connection": return "Connections"
-        case "restore": return "Restores"
-        default: return "All"
+        case "file_read": "Reads"
+        case "file_modified": "Writes"
+        case "tool_call": "Tool Calls"
+        case "mcp_connection": "Connections"
+        case "restore": "Restores"
+        default: "All"
         }
     }
 
     private var subtitle: String {
         if store.showSessionGrouping {
-            return "\(store.sessions.count) sessions"
+            "\(store.sessions.count) sessions"
+        } else {
+            "\(filteredEntries.count) events"
         }
-        return "\(filteredEntries.count) events"
     }
 
     // MARK: - Session Grouped Content

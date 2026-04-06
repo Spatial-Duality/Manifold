@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct ActivityRow: View {
     let entry: AuditEntry

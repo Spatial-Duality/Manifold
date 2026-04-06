@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct SourcesSection: View {
     @Environment(ManifoldStore.self) var store

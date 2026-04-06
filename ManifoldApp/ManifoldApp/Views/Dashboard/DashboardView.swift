@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct DashboardView: View {
     @Environment(ManifoldStore.self) var store
@@ -144,7 +143,7 @@ struct DashboardView: View {
                     }
                 }
                 Button {
-                    store.selectedSidebarItem = .activity
+                    store.selectedSidebarItem = .history
                 } label: {
                     HStack {
                         Text("See All Activity")
@@ -174,70 +173,57 @@ struct SourceCardRow: View {
         return source.originalRootPath.hasPrefix(home) ? "~" + source.originalRootPath.dropFirst(home.count) : source.originalRootPath
     }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: source.isAccessible ? "folder.fill" : "folder")
-                .font(.title2)
-                .foregroundStyle(source.isAccessible ? .blue : .secondary)
-                .frame(width: 32)
+    private var isOn: Binding<Bool> {
+        Binding(
+            get: { source.isAccessible },
+            set: { newValue in
+                Task {
+                    if newValue {
+                        await store.resumeSource(sourceID: source.sourceID)
+                    } else {
+                        await store.pauseSource(sourceID: source.sourceID)
+                    }
+                }
+            }
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
+    var body: some View {
+        HStack(spacing: Spacing.section) {
+            Image(systemName: "folder.fill")
+                .font(.title3)
+                .foregroundStyle(source.isAccessible ? Color(nsColor: .systemBlue) : Color.secondary.opacity(0.3))
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 1) {
                 Text(source.displayName)
                     .font(.body.weight(.medium))
-                Text(shortenedPath)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .foregroundStyle(source.isAccessible ? .primary : .secondary)
+                HStack(spacing: Spacing.tight) {
+                    Text(shortenedPath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if fileCount > 0 {
+                        Text("·")
+                        Text("\(fileCount) files")
+                            .monospacedDigit()
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             }
 
             Spacer()
 
-            Text("\(fileCount)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-            Text("files")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            Button {
-                Task {
-                    if source.isAccessible {
-                        await store.pauseSource(sourceID: source.sourceID)
-                    } else {
-                        await store.resumeSource(sourceID: source.sourceID)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(source.isAccessible ? Color.green : Color.gray)
-                        .frame(width: 8, height: 8)
-                        .accessibilityHidden(true)
-                    Text(source.isAccessible ? "Active" : "Paused")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(source.isAccessible ? .primary : .secondary)
-                }
-                .padding(.horizontal, Spacing.standard)
-                .padding(.vertical, Spacing.tight)
-                .background(source.isAccessible ? Color.green.opacity(0.1) : Color.gray.opacity(0.1))
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
+            Toggle(source.isAccessible ? "Active" : "Paused", isOn: isOn)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .accessibilityLabel(source.isAccessible ? "Active, toggle to pause" : "Paused, toggle to resume")
 
             Menu {
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.selectFile(source.originalRootPath, inFileViewerRootedAtPath: "")
-                }
-                Divider()
-                if source.isAccessible {
-                    Button("Pause Access") {
-                        Task { await store.pauseSource(sourceID: source.sourceID) }
-                    }
-                } else {
-                    Button("Resume Access") {
-                        Task { await store.resumeSource(sourceID: source.sourceID) }
-                    }
                 }
                 Divider()
                 Button("Remove from Manifold...", role: .destructive) {
@@ -245,12 +231,15 @@ struct SourceCardRow: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
+                    .imageScale(.medium)
             }
+            .menuIndicator(.hidden)
             .menuStyle(.borderlessButton)
-            .frame(width: 24)
+            .fixedSize()
         }
         .padding(.vertical, Spacing.tight)
+        .opacity(source.isAccessible ? 1.0 : 0.6)
         .alert("Remove Source?", isPresented: $confirmRemove) {
             Button("Remove", role: .destructive) { store.removeSource(path: source.originalRootPath) }
             Button("Cancel", role: .cancel) {}

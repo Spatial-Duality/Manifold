@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct OnboardingView: View {
     @Environment(ManifoldStore.self) var store
@@ -162,7 +161,7 @@ struct OnboardingView: View {
                     Text("Installed").font(.callout.weight(.medium))
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    configLine("MCP binary", path: ManifoldStore.mcpBinaryPath())
+                    configLine("MCP binary", path: ManifoldStore.mcpBinaryPath)
                     if store.claudeDesktopConfigured {
                         configLine("Claude config", path: "~/Library/Application Support/Claude/claude_desktop_config.json")
                     }

@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct VersionDetailView: View {
     @Environment(ManifoldStore.self) var store

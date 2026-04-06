@@ -5,18 +5,13 @@ options:
     macOS: "26.0"
   xcodeVersion: "26.4"
 
-packages:
-  ManifoldKit:
-    path: .
-
 targets:
   Manifold:
     type: application
     platform: macOS
     sources:
       - path: ManifoldApp/ManifoldApp
-    dependencies:
-      - package: ManifoldKit
+      - path: Sources/ManifoldKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.spatialduality.manifold

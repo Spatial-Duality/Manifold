@@ -20,3 +20,10 @@
 **Context:** Currently startSession() materializes immediately with no preview. Add a pre-session state to ManifoldStore that computes the preview, shows it in DashboardView, and waits for user confirmation before materializing.
 **Files:** ManifoldStore.swift (pre-session state), DashboardView.swift (preview UI), MaterializationEngine.swift (size estimation method).
 **Depends on:** Size guard (Issue 3A from eng review).
+
+## Wire domain presets into session behavior
+**What:** DomainPreset.emailSensitivity and summaryFraming are defined but ignored by startSession(). The user picks "Legal Review" and the session behaves identically to "General."
+**Why:** UI promises behavior it doesn't deliver. Users will notice when "strict" email sensitivity doesn't filter differently than "moderate."
+**Context:** DomainPreset.swift defines 6 presets with emailSensitivity (strict/moderate/open) and summaryFraming. ManifoldStore.selectedPreset holds the selection. startSession() needs to: (1) pass emailSensitivity to EmailFilter's classification threshold, (2) use summaryFraming as the prefix in generateSessionSummary(). PresetPickerView.swift in HomeView already shows the selection.
+**Files:** ManifoldStore.swift (startSession, generateSessionSummary), EmailFilter.swift (classification threshold), DomainPreset.swift (data model).
+**Depends on:** Nothing. Can be built independently.

@@ -3,18 +3,17 @@ import Foundation
 import UserNotifications
 import CommonCrypto
 import os
-import ManifoldKit
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "store")
 
 // MARK: - Navigation
 
-enum SidebarItem: Hashable {
-    case dashboard
+enum SidebarItem: String, Hashable, CaseIterable {
+    case home
     case files
-    case activity
-    case email
-    case versions
+    case emails
+    case history
+    case sources
 }
 
 // MARK: - Store
@@ -23,7 +22,7 @@ enum SidebarItem: Hashable {
 @MainActor
 class ManifoldStore {
     // Navigation
-    var selectedSidebarItem: SidebarItem? = .dashboard
+    var selectedSidebarItem: SidebarItem? = .home
     var inspectedFilePath: String?
 
     // Connection
@@ -49,6 +48,7 @@ class ManifoldStore {
     var mailAccessStatus: MailAccessStatus?
     var mailboxes: [MailboxInfo] = []
     var selectedEmailIDsForNextSession: Set<String> = []
+    var selectedPreset: DomainPreset?
 
     // Versions
     var allTrackedFiles: [String] = []
@@ -57,6 +57,7 @@ class ManifoldStore {
 
     // Errors
     var lastError: String?
+    var lastCompletedSession: Session?
 
     // Setup
     var mcpInstalled = false
@@ -67,6 +68,17 @@ class ManifoldStore {
     // Onboarding
     var hasCompletedOnboarding: Bool {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "manifold.onboarding.completed") }
+    }
+
+    // Preferences
+    var launchAtLogin: Bool {
+        didSet { UserDefaults.standard.set(launchAtLogin, forKey: "manifold.launchAtLogin") }
+    }
+    var notifyOnSessionEnd: Bool {
+        didSet { UserDefaults.standard.set(notifyOnSessionEnd, forKey: "manifold.notify.sessionEnd") }
+    }
+    var notifyOnAccessDenied: Bool {
+        didSet { UserDefaults.standard.set(notifyOnAccessDenied, forKey: "manifold.notify.accessDenied") }
     }
 
     // Grant lifecycle
@@ -92,6 +104,9 @@ class ManifoldStore {
 
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "manifold.onboarding.completed")
+        launchAtLogin = UserDefaults.standard.bool(forKey: "manifold.launchAtLogin")
+        notifyOnSessionEnd = UserDefaults.standard.object(forKey: "manifold.notify.sessionEnd") as? Bool ?? true
+        notifyOnAccessDenied = UserDefaults.standard.object(forKey: "manifold.notify.accessDenied") as? Bool ?? true
         Task {
             await initStores()
             setupNotificationObservers()
@@ -101,7 +116,7 @@ class ManifoldStore {
 
     private func initStores() async {
         do {
-            let storeURL = Self.storeURL()
+            let storeURL = Self.storeURL
             try FileManager.default.createDirectory(at: storeURL, withIntermediateDirectories: true)
             let contentStore = try ContentStore(rootURL: storeURL)
             self.contentStore = contentStore
@@ -271,7 +286,50 @@ class ManifoldStore {
         for path in paths { removeSource(path: path) }
     }
 
-    /// Enumerate all files across all active sources. Returns flat list with metadata.
+    /// Enumerate files from active source original paths. Works without an active session.
+    /// Enriches each file with version count from the snapshot store.
+    func enumerateSourceFiles() async -> [SourceFile] {
+        let fm = FileManager.default
+        var result: [SourceFile] = []
+        let activeSrcs = sources.filter { $0.isAccessible && !$0.isRemoved }
+        let tracked = Set(allTrackedFiles)
+
+        for source in activeSrcs {
+            let root = URL(fileURLWithPath: source.originalRootPath)
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            while let url = enumerator.nextObject() as? URL {
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                      values.isRegularFile == true else { continue }
+                let path = url.path
+                let hasVersions = tracked.contains(path)
+                var file = SourceFile(
+                    name: url.lastPathComponent,
+                    path: path,
+                    relativePath: path.replacingOccurrences(of: source.originalRootPath + "/", with: ""),
+                    sourceName: source.displayName,
+                    sourceID: source.sourceID,
+                    fileExtension: url.pathExtension.lowercased(),
+                    sizeBytes: values.fileSize ?? 0,
+                    modifiedDate: values.contentModificationDate ?? Date.distantPast,
+                    isGrantedToClaude: true
+                )
+                if hasVersions {
+                    let history = await fileHistory(filePath: path)
+                    file.versionCount = history.count
+                    file.hasAIActivity = history.contains { $0.source == "agent" || $0.source == "mcp" }
+                }
+                result.append(file)
+            }
+        }
+        return result
+    }
+
+    /// Enumerate files from grant materialization mounts. Only works during active session.
     func enumerateAllFiles() -> [SourceFile] {
         let fm = FileManager.default
         var result: [SourceFile] = []
@@ -330,10 +388,10 @@ class ManifoldStore {
                 guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
 
                 let lines = content.components(separatedBy: "\n")
-                let matches = lines.enumerated()
+                let matches = Array(lines.enumerated().lazy
                     .filter { $0.element.localizedCaseInsensitiveContains(query) }
                     .prefix(5)
-                    .map { SearchMatch(lineNumber: $0.offset + 1, lineText: String($0.element.prefix(200))) }
+                    .map { SearchMatch(lineNumber: $0.offset + 1, lineText: String($0.element.prefix(200))) })
 
                 if !matches.isEmpty {
                     results.append(SearchResult(
@@ -548,6 +606,9 @@ class ManifoldStore {
             activeGrant = nil
             activeGrantSources = []
             logger.info("Session ended: \(grant.grantID)")
+            // Surface the completed session for recap in HomeView
+            await refresh()
+            lastCompletedSession = sessions.first(where: { $0.id == grant.grantID })
         } catch {
             logger.error("Failed to end session: \(error.localizedDescription)")
             lastError = "Failed to end session: \(error.localizedDescription)"
@@ -959,7 +1020,7 @@ class ManifoldStore {
 
     // MARK: - Setup
 
-    func checkMCPInstalled() { mcpInstalled = FileManager.default.fileExists(atPath: Self.mcpBinaryPath()) }
+    func checkMCPInstalled() { mcpInstalled = FileManager.default.fileExists(atPath: Self.mcpBinaryPath) }
     func checkAgentConfigs() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         claudeDesktopConfigured = FileManager.default.fileExists(atPath: home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json").path)
@@ -968,7 +1029,7 @@ class ManifoldStore {
     func installMCP() {
         installError = nil
         do {
-            let destPath = Self.mcpBinaryPath()
+            let destPath = Self.mcpBinaryPath
             let destURL = URL(fileURLWithPath: destPath)
             try FileManager.default.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if let bundled = Bundle.main.url(forResource: "manifold-mcp", withExtension: nil) {
@@ -1171,64 +1232,15 @@ class ManifoldStore {
         await loadSessions()
     }
 
-    static func storeURL() -> URL {
+    static var storeURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Manifold/store")
     }
-    static func mcpBinaryPath() -> String {
+    static var mcpBinaryPath: String {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Manifold/bin/manifold-mcp").path
     }
 }
 
-// MARK: - File Browser Types
-
-struct SourceFile: Identifiable, Sendable {
-    let id = UUID()
-    let name: String
-    let path: String
-    let relativePath: String
-    let sourceName: String
-    let sourceID: String
-    let fileExtension: String
-    let sizeBytes: Int
-    let modifiedDate: Date
-    let isGrantedToClaude: Bool
-}
-
-struct SearchResult: Identifiable, Sendable {
-    let id = UUID()
-    let fileName: String
-    let filePath: String
-    let sourceName: String
-    let isGranted: Bool
-    let canonicalPath: String
-    let matches: [SearchMatch]
-}
-
-struct SearchMatch: Identifiable, Sendable {
-    let id = UUID()
-    let lineNumber: Int
-    let lineText: String
-}
-
-// MARK: - Revert
-
-enum RevertResult {
-    case success
-    case blobPruned
-    case contentDrift
-    case error(String)
-}
-
-extension Data {
-    var sha256Hex: String {
-        let hash = withUnsafeBytes { bytes -> [UInt8] in
-            var hash = [UInt8](repeating: 0, count: 32)
-            CC_SHA256(bytes.baseAddress, CC_LONG(count), &hash)
-            return hash
-        }
-        return hash.map { String(format: "%02x", $0) }.joined()
-    }
-}
+// Types moved to ManifoldTypes.swift
 
 private struct ResolvedGrantPath {
     let mount: GrantMount

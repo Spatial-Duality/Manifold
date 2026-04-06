@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 enum EmailListFilter: String, CaseIterable {
     case all, selected, shared, hidden

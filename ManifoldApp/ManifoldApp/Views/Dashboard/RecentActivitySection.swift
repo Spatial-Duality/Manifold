@@ -1,5 +1,4 @@
 import SwiftUI
-import ManifoldKit
 
 struct RecentActivitySection: View {
     @Environment(ManifoldStore.self) var store
@@ -29,7 +28,7 @@ struct RecentActivitySection: View {
                     .buttonStyle(.plain)
                 }
                 Button {
-                    store.selectedSidebarItem = .activity
+                    store.selectedSidebarItem = .history
                 } label: {
                     HStack {
                         Text("See All Activity")
