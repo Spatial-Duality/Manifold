@@ -34,6 +34,14 @@ struct SearchMatch: Identifiable, Sendable {
     let lineText: String
 }
 
+// MARK: - Grant Path Resolution
+
+struct ResolvedGrantPath {
+    let mount: GrantMount
+    let relativePath: String
+    let fileURL: URL
+}
+
 // MARK: - Revert
 
 enum RevertResult {

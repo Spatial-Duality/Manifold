@@ -62,6 +62,11 @@
 		E1000000000000000000000D /* DomainPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000D /* DomainPreset.swift */; };
 		E1000000000000000000000E /* PresetPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000E /* PresetPickerView.swift */; };
 		E10000000000000000000010 /* SourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000010 /* SourcesView.swift */; };
+		E10000000000000000000020 /* SetupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000020 /* SetupModel.swift */; };
+		E10000000000000000000021 /* StorageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000021 /* StorageModel.swift */; };
+		E10000000000000000000022 /* EmailModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000022 /* EmailModel.swift */; };
+		E10000000000000000000023 /* HistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000023 /* HistoryModel.swift */; };
+		E10000000000000000000024 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000024 /* SessionModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -121,6 +126,11 @@
 		D1000000000000000000000D /* DomainPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainPreset.swift; sourceTree = "<group>"; };
 		D1000000000000000000000E /* PresetPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetPickerView.swift; sourceTree = "<group>"; };
 		D10000000000000000000010 /* SourcesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourcesView.swift; sourceTree = "<group>"; };
+		D10000000000000000000020 /* SetupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupModel.swift; sourceTree = "<group>"; };
+		D10000000000000000000021 /* StorageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageModel.swift; sourceTree = "<group>"; };
+		D10000000000000000000022 /* EmailModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModel.swift; sourceTree = "<group>"; };
+		D10000000000000000000023 /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
+		D10000000000000000000024 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -255,9 +265,14 @@
 			children = (
 				D10000000000000000000004 /* CommandCenter.swift */,
 				D1000000000000000000000D /* DomainPreset.swift */,
+				D10000000000000000000022 /* EmailModel.swift */,
 				A43BA689161AF82B93E21E11 /* FileNode.swift */,
+				D10000000000000000000023 /* HistoryModel.swift */,
 				F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */,
 				D1000000000000000000000C /* ManifoldTypes.swift */,
+				D10000000000000000000024 /* SessionModel.swift */,
+				D10000000000000000000020 /* SetupModel.swift */,
+				D10000000000000000000021 /* StorageModel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -374,6 +389,11 @@
 				E1000000000000000000000D /* DomainPreset.swift in Sources */,
 				E1000000000000000000000E /* PresetPickerView.swift in Sources */,
 				E10000000000000000000010 /* SourcesView.swift in Sources */,
+				E10000000000000000000020 /* SetupModel.swift in Sources */,
+				E10000000000000000000021 /* StorageModel.swift in Sources */,
+				E10000000000000000000022 /* EmailModel.swift in Sources */,
+				E10000000000000000000023 /* HistoryModel.swift in Sources */,
+				E10000000000000000000024 /* SessionModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
