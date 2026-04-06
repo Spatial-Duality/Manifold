@@ -161,7 +161,7 @@ enum ToolHandlers {
             case "list_changes":
                 let changes = try await bridge.listChanges()
                 if changes.isEmpty { return textResult("No changes recorded yet.") }
-                let formatted = changes.map { "[\($0.timestamp)] \($0.type.uppercased()) [\($0.source)] \($0.path) (by \($0.agent))" }
+                let formatted = changes.map { "[\($0.timestamp)] \($0.action.uppercased()) \($0.path ?? "") (by \($0.agent ?? "unknown"))" }
                 return textResult(formatted.joined(separator: "\n"))
 
             case "file_info":

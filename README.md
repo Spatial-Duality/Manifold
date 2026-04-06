@@ -31,7 +31,7 @@ Manifold does **not** control agent connectors, plugins, computer use, or networ
 - **Manifold.app** — Native SwiftUI. Menu bar + main window. Sources, Profiles, Activity views. Liquid Glass on macOS 26.
 - **manifold-cli** — Terminal interface. `init`, `grant`, `watch`, `log`, `restore`, `promote`.
 
-28 tests. All passing.
+145+ tests across 16 suites covering grants, snapshots, content store, email filtering, promotions, MCP access control, and database migrations.
 
 ## Status
 

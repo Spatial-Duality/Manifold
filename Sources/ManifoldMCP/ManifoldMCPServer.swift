@@ -38,8 +38,10 @@ struct ManifoldMCPServer {
             logger.info("Applied \(migrated) database migration(s)")
         }
 
+        let contentStore = try ContentStore(rootURL: storeURL)
         let auditStore = try AuditStore(db: db)
         let emailFilter = try EmailFilter(db: db)
+        let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let grantStore = GrantStore(db: db)
 
         // Log MCP connection and notify the app
@@ -50,8 +52,10 @@ struct ManifoldMCPServer {
         let bridge = ManifoldBridge(
             db: db,
             auditStore: auditStore,
+            contentStore: contentStore,
             emailFilter: emailFilter,
-            grantStore: grantStore
+            grantStore: grantStore,
+            snapshotStore: snapshotStore
         )
 
         // Create MCP server

@@ -32,8 +32,10 @@ struct GrantBoundaryBridgeTests {
         let bridge = ManifoldBridge(
             db: db,
             auditStore: auditStore,
+            contentStore: contentStore,
             emailFilter: emailFilter,
-            grantStore: grantStore
+            grantStore: grantStore,
+            snapshotStore: snapshotStore
         )
         return Harness(
             db: db,

@@ -117,7 +117,7 @@ public struct PromoteEngine: Sendable {
 
                 newFiles.append(FileResult(
                     relativePath: path,
-                    result: .applied,
+                    result: .newFile,
                     originalBeforeHash: nil,
                     promotedHash: matHash,
                     conflictReason: nil

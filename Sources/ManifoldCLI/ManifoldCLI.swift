@@ -73,12 +73,14 @@ struct ManifoldCLI {
     static func handleSources() async throws {
         let storeURL = manifoldStoreURL()
         let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
-        let rows = try db.queryAll("SELECT root_path FROM workspaces")
-        if rows.isEmpty {
+        let grantStore = GrantStore(db: db)
+        let sources = try await grantStore.allSources()
+        if sources.isEmpty {
             print("No approved sources. Use the Manifold app to add sources.")
         } else {
-            for row in rows {
-                if let path = row["root_path"] { print(path) }
+            for source in sources {
+                let status = source.isAccessible ? "active" : source.isPaused ? "paused" : source.status
+                print("\(source.originalRootPath) [\(status)]")
             }
         }
     }

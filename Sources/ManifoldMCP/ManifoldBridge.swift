@@ -7,27 +7,40 @@ import ManifoldKit
 public actor ManifoldBridge {
     private let db: DatabaseConnection
     private let auditStore: AuditStore
+    private let contentStore: ContentStore
     private let emailFilter: EmailFilter
     private let grantStore: GrantStore
+    private let snapshotStore: SnapshotStore
 
     public init(
         db: DatabaseConnection,
         auditStore: AuditStore,
+        contentStore: ContentStore,
         emailFilter: EmailFilter,
-        grantStore: GrantStore
+        grantStore: GrantStore,
+        snapshotStore: SnapshotStore
     ) {
         self.db = db
         self.auditStore = auditStore
+        self.contentStore = contentStore
         self.emailFilter = emailFilter
         self.grantStore = grantStore
+        self.snapshotStore = snapshotStore
     }
+
+    private static let binaryExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "ico", "webp",
+        "pdf", "zip", "gz", "tar", "rar", "7z",
+        "exe", "dll", "dylib", "so", "a", "o",
+        "mp3", "mp4", "wav", "avi", "mov", "mkv",
+        "sqlite", "db", "bin", "dat",
+    ]
 
     // MARK: - Grant Resolution
 
     /// Resolve the active grant or throw. Fail-closed: no grant = no access.
     private func requireGrant(targetApp: TargetApp = .cowork, profileID: String = "default") async throws -> (GrantRecord, [GrantSourceRecord]) {
         guard let grant = try await grantStore.activeGrant(targetApp: targetApp, profileID: profileID) else {
-            // Check if sources exist but just no session
             let sources = try await grantStore.activeSources()
             if sources.isEmpty {
                 throw ManifoldMCPError.noSources
@@ -35,18 +48,23 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.noActiveSession
         }
         let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
-        // Touch the grant to reset inactivity timer
         try await grantStore.touchGrant(grantID: grant.grantID)
         return (grant, grantSources)
     }
 
-    /// Get mount directories for a grant.
-    private func grantMounts(grant: GrantRecord, sources: [GrantSourceRecord]) -> [(mountName: String, mountPath: String)] {
+    /// Get mount directories for a grant, including source IDs.
+    private func grantMounts(grant: GrantRecord, sources: [GrantSourceRecord]) -> [GrantMount] {
         sources.map { gs in
             let path = URL(fileURLWithPath: grant.materializationRoot)
                 .appendingPathComponent(gs.mountName).path
-            return (mountName: gs.mountName, mountPath: path)
+            return GrantMount(sourceID: gs.sourceID, mountName: gs.mountName, mountPath: path)
         }
+    }
+
+    private struct GrantMount {
+        let sourceID: String
+        let mountName: String
+        let mountPath: String
     }
 
     // MARK: - Path Safety
@@ -69,6 +87,37 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.invalidPath("Path escapes workspace boundary")
         }
         return resolved
+    }
+
+    /// Resolve a cleaned path to a specific mount. Returns nil if no mount prefix matches.
+    private func resolveMountAndPath(_ path: String, in mounts: [GrantMount]) -> (GrantMount, String)? {
+        for mount in mounts {
+            if path.hasPrefix(mount.mountName + "/") {
+                let relPath = String(path.dropFirst(mount.mountName.count + 1))
+                return (mount, relPath)
+            }
+        }
+        return nil
+    }
+
+    /// Resolve bare path to a single unambiguous mount. Throws if ambiguous.
+    private func resolveBarePath(_ path: String, in mounts: [GrantMount]) throws -> (GrantMount, String) {
+        var matches: [(mount: GrantMount, url: URL)] = []
+        for mount in mounts {
+            if let url = try? validatePath(path, rootPath: mount.mountPath),
+               FileManager.default.fileExists(atPath: url.path) {
+                matches.append((mount, url))
+            }
+        }
+        switch matches.count {
+        case 0:
+            throw ManifoldMCPError.fileNotFound(path)
+        case 1:
+            return (matches[0].mount, path)
+        default:
+            let names = matches.map(\.mount.mountName).joined(separator: ", ")
+            throw ManifoldMCPError.invalidPath("Ambiguous path '\(path)' exists in multiple sources: \(names). Use mount-prefixed path (e.g. '\(matches[0].mount.mountName)/\(path)').")
+        }
     }
 
     // MARK: - Tool Audit
@@ -97,7 +146,7 @@ public actor ManifoldBridge {
                 let fileCount = (try? enumerateFiles(in: mountURL).count) ?? 0
                 totalFiles += fileCount
             }
-            let emailCount = (try? await emailFilter.sharedEmails().count) ?? 0
+            let emailCount = (try? await grantStore.grantEmailMessages(grantID: grant.grantID).count) ?? 0
             let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
             let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
 
@@ -111,7 +160,6 @@ public actor ManifoldBridge {
                 message: message
             )
         } catch ManifoldMCPError.noActiveSession {
-            // Report sources but no session
             let sources = (try? await grantStore.activeSources()) ?? []
             let paused = sources.filter(\.isPaused)
             let active = sources.filter(\.isAccessible)
@@ -163,6 +211,8 @@ public actor ManifoldBridge {
         return allFiles.sorted { $0.path < $1.path }
     }
 
+    // MARK: - Read File (P1 FIX: reject ambiguous bare paths)
+
     public func readFile(path: String) async throws -> String {
         await logToolCall(tool: "read_file", arguments: ["path": path])
         let (grant, grantSources) = try await requireGrant()
@@ -174,13 +224,9 @@ public actor ManifoldBridge {
             return try await readFromMount(relativePath: relPath, mountPath: mount.mountPath, mountName: mount.mountName, grantID: grant.grantID)
         }
 
-        // Fall back: try each mount with the raw path
-        for mount in mounts {
-            do {
-                return try await readFromMount(relativePath: cleaned, mountPath: mount.mountPath, mountName: mount.mountName, grantID: grant.grantID)
-            } catch is ManifoldMCPError { continue }
-        }
-        throw ManifoldMCPError.fileNotFound(path)
+        // Bare path: resolve unambiguously or reject
+        let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
+        return try await readFromMount(relativePath: relPath, mountPath: mount.mountPath, mountName: mount.mountName, grantID: grant.grantID)
     }
 
     private func readFromMount(relativePath: String, mountPath: String, mountName: String, grantID: String) async throws -> String {
@@ -189,16 +235,17 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.fileNotFound(relativePath)
         }
         let data = try Data(contentsOf: fileURL)
+        let canonicalPath = "\(mountName)/\(relativePath)"
 
         try? await auditStore.log(
             action: .fileRead,
             agent: "cowork",
-            filePath: relativePath,
+            filePath: canonicalPath,
             metadata: ["grant_id": grantID, "mount": mountName],
             grantID: grantID
         )
         ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
-            "path": relativePath, "action": "read", "agent": "cowork"
+            "path": canonicalPath, "action": "read", "agent": "cowork"
         ])
 
         if let text = String(data: data, encoding: .utf8) {
@@ -207,6 +254,8 @@ public actor ManifoldBridge {
             return "<binary file, \(data.count) bytes>"
         }
     }
+
+    // MARK: - Write File (P1 FIX: record snapshots, use canonical paths, reject ambiguous)
 
     public func writeFile(path: String, content: String) async throws -> String {
         await logToolCall(tool: "write_file", arguments: ["path": path, "content_length": "\(content.count)"])
@@ -220,24 +269,38 @@ public actor ManifoldBridge {
 
         let data = content.data(using: .utf8) ?? Data()
 
-        // Resolve which mount to write to
-        let mountPath: String
-        let mountName: String
+        // Resolve mount deterministically
+        let resolved: GrantMount
         let resolvedPath: String
         if let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) {
-            mountPath = mount.mountPath
-            mountName = mount.mountName
+            resolved = mount
             resolvedPath = relPath
-        } else if let first = mounts.first {
-            mountPath = first.mountPath
-            mountName = first.mountName
+        } else if mounts.count == 1, let first = mounts.first {
+            resolved = first
             resolvedPath = cleaned
+        } else if mounts.count > 1 {
+            let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
+            resolved = mount
+            resolvedPath = relPath
         } else {
             throw ManifoldMCPError.noSources
         }
 
-        let fileURL = try validatePath(resolvedPath, rootPath: mountPath)
+        let fileURL = try validatePath(resolvedPath, rootPath: resolved.mountPath)
+        let canonicalPath = "\(resolved.mountName)/\(resolvedPath)"
+
+        // Snapshot BEFORE writing (capture previous state)
         let existed = FileManager.default.fileExists(atPath: fileURL.path)
+        if existed {
+            let beforeData = try Data(contentsOf: fileURL)
+            try await snapshotStore.recordModification(
+                runID: grant.grantID,
+                workspaceID: resolved.sourceID,
+                filePath: canonicalPath,
+                newData: beforeData,
+                source: "mcp"
+            )
+        }
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
@@ -245,16 +308,27 @@ public actor ManifoldBridge {
         )
         try data.write(to: fileURL, options: .atomic)
 
+        // Snapshot AFTER writing (capture new state)
+        try await snapshotStore.recordModification(
+            runID: grant.grantID,
+            workspaceID: resolved.sourceID,
+            filePath: canonicalPath,
+            newData: data,
+            source: "mcp"
+        )
+
         try? await auditStore.log(
             action: existed ? .fileModified : .fileCreated,
+            runID: grant.grantID,
+            workspaceID: resolved.sourceID,
             agent: "cowork",
-            filePath: resolvedPath,
-            metadata: ["grant_id": grant.grantID, "mount": mountName],
+            filePath: canonicalPath,
+            metadata: ["grant_id": grant.grantID, "mount": resolved.mountName, "bytes": "\(data.count)"],
             grantID: grant.grantID
         )
         ManifoldNotification.post(ManifoldNotification.dataChanged)
 
-        return "Wrote \(data.count) bytes to \(resolvedPath) in \(mountName)"
+        return "Wrote \(data.count) bytes to \(canonicalPath)"
     }
 
     public func searchFiles(query: String) async throws -> [(path: String, source: String, matches: [String])] {
@@ -274,343 +348,350 @@ public actor ManifoldBridge {
                 let rel = relativePath(file: file, base: root)
                 guard !rel.hasPrefix("_emails/") else { continue }
                 guard !rel.hasPrefix(".manifold-") else { continue }
-                guard let content = try? String(contentsOf: file, encoding: .utf8) else { continue }
 
-                let lines = content.components(separatedBy: "\n")
-                let matching = lines.enumerated()
-                    .filter { $0.element.localizedCaseInsensitiveContains(query) }
+                guard let data = try? Data(contentsOf: file),
+                      let text = String(data: data, encoding: .utf8) else { continue }
+
+                let matchingLines = text.components(separatedBy: "\n")
+                    .filter { $0.localizedCaseInsensitiveContains(query) }
                     .prefix(5)
-                    .map { "\($0.offset + 1): \($0.element.prefix(200))" }
+                    .map { String($0.prefix(200)) }
 
-                if !matching.isEmpty {
-                    results.append((rel, dir.name, Array(matching)))
+                if !matchingLines.isEmpty {
+                    results.append((path: "\(dir.name)/\(rel)", source: dir.name, matches: Array(matchingLines)))
                 }
-                if results.count >= 50 { break }
             }
         }
         return results
     }
 
-    // MARK: - Binary File Tools
+    // MARK: - File Info
 
-    public func fileInfo(path: String) async throws -> FileMetadata {
+    public func fileInfo(path: String) async throws -> FileInfoDetail {
         await logToolCall(tool: "file_info", arguments: ["path": path])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
         let cleaned = cleanPath(path)
 
-        var searchDirs: [(name: String, rootPath: String, resolvedPath: String)] = []
+        let mountPath: String
+        let mountName: String
+        let resolvedPath: String
+
         if let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) {
-            searchDirs.append((mount.mountName, mount.mountPath, relPath))
+            mountPath = mount.mountPath
+            mountName = mount.mountName
+            resolvedPath = relPath
+        } else {
+            let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
+            mountPath = mount.mountPath
+            mountName = mount.mountName
+            resolvedPath = relPath
         }
-        for mount in mounts { searchDirs.append((mount.mountName, mount.mountPath, cleaned)) }
 
-        for entry in searchDirs {
-            let fileURL = try? validatePath(entry.resolvedPath, rootPath: entry.rootPath)
-            guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { continue }
-
-            let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-            let size = (attrs[.size] as? Int) ?? 0
-            let modified = (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) } ?? ""
-            let ext = fileURL.pathExtension.lowercased()
-
-            let isBinary = ["zip", "pdf", "png", "jpg", "jpeg", "gif", "webp", "mp4", "mov",
-                            "mp3", "wav", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-                            "ttf", "otf", "woff", "woff2", "epub"].contains(ext)
-
-            var archiveContents: [String]?
-            if ext == "zip" { archiveContents = listZipContents(at: fileURL) }
-
-            return FileMetadata(
-                path: path, sourceName: entry.name, sizeBytes: size,
-                lastModified: modified, fileExtension: ext,
-                isBinary: isBinary, archiveContents: archiveContents
-            )
+        let fileURL = try validatePath(resolvedPath, rootPath: mountPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw ManifoldMCPError.fileNotFound(cleaned)
         }
-        throw ManifoldMCPError.fileNotFound(path)
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let size = (attrs[.size] as? Int) ?? 0
+        let modified = (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) } ?? ""
+        let ext = fileURL.pathExtension
+        let isBinary = Self.binaryExtensions.contains(ext.lowercased())
+
+        var archiveContents: [String]? = nil
+        if ext.lowercased() == "zip" {
+            archiveContents = listZipContents(atPath: fileURL.path)
+        }
+
+        return FileInfoDetail(
+            path: "\(mountName)/\(resolvedPath)",
+            sourceName: mountName,
+            sizeBytes: size,
+            fileExtension: ext,
+            isBinary: isBinary,
+            lastModified: modified,
+            archiveContents: archiveContents
+        )
     }
+
+    // MARK: - Archive Listing
 
     public func listArchive(path: String) async throws -> [String] {
         await logToolCall(tool: "list_archive", arguments: ["path": path])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
+        let cleaned = cleanPath(path)
 
-        for mount in mounts {
-            let fileURL = try? validatePath(path, rootPath: mount.mountPath)
-            guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { continue }
-            guard let contents = listZipContents(at: fileURL) else {
-                throw ManifoldMCPError.invalidPath("Not a valid zip archive: \(path)")
-            }
-            return contents
+        guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
+            throw ManifoldMCPError.fileNotFound(path)
         }
-        throw ManifoldMCPError.fileNotFound(path)
+
+        let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
+        guard FileManager.default.fileExists(atPath: archiveURL.path) else {
+            throw ManifoldMCPError.fileNotFound(path)
+        }
+
+        guard let contents = listZipContents(atPath: archiveURL.path) else {
+            throw ManifoldMCPError.invalidPath("Not a valid zip archive or archive is empty")
+        }
+        return contents
     }
+
+    // MARK: - Extract File
 
     public func extractFile(archivePath: String, filePath: String) async throws -> String {
         await logToolCall(tool: "extract_file", arguments: ["archive": archivePath, "file": filePath])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
+        let cleaned = cleanPath(archivePath)
 
-        for mount in mounts {
-            let archiveURL = try? validatePath(archivePath, rootPath: mount.mountPath)
-            guard let archiveURL, FileManager.default.fileExists(atPath: archiveURL.path) else { continue }
+        // Resolve mount for the archive
+        guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
+            throw ManifoldMCPError.fileNotFound(archivePath)
+        }
 
-            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("manifold-extract-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: tempDir) }
+        let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
+        guard FileManager.default.fileExists(atPath: archiveURL.path) else {
+            throw ManifoldMCPError.fileNotFound(archivePath)
+        }
 
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-            process.arguments = ["-o", "-q", archiveURL.path, filePath, "-d", tempDir.path]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            process.waitUntilExit()
+        // Size check: 50MB limit
+        let attrs = try FileManager.default.attributesOfItem(atPath: archiveURL.path)
+        let archiveSize = (attrs[.size] as? Int64) ?? 0
+        guard archiveSize <= 50_000_000 else {
+            throw ManifoldMCPError.invalidPath("Archive exceeds 50MB extraction limit")
+        }
 
-            let extractedURL = tempDir.appendingPathComponent(filePath)
-            guard FileManager.default.fileExists(atPath: extractedURL.path) else {
-                throw ManifoldMCPError.fileNotFound("'\(filePath)' not found in archive '\(archivePath)'")
-            }
+        let archiveContents = listZipContents(atPath: archiveURL.path)
+        guard let targetEntry = archiveContents?.first(where: { $0 == filePath }) else {
+            let available = (archiveContents ?? []).prefix(20).joined(separator: "\n")
+            throw ManifoldMCPError.fileNotFound("'\(filePath)' not found in archive. Available files:\n\(available)")
+        }
 
-            // 50MB extraction size limit
-            let extractedAttrs = try FileManager.default.attributesOfItem(atPath: extractedURL.path)
-            let extractedSize = (extractedAttrs[.size] as? Int64) ?? 0
-            guard extractedSize <= 50_000_000 else {
-                throw ManifoldMCPError.invalidPath(
-                    "Extracted file exceeds 50MB limit (\(extractedSize / 1_000_000)MB)"
+        return try extractFromZip(archivePath: archiveURL.path, entryPath: targetEntry)
+    }
+
+    // MARK: - Changes
+
+    public func listChanges() async throws -> [ChangeInfo] {
+        await logToolCall(tool: "list_changes")
+        let (grant, _) = try await requireGrant()
+        let entries = try await auditStore.recentEntries(limit: 50)
+        return entries
+            .filter { $0.grantID == grant.grantID }
+            .map { entry in
+                ChangeInfo(
+                    action: entry.action,
+                    path: entry.filePath,
+                    agent: entry.agent,
+                    timestamp: entry.timestamp
                 )
             }
-
-            let data = try Data(contentsOf: extractedURL)
-            try? await auditStore.log(action: .fileRead, agent: "cowork", filePath: "\(archivePath)/\(filePath)")
-
-            if let text = String(data: data, encoding: .utf8) {
-                return text
-            } else {
-                return "<binary file, \(data.count) bytes>"
-            }
-        }
-        throw ManifoldMCPError.fileNotFound(archivePath)
     }
 
     // MARK: - Zip Helpers
 
-    private func listZipContents(at url: URL) -> [String]? {
+    private func listZipContents(atPath path: String) -> [String]? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-l", url.path]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zipinfo")
+        process.arguments = ["-1", path]
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch { return nil }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return nil }
-
-        let lines = output.components(separatedBy: "\n")
-        var files: [String] = []
-        var started = false
-        for line in lines {
-            if line.contains("--------") {
-                started = !started
-                continue
-            }
-            guard started else { continue }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
-            let components = trimmed.split(separator: " ", maxSplits: 3)
-            guard components.count >= 4 else { continue }
-            let filename = String(components[3])
-            guard !filename.hasSuffix("/") else { continue }
-            files.append(filename)
-        }
+        process.standardError = Pipe()
+        try? process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let files = trimmed.components(separatedBy: "\n").filter { !$0.hasSuffix("/") }
         return files.isEmpty ? nil : files
     }
 
-    // MARK: - Email Tools
+    private func extractFromZip(archivePath: String, entryPath: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-p", archivePath, entryPath]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw ManifoldMCPError.fileNotFound("Failed to extract '\(entryPath)' from archive")
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let text = String(data: data, encoding: .utf8) {
+            return text
+        } else {
+            return "<binary content, \(data.count) bytes>"
+        }
+    }
+
+    // MARK: - File Enumeration
+
+    private func enumerateFiles(in directory: URL) throws -> [URL] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [URL] = []
+        while let url = enumerator.nextObject() as? URL {
+            guard let vals = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                  vals.isRegularFile == true else { continue }
+            files.append(url)
+        }
+        return files
+    }
+
+    private func relativePath(file: URL, base: URL) -> String {
+        let filePath = file.standardizedFileURL.path
+        let basePath = base.standardizedFileURL.path + "/"
+        if filePath.hasPrefix(basePath) {
+            return String(filePath.dropFirst(basePath.count))
+        }
+        return file.lastPathComponent
+    }
+
+    // MARK: - Sessions
+
+    public func listSessions(limit: Int) async throws -> [SessionSummary] {
+        await logToolCall(tool: "list_sessions", arguments: ["limit": "\(limit)"])
+        let grants = try await grantStore.allGrants(limit: limit)
+        let ended = grants.filter { $0.endedAt != nil }
+        var results: [SessionSummary] = []
+        for grant in ended {
+            let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
+            let preview = summaries.first?.summaryMarkdown.prefix(200).description ?? "No summary"
+            results.append(SessionSummary(
+                grantID: grant.grantID,
+                targetApp: grant.targetApp,
+                startedAt: grant.startedAt,
+                endedAt: grant.endedAt ?? "",
+                summaryPreview: preview
+            ))
+        }
+        return results
+    }
+
+    public func getSession(grantID: String) async throws -> SessionDetail {
+        await logToolCall(tool: "get_session", arguments: ["grant_id": grantID])
+        let grants = try await grantStore.allGrants(limit: 100)
+        guard let grant = grants.first(where: { $0.grantID == grantID }) else {
+            throw ManifoldMCPError.fileNotFound("Session not found: \(grantID)")
+        }
+        let grantSources = try await grantStore.grantSources(grantID: grantID)
+        let summaries = try await grantStore.summaries(grantID: grantID)
+        let entries = try await auditStore.recentEntries(limit: 200)
+        let grantEntries = entries.filter { $0.grantID == grantID }
+        let filesModified = Set(grantEntries.compactMap(\.filePath)).sorted()
+
+        return SessionDetail(
+            grantID: grantID,
+            targetApp: grant.targetApp,
+            status: grant.status,
+            startedAt: grant.startedAt,
+            endedAt: grant.endedAt,
+            sources: grantSources.map(\.mountName),
+            summaryMarkdown: summaries.first?.summaryMarkdown,
+            filesApplied: filesModified,
+            filesConflicted: [],
+            totalPromotions: filesModified.count
+        )
+    }
+
+    public func saveSessionNote(note: String) async throws -> String {
+        await logToolCall(tool: "save_session_note", arguments: ["note_length": "\(note.count)"])
+        let (grant, _) = try await requireGrant()
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        _ = try await grantStore.saveSummary(
+            grantID: grant.grantID,
+            targetApp: TargetApp(rawValue: grant.targetApp) ?? .cowork,
+            startedAt: grant.startedAt,
+            endedAt: now,
+            markdown: note
+        )
+        return "Session note saved for grant \(grant.grantID.prefix(12))..."
+    }
+
+    // MARK: - Email Tools (P1 FIX: use grant-scoped emails, not global cache)
 
     public func listEmails() async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
-        _ = try await requireGrant()
-        let shared = try await emailFilter.sharedEmails()
-        return shared.map {
-            EmailSummary(id: $0.messageID, from: $0.sender, subject: $0.subject, date: $0.dateReceived)
+        let (grant, _) = try await requireGrant()
+
+        // Read from grant-scoped email table with full metadata, NOT global email_cache
+        let grantEmails = try await grantStore.grantEmailMessages(grantID: grant.grantID)
+        return grantEmails.map {
+            EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
     }
 
     public func readEmail(id: String) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
-        _ = try await requireGrant()
-        let shared = try await emailFilter.sharedEmails()
-        guard let email = shared.first(where: { $0.messageID == id }) else {
-            throw ManifoldMCPError.fileNotFound("Email not found or not shared: \(id)")
+        let (grant, _) = try await requireGrant()
+
+        // Read from grant-scoped emails with full metadata, NOT global email_cache
+        let grantEmails = try await grantStore.grantEmailMessages(grantID: grant.grantID)
+        guard let email = grantEmails.first(where: { $0.emailID == id }) else {
+            throw ManifoldMCPError.fileNotFound("Email not found in this session: \(id)")
         }
 
+        // Try to read the materialized email file first
+        let emailFileURL = URL(fileURLWithPath: grant.materializationRoot)
+            .appendingPathComponent(email.materializedPath)
+        if FileManager.default.fileExists(atPath: emailFileURL.path),
+           let content = try? String(contentsOf: emailFileURL, encoding: .utf8) {
+            try? await auditStore.log(
+                action: .fileRead,
+                runID: grant.grantID,
+                agent: "cowork",
+                filePath: email.materializedPath,
+                metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID],
+                grantID: grant.grantID
+            )
+            return content
+        }
+
+        // Fallback: read from content store via hash
+        if let hash = email.contentHash,
+           let data = try? await contentStore.retrieve(hash: hash),
+           let content = String(data: data, encoding: .utf8) {
+            try? await auditStore.log(
+                action: .fileRead,
+                runID: grant.grantID,
+                agent: "cowork",
+                metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID, "source": "content_store"],
+                grantID: grant.grantID
+            )
+            return content
+        }
+
+        // Last resort: construct from grant email metadata
         try? await auditStore.log(
             action: .fileRead,
+            runID: grant.grantID,
             agent: "cowork",
-            metadata: ["type": "email", "messageID": id]
+            metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID],
+            grantID: grant.grantID
         )
 
         return """
         From: \(email.sender)
         Subject: \(email.subject)
-        Date: \(email.dateReceived)
+        Date: \(email.receivedAt)
 
-        \(email.bodyPreview ?? "(no preview available)")
+        \(email.preview ?? "(no preview available)")
         """
     }
-
-    public func listChanges() async throws -> [ChangeEntry] {
-        await logToolCall(tool: "list_changes")
-        let (grant, _) = try await requireGrant()
-
-        let entries = try await auditStore.entriesByGrant(grantID: grant.grantID, limit: 50)
-        return entries
-            .compactMap { entry -> ChangeEntry? in
-                guard let filePath = entry.filePath else { return nil }
-                let changeType: String
-                switch entry.action {
-                case "file_created": changeType = "created"
-                case "file_modified": changeType = "modified"
-                default: return nil
-                }
-                return ChangeEntry(
-                    timestamp: entry.timestamp,
-                    path: filePath,
-                    source: "grant",
-                    type: changeType,
-                    agent: entry.agent ?? "cowork"
-                )
-            }
-    }
-
-    // MARK: - Session Memory
-
-    /// List past session summaries.
-    public func listSessions(limit: Int = 20) async throws -> [SessionInfo] {
-        await logToolCall(tool: "list_sessions")
-        let summaries = try await grantStore.allSummaries(limit: limit)
-        return summaries.map { s in
-            SessionInfo(
-                grantID: s.grantID,
-                targetApp: s.targetApp,
-                startedAt: s.startedAt,
-                endedAt: s.endedAt,
-                summaryPreview: String(s.summaryMarkdown.prefix(200))
-            )
-        }
-    }
-
-    /// Get full session detail: summary + promotions.
-    public func getSession(grantID: String) async throws -> SessionDetail {
-        await logToolCall(tool: "get_session", arguments: ["grant_id": grantID])
-
-        let grant = try await grantStore.grant(id: grantID)
-        let summaries = try await grantStore.summaries(grantID: grantID)
-        let promotions = try await grantStore.promotions(grantID: grantID)
-        let grantSources = try await grantStore.grantSources(grantID: grantID)
-
-        let sourceNames = grantSources.map(\.mountName)
-        let applied = promotions.filter { $0.result == "applied" }
-        let conflicts = promotions.filter { $0.result == "conflict" }
-
-        return SessionDetail(
-            grantID: grantID,
-            targetApp: grant?.targetApp ?? "unknown",
-            status: grant?.status ?? "unknown",
-            startedAt: grant?.startedAt ?? "",
-            endedAt: grant?.endedAt,
-            sources: sourceNames,
-            summaryMarkdown: summaries.first?.summaryMarkdown,
-            filesApplied: applied.map(\.relativePath),
-            filesConflicted: conflicts.map(\.relativePath),
-            totalPromotions: promotions.count
-        )
-    }
-
-    /// Save a session note/summary for the current active grant.
-    public func saveSessionNote(note: String) async throws -> String {
-        await logToolCall(tool: "save_session_note")
-
-        guard let grant = try await grantStore.activeGrant(targetApp: .cowork, profileID: "default") else {
-            throw ManifoldMCPError.noActiveSession
-        }
-
-        let now = ISO8601DateFormatter().string(from: Date())
-        try await grantStore.saveSummary(
-            grantID: grant.grantID,
-            targetApp: .cowork,
-            startedAt: grant.startedAt,
-            endedAt: now,
-            markdown: note
-        )
-
-        return "Session note saved for grant \(grant.grantID.prefix(12))..."
-    }
-
-    // MARK: - Grant Path Resolution
-
-    private func resolveMountAndPath(
-        _ path: String,
-        in mounts: [(mountName: String, mountPath: String)]
-    ) -> (mount: (mountName: String, mountPath: String), relativePath: String)? {
-        let components = path.split(separator: "/", maxSplits: 1)
-        guard components.count >= 2 else { return nil }
-        let prefix = String(components[0])
-        let rest = String(components[1])
-        if let mount = mounts.first(where: { $0.mountName == prefix }) {
-            return (mount, rest)
-        }
-        return nil
-    }
-
-    /// Safe relative path computation using resolved symlinks.
-    private func relativePath(file: URL, base: URL) -> String {
-        let resolvedFile = file.resolvingSymlinksInPath().path
-        let resolvedBase = base.resolvingSymlinksInPath().path + "/"
-        if resolvedFile.hasPrefix(resolvedBase) {
-            return String(resolvedFile.dropFirst(resolvedBase.count))
-        }
-        return file.path.replacingOccurrences(of: base.path + "/", with: "")
-    }
-
-    // MARK: - Helpers
-
-    private func enumerateFiles(in directory: URL) throws -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        var files: [URL] = []
-        while let url = enumerator.nextObject() as? URL {
-            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
-            if values.isRegularFile == true { files.append(url) }
-        }
-        return files
-    }
 }
 
-// MARK: - Types
-
-public struct FileInfo: Sendable {
-    public let path: String
-    public let sourceName: String
-    public let sourceAddedAt: String
-    public let sizeBytes: Int
-    public let lastModified: String
-}
-
-public struct SourceDetail: Sendable {
-    public let name: String
-    public let status: String
-    public let fileCount: Int
-}
+// MARK: - Result Types
 
 public struct StatusResult: Sendable {
     public let active: Bool
@@ -622,32 +703,32 @@ public struct StatusResult: Sendable {
     public let message: String
 }
 
-public struct FileMetadata: Sendable {
+public struct FileInfo: Sendable {
+    public let path: String
+    public let sourceName: String
+    public let sourceAddedAt: String
+    public let sizeBytes: Int
+    public let lastModified: String
+}
+
+public struct ChangeInfo: Sendable {
+    public let action: String
+    public let path: String?
+    public let agent: String?
+    public let timestamp: String
+}
+
+public struct FileInfoDetail: Sendable {
     public let path: String
     public let sourceName: String
     public let sizeBytes: Int
-    public let lastModified: String
     public let fileExtension: String
     public let isBinary: Bool
+    public let lastModified: String
     public let archiveContents: [String]?
 }
 
-public struct EmailSummary: Sendable {
-    public let id: String
-    public let from: String
-    public let subject: String
-    public let date: String
-}
-
-public struct ChangeEntry: Sendable {
-    public let timestamp: String
-    public let path: String
-    public let source: String
-    public let type: String
-    public let agent: String
-}
-
-public struct SessionInfo: Sendable {
+public struct SessionSummary: Sendable {
     public let grantID: String
     public let targetApp: String
     public let startedAt: String
@@ -668,25 +749,25 @@ public struct SessionDetail: Sendable {
     public let totalPromotions: Int
 }
 
+public struct EmailSummary: Sendable {
+    public let id: String
+    public let from: String
+    public let subject: String
+    public let date: String
+}
+
 public enum ManifoldMCPError: Error, LocalizedError {
-    case noSources
-    case allSourcesPaused
     case noActiveSession
-    case invalidPath(String)
+    case noSources
     case fileNotFound(String)
+    case invalidPath(String)
 
     public var errorDescription: String? {
         switch self {
-        case .noSources: return "No sources configured. Open Manifold and add a folder."
-        case .allSourcesPaused: return "All sources are paused. Open Manifold and resume at least one source to grant access."
-        case .noActiveSession: return "No active session. Start a session in Manifold first."
-        case .invalidPath(let msg): return "Invalid path: \(msg)"
-        case .fileNotFound(let path): return "File not found: \(path)"
+        case .noActiveSession: "No active session"
+        case .noSources: "No sources configured"
+        case .fileNotFound(let path): "File not found: \(path)"
+        case .invalidPath(let msg): "Invalid path: \(msg)"
         }
-    }
-
-    public var isPathError: Bool {
-        if case .invalidPath = self { return true }
-        return false
     }
 }
