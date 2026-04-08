@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct CommandPaletteView: View {
     @Environment(ManifoldStore.self) var store

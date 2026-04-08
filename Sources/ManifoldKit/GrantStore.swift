@@ -94,10 +94,11 @@ public actor GrantStore {
         targetApp: TargetApp,
         profileID: String,
         sourceIDs: [String],
-        emailIDs: [String] = [],
         materializationRoot: String,
         inactivityTimeout: TimeInterval = 3600,
-        refreshOfGrantID: String? = nil
+        refreshOfGrantID: String? = nil,
+        emailSensitivity: String = "moderate",
+        summaryFraming: String? = nil
     ) throws -> GrantRecord {
         // End existing active grant for this target/profile
         try endActiveGrant(targetApp: targetApp, profileID: profileID, reason: .timedOut)
@@ -119,11 +120,13 @@ public actor GrantStore {
         try db.transaction {
             try db.execute("""
                 INSERT INTO grants (grant_id, target_app, profile_id, status, started_at,
-                    materialization_root, inactivity_deadline, refresh_of_grant_id)
-                VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
+                    materialization_root, inactivity_deadline, refresh_of_grant_id,
+                    email_sensitivity, summary_framing)
+                VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
             """, params: [
                 grantID, targetApp.rawValue, profileID, now,
                 materializationRoot, deadline, refreshOfGrantID,
+                emailSensitivity, summaryFraming,
             ])
 
             // Link sources to this grant
@@ -135,18 +138,6 @@ public actor GrantStore {
                 """, params: [grantID, sourceID, mountName])
             }
 
-            for emailID in emailIDs {
-                let exists = try db.queryScalar(
-                    "SELECT email_id FROM email_messages WHERE email_id = ? LIMIT 1",
-                    params: [emailID]
-                )
-                guard exists != nil else { continue }
-                try db.execute("""
-                    INSERT OR REPLACE INTO grant_emails (grant_id, email_id, materialized_path)
-                    VALUES (?, ?, ?)
-                """, params: [grantID, emailID, "_emails/\(emailID).md"])
-            }
-
             // Mark linked sources as active
             for sourceID in sourceIDs {
                 try db.execute(
@@ -156,7 +147,7 @@ public actor GrantStore {
             }
         }
 
-        logger.info("Started grant \(grantID) for \(targetApp.rawValue) with \(sourceIDs.count) sources and \(emailIDs.count) emails")
+        logger.info("Started grant \(grantID) for \(targetApp.rawValue) with \(sourceIDs.count) sources")
         guard let created = try grant(id: grantID) else {
             throw ManifoldError.database("Grant \(grantID) not found after insert")
         }
@@ -279,86 +270,6 @@ public actor GrantStore {
             UPDATE grant_sources SET baseline_manifest_hash = ?
             WHERE grant_id = ? AND source_id = ?
         """, params: [hash, grantID, sourceID])
-    }
-
-    // MARK: - Grant ↔ Email Links
-
-    public func upsertEmailMessage(
-        emailID: String,
-        account: String,
-        mailbox: String,
-        sender: String,
-        recipients: String,
-        subject: String,
-        receivedAt: String,
-        preview: String?,
-        classificationStatus: String,
-        hiddenReason: String?,
-        contentHash: String?
-    ) throws {
-        try db.execute("""
-            INSERT INTO email_messages (
-                email_id, account, mailbox, sender, recipients, subject, received_at,
-                content_hash, preview, classification_status, hidden_reason
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(email_id) DO UPDATE SET
-                account = excluded.account,
-                mailbox = excluded.mailbox,
-                sender = excluded.sender,
-                recipients = excluded.recipients,
-                subject = excluded.subject,
-                received_at = excluded.received_at,
-                content_hash = COALESCE(excluded.content_hash, email_messages.content_hash),
-                preview = COALESCE(excluded.preview, email_messages.preview),
-                classification_status = excluded.classification_status,
-                hidden_reason = excluded.hidden_reason
-        """, params: [
-            emailID, account, mailbox, sender, recipients, subject, receivedAt,
-            contentHash, preview, classificationStatus, hiddenReason,
-        ])
-    }
-
-    public func emailMessage(id: String) throws -> EmailMessageRecord? {
-        let rows = try db.queryAll(
-            "SELECT * FROM email_messages WHERE email_id = ? LIMIT 1",
-            params: [id]
-        )
-        return rows.first.flatMap { EmailMessageRecord(row: $0) }
-    }
-
-    public func attachEmailsToGrant(
-        grantID: String,
-        emails: [(emailID: String, materializedPath: String)]
-    ) throws {
-        for email in emails {
-            try db.execute("""
-                INSERT OR REPLACE INTO grant_emails (grant_id, email_id, materialized_path)
-                VALUES (?, ?, ?)
-            """, params: [grantID, email.emailID, email.materializedPath])
-        }
-    }
-
-    public func grantEmails(grantID: String) throws -> [GrantEmailRecord] {
-        let rows = try db.queryAll(
-            "SELECT * FROM grant_emails WHERE grant_id = ? ORDER BY materialized_path ASC",
-            params: [grantID]
-        )
-        return rows.compactMap { GrantEmailRecord(row: $0) }
-    }
-
-    public func grantEmailMessages(grantID: String) throws -> [GrantEmailMessageRecord] {
-        let rows = try db.queryAll("""
-            SELECT ge.grant_id, ge.email_id, ge.materialized_path,
-                   em.account, em.mailbox, em.sender, em.recipients, em.subject,
-                   em.received_at, em.content_hash, em.preview,
-                   em.classification_status, em.hidden_reason
-            FROM grant_emails ge
-            JOIN email_messages em ON em.email_id = ge.email_id
-            WHERE ge.grant_id = ?
-            ORDER BY em.received_at DESC, ge.materialized_path ASC
-        """, params: [grantID])
-        return rows.compactMap { GrantEmailMessageRecord(row: $0) }
     }
 
     // MARK: - Promotions

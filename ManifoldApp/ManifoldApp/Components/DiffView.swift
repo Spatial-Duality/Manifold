@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct DiffView: View {
     let lines: [DiffLine]

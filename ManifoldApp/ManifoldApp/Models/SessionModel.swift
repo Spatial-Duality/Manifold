@@ -1,7 +1,30 @@
 import Foundation
 import os
+import ManifoldKit
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "session")
+
+// MARK: - Session Preview
+
+struct SessionPreview {
+    struct SourceEstimate {
+        let sourceID: String
+        let displayName: String
+        let fileCount: Int
+        let totalBytes: Int64
+    }
+    let sources: [SourceEstimate]
+    let emailCount: Int
+    let visibleEmailCount: Int
+    let sensitivityLevel: EmailSensitivityFilter.Level
+    var totalFiles: Int { sources.reduce(0) { $0 + $1.fileCount } }
+    var totalBytes: Int64 { sources.reduce(0) { $0 + $1.totalBytes } }
+    var exceedsWarnThreshold: Bool { totalBytes > MaterializationEngine.warnThreshold }
+    var exceedsBlockThreshold: Bool { totalBytes > MaterializationEngine.blockThreshold }
+    var emailsFiltered: Bool { visibleEmailCount < emailCount }
+}
+
+// MARK: - Session Model
 
 @Observable
 @MainActor
@@ -10,15 +33,18 @@ final class SessionModel {
     var activeGrantSources: [GrantSourceRecord] = []
     var lastCompletedSession: Session?
     var selectedPreset: DomainPreset?
+    var preview: SessionPreview?
+    var isComputing: Bool = false
+    var previewError: String?
 
     var hasActiveSession: Bool { activeGrant?.isActive == true }
+    var isPreviewing: Bool { preview != nil }
 
     private var grantStore: GrantStore?
     private var snapshotStore: SnapshotStore?
     private var contentStore: ContentStore?
     private var auditStore: AuditStore?
-    private var emailFilter: EmailFilter?
-
+    private var emailStore: EmailStore?
     init() {}
 
     func configure(
@@ -26,13 +52,74 @@ final class SessionModel {
         snapshotStore: SnapshotStore,
         contentStore: ContentStore,
         auditStore: AuditStore,
-        emailFilter: EmailFilter
+        emailStore: EmailStore? = nil
     ) {
         self.grantStore = grantStore
         self.snapshotStore = snapshotStore
         self.contentStore = contentStore
         self.auditStore = auditStore
-        self.emailFilter = emailFilter
+        self.emailStore = emailStore
+    }
+
+    // MARK: - Pre-session Preview
+
+    /// Compute a preview of what the session will contain without materializing.
+    func computePreview(targetApp: TargetApp = .cowork) async {
+        guard let grantStore else { return }
+        isComputing = true
+        previewError = nil
+        do {
+            let activeSources = try await grantStore.activeSources()
+            guard !activeSources.isEmpty else {
+                isComputing = false
+                previewError = "Select at least one folder before starting a session."
+                return
+            }
+
+            let mountInputs = activeSources.map { source in
+                (source: source, mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased())
+            }
+
+            let perSource = try MaterializationEngine.estimateSizePerSource(sources: mountInputs)
+            let estimates = perSource.map {
+                SessionPreview.SourceEstimate(
+                    sourceID: $0.sourceID,
+                    displayName: $0.displayName,
+                    fileCount: $0.fileCount,
+                    totalBytes: $0.totalBytes
+                )
+            }
+
+            let emailCount = (try? await emailStore?.emailMessageCount()) ?? 0
+            let preset = selectedPreset ?? DomainPreset.presets.first { $0.id == "general" }
+            let sensitivity = EmailSensitivityFilter(rawValue: preset?.emailSensitivity.rawValue ?? "moderate")
+            let visibleEmailCount: Int
+            if sensitivity.level == .strict {
+                visibleEmailCount = (try? await emailStore?.sharedEmailCount()) ?? 0
+            } else if sensitivity.level == .open {
+                visibleEmailCount = emailCount // most visible
+            } else {
+                // moderate: approximate by counting non-hidden-domain emails
+                visibleEmailCount = (try? await emailStore?.visibleEmailCount(hiddenDomains: sensitivity.hiddenDomains)) ?? emailCount
+            }
+
+            preview = SessionPreview(
+                sources: estimates,
+                emailCount: emailCount,
+                visibleEmailCount: visibleEmailCount,
+                sensitivityLevel: sensitivity.level
+            )
+            isComputing = false
+        } catch {
+            isComputing = false
+            previewError = "Couldn't estimate session size: \(error.localizedDescription)"
+            logger.error("Preview failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Cancel the preview and return to idle state.
+    func cancelPreview() {
+        preview = nil
     }
 
     // MARK: - Grant Lifecycle
@@ -40,25 +127,25 @@ final class SessionModel {
     /// Start a new session: creates a grant, materializes sources, sets baseline hashes.
     func startSession(
         targetApp: TargetApp = .cowork,
-        selectedEmailIDs: Set<String>,
         onError: (String) -> Void
     ) async {
         guard let grantStore, let snapshotStore else { return }
         do {
             let activeSources = try await grantStore.activeSources()
-            let emailIDs = Array(selectedEmailIDs).sorted()
-            guard !activeSources.isEmpty || !emailIDs.isEmpty else {
-                onError("Select at least one folder or shared email before starting a session.")
+            guard !activeSources.isEmpty else {
+                onError("Select at least one folder before starting a session.")
                 return
             }
 
             let sourceIDs = activeSources.map(\.sourceID)
+            let preset = selectedPreset ?? DomainPreset.presets.first { $0.id == "general" }
             let grant = try await grantStore.startGrant(
                 targetApp: targetApp,
                 profileID: "default",
                 sourceIDs: sourceIDs,
-                emailIDs: emailIDs,
-                materializationRoot: Self.materializationRoot(grantID: "").path
+                materializationRoot: Self.materializationRoot(grantID: "").path,
+                emailSensitivity: preset?.emailSensitivity.rawValue ?? "moderate",
+                summaryFraming: preset?.summaryFraming
             )
 
             let actualRoot = Self.materializationRoot(grantID: grant.grantID)
@@ -91,16 +178,6 @@ final class SessionModel {
                 )
             }
 
-            if !emailIDs.isEmpty {
-                let emails = try await grantStore.grantEmailMessages(grantID: grant.grantID)
-                let attachments = try await materializeGrantEmails(
-                    grantID: grant.grantID,
-                    grantRoot: actualRoot,
-                    emails: emails
-                )
-                try await grantStore.attachEmailsToGrant(grantID: grant.grantID, emails: attachments)
-            }
-
             activeGrant = try await grantStore.grant(id: grant.grantID)
             activeGrantSources = try await grantStore.grantSources(grantID: grant.grantID)
 
@@ -108,10 +185,10 @@ final class SessionModel {
                 action: .runStart,
                 runID: grant.grantID,
                 agent: targetApp.rawValue,
-                metadata: ["grant_id": grant.grantID, "email_count": "\(emailIDs.count)"],
+                metadata: ["grant_id": grant.grantID],
                 grantID: grant.grantID
             )
-            logger.info("Session started: \(grant.grantID) with \(results.count) sources and \(emailIDs.count) emails")
+            logger.info("Session started: \(grant.grantID) with \(results.count) sources")
         } catch {
             logger.error("Failed to start session: \(error.localizedDescription)")
             onError("Failed to start session: \(error.localizedDescription)")
@@ -195,6 +272,9 @@ final class SessionModel {
             try? await generateSessionSummary(grantID: grant.grantID)
             try await grantStore.endGrant(grantID: grant.grantID)
             try? await auditStore?.log(action: .runEnd, runID: grant.grantID, metadata: ["grant_id": grant.grantID], grantID: grant.grantID)
+
+            // Clean up materialization directory after successful promotion
+            Self.cleanupMaterialization(for: grant)
 
             activeGrant = nil
             activeGrantSources = []
@@ -318,26 +398,17 @@ final class SessionModel {
         let grant = try await grantStore.grant(id: grantID)
         let promotions = try await grantStore.promotions(grantID: grantID)
         let grantSources = try await grantStore.grantSources(grantID: grantID)
-        let grantEmails = try await grantStore.grantEmailMessages(grantID: grantID)
-
         let created = promotions.filter { $0.result == "applied" && $0.originalBeforeHash == nil }
         let applied = promotions.filter { $0.result == "applied" && $0.originalBeforeHash != nil }
         let conflicts = promotions.filter { $0.result == "conflict" }
 
+        let framing = grant?.summaryFraming ?? "Session"
         var lines: [String] = []
-        lines.append("# Session Summary")
+        lines.append("# \(framing.prefix(1).uppercased() + framing.dropFirst()) Summary")
         lines.append("")
         lines.append("- **Grant:** \(grantID.prefix(12))...")
         lines.append("- **Sources:** \(grantSources.map(\.mountName).joined(separator: ", "))")
-        lines.append("- **Selected Emails:** \(grantEmails.count)")
 
-        if !grantEmails.isEmpty {
-            lines.append("")
-            lines.append("## Emails")
-            for email in grantEmails.prefix(10) {
-                lines.append("- `\(email.emailID)` — \(email.subject)")
-            }
-        }
         if !applied.isEmpty {
             lines.append("")
             lines.append("## Files Modified (\(applied.count))")
@@ -385,7 +456,6 @@ final class SessionModel {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey])
             guard values.isRegularFile == true else { continue }
             let canonical = canonicalPath(for: url, base: root, mountName: mountName)
-            guard !canonical.hasPrefix("\(mountName)/_emails/") else { continue }
             guard !canonical.hasPrefix("\(mountName)/.manifold-") else { continue }
             let data = try Data(contentsOf: url)
             try await snapshotStore.recordBaseline(
@@ -397,69 +467,54 @@ final class SessionModel {
         }
     }
 
-    private func materializeGrantEmails(
-        grantID: String,
-        grantRoot: URL,
-        emails: [GrantEmailMessageRecord]
-    ) async throws -> [(emailID: String, materializedPath: String)] {
-        let emailsRoot = grantRoot.appendingPathComponent("_emails")
-        try FileManager.default.createDirectory(at: emailsRoot, withIntermediateDirectories: true)
-
-        var attachments: [(emailID: String, materializedPath: String)] = []
-        var usedPaths: Set<String> = []
-
-        for email in emails {
-            let fileName = uniqueEmailFileName(for: email, usedPaths: usedPaths)
-            usedPaths.insert(fileName)
-            let relativePath = "_emails/\(fileName)"
-            let targetURL = grantRoot.appendingPathComponent(relativePath)
-
-            let content: String
-            if let contentHash = email.contentHash,
-               let data = try await contentStore?.retrieve(hash: contentHash),
-               let markdown = String(data: data, encoding: .utf8) {
-                content = markdown
-            } else {
-                content = """
-                ---
-                from: \(email.sender)
-                to: \(email.recipients)
-                date: \(email.receivedAt)
-                subject: \(email.subject)
-                message-id: \(email.emailID)
-                ---
-
-                # \(email.subject)
-
-                \(email.preview ?? "")
-                """
-            }
-
-            try content.write(to: targetURL, atomically: true, encoding: .utf8)
-            attachments.append((email.emailID, relativePath))
-        }
-
-        return attachments
-    }
-
-    private func uniqueEmailFileName(for email: GrantEmailMessageRecord, usedPaths: Set<String>) -> String {
-        let dateSlug = email.receivedAt.replacingOccurrences(of: "[^a-zA-Z0-9]", with: "-", options: .regularExpression)
-        let subjectSlug = email.subject
-            .replacingOccurrences(of: "[^a-zA-Z0-9 ]", with: "", options: .regularExpression)
-            .replacingOccurrences(of: " ", with: "-")
-            .lowercased()
-        let base = "\(dateSlug)-\(subjectSlug.prefix(40))-\(email.emailID.prefix(8)).md"
-        if !usedPaths.contains(base) { return base }
-
-        var index = 2
-        while usedPaths.contains("\(base.dropLast(3))-\(index).md") {
-            index += 1
-        }
-        return "\(base.dropLast(3))-\(index).md"
-    }
-
     static func materializationRoot(grantID: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport.appendingPathComponent("Manifold/materializations/\(grantID)/workspace")
+    }
+
+    // MARK: - Materialization Cleanup
+
+    /// Delete the materialization directory for a completed grant.
+    /// Safety: only deletes paths within the expected materializations/ parent.
+    static func cleanupMaterialization(for grant: GrantRecord) {
+        let matRoot = URL(fileURLWithPath: grant.materializationRoot)
+        // materializationRoot is .../materializations/<grantID>/workspace
+        // Delete the grant-level parent: .../materializations/<grantID>/
+        let grantDir = matRoot.deletingLastPathComponent()
+        let expectedParent = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Manifold/materializations")
+        guard grantDir.path.hasPrefix(expectedParent.path),
+              grantDir.lastPathComponent != "materializations" else {
+            logger.error("Materialization path escapes expected parent: \(grantDir.path)")
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: grantDir)
+            logger.info("Cleaned materialization: \(grantDir.lastPathComponent)")
+        } catch {
+            logger.warning("Failed to clean materialization: \(error.localizedDescription)")
+        }
+    }
+
+    /// Remove materialization directories for ended or orphaned grants.
+    /// Called at app launch to reclaim disk space from crashed sessions.
+    static func cleanupOrphanedMaterializations(grantStore: GrantStore) async {
+        let matParent = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Manifold/materializations")
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: matParent.path) else { return }
+        for entry in entries {
+            let grantDir = matParent.appendingPathComponent(entry)
+            // Only delete if we can confirm the grant is ended or doesn't exist.
+            // On DB error, skip to avoid deleting active session data.
+            do {
+                if let grant = try await grantStore.grant(id: entry), grant.isActive { continue }
+            } catch {
+                logger.warning("Skipping orphan cleanup for \(entry): DB error \(error.localizedDescription)")
+                continue
+            }
+            try? fm.removeItem(at: grantDir)
+            logger.info("Cleaned orphaned materialization: \(entry)")
+        }
     }
 }

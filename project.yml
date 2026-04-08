@@ -5,13 +5,19 @@ options:
     macOS: "26.0"
   xcodeVersion: "26.4"
 
+packages:
+  ManifoldKit:
+    path: .
+
 targets:
   Manifold:
     type: application
     platform: macOS
     sources:
       - path: ManifoldApp/ManifoldApp
-      - path: Sources/ManifoldKit
+    dependencies:
+      - package: ManifoldKit
+        product: ManifoldKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.spatialduality.manifold
@@ -25,6 +31,8 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright 2026 Spatial Duality. All rights reserved."
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 9FHKB788RP
+        CODE_SIGN_ENTITLEMENTS: ManifoldApp/ManifoldApp/Manifold.entitlements
         COMBINE_HIDPI_IMAGES: YES
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"

@@ -23,20 +23,38 @@ public struct MaterializationEngine: Sendable {
 
     // MARK: - Size Estimation
 
-    /// Size thresholds for materialization safety.
-    private static let warnThreshold: Int64 = 5_368_709_120    // 5 GB
-    private static let blockThreshold: Int64 = 53_687_091_200  // 50 GB
+    /// Result of estimating source size before materialization.
+    public struct SizeEstimate: Sendable {
+        public let fileCount: Int
+        public let totalBytes: Int64
+    }
 
-    /// Estimate the total size of sources without copying any files.
+    /// Per-source size estimate for preview display.
+    public struct SourceSizeEstimate: Sendable {
+        public let sourceID: String
+        public let displayName: String
+        public let fileCount: Int
+        public let totalBytes: Int64
+    }
+
+    /// Size thresholds for materialization safety.
+    public static let warnThreshold: Int64 = 5_368_709_120    // 5 GB
+    public static let blockThreshold: Int64 = 53_687_091_200  // 50 GB
+
+    /// Estimate file count and total size of sources without copying.
+    /// Respects `.manifoldignore` files at each source root.
     public static func estimateSize(
         sources: [(source: SourceRecord, mountName: String)]
-    ) throws -> Int64 {
+    ) throws -> SizeEstimate {
         let fm = FileManager.default
         var totalBytes: Int64 = 0
+        var fileCount = 0
 
         for (source, _) in sources {
             let sourceURL = URL(fileURLWithPath: source.originalRootPath)
             let resolvedSource = sourceURL.resolvingSymlinksInPath()
+            let ignoreMatcher = GlobMatcher.load(from: sourceURL.appendingPathComponent(".manifoldignore"))
+
             guard let enumerator = fm.enumerator(
                 at: resolvedSource,
                 includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
@@ -54,13 +72,34 @@ public struct MaterializationEngine: Sendable {
                     continue
                 }
 
+                if ignoreMatcher.shouldExclude(relativePath: relativePath, isDirectory: fileURL.hasDirectoryPath) {
+                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                    continue
+                }
+
                 guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
                       values.isRegularFile == true else { continue }
                 totalBytes += Int64(values.fileSize ?? 0)
+                fileCount += 1
             }
         }
 
-        return totalBytes
+        return SizeEstimate(fileCount: fileCount, totalBytes: totalBytes)
+    }
+
+    /// Per-source size estimates for session preview.
+    public static func estimateSizePerSource(
+        sources: [(source: SourceRecord, mountName: String)]
+    ) throws -> [SourceSizeEstimate] {
+        try sources.map { (source, _) in
+            let est = try estimateSize(sources: [(source, "")])
+            return SourceSizeEstimate(
+                sourceID: source.sourceID,
+                displayName: source.displayName,
+                fileCount: est.fileCount,
+                totalBytes: est.totalBytes
+            )
+        }
     }
 
     /// Materialize all sources for a grant into the workspace directory.
@@ -76,15 +115,15 @@ public struct MaterializationEngine: Sendable {
         try fm.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
 
         // Size guard: estimate total before copying
-        let estimatedBytes = try estimateSize(sources: sources)
-        if estimatedBytes > blockThreshold {
-            let gb = Double(estimatedBytes) / (1024 * 1024 * 1024)
+        let estimate = try estimateSize(sources: sources)
+        if estimate.totalBytes > blockThreshold {
+            let gb = Double(estimate.totalBytes) / (1024 * 1024 * 1024)
             throw ManifoldError.materialization(
                 "Source size (\(String(format: "%.1f", gb)) GB) exceeds 50 GB limit. Remove large sources or split into smaller sets."
             )
         }
-        if estimatedBytes > warnThreshold {
-            let gb = Double(estimatedBytes) / (1024 * 1024 * 1024)
+        if estimate.totalBytes > warnThreshold {
+            let gb = Double(estimate.totalBytes) / (1024 * 1024 * 1024)
             logger.warning("Large materialization: \(String(format: "%.1f", gb)) GB. Consider reducing source scope.")
         }
 
@@ -169,11 +208,13 @@ public struct MaterializationEngine: Sendable {
         }
         try fm.createDirectory(at: mountURL, withIntermediateDirectories: true)
 
-        // Copy files (skip hidden files and common noise)
+        // Copy files (skip hidden files, common noise, and .manifoldignore patterns)
         var fileCount = 0
         var totalBytes: Int64 = 0
 
         let resolvedSource = sourceURL.resolvingSymlinksInPath()
+        let ignoreMatcher = GlobMatcher.load(from: sourceURL.appendingPathComponent(".manifoldignore"))
+
         guard let enumerator = fm.enumerator(
             at: resolvedSource,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
@@ -183,34 +224,47 @@ public struct MaterializationEngine: Sendable {
         }
 
         let sourceBasePath = resolvedSource.path + "/"
-        while let fileURL = enumerator.nextObject() as? URL {
-            let resolved = fileURL.resolvingSymlinksInPath()
-            guard resolved.path.hasPrefix(sourceBasePath) else { continue }
-            let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
+        do {
+            while let fileURL = enumerator.nextObject() as? URL {
+                let resolved = fileURL.resolvingSymlinksInPath()
+                guard resolved.path.hasPrefix(sourceBasePath) else { continue }
+                let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
 
-            // Skip noise directories
-            if shouldSkip(relativePath: relativePath) {
-                if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
-                continue
+                // Skip noise directories
+                if shouldSkip(relativePath: relativePath) {
+                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                    continue
+                }
+
+                // Skip .manifoldignore patterns
+                if ignoreMatcher.shouldExclude(relativePath: relativePath, isDirectory: fileURL.hasDirectoryPath) {
+                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                    continue
+                }
+
+                guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                      values.isRegularFile == true else {
+                    // It's a directory — create it in mount
+                    let destDir = mountURL.appendingPathComponent(relativePath)
+                    try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+                    continue
+                }
+
+                let destURL = mountURL.appendingPathComponent(relativePath)
+                let destDir = destURL.deletingLastPathComponent()
+                if !fm.fileExists(atPath: destDir.path) {
+                    try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+                }
+                try fm.copyItem(at: fileURL, to: destURL)
+
+                fileCount += 1
+                totalBytes += Int64(values.fileSize ?? 0)
             }
-
-            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-                  values.isRegularFile == true else {
-                // It's a directory — create it in mount
-                let destDir = mountURL.appendingPathComponent(relativePath)
-                try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
-                continue
-            }
-
-            let destURL = mountURL.appendingPathComponent(relativePath)
-            let destDir = destURL.deletingLastPathComponent()
-            if !fm.fileExists(atPath: destDir.path) {
-                try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
-            }
-            try fm.copyItem(at: fileURL, to: destURL)
-
-            fileCount += 1
-            totalBytes += Int64(values.fileSize ?? 0)
+        } catch {
+            // Clean up partial mount to avoid leaving orphaned files
+            try? fm.removeItem(at: mountURL)
+            logger.error("Materialization failed for \(mountName), cleaned partial mount: \(error.localizedDescription)")
+            throw error
         }
 
         // Build and write baseline manifest

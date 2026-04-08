@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct OnboardingView: View {
     @Environment(ManifoldStore.self) var store
@@ -82,7 +83,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: Spacing.standard) {
                 featurePreview(icon: "folder.badge.gearshape", text: "Control which folders AI can access")
                 featurePreview(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", text: "Undo any AI change with one click")
-                featurePreview(icon: "envelope.badge.shield.half.filled", text: "Share emails safely, sensitive ones auto-hidden")
+                featurePreview(icon: "envelope.badge.shield.half.filled", text: "Back up your emails as local .eml files automatically")
             }
             .padding(Spacing.section)
             .background(Color(.controlBackgroundColor).opacity(0.5))
@@ -265,49 +266,37 @@ struct OnboardingView: View {
 
     // MARK: - Step 4: Email (Optional)
 
+    @State private var showEmailSetup = false
+
     private var emailStep: some View {
         VStack(spacing: 16) {
             Image(systemName: "envelope.badge.shield.half.filled")
                 .font(.system(size: 36)).foregroundStyle(Color.accentColor)
-            Text("Connect Apple Mail")
+            Text("Back Up Your Email")
                 .font(.title2.weight(.semibold))
-            Text("Optionally let Claude see your emails. Manifold auto-hides sensitive ones (banking, 2FA, healthcare) and you control what's shared.")
+            Text("Manifold connects to your email via IMAP and backs up every message as a .eml file on your disk.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
-            activationLabel("Activates: Email sharing with automatic privacy filtering")
+            activationLabel("Activates: Continuous email backup to local .eml files")
 
-            switch store.mailAccessStatus {
-            case .available:
+            if !store.emailAccounts.accounts.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text("Apple Mail connected").font(.callout.weight(.medium))
+                    Text("\(store.emailAccounts.accounts.count) account\(store.emailAccounts.accounts.count == 1 ? "" : "s") connected")
+                        .font(.callout.weight(.medium))
                 }
-            case .mailNotRunning:
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.yellow)
-                    Text("Mail.app is not running").font(.callout)
-                }
-                Button("Check Again") { Task { await store.checkMailAccess() } }
-                    .controlSize(.small)
-            case .accessDenied:
-                HStack(spacing: 8) {
-                    Image(systemName: "xmark.circle").foregroundStyle(.red)
-                    Text("Automation permission needed").font(.callout)
-                }
-                Text("Go to System Settings → Privacy & Security → Automation and enable Manifold for Mail.")
-                    .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
-                Button("Check Again") { Task { await store.checkMailAccess() } }
-                    .controlSize(.small)
-            case nil:
-                Button("Connect Apple Mail") { Task { await store.checkMailAccess() } }
-                    .buttonStyle(.borderedProminent)
             }
 
-            Button("I don't use Apple Mail") { withAnimation { step += 1 } }
+            Button("Add Email Account") { showEmailSetup = true }
+                .buttonStyle(.borderedProminent)
+
+            Button("Skip for now") { withAnimation { step += 1 } }
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, Spacing.xlarge + Spacing.standard)
-        .task { await store.checkMailAccess() }
+        .sheet(isPresented: $showEmailSetup) {
+            EmailAccountSetupView()
+        }
     }
 
     // MARK: - Step 5: Done
@@ -322,7 +311,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 summaryRow("MCP Server", done: store.mcpInstalled, detail: store.mcpInstalled ? "Installed" : "Not installed, set up in Settings")
                 summaryRow("Source Folders", done: !store.approvedSources.isEmpty, detail: store.approvedSources.isEmpty ? "None added yet" : "\(store.approvedSources.count) folder(s)")
-                summaryRow("Apple Mail", done: store.mailAccessStatus == .available, detail: store.mailAccessStatus == .available ? "Connected" : "Not connected")
+                summaryRow("Email Backup", done: !store.emailAccounts.accounts.isEmpty, detail: store.emailAccounts.accounts.isEmpty ? "No accounts" : "\(store.emailAccounts.accounts.count) account(s)")
             }
 
             if !store.mcpInstalled || store.approvedSources.isEmpty {

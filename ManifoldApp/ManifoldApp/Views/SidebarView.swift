@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct SidebarView: View {
     @Environment(ManifoldStore.self) var store

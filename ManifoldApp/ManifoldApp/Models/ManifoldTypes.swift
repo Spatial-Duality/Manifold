@@ -1,5 +1,6 @@
 import Foundation
 import CommonCrypto
+import ManifoldKit
 
 // MARK: - File Browser Types
 

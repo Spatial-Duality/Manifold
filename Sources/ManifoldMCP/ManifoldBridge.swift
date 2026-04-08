@@ -8,23 +8,23 @@ public actor ManifoldBridge {
     private let db: DatabaseConnection
     private let auditStore: AuditStore
     private let contentStore: ContentStore
-    private let emailFilter: EmailFilter
     private let grantStore: GrantStore
+    private let emailStore: EmailStore
     private let snapshotStore: SnapshotStore
 
     public init(
         db: DatabaseConnection,
         auditStore: AuditStore,
         contentStore: ContentStore,
-        emailFilter: EmailFilter,
         grantStore: GrantStore,
+        emailStore: EmailStore,
         snapshotStore: SnapshotStore
     ) {
         self.db = db
         self.auditStore = auditStore
         self.contentStore = contentStore
-        self.emailFilter = emailFilter
         self.grantStore = grantStore
+        self.emailStore = emailStore
         self.snapshotStore = snapshotStore
     }
 
@@ -146,9 +146,9 @@ public actor ManifoldBridge {
                 let fileCount = (try? enumerateFiles(in: mountURL).count) ?? 0
                 totalFiles += fileCount
             }
-            let emailCount = (try? await grantStore.grantEmailMessages(grantID: grant.grantID).count) ?? 0
+            let emailCount = (try? emailStore.emailMessageCount()) ?? 0
             let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
-            let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
+            let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
 
             return StatusResult(
                 active: true,
@@ -619,15 +619,31 @@ public actor ManifoldBridge {
         return "Session note saved for grant \(grant.grantID.prefix(12))..."
     }
 
-    // MARK: - Email Tools (P1 FIX: use grant-scoped emails, not global cache)
+    // MARK: - Email Tools (reads from .eml-backed email index)
+
+    /// Check if a single email is accessible under the given sensitivity filter.
+    private func isEmailAccessible(email: EmailMessageRecord, filter: EmailSensitivityFilter) throws -> Bool {
+        if filter.level == .strict {
+            return try emailStore.isEmailShared(emailID: email.emailID)
+        }
+        return filter.isVisible(email: email)
+    }
 
     public func listEmails() async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
         let (grant, _) = try await requireGrant()
 
-        // Read from grant-scoped email table with full metadata, NOT global email_cache
-        let grantEmails = try await grantStore.grantEmailMessages(grantID: grant.grantID)
-        return grantEmails.map {
+        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
+
+        let emails: [EmailMessageRecord]
+        if filter.level == .strict {
+            emails = try emailStore.sharedEmails(limit: 200)
+        } else {
+            let all = try emailStore.allEmailMessages(limit: 200)
+            emails = all.filter { filter.isVisible(email: $0) }
+        }
+
+        return emails.map {
             EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
     }
@@ -636,43 +652,32 @@ public actor ManifoldBridge {
         await logToolCall(tool: "read_email", arguments: ["id": id])
         let (grant, _) = try await requireGrant()
 
-        // Read from grant-scoped emails with full metadata, NOT global email_cache
-        let grantEmails = try await grantStore.grantEmailMessages(grantID: grant.grantID)
-        guard let email = grantEmails.first(where: { $0.emailID == id }) else {
-            throw ManifoldMCPError.fileNotFound("Email not found in this session: \(id)")
+        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
+
+        guard let email = try emailStore.emailMessage(id: id) else {
+            throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
         }
 
-        // Try to read the materialized email file first
-        let emailFileURL = URL(fileURLWithPath: grant.materializationRoot)
-            .appendingPathComponent(email.materializedPath)
-        if FileManager.default.fileExists(atPath: emailFileURL.path),
-           let content = try? String(contentsOf: emailFileURL, encoding: .utf8) {
+        guard try isEmailAccessible(email: email, filter: filter) else {
+            throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
+        }
+
+        // Read from .eml file on disk
+        if let emlPath = email.emlPath,
+           FileManager.default.fileExists(atPath: emlPath),
+           let content = try? String(contentsOfFile: emlPath, encoding: .utf8) {
             try? await auditStore.log(
                 action: .fileRead,
                 runID: grant.grantID,
                 agent: "cowork",
-                filePath: email.materializedPath,
+                filePath: emlPath,
                 metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID],
                 grantID: grant.grantID
             )
             return content
         }
 
-        // Fallback: read from content store via hash
-        if let hash = email.contentHash,
-           let data = try? await contentStore.retrieve(hash: hash),
-           let content = String(data: data, encoding: .utf8) {
-            try? await auditStore.log(
-                action: .fileRead,
-                runID: grant.grantID,
-                agent: "cowork",
-                metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID, "source": "content_store"],
-                grantID: grant.grantID
-            )
-            return content
-        }
-
-        // Last resort: construct from grant email metadata
+        // Fallback: return metadata summary
         try? await auditStore.log(
             action: .fileRead,
             runID: grant.grantID,
@@ -683,6 +688,7 @@ public actor ManifoldBridge {
 
         return """
         From: \(email.sender)
+        To: \(email.recipients)
         Subject: \(email.subject)
         Date: \(email.receivedAt)
 

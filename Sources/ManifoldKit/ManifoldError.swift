@@ -9,6 +9,7 @@ public enum ManifoldError: Error, LocalizedError {
     case hashMismatch(expected: String, actual: String)
     case materialization(String)
     case promotion(String)
+    case email(String)
 
     public var errorDescription: String? {
         switch self {
@@ -20,6 +21,7 @@ public enum ManifoldError: Error, LocalizedError {
             return "Hash mismatch: expected \(expected), got \(actual)"
         case .materialization(let msg): return "Materialization error: \(msg)"
         case .promotion(let msg): return "Promotion error: \(msg)"
+        case .email(let msg): return "Email error: \(msg)"
         }
     }
 }

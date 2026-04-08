@@ -84,6 +84,9 @@ Button("Action") { }
 | Command palette | `.glassEffect(.regular, in: RoundedRectangle(cornerRadius: Spacing.cornerLarge))` |
 | Error banner | `.glassEffect(.regular, in: RoundedRectangle(cornerRadius: Spacing.standard))` |
 | Start Session CTA | `.buttonStyle(.glassProminent)` with `.tint(.accentColor)` |
+| Session Preview Card | Non-glass card. Decision-payload-first hierarchy: totals header, per-source rows, email sensitivity context, size warnings |
+| Session Preview Confirm | `.buttonStyle(.glassProminent)` with `.tint(.accentColor)` |
+| Session Preview Cancel | `.buttonStyle(.glass)` |
 | End Session | `.buttonStyle(.glass)` |
 | Review Changes | `.buttonStyle(.glassProminent)` |
 | Session recap dismiss | `.buttonStyle(.glass)` |
@@ -206,3 +209,7 @@ Three weights only. No bold. No light.
 | 2026-04-06 | `.glassEffect()` on command palette, error banner, session cards | Navigation-layer glass per DESIGN.md core principle |
 | 2026-04-06 | `.glassProminent` / `.glass` button styles with fallback helpers | Primary/secondary CTA hierarchy via glass tint prominence |
 | 2026-04-06 | `glassBackground()` / `glassProminentButton()` / `glassButton()` helpers | Centralized `#available(macOS 26, *)` with `.ultraThinMaterial` / `.bordered` fallback |
+| 2026-04-08 | Pre-session preview card: decision-payload-first hierarchy | Users see totals first ("Grant AI access to N sources"), details second. Not data-list-first. |
+| 2026-04-08 | 5 preview interaction states (computing, error, no-sources, preview, cancel) | Every state visible, no silent failures. Computing shows ProgressView, error shows retry. |
+| 2026-04-08 | Email sensitivity context in preview: "N of M emails visible (Strict filtering)" | Users understand what "Legal Review" means before confirming. Transparency over simplicity. |
+| 2026-04-08 | Domain presets: strict/moderate/open email sensitivity | strict = shared only, moderate = hides banking/health/2FA, open = hides 2FA only. Stored on grant. |

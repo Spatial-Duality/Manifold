@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct RecentActivitySection: View {
     @Environment(ManifoldStore.self) var store

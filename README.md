@@ -27,11 +27,11 @@ Manifold does **not** control agent connectors, plugins, computer use, or networ
 
 ## Architecture
 
-- **ManifoldKit** — Swift package. Content-addressed blob store (SHA-256 dedup), per-write snapshots, FSEvents monitoring, managed workspaces, access run lifecycle.
-- **Manifold.app** — Native SwiftUI. Menu bar + main window. Sources, Profiles, Activity views. Liquid Glass on macOS 26.
+- **ManifoldKit** — Swift package. Content-addressed blob store (SHA-256 dedup), per-write snapshots, managed workspaces, access run lifecycle. Email backup with IMAP sync, FTS5 search, smart mailbox rules, and domain-based sensitivity filtering. `.manifoldignore` support via GlobMatcher. Materialization with size estimation and cleanup.
+- **Manifold.app** — Native SwiftUI. Menu bar + main window. Sources, Files, Activity, Emails, Versions views. Pre-session preview with confirmation. Domain preset selection. Liquid Glass on macOS 26.
 - **manifold-cli** — Terminal interface. `init`, `grant`, `watch`, `log`, `restore`, `promote`.
 
-145+ tests across 16 suites covering grants, snapshots, content store, email filtering, promotions, MCP access control, and database migrations.
+230+ tests across 20 suites covering grants, snapshots, content store, email store, email sensitivity, glob matching, grant types, promotions, MCP access control, and database migrations.
 
 ## Status
 

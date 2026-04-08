@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct ManifoldCommand: Identifiable {
     let id: String

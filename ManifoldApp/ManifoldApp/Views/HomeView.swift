@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct HomeView: View {
     @Environment(ManifoldStore.self) var store
@@ -90,7 +91,7 @@ private struct ActiveSessionCard: View {
 
             HStack(spacing: Spacing.edge) {
                 StatPill(label: "Sources", value: "\(store.activeGrantSources.count)", icon: "folder.fill")
-                StatPill(label: "Emails", value: "\(store.selectedEmailIDsForNextSession.count)", icon: "envelope.fill")
+                StatPill(label: "Email Accounts", value: "\(store.emailAccounts.accounts.count)", icon: "envelope.fill")
             }
 
             HStack(spacing: Spacing.section) {
@@ -128,7 +129,7 @@ private struct ReadyToStartCard: View {
 
             HStack(spacing: Spacing.edge) {
                 StatPill(label: "Sources", value: "\(activeSources.count)", icon: "folder.fill")
-                StatPill(label: "Emails", value: "\(store.selectedEmailIDsForNextSession.count)", icon: "envelope.fill")
+                StatPill(label: "Email Accounts", value: "\(store.emailAccounts.accounts.count)", icon: "envelope.fill")
             }
 
             PresetPickerView(selectedPreset: $store.selectedPreset)

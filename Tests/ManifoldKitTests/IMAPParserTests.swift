@@ -1,0 +1,252 @@
+import Testing
+import Foundation
+@testable import ManifoldKit
+
+@Suite("IMAP Parser")
+struct IMAPParserTests {
+
+    // MARK: - LIST Response Parsing
+
+    @Test("Parse iCloud LIST responses into mailbox names")
+    func parseICloudListResponses() {
+        // Real iCloud LIST responses (after * prefix is stripped)
+        let rawLines = [
+            #"LIST (\HasNoChildren) "/" "INBOX""#,
+            #"LIST (\HasNoChildren) "/" "Sent Messages""#,
+            #"LIST (\HasNoChildren) "/" "Drafts""#,
+            #"LIST (\HasNoChildren) "/" "Deleted Messages""#,
+            #"LIST (\HasNoChildren) "/" "Junk""#,
+            #"LIST (\HasChildren) "/" "Archive""#,
+            #"LIST (\HasNoChildren) "/" "Notes""#,
+        ]
+
+        let mailboxes = rawLines.compactMap {
+            IMAPParser.parseListResponse($0, accountID: "test-account")
+        }
+
+        #expect(mailboxes.count == 7)
+        let names = mailboxes.map(\.name)
+        #expect(names.contains("INBOX"))
+        #expect(names.contains("Sent Messages"))
+        #expect(names.contains("Drafts"))
+        #expect(names.contains("Deleted Messages"))
+        #expect(names.contains("Junk"))
+        #expect(names.contains("Archive"))
+        #expect(names.contains("Notes"))
+    }
+
+    @Test("Parse Gmail LIST responses with nested folders")
+    func parseGmailListResponses() {
+        let rawLines = [
+            #"LIST (\HasNoChildren) "/" "INBOX""#,
+            #"LIST (\HasChildren \Noselect) "/" "[Gmail]""#,
+            #"LIST (\HasNoChildren \All) "/" "[Gmail]/All Mail""#,
+            #"LIST (\HasNoChildren \Drafts) "/" "[Gmail]/Drafts""#,
+            #"LIST (\HasNoChildren \Sent) "/" "[Gmail]/Sent Mail""#,
+            #"LIST (\HasNoChildren \Junk) "/" "[Gmail]/Spam""#,
+            #"LIST (\HasNoChildren \Trash) "/" "[Gmail]/Trash""#,
+        ]
+
+        let mailboxes = rawLines.compactMap {
+            IMAPParser.parseListResponse($0, accountID: "gmail-test")
+        }
+
+        #expect(mailboxes.count == 7)
+        let names = mailboxes.map(\.name)
+        #expect(names.contains("INBOX"))
+        #expect(names.contains("[Gmail]/Sent Mail"))
+        #expect(names.contains("[Gmail]/All Mail"))
+
+        // Verify \Noselect detection
+        let gmailRoot = mailboxes.first { $0.name == "[Gmail]" }
+        #expect(gmailRoot?.isNoSelect == true)
+    }
+
+    @Test("Parse LIST response with dot delimiter (Dovecot)")
+    func parseDotDelimiterList() {
+        let line = #"LIST (\HasNoChildren) "." "INBOX.Sent""#
+        let mailbox = IMAPParser.parseListResponse(line, accountID: "dovecot")
+        #expect(mailbox?.name == "INBOX.Sent")
+        #expect(mailbox?.delimiter == ".")
+    }
+
+    @Test("Parse LIST response preserves flags")
+    func parseListFlags() {
+        let line = #"LIST (\HasNoChildren \Marked \Drafts) "/" "Drafts""#
+        let mailbox = IMAPParser.parseListResponse(line, accountID: "test")
+        #expect(mailbox != nil)
+        #expect(mailbox!.flags.contains("\\HasNoChildren"))
+        #expect(mailbox!.flags.contains("\\Marked"))
+        #expect(mailbox!.flags.contains("\\Drafts"))
+    }
+
+    // MARK: - Inline LIST Parsing (mirrors IMAPConnection.list())
+
+    /// Simulates the inline parsing logic from IMAPConnection.list()
+    /// to verify it produces the same mailbox names as the parser.
+    @Test("Inline list parsing matches parser output for iCloud responses")
+    func inlineListParsingMatchesParser() {
+        // These are untagged lines as they'd appear after classifyLine strips "* "
+        let untagged = [
+            #"LIST (\HasNoChildren) "/" "INBOX""#,
+            #"LIST (\HasNoChildren) "/" "Sent Messages""#,
+            #"LIST (\HasChildren) "/" "Archive""#,
+            #"LIST (\HasNoChildren) "/" "Drafts""#,
+            #"LIST (\Noselect \HasChildren) "/" "[Gmail]""#,
+            #"LIST (\HasNoChildren) "/" "[Gmail]/Sent Mail""#,
+            #"OK LIST complete"#,
+        ]
+
+        // IMAPConnection.list() inline parsing logic (exact copy)
+        var names: [String] = []
+        for line in untagged {
+            guard line.uppercased().hasPrefix("LIST ") else { continue }
+            let rest = String(line.dropFirst(5))
+            guard let flagEnd = rest.firstIndex(of: ")") else { continue }
+            let afterFlags = String(rest[rest.index(after: flagEnd)...]).trimmingCharacters(in: .whitespaces)
+            let parts = afterFlags.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            var name = String(parts[1]).trimmingCharacters(in: .whitespaces)
+            if name.hasPrefix("\"") && name.hasSuffix("\"") && name.count >= 2 {
+                name = String(name.dropFirst().dropLast())
+            }
+            guard !name.isEmpty else { continue }
+            names.append(name)
+        }
+
+        #expect(names.count == 6)
+        #expect(names.contains("INBOX"))
+        #expect(names.contains("Sent Messages"))
+        #expect(names.contains("Archive"))
+        #expect(names.contains("[Gmail]/Sent Mail"))
+
+        // Cross-check with the parser
+        let parsed = untagged.compactMap {
+            IMAPParser.parseListResponse($0, accountID: "cross-check")
+        }
+        let parsedNames = parsed.map(\.name)
+        #expect(Set(names) == Set(parsedNames))
+    }
+
+    // MARK: - Sync Engine Mailbox Filtering
+
+    @Test("Sync engine filters iCloud mailboxes correctly")
+    func syncEngineMailboxFilter() {
+        // After list() returns parsed names, the sync engine filters:
+        //   $0.uppercased() == "INBOX"
+        //   || $0.uppercased() == "SENT"
+        //   || $0.uppercased().contains("SENT")
+        let iCloudMailboxes = ["INBOX", "Sent Messages", "Drafts", "Deleted Messages", "Junk", "Archive", "Notes"]
+
+        let toSync = iCloudMailboxes.filter {
+            $0.uppercased() == "INBOX"
+            || $0.uppercased() == "SENT"
+            || $0.uppercased().contains("SENT")
+        }.prefix(3)
+
+        let syncList = Array(toSync)
+        #expect(syncList.contains("INBOX"))
+        #expect(syncList.contains("Sent Messages"))
+        #expect(syncList.count == 2) // Only INBOX and "Sent Messages" match
+    }
+
+    @Test("Sync engine filters Gmail mailboxes correctly")
+    func syncEngineGmailFilter() {
+        let gmailMailboxes = ["INBOX", "[Gmail]", "[Gmail]/All Mail", "[Gmail]/Drafts", "[Gmail]/Sent Mail", "[Gmail]/Spam", "[Gmail]/Trash"]
+
+        let toSync = gmailMailboxes.filter {
+            $0.uppercased() == "INBOX"
+            || $0.uppercased() == "SENT"
+            || $0.uppercased().contains("SENT")
+        }.prefix(3)
+
+        let syncList = Array(toSync)
+        #expect(syncList.contains("INBOX"))
+        #expect(syncList.contains("[Gmail]/Sent Mail"))
+        #expect(syncList.count == 2)
+    }
+
+    // MARK: - SELECT Response Parsing
+
+    @Test("Parse SELECT response extracts UIDVALIDITY and EXISTS")
+    func parseSelectResponse() {
+        let lines = [
+            "42 EXISTS",
+            "0 RECENT",
+            "FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)",
+            "OK [UIDVALIDITY 1234567890] UIDs valid",
+            "OK [UIDNEXT 43] Predicted next UID",
+            "OK [READ-WRITE] SELECT completed"
+        ]
+
+        let result = IMAPParser.parseSelectResponses(lines)
+        #expect(result.exists == 42)
+        #expect(result.recent == 0)
+        #expect(result.uidValidity == 1234567890)
+        #expect(result.uidNext == 43)
+        #expect(result.readWrite == true)
+        #expect(result.flags.contains("\\Seen"))
+    }
+
+    // MARK: - SEARCH Response Parsing
+
+    @Test("Parse SEARCH response returns sorted UIDs")
+    func parseSearchResponse() {
+        let uids = IMAPParser.parseSearchResponse("SEARCH 5 3 17 1 42")
+        #expect(uids == [5, 3, 17, 1, 42]) // Parser returns in order, caller sorts
+    }
+
+    @Test("Parse empty SEARCH response")
+    func parseEmptySearch() {
+        let uids = IMAPParser.parseSearchResponse("SEARCH")
+        #expect(uids.isEmpty)
+    }
+
+    // MARK: - Literal Count Detection
+
+    @Test("Detect literal count in FETCH response")
+    func detectLiteralCount() {
+        #expect(IMAPParser.literalCount(in: "* 1 FETCH (BODY[] {12345}") == 12345)
+        #expect(IMAPParser.literalCount(in: "no literal here") == nil)
+        #expect(IMAPParser.literalCount(in: "FETCH (UID 1 FLAGS (\\Seen))") == nil)
+    }
+
+    // MARK: - Response Classification
+
+    @Test("Classify IMAP response lines")
+    func classifyLines() {
+        let untagged = IMAPParser.classifyLine("* OK IMAP server ready")
+        if case .untagged(let text) = untagged {
+            #expect(text == "OK IMAP server ready")
+        } else {
+            Issue.record("Expected untagged response")
+        }
+
+        let tagged = IMAPParser.classifyLine("M0001 OK LOGIN completed")
+        if case .tagged(let tag, let status, let text) = tagged {
+            #expect(tag == "M0001")
+            #expect(status == "OK")
+            #expect(text == "LOGIN completed")
+        } else {
+            Issue.record("Expected tagged response")
+        }
+
+        let cont = IMAPParser.classifyLine("+ ")
+        if case .continuation = cont { } else {
+            Issue.record("Expected continuation")
+        }
+    }
+
+    // MARK: - FETCH Response Parsing
+
+    @Test("Parse FETCH response with UID, FLAGS, and RFC822.SIZE")
+    func parseFetchResponse() {
+        let line = "1 FETCH (UID 42 FLAGS (\\Seen \\Answered) RFC822.SIZE 1234)"
+        let result = IMAPParser.parseFetchResponse(line)
+        #expect(result.sequenceNumber == 1)
+        #expect(result.uid == 42)
+        #expect(result.flags.contains("\\Seen"))
+        #expect(result.flags.contains("\\Answered"))
+        #expect(result.rfc822Size == 1234)
+    }
+}

@@ -204,4 +204,115 @@ struct MaterializationEngineTests {
         #expect(fm.fileExists(atPath: matRoot.appendingPathComponent("project-a/a.txt").path))
         #expect(fm.fileExists(atPath: matRoot.appendingPathComponent("project-b/b.txt").path))
     }
+
+    @Test("estimateSize returns correct fileCount and totalBytes")
+    func estimateSizeBasic() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try createSourceTree(at: sourceDir)
+
+        let source = SourceRecord(row: [
+            "source_id": "src-est",
+            "display_name": "EstimateTest",
+            "original_root_path": sourceDir.path,
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        ])!
+
+        let estimate = try MaterializationEngine.estimateSize(
+            sources: [(source: source, mountName: "EstimateTest")]
+        )
+
+        // createSourceTree writes 3 files: src/main.swift, README.md, tests/test_a.swift
+        #expect(estimate.fileCount == 3)
+
+        let expectedBytes: Int64 =
+            Int64("func main() {}".utf8.count) +
+            Int64("# README".utf8.count) +
+            Int64("func testA() {}".utf8.count)
+        #expect(estimate.totalBytes == expectedBytes)
+    }
+
+    @Test("estimateSizePerSource returns per-source estimates")
+    func estimateSizePerSource() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let source1Dir = tempDir.appendingPathComponent("alpha")
+        try FileManager.default.createDirectory(at: source1Dir, withIntermediateDirectories: true)
+        try Data("aaa".utf8).write(to: source1Dir.appendingPathComponent("a.txt"))
+
+        let source2Dir = tempDir.appendingPathComponent("beta")
+        try FileManager.default.createDirectory(at: source2Dir, withIntermediateDirectories: true)
+        try Data("bbbb".utf8).write(to: source2Dir.appendingPathComponent("b1.txt"))
+        try Data("cc".utf8).write(to: source2Dir.appendingPathComponent("b2.txt"))
+
+        let s1 = SourceRecord(row: [
+            "source_id": "src-a", "display_name": "Alpha",
+            "original_root_path": source1Dir.path,
+            "status": "active", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+        ])!
+        let s2 = SourceRecord(row: [
+            "source_id": "src-b", "display_name": "Beta",
+            "original_root_path": source2Dir.path,
+            "status": "active", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+        ])!
+
+        let perSource = try MaterializationEngine.estimateSizePerSource(
+            sources: [(source: s1, mountName: "alpha"), (source: s2, mountName: "beta")]
+        )
+
+        #expect(perSource.count == 2)
+
+        let alpha = perSource.first { $0.sourceID == "src-a" }!
+        #expect(alpha.displayName == "Alpha")
+        #expect(alpha.fileCount == 1)
+        #expect(alpha.totalBytes == 3) // "aaa"
+
+        let beta = perSource.first { $0.sourceID == "src-b" }!
+        #expect(beta.displayName == "Beta")
+        #expect(beta.fileCount == 2)
+        #expect(beta.totalBytes == 6) // "bbbb" + "cc"
+    }
+
+    @Test("estimateSize respects .manifoldignore patterns")
+    func estimateSizeRespectsIgnore() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let sourceDir = tempDir.appendingPathComponent("ignored-source")
+        let fm = FileManager.default
+        try fm.createDirectory(at: sourceDir.appendingPathComponent("logs"), withIntermediateDirectories: true)
+        try Data("keep me".utf8).write(to: sourceDir.appendingPathComponent("main.swift"))
+        try Data("also keep".utf8).write(to: sourceDir.appendingPathComponent("util.swift"))
+        try Data("log data".utf8).write(to: sourceDir.appendingPathComponent("logs/debug.log"))
+        try Data("tmp stuff".utf8).write(to: sourceDir.appendingPathComponent("scratch.tmp"))
+
+        // Write a .manifoldignore that excludes *.log and *.tmp files
+        try Data("*.log\n*.tmp\n".utf8).write(to: sourceDir.appendingPathComponent(".manifoldignore"))
+
+        let source = SourceRecord(row: [
+            "source_id": "src-ign",
+            "display_name": "IgnoreTest",
+            "original_root_path": sourceDir.path,
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        ])!
+
+        let estimate = try MaterializationEngine.estimateSize(
+            sources: [(source: source, mountName: "IgnoreTest")]
+        )
+
+        // Only main.swift and util.swift should be counted (logs/debug.log and scratch.tmp excluded)
+        #expect(estimate.fileCount == 2)
+
+        let expectedBytes: Int64 =
+            Int64("keep me".utf8.count) +
+            Int64("also keep".utf8.count)
+        #expect(estimate.totalBytes == expectedBytes)
+    }
 }

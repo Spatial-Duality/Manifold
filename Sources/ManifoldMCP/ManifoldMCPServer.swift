@@ -40,9 +40,9 @@ struct ManifoldMCPServer {
 
         let contentStore = try ContentStore(rootURL: storeURL)
         let auditStore = try AuditStore(db: db)
-        let emailFilter = try EmailFilter(db: db)
         let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let grantStore = GrantStore(db: db)
+        let emailStore = EmailStore(db: db)
 
         // Log MCP connection and notify the app
         try? await auditStore.log(action: .mcpConnection, metadata: ["event": "connected"])
@@ -53,8 +53,8 @@ struct ManifoldMCPServer {
             db: db,
             auditStore: auditStore,
             contentStore: contentStore,
-            emailFilter: emailFilter,
             grantStore: grantStore,
+            emailStore: emailStore,
             snapshotStore: snapshotStore
         )
 

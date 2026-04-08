@@ -2,6 +2,38 @@
 
 All notable changes to Manifold are documented here.
 
+## [0.4.0] - 2026-04-08
+
+### Added
+- Email backup infrastructure: IMAP sync engine with per-account connection management, .eml file storage, FTS5 full-text search, and body text background backfill with progress tracking.
+- EmailStore: extracted from GrantStore into a dedicated store with unified condition builder, smart mailbox rule engine, and composable search across sender, subject, body text, and metadata fields.
+- Smart mailbox editor: create custom mailboxes with AND/OR rule logic, field conditions (equals, contains, before/after, between), and live result counts.
+- .manifoldignore: gitignore-style per-source exclusion files. Supports wildcards, double-star, negation, directory-only, and anchored patterns. Excluded files are skipped during both materialization and size estimation.
+- Pre-session preview: before granting AI access, users see file count per source, total size, email count, and sensitivity-filtered email visibility. Five interaction states (computing, error, no-sources, preview, cancel) with Liquid Glass button styles on macOS 26.
+- Domain presets wired into session behavior: email sensitivity (strict/moderate/open) and summary framing now flow from preset selection through grant creation to MCP tool filtering. "Legal Review" actually filters emails differently than "General."
+- EmailSensitivityFilter: domain-based email filtering with curated deny lists for banking, health, and 2FA domains.
+- Migration v10: email backup state columns, FTS5 virtual table, mailbox membership tracking, junk backfill.
+- Migration v11: grant email_sensitivity and summary_framing columns.
+- 33 new tests covering EmailStore operators, MaterializationEngine estimation, GrantTypes, and GlobMatcher patterns.
+
+### Changed
+- GrantStore refactored: email-related methods extracted to EmailStore. Grant types extracted to GrantTypes.swift. GrantStore focused on grant lifecycle only.
+- SessionPreviewCard redesigned with decision-payload-first hierarchy: "Grant AI access to N sources" header, summary line, per-source breakdown, email sensitivity context, and size warnings using system semantic colors.
+- DashboardView session banner: 5 states (computing, error, preview, active, idle) with glass button styles and VoiceOver accessibility labels.
+- GlobMatcher: regex pre-compiled at init instead of per-match call. Order-of-magnitude improvement for large source trees.
+- ManifoldBridge readEmail: single-row lookup via emailMessage(id:) instead of fetching 5000 rows. isEmailAccessible helper consolidates visibility checks.
+- Materialization copy loop wrapped in do/catch with partial mount cleanup on failure.
+
+### Fixed
+- FTS5 duplicate entries on re-index: stale entry deleted before inserting updated body text.
+- FTS5 orphan entries on account deletion: entries cleaned before DELETE FROM email_messages.
+- SQL injection defense-in-depth: sqlForCondition re-validates field against allowedFields whitelist.
+- deleted_on_server_at filter used != '' which misses NULL rows. Added isNotNull operator.
+- .today and .thisWeek quick filters returned nil (unfiltered). Added inline date-relative SQL.
+- EmailSyncEngine isStopped never reset after stop(), permanently killing sync. Now resets on register().
+- Orphan materialization cleanup could delete active session data on transient DB errors. Now distinguishes "not found" from "error."
+- Removed unnecessary await on synchronous EmailStore methods in ManifoldBridge.
+
 ## [0.3.0] - 2026-04-05
 
 ### Added

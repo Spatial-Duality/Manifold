@@ -7,7 +7,7 @@ import Foundation
 
 @Suite("MCP Bridge Logic")
 struct MCPBridgeLogicTests {
-    func makeStores() throws -> (DatabaseConnection, ContentStore, SnapshotStore, WorkspaceLeaseManager, AuditStore, EmailFilter, URL) {
+    func makeStores() throws -> (DatabaseConnection, ContentStore, SnapshotStore, WorkspaceLeaseManager, AuditStore, URL) {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("manifold-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -19,9 +19,8 @@ struct MCPBridgeLogicTests {
         let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let leaseManager = try WorkspaceLeaseManager(db: db, snapshotStore: snapshotStore)
         let auditStore = try AuditStore(db: db)
-        let emailFilter = try EmailFilter(db: db)
 
-        return (db, contentStore, snapshotStore, leaseManager, auditStore, emailFilter, tempDir)
+        return (db, contentStore, snapshotStore, leaseManager, auditStore, tempDir)
     }
 
     func cleanup(_ url: URL) { try? FileManager.default.removeItem(at: url) }
@@ -57,7 +56,7 @@ struct MCPBridgeLogicTests {
 
     @Test("No active run when workspace not registered")
     func noActiveRun() async throws {
-        let (db, _, _, leaseManager, _, _, tempDir) = try makeStores()
+        let (db, _, _, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         let rows = try db.queryAll("SELECT * FROM workspaces WHERE status = 'active'")
@@ -66,7 +65,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Active run detected after grant")
     func activeRunDetected() async throws {
-        let (_, _, _, leaseManager, _, _, tempDir) = try makeStores()
+        let (_, _, _, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-1", profileID: "default", rootPath: tempDir.path, agent: "cowork")
@@ -79,7 +78,7 @@ struct MCPBridgeLogicTests {
 
     @Test("No active run after end")
     func noRunAfterEnd() async throws {
-        let (_, _, _, leaseManager, _, _, tempDir) = try makeStores()
+        let (_, _, _, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-2", profileID: "default", rootPath: tempDir.path, agent: "cowork")
@@ -94,7 +93,7 @@ struct MCPBridgeLogicTests {
 
     @Test("File read is audited")
     func fileReadAudited() async throws {
-        let (_, _, _, _, auditStore, _, tempDir) = try makeStores()
+        let (_, _, _, _, auditStore, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await auditStore.log(action: .fileRead, runID: "run-1", workspaceID: "ws-1", filePath: "test.txt")
@@ -106,7 +105,7 @@ struct MCPBridgeLogicTests {
 
     @Test("MCP connection is audited")
     func mcpConnectionAudited() async throws {
-        let (_, _, _, _, auditStore, _, tempDir) = try makeStores()
+        let (_, _, _, _, auditStore, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await auditStore.log(action: .mcpConnection, metadata: ["event": "connected"])
@@ -119,7 +118,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Write creates snapshot via snapshot store")
     func writeCreatesSnapshot() async throws {
-        let (_, contentStore, snapshotStore, leaseManager, _, _, tempDir) = try makeStores()
+        let (_, contentStore, snapshotStore, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-snap", profileID: "default", rootPath: tempDir.path, agent: "cowork")
@@ -137,7 +136,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Modification records before and after hashes")
     func modificationTracking() async throws {
-        let (_, contentStore, snapshotStore, leaseManager, _, _, tempDir) = try makeStores()
+        let (_, contentStore, snapshotStore, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-mod", profileID: "default", rootPath: tempDir.path, agent: "cowork")
@@ -165,7 +164,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Auto-run creation when no active run exists")
     func autoRunCreation() async throws {
-        let (_, _, _, leaseManager, _, _, tempDir) = try makeStores()
+        let (_, _, _, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-auto", profileID: "default", rootPath: tempDir.path, agent: "cowork")
@@ -186,7 +185,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Write logs file_created for new files")
     func writeLogsCreated() async throws {
-        let (_, _, _, _, auditStore, _, tempDir) = try makeStores()
+        let (_, _, _, _, auditStore, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await auditStore.log(action: .fileCreated, workspaceID: "ws-1", agent: "cowork", filePath: "new-file.txt")
@@ -197,7 +196,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Write logs file_modified for existing files")
     func writeLogsModified() async throws {
-        let (_, _, _, _, auditStore, _, tempDir) = try makeStores()
+        let (_, _, _, _, auditStore, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await auditStore.log(action: .fileModified, workspaceID: "ws-1", agent: "cowork", filePath: "existing.txt")

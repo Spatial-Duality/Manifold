@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 private enum HistoryMode: String, CaseIterable {
     case sessions = "Sessions"

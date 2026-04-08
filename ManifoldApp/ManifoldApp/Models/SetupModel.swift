@@ -1,5 +1,6 @@
 import Foundation
 import os
+import ManifoldKit
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "setup")
 

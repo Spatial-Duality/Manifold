@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ManifoldKit
 
 struct FilesView: View {
     @Environment(ManifoldStore.self) var store

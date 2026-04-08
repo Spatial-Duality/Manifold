@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct SetupView: View {
     var body: some View {
@@ -7,8 +8,8 @@ struct SetupView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             ConnectionTab()
                 .tabItem { Label("Connection", systemImage: "antenna.radiowaves.left.and.right") }
-            PrivacyTab()
-                .tabItem { Label("Privacy", systemImage: "hand.raised") }
+            EmailBackupTab()
+                .tabItem { Label("Email", systemImage: "envelope") }
             StorageTab()
                 .tabItem { Label("Storage", systemImage: "externaldrive") }
             AboutTab()
@@ -89,89 +90,147 @@ private struct ConnectionTab: View {
                 }
             }
 
-            Section("Apple Mail") {
-                HStack {
-                    mailStatusIndicator
-                    Spacer()
-                    Button("Test") {
-                        Task { await store.checkMailAccess() }
-                    }
-                    .controlSize(.small)
-                }
-
-                DisclosureGroup("Help") {
-                    Text("Go to System Settings \u{2192} Privacy & Security \u{2192} Automation, then enable Manifold for Mail.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
         .formStyle(.grouped)
         .task {
             store.checkMCPInstalled()
             store.checkAgentConfigs()
-            await store.checkMailAccess()
-        }
-    }
-
-    @ViewBuilder
-    private var mailStatusIndicator: some View {
-        switch store.mailAccessStatus {
-        case .available:
-            Label("Connected", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(Color(nsColor: .systemGreen))
-        case .mailNotRunning:
-            Label("Mail not running", systemImage: "exclamationmark.triangle")
-                .foregroundStyle(Color(nsColor: .systemYellow))
-        case .accessDenied:
-            Label("Permission needed", systemImage: "xmark.circle")
-                .foregroundStyle(Color(nsColor: .systemRed))
-        case nil:
-            Label("Not checked", systemImage: "questionmark.circle")
-                .foregroundStyle(.gray)
         }
     }
 }
 
-// MARK: - Privacy
+// MARK: - Email Backup
 
-private struct PrivacyTab: View {
+private struct EmailBackupTab: View {
     @Environment(ManifoldStore.self) var store
+    @State private var showAddAccount = false
+    @State private var confirmDelete: EmailAccountRecord?
 
     var body: some View {
         Form {
-            Section {
-                Text("Emails matching these patterns are automatically hidden from AI agents. Banking, 2FA, and healthcare emails are hidden by default.")
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Email Rules") {
-                if store.emailRules.isEmpty {
-                    Text("No custom rules. Built-in rules for banking, 2FA, and healthcare are always active.")
+            Section("Accounts") {
+                if store.emailAccounts.accounts.isEmpty {
+                    Text("No email accounts configured. Add one to start continuous backup.")
                         .foregroundStyle(.tertiary)
                 } else {
-                    ForEach(store.emailRules, id: \.id) { rule in
-                        HStack {
-                            Text(rule.pattern)
-                                .font(.callout.monospaced())
-                            Spacer()
-                            Text(rule.category ?? "Other")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .swipeActions {
-                            Button(role: .destructive) {
-                                Task { await store.removeEmailRule(id: rule.id) }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                    ForEach(store.emailAccounts.accounts) { account in
+                        HStack(spacing: Spacing.section) {
+                            Image(systemName: account.provider.systemImage)
+                                .foregroundStyle(providerColor(account.provider))
+                                .frame(width: 20)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.displayName)
+                                    .font(.callout.weight(.medium))
+                                HStack(spacing: Spacing.standard) {
+                                    Text(account.username ?? "")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Text("\u{2022}").foregroundStyle(.quaternary).font(.caption2)
+                                    Text(account.server ?? "")
+                                        .font(.caption.monospaced()).foregroundStyle(.tertiary)
+                                }
                             }
+
+                            Spacer()
+
+                            Toggle("", isOn: Binding(
+                                get: { account.syncEnabled },
+                                set: { enabled in
+                                    Task { await store.emailAccounts.toggleSync(accountID: account.accountID, enabled: enabled) }
+                                }
+                            ))
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .labelsHidden()
+
+                            Button {
+                                Task { await store.emailAccounts.syncNow(accountID: account.accountID) }
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Sync Now")
+
+                            Button(role: .destructive) {
+                                confirmDelete = account
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Remove Account")
                         }
+                    }
+                }
+
+                Button("Add Email Account") { showAddAccount = true }
+                    .controlSize(.small)
+            }
+
+            Section("Storage") {
+                LabeledContent("Backup location") {
+                    HStack(spacing: Spacing.tight) {
+                        Text(store.emailAccounts.backupRootPath)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Button {
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: store.emailAccounts.backupRootPath)
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Reveal in Finder")
+                    }
+                }
+
+                LabeledContent("Total messages") {
+                    Text("\(store.emailAccounts.totalMessageCount)")
+                        .monospacedDigit()
+                }
+
+                let usage = store.emailAccounts.backupDiskUsage
+                if usage > 0 {
+                    LabeledContent("Disk usage") {
+                        Text(ByteCountFormatter.string(fromByteCount: usage, countStyle: .file))
+                            .monospacedDigit()
                     }
                 }
             }
         }
         .formStyle(.grouped)
-        .task { await store.loadEmailRules() }
+        .sheet(isPresented: $showAddAccount) {
+            EmailAccountSetupView()
+        }
+        .alert("Remove Account?", isPresented: Binding(
+            get: { confirmDelete != nil },
+            set: { if !$0 { confirmDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { confirmDelete = nil }
+            Button("Remove", role: .destructive) {
+                if let account = confirmDelete {
+                    Task { await store.emailAccounts.removeAccount(id: account.accountID) }
+                }
+                confirmDelete = nil
+            }
+        } message: {
+            Text("This will remove \(confirmDelete?.displayName ?? "this account") and stop syncing. Backed up .eml files on disk will not be deleted.")
+        }
+        .task {
+            await store.emailAccounts.loadAccounts()
+        }
+    }
+
+    private func providerColor(_ provider: EmailProvider) -> Color {
+        switch provider {
+        case .gmail:    .red
+        case .outlook:  .blue
+        case .icloud:   .cyan
+        case .yahoo:    .purple
+        case .fastmail: .indigo
+        case .other:    .secondary
+        }
     }
 }
 

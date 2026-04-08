@@ -3,6 +3,7 @@ import Foundation
 import UserNotifications
 import CommonCrypto
 import os
+import ManifoldKit
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "store")
 
@@ -38,32 +39,33 @@ class ManifoldStore {
 
     // Sub-models
     let session: SessionModel
-    let email: EmailModel
     let history: HistoryModel
     let storage: StorageModel
     let setup: SetupModel
+    let emailAccounts: EmailAccountModel
 
     var menuBarIcon: String { isConnected ? "shield.checkered.fill" : "shield.checkered" }
 
     // Internal
     private var auditStore: AuditStore?
-    private var emailFilter: EmailFilter?
     private(set) var snapshotStore: SnapshotStore?
     private(set) var contentStore: ContentStore?
     private var leaseManager: WorkspaceLeaseManager?
     private(set) var grantStore: GrantStore?
+    private(set) var emailStore: EmailStore?
     private var db: DatabaseConnection?
     private var pollTimer: Timer?
     private var notificationObservers: [NSObjectProtocol] = []
+    private var syncEngine: EmailSyncEngine?
 
     // MARK: - Init
 
     init() {
         session = SessionModel()
-        email = EmailModel()
         history = HistoryModel()
         storage = StorageModel()
         setup = SetupModel()
+        emailAccounts = EmailAccountModel()
 
         Task {
             await initStores()
@@ -86,24 +88,29 @@ class ManifoldStore {
 
             let auditStore = try AuditStore(db: connection)
             let snapshotStore = try SnapshotStore(db: connection, contentStore: contentStore)
-            let emailFilter = try EmailFilter(db: connection)
             let leaseManager = try WorkspaceLeaseManager(db: connection, snapshotStore: snapshotStore)
             let grantStore = GrantStore(db: connection)
+            let emailStore = EmailStore(db: connection)
 
             self.auditStore = auditStore
             self.snapshotStore = snapshotStore
-            self.emailFilter = emailFilter
             self.leaseManager = leaseManager
             self.grantStore = grantStore
+            self.emailStore = emailStore
+
+            // Initialize email sync engine
+            let syncEngine = EmailSyncEngine(emailStore: emailStore)
+            self.syncEngine = syncEngine
 
             // Re-create sub-models with actual stores
             reinjectStores(
                 auditStore: auditStore,
                 contentStore: contentStore,
                 snapshotStore: snapshotStore,
-                emailFilter: emailFilter,
                 grantStore: grantStore,
-                db: connection
+                emailStore: emailStore,
+                db: connection,
+                syncEngine: syncEngine
             )
 
             setup.checkMCPInstalled()
@@ -114,6 +121,10 @@ class ManifoldStore {
             _ = try? await snapshotStore.pruneByAge(days: 30)
             _ = try? await snapshotStore.pruneByFileCount(maxPerFile: 50)
             _ = try? await contentStore.garbageCollect()
+
+            // Clean up materialization directories from ended or crashed sessions
+            let gs = grantStore
+            Task.detached { await SessionModel.cleanupOrphanedMaterializations(grantStore: gs) }
 
             pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.refresh() }
@@ -128,14 +139,18 @@ class ManifoldStore {
         auditStore: AuditStore,
         contentStore: ContentStore,
         snapshotStore: SnapshotStore,
-        emailFilter: EmailFilter,
         grantStore: GrantStore,
-        db: DatabaseConnection
+        emailStore: EmailStore,
+        db: DatabaseConnection,
+        syncEngine: EmailSyncEngine
     ) {
-        session.configure(grantStore: grantStore, snapshotStore: snapshotStore, contentStore: contentStore, auditStore: auditStore, emailFilter: emailFilter)
-        email.configure(emailFilter: emailFilter, grantStore: grantStore, contentStore: contentStore)
+        session.configure(grantStore: grantStore, snapshotStore: snapshotStore, contentStore: contentStore, auditStore: auditStore, emailStore: emailStore)
         history.configure(auditStore: auditStore, snapshotStore: snapshotStore, contentStore: contentStore)
         storage.configure(snapshotStore: snapshotStore, contentStore: contentStore, db: db)
+        emailAccounts.configure(emailStore: emailStore, syncEngine: syncEngine)
+
+        // Register existing email accounts with the sync engine
+        Task { await emailAccounts.registerAllAccounts() }
     }
 
     // MARK: - Notifications
@@ -328,7 +343,6 @@ class ManifoldStore {
                 guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
                       values.isRegularFile == true else { continue }
                 let relativePath = session.canonicalPath(for: url, base: root, mountName: mount.mountName)
-                guard !relativePath.hasPrefix("\(mount.mountName)/_emails/") else { continue }
                 guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
                 result.append(SourceFile(
                     name: url.lastPathComponent,
@@ -365,7 +379,6 @@ class ManifoldStore {
                       values.isRegularFile == true,
                       let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let relativePath = session.canonicalPath(for: url, base: root, mountName: mount.mountName)
-                guard !relativePath.hasPrefix("\(mount.mountName)/_emails/") else { continue }
                 guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
 
                 let lines = content.components(separatedBy: "\n")
@@ -393,11 +406,19 @@ class ManifoldStore {
     // MARK: - Delegated Session Operations
 
     func startSession(targetApp: TargetApp = .cowork) async {
-        await session.startSession(
-            targetApp: targetApp,
-            selectedEmailIDs: email.selectedEmailIDsForNextSession,
-            onError: { [weak self] msg in self?.lastError = msg }
-        )
+        if session.isPreviewing {
+            // User confirmed the preview, proceed with actual materialization
+            session.preview = nil
+            session.previewError = nil
+            await session.startSession(
+                targetApp: targetApp,
+                onError: { [weak self] msg in self?.lastError = msg }
+            )
+        } else {
+            // Clear any prior error, show preview
+            session.previewError = nil
+            await session.computePreview(targetApp: targetApp)
+        }
         await refresh()
     }
 
@@ -445,9 +466,6 @@ class ManifoldStore {
         await session.refreshGrantState()
         await storage.loadStorageStats()
         await storage.loadTrackedFiles()
-        await email.reclassifyEmails()
-        await email.loadCachedEmails()
-        await email.loadMailboxes()
         await history.loadSessions()
     }
 
@@ -466,13 +484,6 @@ class ManifoldStore {
     var showSessionGrouping: Bool {
         get { history.showSessionGrouping }
         set { history.showSessionGrouping = newValue }
-    }
-    var cachedEmails: [CachedEmail] { email.cachedEmails }
-    var emailRules: [EmailRule] { email.emailRules }
-    var emailClassification: EmailClassificationResult? { email.emailClassification }
-    var selectedEmailIDsForNextSession: Set<String> {
-        get { email.selectedEmailIDsForNextSession }
-        set { email.selectedEmailIDsForNextSession = newValue }
     }
     var allTrackedFiles: [String] { storage.allTrackedFiles }
     var storageUsed: Int64 { storage.storageUsed }
@@ -500,8 +511,6 @@ class ManifoldStore {
         get { setup.hasCompletedOnboarding }
         set { setup.hasCompletedOnboarding = newValue }
     }
-    var mailAccessStatus: MailAccessStatus? { email.mailAccessStatus }
-    var mailboxes: [MailboxInfo] { email.mailboxes }
     var lastCompletedSession: Session? {
         get { session.lastCompletedSession }
         set { session.lastCompletedSession = newValue }
@@ -524,18 +533,6 @@ class ManifoldStore {
     func checkMCPInstalled() { setup.checkMCPInstalled() }
     func checkAgentConfigs() { setup.checkAgentConfigs() }
     func installMCP() { setup.installMCP() }
-
-    func loadEmailRules() async { await email.loadEmailRules() }
-    func addEmailRule(type: RuleType, pattern: String, category: String) async { await email.addEmailRule(type: type, pattern: pattern, category: category) }
-    func removeEmailRule(id: Int) async { await email.removeEmailRule(id: id) }
-    func overrideEmailToShared(messageID: String) async { await email.overrideEmailToShared(messageID: messageID) }
-    func hideEmail(messageID: String) async { await email.hideEmail(messageID: messageID) }
-    func reclassifyEmails() async { await email.reclassifyEmails() }
-    func loadCachedEmails() async { await email.loadCachedEmails() }
-    func toggleEmailSelection(messageID: String) { email.toggleEmailSelection(messageID: messageID) }
-    func checkMailAccess() async { await email.checkMailAccess() }
-    func loadMailboxes() async { await email.loadMailboxes() }
-    func fetchAndCacheEmails(account: String, mailbox: String) async { await email.fetchAndCacheEmails(account: account, mailbox: mailbox) }
 
     func loadSessions() async { await history.loadSessions() }
     func loadSessionEvents(sessionID: String) async { await history.loadSessionEvents(sessionID: sessionID) }

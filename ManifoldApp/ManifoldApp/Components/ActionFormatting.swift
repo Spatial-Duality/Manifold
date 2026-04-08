@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 /// Shared formatting for audit actions across all views.
 /// Pro Swift: extract duplicated logic into a single location.

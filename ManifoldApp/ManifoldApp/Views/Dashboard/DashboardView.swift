@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct DashboardView: View {
     @Environment(ManifoldStore.self) var store
@@ -64,11 +65,41 @@ private struct DashboardSessionBanner: View {
                     Button("End Session") {
                         Task { await store.endSession() }
                     }
-                    .buttonStyle(.bordered)
+                    .glassButton()
                     .controlSize(.small)
                     .tint(.orange)
                 }
                 .padding(.vertical, Spacing.tight)
+            }
+        } else if store.session.isComputing {
+            Section {
+                HStack(spacing: Spacing.standard) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Scanning sources...")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, Spacing.tight)
+            }
+        } else if let error = store.session.previewError {
+            Section {
+                VStack(alignment: .leading, spacing: Spacing.standard) {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(Color(nsColor: .systemOrange))
+                    Button("Try Again") {
+                        Task { await store.startSession() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, Spacing.tight)
+            }
+        } else if store.session.isPreviewing, let preview = store.session.preview {
+            Section {
+                SessionPreviewCard(preview: preview)
             }
         } else if !visibleSources.isEmpty {
             Section {
@@ -87,6 +118,7 @@ private struct DashboardSessionBanner: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .disabled(store.session.isComputing)
                 }
                 .padding(.vertical, Spacing.tight)
             }
@@ -272,5 +304,111 @@ struct SourceCardRow: View {
         var count = 0
         while enumerator.nextObject() != nil { count += 1 }
         fileCount = count
+    }
+}
+
+// MARK: - Session Preview Card
+
+private struct SessionPreviewCard: View {
+    @Environment(ManifoldStore.self) var store
+    let preview: SessionPreview
+
+    private var summaryLine: String {
+        var parts: [String] = []
+        parts.append("\(preview.totalFiles) files")
+        parts.append(ByteCountFormatter.string(fromByteCount: preview.totalBytes, countStyle: .file))
+        if preview.emailCount > 0 {
+            parts.append("\(preview.visibleEmailCount) emails accessible")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var sensitivityLabel: String? {
+        guard preview.emailsFiltered else { return nil }
+        switch preview.sensitivityLevel {
+        case .strict:
+            return "\(preview.visibleEmailCount) of \(preview.emailCount) emails visible (Strict — shared only)"
+        case .moderate:
+            return "\(preview.visibleEmailCount) of \(preview.emailCount) emails visible (Moderate filtering)"
+        case .open:
+            return nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.standard) {
+            // 1. Decision payload header
+            Text("Grant AI access to \(preview.sources.count) source\(preview.sources.count == 1 ? "" : "s")")
+                .font(.body.weight(.medium))
+
+            // 2. Summary totals
+            Text(summaryLine)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            // 3. Email sensitivity context
+            if let sensitivity = sensitivityLabel {
+                Text(sensitivity)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            // 4. Per-source breakdown
+            ForEach(preview.sources, id: \.sourceID) { source in
+                HStack {
+                    Label {
+                        Text(source.displayName)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } icon: {
+                        Image(systemName: "folder.fill")
+                    }
+                    Spacer()
+                    Text("\(source.fileCount) files")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text(ByteCountFormatter.string(fromByteCount: source.totalBytes, countStyle: .file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // 5. Size warnings
+            if preview.exceedsBlockThreshold {
+                Label("Session exceeds 50 GB limit. Remove sources to proceed.", systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(Color(nsColor: .systemRed))
+                    .font(.caption)
+                    .accessibilityLabel("Error: Session exceeds 50 gigabyte limit. Remove sources to proceed.")
+            } else if preview.exceedsWarnThreshold {
+                Label(
+                    "Large session (\(ByteCountFormatter.string(fromByteCount: preview.totalBytes, countStyle: .file))). This may take a while.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(Color(nsColor: .systemYellow))
+                .font(.caption)
+                .accessibilityLabel("Warning: Large session, \(ByteCountFormatter.string(fromByteCount: preview.totalBytes, countStyle: .file)). This may take a while.")
+            }
+
+            // 6. Actions
+            HStack(spacing: Spacing.section) {
+                Button("Confirm") {
+                    Task { await store.startSession() }
+                }
+                .glassProminentButton()
+                .tint(.accentColor)
+                .controlSize(.small)
+                .disabled(preview.exceedsBlockThreshold)
+
+                Button("Cancel") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        store.session.cancelPreview()
+                    }
+                }
+                .glassButton()
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, Spacing.tight)
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 @main
 struct ManifoldApp: App {
@@ -109,7 +110,7 @@ struct ManifoldApp: App {
             Label("Session Active", systemImage: "circle.fill")
                 .foregroundStyle(.green)
             if store.activeGrant != nil {
-                Text("\(store.activeGrantSources.count) sources \u{00B7} \(store.selectedEmailIDsForNextSession.count) emails")
+                Text("\(store.activeGrantSources.count) sources")
             }
             Button("End Session") {
                 Task { await store.endSession() }

@@ -61,6 +61,8 @@ public struct GrantRecord: Sendable, Identifiable {
     public let materializationRoot: String
     public let inactivityDeadline: String?
     public let refreshOfGrantID: String?
+    public let emailSensitivity: String  // strict, moderate, open
+    public let summaryFraming: String?
 
     public var isActive: Bool { status == GrantStatus.active.rawValue }
 
@@ -83,6 +85,8 @@ public struct GrantRecord: Sendable, Identifiable {
         self.materializationRoot = materializationRoot
         self.inactivityDeadline = row["inactivity_deadline"]
         self.refreshOfGrantID = row["refresh_of_grant_id"]
+        self.emailSensitivity = row["email_sensitivity"] ?? "moderate"
+        self.summaryFraming = row["summary_framing"]
     }
 }
 
@@ -120,112 +124,371 @@ public struct GrantMount: Sendable, Hashable {
     }
 }
 
-// MARK: - Email (normalized, first-class content)
+// MARK: - Email Message (metadata index for .eml files)
 
-public struct EmailMessageRecord: Sendable, Identifiable {
+public struct EmailMessageRecord: Sendable, Identifiable, Hashable {
     public var id: String { emailID }
     public let emailID: String
-    public let account: String
-    public let mailbox: String
-    public let sender: String
+    public let accountID: String
+    public let mailbox: String          // primary/denormalized mailbox
+    public let sender: String           // display: "John Doe <john@example.com>"
+    public let senderEmail: String?     // normalized: "john@example.com"
+    public let senderDomain: String?    // normalized: "example.com"
     public let recipients: String
+    public let cc: String
     public let subject: String
     public let receivedAt: String
-    public let contentHash: String?
+    public let emlPath: String?         // path to .eml file on disk
+    public let sizeBytes: Int
     public let preview: String?
-    public let classificationStatus: String  // pending, shared, auto_hidden, user_hidden
-    public let hiddenReason: String?
-
-    public var isShared: Bool { classificationStatus == "shared" }
+    public let contentType: String?     // "text/plain" or "text/html"
+    public let isRead: Bool
+    public let isFlagged: Bool
+    public let flagColor: String?
+    public let inReplyTo: String?
+    public let referencesHeader: String?
+    public let messageIDHeader: String? // RFC Message-ID header
+    public let attachmentCount: Int
+    public let localIsViewed: Bool       // v10: opened in Manifold (not IMAP \Seen)
+    public let isJunk: Bool              // v10: in a junk/spam IMAP folder
+    public let deletedOnServerAt: String? // v10: ISO8601 timestamp when server UID disappeared
+    public let bodyText: String?         // v10: plaintext extracted from .eml for FTS5
 
     init?(row: [String: String]) {
+        // account_id was added in v8; fall back to legacy "account" column
         guard let emailID = row["email_id"],
-              let account = row["account"],
+              let accountID = row["account_id"] ?? row["account"],
               let mailbox = row["mailbox"],
               let sender = row["sender"],
               let subject = row["subject"],
-              let receivedAt = row["received_at"],
-              let classificationStatus = row["classification_status"] else {
+              let receivedAt = row["received_at"] else {
             logger.warning("Failed to parse EmailMessageRecord: missing field(s) in \(row.keys.sorted())")
             return nil
         }
         self.emailID = emailID
-        self.account = account
+        self.accountID = accountID
         self.mailbox = mailbox
         self.sender = sender
+        self.senderEmail = row["sender_email"]
+        self.senderDomain = row["sender_domain"]
         self.recipients = row["recipients"] ?? ""
+        self.cc = row["cc"] ?? ""
         self.subject = subject
         self.receivedAt = receivedAt
-        self.contentHash = row["content_hash"]
+        self.emlPath = row["eml_path"]
+        self.sizeBytes = row["size_bytes"].flatMap { Int($0) } ?? 0
         self.preview = row["preview"]
-        self.classificationStatus = classificationStatus
-        self.hiddenReason = row["hidden_reason"]
+        self.contentType = row["content_type"]
+        self.isRead = row["is_read"] == "1"
+        self.isFlagged = row["is_flagged"] == "1"
+        self.flagColor = row["flag_color"]
+        self.inReplyTo = row["in_reply_to"]
+        self.referencesHeader = row["references_header"]
+        self.messageIDHeader = row["message_id_header"]
+        self.attachmentCount = row["attachment_count"].flatMap { Int($0) } ?? 0
+        self.localIsViewed = row["local_is_viewed"] == "1"
+        self.isJunk = row["is_junk"] == "1"
+        self.deletedOnServerAt = row["deleted_on_server_at"]
+        self.bodyText = row["body_text"]
+    }
+
+    public var isDeletedOnServer: Bool { deletedOnServerAt != nil }
+}
+
+// MARK: - IMAP Mailbox (persisted folder tree from IMAP LIST)
+
+public struct IMAPMailboxRecord: Sendable, Identifiable, Hashable {
+    public var id: String { "\(accountID)/\(mailboxName)" }
+    public let accountID: String
+    public let mailboxName: String
+    public let delimiter: String?
+    public let flags: [String]          // e.g. ["\\Sent", "\\Trash"]
+    public let isSelectable: Bool
+    public let parentPath: String?
+    public let sortOrder: Int
+
+    public init?(row: [String: String]) {
+        guard let accountID = row["account_id"],
+              let mailboxName = row["mailbox_name"] else { return nil }
+        self.accountID = accountID
+        self.mailboxName = mailboxName
+        self.delimiter = row["delimiter"]
+        // flags stored as JSON array string
+        if let flagsJSON = row["flags"],
+           let data = flagsJSON.data(using: .utf8),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            self.flags = parsed
+        } else {
+            self.flags = []
+        }
+        self.isSelectable = row["is_selectable"] != "0"
+        self.parentPath = row["parent_path"]
+        self.sortOrder = row["sort_order"].flatMap { Int($0) } ?? 0
+    }
+
+    /// Canonical folder type derived from IMAP flags.
+    public var folderType: FolderType {
+        let upper = flags.map { $0.lowercased() }
+        if upper.contains("\\inbox") || mailboxName.uppercased() == "INBOX" { return .inbox }
+        if upper.contains("\\sent") { return .sent }
+        if upper.contains("\\drafts") { return .drafts }
+        if upper.contains("\\trash") { return .trash }
+        if upper.contains("\\junk") { return .junk }
+        if upper.contains("\\archive") || upper.contains("\\all") { return .archive }
+        if upper.contains("\\flagged") { return .flagged }
+        // Heuristic fallback by name
+        let name = mailboxName.uppercased()
+        if name == "INBOX" { return .inbox }
+        if name.contains("SENT") { return .sent }
+        if name.contains("DRAFT") { return .drafts }
+        if name.contains("TRASH") || name.contains("DELETED") { return .trash }
+        if name.contains("JUNK") || name.contains("SPAM") { return .junk }
+        if name.contains("ARCHIVE") || name.contains("ALL MAIL") { return .archive }
+        return .other
+    }
+
+    public enum FolderType: String, Sendable {
+        case inbox, sent, drafts, trash, junk, archive, flagged, other
+
+        public var systemImage: String {
+            switch self {
+            case .inbox: "tray.fill"
+            case .sent: "paperplane.fill"
+            case .drafts: "pencil.line"
+            case .trash: "trash.fill"
+            case .junk: "xmark.bin.fill"
+            case .archive: "archivebox.fill"
+            case .flagged: "flag.fill"
+            case .other: "folder.fill"
+            }
+        }
+
+        /// Sort priority (lower = higher in sidebar).
+        public var sortPriority: Int {
+            switch self {
+            case .inbox: 0
+            case .sent: 1
+            case .drafts: 2
+            case .flagged: 3
+            case .archive: 4
+            case .junk: 5
+            case .trash: 6
+            case .other: 10
+            }
+        }
     }
 }
 
-// MARK: - Grant ↔ Email (emails selected for a grant)
+// MARK: - Shared Email (persistent sharing, independent of grants)
 
-public struct GrantEmailRecord: Sendable {
-    public let grantID: String
+public struct SharedEmailRecord: Sendable, Identifiable {
+    public var id: String { shareID }
+    public let shareID: String
     public let emailID: String
-    public let materializedPath: String
+    public let sharedAt: String
+    public let label: String?
 
-    init?(row: [String: String]) {
-        guard let grantID = row["grant_id"],
+    public init?(row: [String: String]) {
+        guard let shareID = row["share_id"],
               let emailID = row["email_id"],
-              let materializedPath = row["materialized_path"] else {
-            logger.warning("Failed to parse GrantEmailRecord: missing field(s) in \(row.keys.sorted())")
-            return nil
-        }
-        self.grantID = grantID
+              let sharedAt = row["shared_at"] else { return nil }
+        self.shareID = shareID
         self.emailID = emailID
-        self.materializedPath = materializedPath
+        self.sharedAt = sharedAt
+        self.label = row["label"]
     }
 }
 
-public struct GrantEmailMessageRecord: Sendable, Identifiable {
-    public var id: String { emailID }
-    public let grantID: String
-    public let emailID: String
-    public let materializedPath: String
-    public let account: String
-    public let mailbox: String
-    public let sender: String
-    public let recipients: String
-    public let subject: String
-    public let receivedAt: String
-    public let contentHash: String?
-    public let preview: String?
-    public let classificationStatus: String
-    public let hiddenReason: String?
+// MARK: - Smart Mailbox (virtual folder with rule-based filtering)
 
-    init?(row: [String: String]) {
-        guard let grantID = row["grant_id"],
-              let emailID = row["email_id"],
-              let materializedPath = row["materialized_path"],
-              let account = row["account"],
-              let mailbox = row["mailbox"],
-              let sender = row["sender"],
-              let subject = row["subject"],
-              let receivedAt = row["received_at"],
-              let classificationStatus = row["classification_status"] else {
-            logger.warning("Failed to parse GrantEmailMessageRecord: missing field(s) in \(row.keys.sorted())")
-            return nil
-        }
-        self.grantID = grantID
-        self.emailID = emailID
-        self.materializedPath = materializedPath
-        self.account = account
-        self.mailbox = mailbox
-        self.sender = sender
-        self.recipients = row["recipients"] ?? ""
-        self.subject = subject
-        self.receivedAt = receivedAt
-        self.contentHash = row["content_hash"]
-        self.preview = row["preview"]
-        self.classificationStatus = classificationStatus
-        self.hiddenReason = row["hidden_reason"]
+public struct SmartMailboxRecord: Sendable, Identifiable {
+    public var id: String { mailboxID }
+    public let mailboxID: String
+    public let displayName: String
+    public let iconName: String
+    public let rulesJSON: String
+    public let sortOrder: Int
+
+    public init?(row: [String: String]) {
+        guard let mailboxID = row["mailbox_id"],
+              let displayName = row["display_name"] else { return nil }
+        self.mailboxID = mailboxID
+        self.displayName = displayName
+        self.iconName = row["icon_name"] ?? "tray"
+        self.rulesJSON = row["rules_json"] ?? "[]"
+        self.sortOrder = row["sort_order"].flatMap { Int($0) } ?? 0
     }
+
+    /// Parsed rules from rulesJSON
+    public var rules: SmartMailboxRules? {
+        guard let data = rulesJSON.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SmartMailboxRules.self, from: data)
+    }
+}
+
+// MARK: - Rule Condition (unified condition model for search, filters, smart mailboxes)
+
+public struct RuleCondition: Codable, Sendable, Hashable {
+    public let field: String
+    public let op: RuleOperator
+    public let value: String
+
+    public init(field: String, op: RuleOperator, value: String) {
+        self.field = field
+        self.op = op
+        self.value = value
+    }
+
+    public enum RuleOperator: String, Codable, Sendable, Hashable {
+        case equals
+        case notEquals
+        case contains
+        case notContains
+        case greaterThan
+        case lessThan
+        case after
+        case before
+        case between
+        case isNotNull
+    }
+
+    /// Whitelist of allowed field names for SQL injection safety
+    public static let allowedFields: Set<String> = [
+        "sender", "sender_email", "sender_domain", "recipients", "cc",
+        "subject", "body_text", "received_at", "is_read", "local_is_viewed",
+        "is_flagged", "is_junk", "deleted_on_server_at", "attachment_count",
+        "size_bytes", "mailbox", "shared"
+    ]
+
+    public var isValid: Bool { Self.allowedFields.contains(field) }
+
+    /// Field type classification for UI input control selection
+    public enum FieldType: Sendable {
+        case string, date, boolean, numeric, enumeration
+    }
+
+    public static func fieldType(for field: String) -> FieldType {
+        switch field {
+        case "received_at", "deleted_on_server_at": return .date
+        case "is_read", "is_flagged", "is_junk", "local_is_viewed", "shared": return .boolean
+        case "attachment_count", "size_bytes": return .numeric
+        case "mailbox": return .enumeration
+        default: return .string
+        }
+    }
+
+    /// Valid operators for a given field type
+    public static func operators(for field: String) -> [RuleOperator] {
+        switch fieldType(for: field) {
+        case .string: return [.contains, .notContains, .equals, .notEquals]
+        case .date: return [.after, .before, .between]
+        case .boolean: return [.equals]
+        case .numeric: return [.equals, .greaterThan, .lessThan]
+        case .enumeration: return [.equals, .notEquals]
+        }
+    }
+}
+
+public struct SmartMailboxRules: Codable, Sendable, Hashable {
+    public let match: MatchType
+    public let conditions: [RuleCondition]
+
+    public init(match: MatchType, conditions: [RuleCondition]) {
+        self.match = match
+        self.conditions = conditions
+    }
+
+    public enum MatchType: String, Codable, Sendable, Hashable {
+        case all
+        case any
+    }
+
+    public func toJSON() -> String? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+// MARK: - Search Token (for email search UI)
+
+public enum SearchTokenType: String, Sendable, CaseIterable {
+    case from           // matches sender_email LIKE
+    case domain         // matches sender_domain exact or LIKE
+    case subject        // matches subject LIKE
+    case to             // matches recipients LIKE
+    case hasAttachments // matches attachment_count > 0
+    case body           // matches body_text via FTS5 MATCH
+    case dateAfter      // matches received_at > value
+    case dateBefore     // matches received_at < value
+    case isJunk         // matches is_junk = 1
+    case isDeleted      // matches deleted_on_server_at IS NOT NULL
+}
+
+public struct SearchToken: Sendable, Identifiable, Hashable {
+    public var id: String { "\(type.rawValue):\(value)" }
+    public let type: SearchTokenType
+    public let value: String
+
+    public init(type: SearchTokenType, value: String) {
+        self.type = type
+        self.value = value
+    }
+}
+
+// MARK: - Quick Filter (sidebar filter presets)
+
+public enum QuickFilter: String, Sendable, CaseIterable, Identifiable {
+    case unread
+    case flagged
+    case attachments
+    case today
+    case unviewed
+    case deletedOnServer
+    case junk
+    case thisWeek
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .unread: "Unread"
+        case .flagged: "Flagged"
+        case .attachments: "Attachments"
+        case .today: "Today"
+        case .unviewed: "Unviewed"
+        case .deletedOnServer: "Deleted on Server"
+        case .junk: "Junk"
+        case .thisWeek: "This Week"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .unread: "envelope.badge"
+        case .flagged: "flag.fill"
+        case .attachments: "paperclip"
+        case .today: "calendar"
+        case .unviewed: "eye.slash"
+        case .deletedOnServer: "cloud.slash"
+        case .junk: "xmark.bin"
+        case .thisWeek: "calendar.badge.clock"
+        }
+    }
+
+    /// Default visible filters (configurable by user)
+    public static let defaultVisible: [QuickFilter] = [.unviewed, .flagged, .attachments, .deletedOnServer]
+
+    /// Overflow filters shown in "More Filters..." disclosure
+    public static let overflow: [QuickFilter] = [.junk, .today, .thisWeek, .unread]
+}
+
+// MARK: - Sort Key (for message list ordering)
+
+public enum EmailSortKey: String, Sendable, CaseIterable {
+    case date
+    case sender
+    case subject
+    case size
 }
 
 // MARK: - Promotion (result of writing grant changes back to originals)

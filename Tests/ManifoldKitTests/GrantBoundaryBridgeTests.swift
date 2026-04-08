@@ -10,8 +10,8 @@ struct GrantBoundaryBridgeTests {
         let contentStore: ContentStore
         let snapshotStore: SnapshotStore
         let auditStore: AuditStore
-        let emailFilter: EmailFilter
         let grantStore: GrantStore
+        let emailStore: EmailStore
         let bridge: ManifoldBridge
         let tempDir: URL
     }
@@ -27,14 +27,14 @@ struct GrantBoundaryBridgeTests {
         try migrator.migrate()
         let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let auditStore = try AuditStore(db: db)
-        let emailFilter = try EmailFilter(db: db)
         let grantStore = GrantStore(db: db)
+        let emailStore = EmailStore(db: db)
         let bridge = ManifoldBridge(
             db: db,
             auditStore: auditStore,
             contentStore: contentStore,
-            emailFilter: emailFilter,
             grantStore: grantStore,
+            emailStore: emailStore,
             snapshotStore: snapshotStore
         )
         return Harness(
@@ -42,8 +42,8 @@ struct GrantBoundaryBridgeTests {
             contentStore: contentStore,
             snapshotStore: snapshotStore,
             auditStore: auditStore,
-            emailFilter: emailFilter,
             grantStore: grantStore,
+            emailStore: emailStore,
             bridge: bridge,
             tempDir: tempDir
         )
@@ -66,15 +66,13 @@ struct GrantBoundaryBridgeTests {
 
     func startMaterializedGrant(
         harness: Harness,
-        sources: [(id: String, record: SourceRecord)],
-        emailIDs: [String] = []
+        sources: [(id: String, record: SourceRecord)]
     ) async throws -> GrantRecord {
         let materializationRoot = harness.tempDir.appendingPathComponent("materialized/\(UUID().uuidString)")
         let grant = try await harness.grantStore.startGrant(
             targetApp: .cowork,
             profileID: "default",
             sourceIDs: sources.map(\.id),
-            emailIDs: emailIDs,
             materializationRoot: materializationRoot.path
         )
         let grantSources = try await harness.grantStore.grantSources(grantID: grant.grantID)
@@ -186,41 +184,52 @@ struct GrantBoundaryBridgeTests {
     }
 
     @Test("Email-only grant exposes full selected email content")
-    func emailOnlyGrantReadsFullContent() async throws {
+    func emailOnlyGrantReadsFromEml() async throws {
         let harness = try makeHarness()
         defer { cleanup(harness.tempDir) }
 
-        let markdown = """
-        ---
-        from: counsel@example.com
-        to: team@example.com
-        date: 2026-04-05
-        subject: Draft redlines
-        message-id: email-1
-        ---
+        // Write a .eml file to disk
+        let emlContent = """
+        From: counsel@example.com
+        To: team@example.com
+        Date: 2026-04-05
+        Subject: Draft redlines
+        Message-ID: email-1
 
         Full legal email body.
         """
-        let contentHash = try await harness.contentStore.ingest(data: Data(markdown.utf8))
-        try await harness.grantStore.upsertEmailMessage(
+        let emlDir = harness.tempDir.appendingPathComponent("eml")
+        try FileManager.default.createDirectory(at: emlDir, withIntermediateDirectories: true)
+        let emlFile = emlDir.appendingPathComponent("1.eml")
+        try emlContent.write(to: emlFile, atomically: true, encoding: .utf8)
+
+        // Create the email account first (FK constraint)
+        let emailAccount = try await harness.emailStore.addEmailAccount(
+            displayName: "Test Account",
+            providerType: "other",
+            server: "imap.example.com",
+            port: 993,
+            username: "test@example.com",
+            authType: "password"
+        )
+
+        try await harness.emailStore.upsertEmailMessage(
             emailID: "email-1",
-            account: "Work",
+            accountID: emailAccount.accountID,
             mailbox: "Inbox",
             sender: "counsel@example.com",
             recipients: "team@example.com",
             subject: "Draft redlines",
             receivedAt: "2026-04-05",
-            preview: "Draft redlines",
-            classificationStatus: "shared",
-            hiddenReason: nil,
-            contentHash: contentHash
+            emlPath: emlFile.path,
+            sizeBytes: emlContent.utf8.count,
+            preview: "Draft redlines"
         )
 
         let grant = try await harness.grantStore.startGrant(
             targetApp: .cowork,
             profileID: "default",
             sourceIDs: [],
-            emailIDs: ["email-1"],
             materializationRoot: harness.tempDir.appendingPathComponent("email-only").path
         )
 

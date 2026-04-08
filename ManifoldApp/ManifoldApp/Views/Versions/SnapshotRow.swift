@@ -1,4 +1,5 @@
 import SwiftUI
+import ManifoldKit
 
 struct SnapshotRow: View {
     let snapshot: SnapshotRecord

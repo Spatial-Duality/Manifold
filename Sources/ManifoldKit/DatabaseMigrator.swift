@@ -244,5 +244,267 @@ public struct DatabaseMigrator {
             }
             try db.execute("CREATE INDEX IF NOT EXISTS idx_audit_grant ON audit_log(grant_id)")
         },
+
+        // v6: Email backup system — accounts, sync state, and extended email_messages columns.
+        // Adds IMAP account management and incremental sync tracking.
+        Migration(version: 6, name: "email_backup_system") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_accounts (
+                    account_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    provider_type TEXT NOT NULL,
+                    server TEXT,
+                    port INTEGER,
+                    username TEXT,
+                    auth_type TEXT NOT NULL DEFAULT 'password',
+                    keychain_ref TEXT,
+                    sync_enabled INTEGER DEFAULT 1,
+                    sync_interval_seconds INTEGER DEFAULT 300,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_sync_state (
+                    account_id TEXT NOT NULL,
+                    mailbox_name TEXT NOT NULL,
+                    uid_validity INTEGER,
+                    last_sync_uid INTEGER DEFAULT 0,
+                    last_sync_at TEXT,
+                    message_count INTEGER DEFAULT 0,
+                    sync_status TEXT DEFAULT 'idle',
+                    error_message TEXT,
+                    PRIMARY KEY(account_id, mailbox_name),
+                    FOREIGN KEY(account_id) REFERENCES email_accounts(account_id)
+                )
+            """)
+
+            // Extend email_messages with account linkage and IMAP UID tracking.
+            let columns = try db.queryAll("PRAGMA table_info(email_messages)")
+            let columnNames = Set(columns.compactMap { $0["name"] })
+
+            if !columnNames.contains("account_id") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN account_id TEXT REFERENCES email_accounts(account_id)")
+            }
+            if !columnNames.contains("imap_uid") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN imap_uid INTEGER")
+            }
+            if !columnNames.contains("synced_at") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN synced_at TEXT")
+            }
+
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_account ON email_messages(account_id)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_uid ON email_messages(account_id, imap_uid)")
+        },
+
+        // v7: Email attachments — extracted MIME parts stored in EmailBackupStore.
+        Migration(version: 7, name: "email_attachments") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_attachments (
+                    attachment_id TEXT PRIMARY KEY,
+                    email_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    content_hash TEXT NOT NULL,
+                    content_id TEXT,
+                    FOREIGN KEY(email_id) REFERENCES email_messages(email_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_attachments_email ON email_attachments(email_id)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_attachments_hash ON email_attachments(content_hash)")
+
+            // Add attachment_count to email_messages for fast display
+            let columns = try db.queryAll("PRAGMA table_info(email_messages)")
+            let columnNames = Set(columns.compactMap { $0["name"] })
+            if !columnNames.contains("attachment_count") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN attachment_count INTEGER DEFAULT 0")
+            }
+        },
+
+        // v8: .eml file storage — add eml_path, size_bytes, and account_id to email_messages.
+        // Replaces content_hash-based storage with direct .eml file references.
+        // account_id mirrors the old `account` column with a FK to email_accounts.
+        Migration(version: 8, name: "eml_file_storage") { db in
+            let columns = try db.queryAll("PRAGMA table_info(email_messages)")
+            let columnNames = Set(columns.compactMap { $0["name"] })
+
+            if !columnNames.contains("eml_path") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN eml_path TEXT")
+            }
+            if !columnNames.contains("size_bytes") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN size_bytes INTEGER DEFAULT 0")
+            }
+            if !columnNames.contains("account_id") {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN account_id TEXT")
+                // Backfill account_id from the legacy account column
+                try db.execute("UPDATE email_messages SET account_id = account WHERE account_id IS NULL")
+            }
+        },
+
+        // v9: Email UI rewrite — rich metadata, mailbox membership, persistent sharing,
+        // IMAP folder tree, and smart mailboxes.
+        Migration(version: 9, name: "email_ui_rewrite") { db in
+            let columns = try db.queryAll("PRAGMA table_info(email_messages)")
+            let columnNames = Set(columns.compactMap { $0["name"] })
+
+            // New metadata columns on email_messages
+            let newColumns: [(String, String)] = [
+                ("sender_email", "TEXT"),
+                ("sender_domain", "TEXT"),
+                ("is_read", "INTEGER DEFAULT 0"),
+                ("is_flagged", "INTEGER DEFAULT 0"),
+                ("flag_color", "TEXT"),
+                ("in_reply_to", "TEXT"),
+                ("references_header", "TEXT"),
+                ("content_type", "TEXT"),
+                ("cc", "TEXT DEFAULT ''"),
+                ("message_id_header", "TEXT"),
+            ]
+            for (name, type) in newColumns where !columnNames.contains(name) {
+                try db.execute("ALTER TABLE email_messages ADD COLUMN \(name) \(type)")
+            }
+
+            // Backfill sender_email from sender column ("Name <email>" → "email")
+            try db.execute("""
+                UPDATE email_messages SET sender_email =
+                    CASE
+                        WHEN INSTR(sender, '<') > 0
+                        THEN LOWER(TRIM(SUBSTR(sender, INSTR(sender, '<') + 1,
+                             INSTR(sender, '>') - INSTR(sender, '<') - 1)))
+                        ELSE LOWER(TRIM(sender))
+                    END
+                WHERE sender_email IS NULL AND sender IS NOT NULL AND sender != ''
+            """)
+
+            // Backfill sender_domain from sender_email
+            try db.execute("""
+                UPDATE email_messages SET sender_domain =
+                    LOWER(SUBSTR(sender_email, INSTR(sender_email, '@') + 1))
+                WHERE sender_domain IS NULL
+                    AND sender_email IS NOT NULL
+                    AND INSTR(sender_email, '@') > 0
+            """)
+
+            // Mailbox membership junction table (one message can appear in multiple folders)
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_mailbox_membership (
+                    account_id TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    imap_uid INTEGER NOT NULL,
+                    email_id TEXT NOT NULL REFERENCES email_messages(email_id),
+                    PRIMARY KEY(account_id, mailbox, imap_uid)
+                )
+            """)
+
+            // Backfill membership from existing email_messages
+            try db.execute("""
+                INSERT OR IGNORE INTO email_mailbox_membership (account_id, mailbox, imap_uid, email_id)
+                SELECT account_id, mailbox, imap_uid, email_id
+                FROM email_messages
+                WHERE account_id IS NOT NULL AND mailbox IS NOT NULL AND imap_uid IS NOT NULL
+            """)
+
+            // IMAP mailbox metadata (persisted folder tree from LIST command)
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS imap_mailboxes (
+                    account_id TEXT NOT NULL,
+                    mailbox_name TEXT NOT NULL,
+                    delimiter TEXT,
+                    flags TEXT,
+                    is_selectable INTEGER DEFAULT 1,
+                    parent_path TEXT,
+                    sort_order INTEGER DEFAULT 0,
+                    PRIMARY KEY(account_id, mailbox_name)
+                )
+            """)
+
+            // Persistent email sharing (independent of grant lifecycle)
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS shared_emails (
+                    share_id TEXT PRIMARY KEY,
+                    email_id TEXT NOT NULL REFERENCES email_messages(email_id),
+                    shared_at TEXT NOT NULL,
+                    label TEXT,
+                    UNIQUE(email_id)
+                )
+            """)
+
+            // Smart mailboxes (virtual folders with rule-based filtering)
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS smart_mailboxes (
+                    mailbox_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    icon_name TEXT DEFAULT 'tray',
+                    rules_json TEXT NOT NULL DEFAULT '[]',
+                    sort_order INTEGER DEFAULT 0
+                )
+            """)
+
+            // Indexes for common query patterns
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_read ON email_messages(is_read)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_flagged ON email_messages(is_flagged)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_in_reply_to ON email_messages(in_reply_to)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_received ON email_messages(received_at)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_sender_domain ON email_messages(sender_domain)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_sender_email ON email_messages(sender_email)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_membership_email ON email_mailbox_membership(email_id)")
+        },
+
+        // v10: Email backup state — viewed tracking, junk tagging, server deletion, FTS5 body search
+        Migration(version: 10, name: "email_backup_state_and_fts5") { db in
+            // New columns on email_messages
+            try db.execute("ALTER TABLE email_messages ADD COLUMN local_is_viewed INTEGER DEFAULT 0")
+            try db.execute("ALTER TABLE email_messages ADD COLUMN is_junk INTEGER DEFAULT 0")
+            try db.execute("ALTER TABLE email_messages ADD COLUMN deleted_on_server_at TEXT")
+            try db.execute("ALTER TABLE email_messages ADD COLUMN body_text TEXT")
+
+            // EXPUNGE detection: per-membership missing tracking
+            try db.execute("ALTER TABLE email_mailbox_membership ADD COLUMN missing_from TEXT")
+
+            // FTS5 virtual table for body text search
+            try db.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS email_fts USING fts5(
+                    email_id,
+                    body_text,
+                    content='email_messages',
+                    content_rowid='rowid'
+                )
+            """)
+
+            // Indexes for new query patterns
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_junk ON email_messages(is_junk)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_deleted ON email_messages(deleted_on_server_at)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_messages_viewed ON email_messages(local_is_viewed)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_membership_missing ON email_mailbox_membership(missing_from)")
+
+            // Backfill is_junk from existing mailbox membership + folder type detection
+            try db.execute("""
+                UPDATE email_messages SET is_junk = 1
+                WHERE email_id IN (
+                    SELECT emm.email_id FROM email_mailbox_membership emm
+                    JOIN imap_mailboxes im ON emm.account_id = im.account_id AND emm.mailbox = im.mailbox_name
+                    WHERE im.flags LIKE '%Junk%' OR im.flags LIKE '%Spam%'
+                       OR UPPER(im.mailbox_name) LIKE '%JUNK%' OR UPPER(im.mailbox_name) LIKE '%SPAM%'
+                )
+            """)
+
+            // Auto-create preset "Shared with Cowork" smart mailbox
+            try db.execute("""
+                INSERT OR IGNORE INTO smart_mailboxes (mailbox_id, display_name, icon_name, rules_json, sort_order)
+                VALUES ('preset-shared-cowork', 'Shared with Cowork', 'person.2.fill',
+                        '{"match":"all","conditions":[{"field":"shared","op":"equals","value":"true"}]}', 0)
+            """)
+
+            logger.info("Migration 10: email backup state columns, FTS5 table, junk backfill, preset smart mailbox")
+        },
+
+        // v11: Domain preset wiring — store email sensitivity and summary framing on grants
+        Migration(version: 11, name: "grant_domain_preset") { db in
+            try db.execute("ALTER TABLE grants ADD COLUMN email_sensitivity TEXT NOT NULL DEFAULT 'moderate'")
+            try db.execute("ALTER TABLE grants ADD COLUMN summary_framing TEXT")
+            logger.info("Migration 11: grant email_sensitivity and summary_framing columns")
+        },
     ]
 }
