@@ -232,6 +232,7 @@ extension RuleCondition.RuleOperator {
         case .after: "after"
         case .before: "before"
         case .between: "between"
+        case .isNotNull: "has a value"
         }
     }
 }
