@@ -45,6 +45,7 @@ final class SessionModel {
     private var contentStore: ContentStore?
     private var auditStore: AuditStore?
     private var emailStore: EmailStore?
+    private var artifactIndex: ArtifactIndex?
     init() {}
 
     func configure(
@@ -52,13 +53,15 @@ final class SessionModel {
         snapshotStore: SnapshotStore,
         contentStore: ContentStore,
         auditStore: AuditStore,
-        emailStore: EmailStore? = nil
+        emailStore: EmailStore? = nil,
+        artifactIndex: ArtifactIndex
     ) {
         self.grantStore = grantStore
         self.snapshotStore = snapshotStore
         self.contentStore = contentStore
         self.auditStore = auditStore
         self.emailStore = emailStore
+        self.artifactIndex = artifactIndex
     }
 
     // MARK: - Pre-session Preview
@@ -97,9 +100,8 @@ final class SessionModel {
             if sensitivity.level == .strict {
                 visibleEmailCount = (try? await emailStore?.sharedEmailCount()) ?? 0
             } else if sensitivity.level == .open {
-                visibleEmailCount = emailCount // most visible
+                visibleEmailCount = emailCount
             } else {
-                // moderate: approximate by counting non-hidden-domain emails
                 visibleEmailCount = (try? await emailStore?.visibleEmailCount(hiddenDomains: sensitivity.hiddenDomains)) ?? emailCount
             }
 
@@ -175,6 +177,28 @@ final class SessionModel {
                     mountName: result.mountName,
                     mountPath: result.mountPath,
                     snapshotStore: snapshotStore
+                )
+            }
+
+            if let artifactIndex {
+                try await artifactIndex.ensureGrantIndexed(
+                    grantID: grant.grantID,
+                    materializationRoot: actualRoot.path,
+                    mounts: results.map {
+                        ArtifactMount(
+                            sourceID: $0.sourceID,
+                            mountName: $0.mountName,
+                            mountPath: $0.mountPath
+                        )
+                    }
+                )
+
+                let emails = try accessibleEmails(for: grant)
+                let attachments = try emailStore?.emailAttachments(emailIDs: emails.map(\.emailID)) ?? []
+                try await artifactIndex.syncEmails(
+                    grantID: grant.grantID,
+                    emails: emails,
+                    attachments: attachments
                 )
             }
 
@@ -378,6 +402,16 @@ final class SessionModel {
                 filePath: filePath,
                 restoredData: data
             )
+            try await artifactIndex?.upsertFile(
+                grantID: grant.grantID,
+                mount: ArtifactMount(
+                    sourceID: resolved.mount.sourceID,
+                    mountName: resolved.mount.mountName,
+                    mountPath: resolved.mount.mountPath
+                ),
+                relativePath: resolved.relativePath,
+                fileURL: resolved.fileURL
+            )
             let afterHash = try await snapshotStore.latestHash(runID: grant.grantID, filePath: filePath)
             try? await auditStore?.log(
                 action: .restore,
@@ -436,6 +470,8 @@ final class SessionModel {
             endedAt: grant?.endedAt ?? now,
             markdown: lines.joined(separator: "\n")
         )
+        let summaries = try await grantStore.summaries(grantID: grantID)
+        try await artifactIndex?.syncSessionSummaries(grantID: grantID, summaries: summaries)
     }
 
     private func baselineSnapshotMount(
@@ -516,5 +552,18 @@ final class SessionModel {
             try? fm.removeItem(at: grantDir)
             logger.info("Cleaned orphaned materialization: \(entry)")
         }
+    }
+
+    private func accessibleEmails(for grant: GrantRecord, limit: Int = 1_000) throws -> [EmailMessageRecord] {
+        guard let emailStore else { return [] }
+        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
+
+        if filter.level == .strict {
+            return try emailStore.sharedEmails(limit: limit)
+        }
+
+        return try emailStore
+            .allEmailMessages(limit: limit)
+            .filter { filter.isVisible(email: $0) }
     }
 }

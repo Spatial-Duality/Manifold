@@ -100,6 +100,30 @@ enum ToolHandlers {
                     "note": ["type": "string", "description": "Markdown note about the session"],
                 ], required: ["note"])
             ),
+            MCPTool(
+                name: "read_range",
+                description: "Read a targeted line range from an approved file.",
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Relative path within the workspace"],
+                    "start_line": ["type": "integer", "description": "1-based start line"],
+                    "end_line": ["type": "integer", "description": "1-based end line"],
+                ], required: ["path", "start_line", "end_line"])
+            ),
+            MCPTool(
+                name: "diff_file",
+                description: "Show a compact diff between the current file and its baseline snapshot.",
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Relative path within the workspace"],
+                ], required: ["path"])
+            ),
+            MCPTool(
+                name: "search_structured",
+                description: "Search approved files and return structured JSON hits with previews.",
+                inputSchema: objectSchema(properties: [
+                    "query": ["type": "string", "description": "Text to search for"],
+                    "limit": ["type": "integer", "description": "Maximum number of hits (default 10)"],
+                ], required: ["query"])
+            ),
         ]
     }
 
@@ -221,6 +245,30 @@ enum ToolHandlers {
                 let msg = try await bridge.saveSessionNote(note: note)
                 return textResult(msg)
 
+            case "read_range":
+                guard let path = arguments["path"] as? String,
+                      let startLine = intArgument(arguments["start_line"]),
+                      let endLine = intArgument(arguments["end_line"]) else {
+                    return errorResult("'path', 'start_line', and 'end_line' parameters required")
+                }
+                let content = try await bridge.readRange(path: path, startLine: startLine, endLine: endLine)
+                return textResult(content)
+
+            case "diff_file":
+                guard let path = arguments["path"] as? String else {
+                    return errorResult("'path' parameter required")
+                }
+                let diff = try await bridge.diffFile(path: path)
+                return textResult(diff)
+
+            case "search_structured":
+                guard let query = arguments["query"] as? String else {
+                    return errorResult("'query' parameter required")
+                }
+                let limit = intArgument(arguments["limit"]) ?? 10
+                let results = try await bridge.searchStructured(query: query, limit: limit)
+                return textResult(results)
+
             default:
                 return errorResult("Unknown tool: \(name)")
             }
@@ -237,6 +285,16 @@ enum ToolHandlers {
 
     private static func errorResult(_ text: String) -> [String: Any] {
         ["content": [["type": "text", "text": text]], "isError": true]
+    }
+
+    private static func intArgument(_ value: Any?) -> Int? {
+        if let intValue = value as? Int {
+            return intValue
+        }
+        if let stringValue = value as? String {
+            return Int(stringValue)
+        }
+        return nil
     }
 
     private static func formatStatus(_ status: StatusResult) -> String {

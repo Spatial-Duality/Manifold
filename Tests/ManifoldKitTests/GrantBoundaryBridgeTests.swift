@@ -12,6 +12,7 @@ struct GrantBoundaryBridgeTests {
         let auditStore: AuditStore
         let grantStore: GrantStore
         let emailStore: EmailStore
+        let artifactIndex: ArtifactIndex
         let bridge: ManifoldBridge
         let tempDir: URL
     }
@@ -29,13 +30,15 @@ struct GrantBoundaryBridgeTests {
         let auditStore = try AuditStore(db: db)
         let grantStore = GrantStore(db: db)
         let emailStore = EmailStore(db: db)
+        let artifactIndex = try ArtifactIndex(db: db)
         let bridge = ManifoldBridge(
             db: db,
             auditStore: auditStore,
             contentStore: contentStore,
             grantStore: grantStore,
             emailStore: emailStore,
-            snapshotStore: snapshotStore
+            snapshotStore: snapshotStore,
+            artifactIndex: artifactIndex
         )
         return Harness(
             db: db,
@@ -44,6 +47,7 @@ struct GrantBoundaryBridgeTests {
             auditStore: auditStore,
             grantStore: grantStore,
             emailStore: emailStore,
+            artifactIndex: artifactIndex,
             bridge: bridge,
             tempDir: tempDir
         )
@@ -183,6 +187,74 @@ struct GrantBoundaryBridgeTests {
         }
     }
 
+    @Test("Bridge search reflects indexed content after writes")
+    func bridgeSearchUpdatesAfterWrite() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "line one\nneedle before\nline three"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        let beforeHits = try await harness.bridge.searchFiles(query: "before")
+        #expect(beforeHits.count == 1)
+        #expect(beforeHits[0].path == "alpha/notes.md")
+        #expect(beforeHits[0].matches.joined(separator: "\n").contains("needle before"))
+
+        _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "line one\nneedle after\nline three")
+
+        let afterHits = try await harness.bridge.searchFiles(query: "after")
+        #expect(afterHits.count == 1)
+        #expect(afterHits[0].matches.joined(separator: "\n").contains("needle after"))
+
+        let oldHits = try await harness.bridge.searchFiles(query: "before")
+        #expect(oldHits.isEmpty)
+    }
+
+    @Test("Bridge read_range returns targeted lines")
+    func bridgeReadRange() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "one\ntwo\nthree\nfour"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        let excerpt = try await harness.bridge.readRange(path: "alpha/notes.md", startLine: 2, endLine: 3)
+        #expect(excerpt == "two\nthree")
+    }
+
+    @Test("Bridge diff_file compares current content to baseline snapshot")
+    func bridgeDiffFile() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "original"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated")
+        let diff = try await harness.bridge.diffFile(path: "alpha/notes.md")
+
+        #expect(diff.contains("-original"))
+        #expect(diff.contains("+updated"))
+    }
+
     @Test("Email-only grant exposes full selected email content")
     func emailOnlyGrantReadsFromEml() async throws {
         let harness = try makeHarness()
@@ -244,5 +316,54 @@ struct GrantBoundaryBridgeTests {
         #expect(status.active == true)
         #expect(status.grantID == grant.grantID)
         #expect(status.emailCount == 1)
+    }
+
+    @Test("Bridge search_structured includes email and session summary artifacts")
+    func bridgeSearchStructuredIncludesNonFileArtifacts() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let emailAccount = try await harness.emailStore.addEmailAccount(
+            displayName: "Test Account",
+            providerType: "other",
+            server: "imap.example.com",
+            port: 993,
+            username: "test@example.com",
+            authType: "password"
+        )
+
+        try await harness.emailStore.upsertEmailMessage(
+            emailID: "email-needle",
+            accountID: emailAccount.accountID,
+            mailbox: "Inbox",
+            sender: "needle@example.com",
+            recipients: "team@example.com",
+            subject: "Needle email",
+            receivedAt: "2026-04-05",
+            emlPath: nil,
+            sizeBytes: 128,
+            preview: "Needle email preview"
+        )
+
+        let grant = try await harness.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [],
+            materializationRoot: harness.tempDir.appendingPathComponent("structured-search").path
+        )
+
+        _ = try await harness.grantStore.saveSummary(
+            grantID: grant.grantID,
+            targetApp: .cowork,
+            startedAt: grant.startedAt,
+            endedAt: "2026-04-06",
+            markdown: "# Session Summary\n\nNeedle summary marker"
+        )
+
+        let result = try await harness.bridge.searchStructured(query: "Needle", limit: 10)
+        #expect(result.contains("\"kind\" : \"email\""))
+        #expect(result.contains("email-needle"))
+        #expect(result.contains("\"kind\" : \"session_summary\""))
+        #expect(result.contains("_sessions"))
     }
 }

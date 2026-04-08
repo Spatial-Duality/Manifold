@@ -195,6 +195,35 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable {
     public var isDeletedOnServer: Bool { deletedOnServerAt != nil }
 }
 
+public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable {
+    public var id: String { attachmentID }
+    public let attachmentID: String
+    public let emailID: String
+    public let filename: String
+    public let mimeType: String
+    public let sizeBytes: Int
+    public let contentHash: String
+    public let contentID: String?
+
+    init?(row: [String: String]) {
+        guard let attachmentID = row["attachment_id"],
+              let emailID = row["email_id"],
+              let filename = row["filename"],
+              let mimeType = row["mime_type"],
+              let contentHash = row["content_hash"] else {
+            logger.warning("Failed to parse EmailAttachmentRecord: missing field(s) in \(row.keys.sorted())")
+            return nil
+        }
+        self.attachmentID = attachmentID
+        self.emailID = emailID
+        self.filename = filename
+        self.mimeType = mimeType
+        self.sizeBytes = row["size_bytes"].flatMap { Int($0) } ?? 0
+        self.contentHash = contentHash
+        self.contentID = row["content_id"]
+    }
+}
+
 // MARK: - IMAP Mailbox (persisted folder tree from IMAP LIST)
 
 public struct IMAPMailboxRecord: Sendable, Identifiable, Hashable {

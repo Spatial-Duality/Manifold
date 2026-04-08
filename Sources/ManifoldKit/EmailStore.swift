@@ -108,6 +108,30 @@ public struct EmailStore: Sendable {
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
 
+    public func emailAttachments(emailIDs: [String]? = nil) throws -> [EmailAttachmentRecord] {
+        if let emailIDs, emailIDs.isEmpty {
+            return []
+        }
+
+        let query: String
+        let params: [String]
+        if let emailIDs {
+            let placeholders = emailIDs.map { _ in "?" }.joined(separator: ",")
+            query = """
+                SELECT * FROM email_attachments
+                WHERE email_id IN (\(placeholders))
+                ORDER BY filename ASC
+            """
+            params = emailIDs
+        } else {
+            query = "SELECT * FROM email_attachments ORDER BY filename ASC"
+            params = []
+        }
+
+        let rows = try db.queryAll(query, params: params)
+        return rows.compactMap { EmailAttachmentRecord(row: $0) }
+    }
+
     public func emailMessage(id: String) throws -> EmailMessageRecord? {
         let rows = try db.queryAll(
             "SELECT * FROM email_messages WHERE email_id = ? LIMIT 1",

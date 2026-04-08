@@ -11,6 +11,7 @@ public actor ManifoldBridge {
     private let grantStore: GrantStore
     private let emailStore: EmailStore
     private let snapshotStore: SnapshotStore
+    private let artifactIndex: ArtifactIndex
 
     public init(
         db: DatabaseConnection,
@@ -18,7 +19,8 @@ public actor ManifoldBridge {
         contentStore: ContentStore,
         grantStore: GrantStore,
         emailStore: EmailStore,
-        snapshotStore: SnapshotStore
+        snapshotStore: SnapshotStore,
+        artifactIndex: ArtifactIndex
     ) {
         self.db = db
         self.auditStore = auditStore
@@ -26,15 +28,8 @@ public actor ManifoldBridge {
         self.grantStore = grantStore
         self.emailStore = emailStore
         self.snapshotStore = snapshotStore
+        self.artifactIndex = artifactIndex
     }
-
-    private static let binaryExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "ico", "webp",
-        "pdf", "zip", "gz", "tar", "rar", "7z",
-        "exe", "dll", "dylib", "so", "a", "o",
-        "mp3", "mp4", "wav", "avi", "mov", "mkv",
-        "sqlite", "db", "bin", "dat",
-    ]
 
     // MARK: - Grant Resolution
 
@@ -61,10 +56,43 @@ public actor ManifoldBridge {
         }
     }
 
+    private func artifactMounts(from mounts: [GrantMount]) -> [ArtifactMount] {
+        mounts.map {
+            ArtifactMount(sourceID: $0.sourceID, mountName: $0.mountName, mountPath: $0.mountPath)
+        }
+    }
+
     private struct GrantMount {
         let sourceID: String
         let mountName: String
         let mountPath: String
+    }
+
+    private func ensureIndexed(grant: GrantRecord, mounts: [GrantMount]) async throws {
+        try await artifactIndex.ensureGrantIndexed(
+            grantID: grant.grantID,
+            materializationRoot: grant.materializationRoot,
+            mounts: artifactMounts(from: mounts)
+        )
+
+        let emails = try accessibleEmails(grant: grant, limit: 1_000)
+        let attachments = try emailStore.emailAttachments(emailIDs: emails.map(\.emailID))
+        try await artifactIndex.syncEmails(
+            grantID: grant.grantID,
+            emails: emails,
+            attachments: attachments
+        )
+
+        let summaries = try await grantStore.summaries(grantID: grant.grantID)
+        try await artifactIndex.syncSessionSummaries(grantID: grant.grantID, summaries: summaries)
+    }
+
+    private func accessibleEmails(grant: GrantRecord, limit: Int) throws -> [EmailMessageRecord] {
+        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
+        if filter.level == .strict {
+            return try emailStore.sharedEmails(limit: limit)
+        }
+        return try emailStore.allEmailMessages(limit: limit).filter { filter.isVisible(email: $0) }
     }
 
     // MARK: - Path Safety
@@ -139,14 +167,9 @@ public actor ManifoldBridge {
         do {
             let (grant, grantSources) = try await requireGrant()
             let mounts = grantMounts(grant: grant, sources: grantSources)
-            var totalFiles = 0
-
-            for mount in mounts {
-                let mountURL = URL(fileURLWithPath: mount.mountPath)
-                let fileCount = (try? enumerateFiles(in: mountURL).count) ?? 0
-                totalFiles += fileCount
-            }
-            let emailCount = (try? emailStore.emailMessageCount()) ?? 0
+            try await ensureIndexed(grant: grant, mounts: mounts)
+            let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
+            let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
             let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
             let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
 
@@ -184,31 +207,21 @@ public actor ManifoldBridge {
         await logToolCall(tool: "list_files")
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
-        var allFiles: [FileInfo] = []
+        try await ensureIndexed(grant: grant, mounts: mounts)
 
-        for mount in mounts {
-            let mountURL = URL(fileURLWithPath: mount.mountPath)
-            let files = try enumerateFiles(in: mountURL)
-
-            for file in files {
-                let rel = relativePath(file: file, base: mountURL)
-                guard !rel.hasPrefix("_emails/") else { continue }
-                guard !rel.hasPrefix(".manifold-") else { continue }
-
-                let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
-                let size = (attrs?[.size] as? Int) ?? 0
-                let modified = (attrs?[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) } ?? ""
-
-                allFiles.append(FileInfo(
-                    path: rel,
-                    sourceName: mount.mountName,
-                    sourceAddedAt: grant.startedAt,
-                    sizeBytes: size,
-                    lastModified: modified
-                ))
-            }
+        let artifacts = try await artifactIndex.listFiles(grantID: grant.grantID)
+        return artifacts.map { handle in
+            let relative = handle.path.hasPrefix(handle.mountName + "/")
+                ? String(handle.path.dropFirst(handle.mountName.count + 1))
+                : handle.path
+            return FileInfo(
+                path: relative,
+                sourceName: handle.mountName,
+                sourceAddedAt: grant.startedAt,
+                sizeBytes: handle.sizeBytes,
+                lastModified: handle.lastModified
+            )
         }
-        return allFiles.sorted { $0.path < $1.path }
     }
 
     // MARK: - Read File (P1 FIX: reject ambiguous bare paths)
@@ -217,6 +230,7 @@ public actor ManifoldBridge {
         await logToolCall(tool: "read_file", arguments: ["path": path])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
+        try await ensureIndexed(grant: grant, mounts: mounts)
         let cleaned = cleanPath(path)
 
         // Try mount-prefixed resolution first (e.g. "MyProject/src/main.swift")
@@ -234,25 +248,29 @@ public actor ManifoldBridge {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw ManifoldMCPError.fileNotFound(relativePath)
         }
-        let data = try Data(contentsOf: fileURL)
         let canonicalPath = "\(mountName)/\(relativePath)"
+        let artifact = try await artifactIndex.artifact(grantID: grantID, canonicalPath: canonicalPath)
+        let read = try ContextEngine.read(
+            fileURL: fileURL,
+            selection: artifact?.selection
+        )
 
         try? await auditStore.log(
             action: .fileRead,
             agent: "cowork",
             filePath: canonicalPath,
-            metadata: ["grant_id": grantID, "mount": mountName],
+            metadata: [
+                "grant_id": grantID,
+                "mount": mountName,
+                "bytes": "\(read.bytesRead)",
+                "truncated": read.truncated ? "true" : "false",
+            ],
             grantID: grantID
         )
         ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
             "path": canonicalPath, "action": "read", "agent": "cowork"
         ])
-
-        if let text = String(data: data, encoding: .utf8) {
-            return text
-        } else {
-            return "<binary file, \(data.count) bytes>"
-        }
+        return read.text
     }
 
     // MARK: - Write File (P1 FIX: record snapshots, use canonical paths, reject ambiguous)
@@ -307,6 +325,12 @@ public actor ManifoldBridge {
             withIntermediateDirectories: true
         )
         try data.write(to: fileURL, options: .atomic)
+        try await artifactIndex.upsertFile(
+            grantID: grant.grantID,
+            mount: ArtifactMount(sourceID: resolved.sourceID, mountName: resolved.mountName, mountPath: resolved.mountPath),
+            relativePath: resolvedPath,
+            fileURL: fileURL
+        )
 
         // Snapshot AFTER writing (capture new state)
         try await snapshotStore.recordModification(
@@ -335,34 +359,19 @@ public actor ManifoldBridge {
         await logToolCall(tool: "search_files", arguments: ["query": query])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
-        return try searchInDirectories(mounts.map { (name: $0.mountName, path: $0.mountPath) }, query: query)
-    }
+        try await ensureIndexed(grant: grant, mounts: mounts)
 
-    private func searchInDirectories(_ dirs: [(name: String, path: String)], query: String) throws -> [(path: String, source: String, matches: [String])] {
-        var results: [(path: String, source: String, matches: [String])] = []
-        for dir in dirs {
-            let root = URL(fileURLWithPath: dir.path)
-            let files = try enumerateFiles(in: root)
-
-            for file in files {
-                let rel = relativePath(file: file, base: root)
-                guard !rel.hasPrefix("_emails/") else { continue }
-                guard !rel.hasPrefix(".manifold-") else { continue }
-
-                guard let data = try? Data(contentsOf: file),
-                      let text = String(data: data, encoding: .utf8) else { continue }
-
-                let matchingLines = text.components(separatedBy: "\n")
-                    .filter { $0.localizedCaseInsensitiveContains(query) }
-                    .prefix(5)
-                    .map { String($0.prefix(200)) }
-
-                if !matchingLines.isEmpty {
-                    results.append((path: "\(dir.name)/\(rel)", source: dir.name, matches: Array(matchingLines)))
-                }
-            }
+        let hits = try await artifactIndex.search(grantID: grant.grantID, query: query)
+        return hits.map { hit in
+            let relative = hit.handle.path.hasPrefix(hit.handle.mountName + "/")
+                ? String(hit.handle.path.dropFirst(hit.handle.mountName.count + 1))
+                : hit.handle.path
+            return (
+                path: hit.handle.path,
+                source: hit.handle.mountName,
+                matches: hit.preview.isEmpty ? [relative] : hit.preview
+            )
         }
-        return results
     }
 
     // MARK: - File Info
@@ -371,6 +380,7 @@ public actor ManifoldBridge {
         await logToolCall(tool: "file_info", arguments: ["path": path])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
+        try await ensureIndexed(grant: grant, mounts: mounts)
         let cleaned = cleanPath(path)
 
         let mountPath: String
@@ -392,20 +402,27 @@ public actor ManifoldBridge {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw ManifoldMCPError.fileNotFound(cleaned)
         }
+        let canonicalPath = "\(mountName)/\(resolvedPath)"
+        let artifact = try await artifactIndex.artifact(grantID: grant.grantID, canonicalPath: canonicalPath)
 
         let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        let size = (attrs[.size] as? Int) ?? 0
-        let modified = (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) } ?? ""
-        let ext = fileURL.pathExtension
-        let isBinary = Self.binaryExtensions.contains(ext.lowercased())
+        let size = artifact?.sizeBytes ?? ((attrs[.size] as? Int) ?? 0)
+        let modified = (artifact?.lastModified.isEmpty == false ? artifact?.lastModified : nil)
+            ?? (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) }
+            ?? ""
+        let ext = artifact?.fileExtension ?? fileURL.pathExtension
+        let isBinary = artifact?.isBinary ?? ContextEngine.isBinary(fileExtension: ext.lowercased(), fileURL: fileURL)
 
         var archiveContents: [String]? = nil
         if ext.lowercased() == "zip" {
-            archiveContents = listZipContents(atPath: fileURL.path)
+            archiveContents = try await artifactIndex.archiveEntries(grantID: grant.grantID, canonicalPath: canonicalPath)
+            if archiveContents?.isEmpty != false {
+                archiveContents = listZipContents(atPath: fileURL.path)
+            }
         }
 
         return FileInfoDetail(
-            path: "\(mountName)/\(resolvedPath)",
+            path: canonicalPath,
             sourceName: mountName,
             sizeBytes: size,
             fileExtension: ext,
@@ -421,6 +438,7 @@ public actor ManifoldBridge {
         await logToolCall(tool: "list_archive", arguments: ["path": path])
         let (grant, grantSources) = try await requireGrant()
         let mounts = grantMounts(grant: grant, sources: grantSources)
+        try await ensureIndexed(grant: grant, mounts: mounts)
         let cleaned = cleanPath(path)
 
         guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
@@ -430,6 +448,12 @@ public actor ManifoldBridge {
         let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
             throw ManifoldMCPError.fileNotFound(path)
+        }
+
+        let canonicalPath = "\(mount.mountName)/\(relPath)"
+        let indexedEntries = try await artifactIndex.archiveEntries(grantID: grant.grantID, canonicalPath: canonicalPath)
+        if !indexedEntries.isEmpty {
+            return indexedEntries
         }
 
         guard let contents = listZipContents(atPath: archiveURL.path) else {
@@ -470,6 +494,144 @@ public actor ManifoldBridge {
         }
 
         return try extractFromZip(archivePath: archiveURL.path, entryPath: targetEntry)
+    }
+
+    public func readRange(path: String, startLine: Int, endLine: Int) async throws -> String {
+        await logToolCall(
+            tool: "read_range",
+            arguments: ["path": path, "start_line": "\(startLine)", "end_line": "\(endLine)"]
+        )
+        guard startLine > 0, endLine >= startLine else {
+            throw ManifoldMCPError.invalidPath("Line range must be positive and end_line must be >= start_line")
+        }
+
+        let (grant, grantSources) = try await requireGrant()
+        let mounts = grantMounts(grant: grant, sources: grantSources)
+        try await ensureIndexed(grant: grant, mounts: mounts)
+        let cleaned = cleanPath(path)
+
+        let resolved: (mount: GrantMount, relativePath: String)
+        if let match = resolveMountAndPath(cleaned, in: mounts) {
+            resolved = match
+        } else {
+            resolved = try resolveBarePath(cleaned, in: mounts)
+        }
+
+        let fileURL = try validatePath(resolved.relativePath, rootPath: resolved.mount.mountPath)
+        let read = try ContextEngine.read(
+            fileURL: fileURL,
+            selection: ArtifactSelection(lineStart: startLine, lineEnd: endLine)
+        )
+        let canonicalPath = "\(resolved.mount.mountName)/\(resolved.relativePath)"
+
+        try? await auditStore.log(
+            action: .fileRead,
+            agent: "cowork",
+            filePath: canonicalPath,
+            metadata: [
+                "grant_id": grant.grantID,
+                "mount": resolved.mount.mountName,
+                "selection": "lines:\(startLine)-\(endLine)",
+                "truncated": read.truncated ? "true" : "false",
+            ],
+            grantID: grant.grantID
+        )
+
+        return read.text
+    }
+
+    public func diffFile(path: String) async throws -> String {
+        await logToolCall(tool: "diff_file", arguments: ["path": path])
+        let (grant, grantSources) = try await requireGrant()
+        let mounts = grantMounts(grant: grant, sources: grantSources)
+        try await ensureIndexed(grant: grant, mounts: mounts)
+        let cleaned = cleanPath(path)
+
+        let resolved: (mount: GrantMount, relativePath: String)
+        if let match = resolveMountAndPath(cleaned, in: mounts) {
+            resolved = match
+        } else {
+            resolved = try resolveBarePath(cleaned, in: mounts)
+        }
+
+        let canonicalPath = "\(resolved.mount.mountName)/\(resolved.relativePath)"
+        let fileURL = try validatePath(resolved.relativePath, rootPath: resolved.mount.mountPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw ManifoldMCPError.fileNotFound(canonicalPath)
+        }
+        let baselineData: Data?
+        if let baselineHash = try await snapshotStore.baselineHash(runID: grant.grantID, filePath: canonicalPath),
+           let retrieved = try await contentStore.retrieve(hash: baselineHash) {
+            baselineData = retrieved
+        } else {
+            let history = try await snapshotStore.runTimeline(runID: grant.grantID)
+            if let fallbackHash = history.first(where: { record in
+                record.isBaseline
+                    && (record.filePath == canonicalPath
+                        || record.filePath == resolved.relativePath
+                        || record.filePath.hasSuffix("/\(resolved.relativePath)"))
+            })?.afterHash {
+                baselineData = try await contentStore.retrieve(hash: fallbackHash)
+            } else if let source = try await grantStore.source(id: resolved.mount.sourceID) {
+                let originalURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(resolved.relativePath)
+                baselineData = try? Data(contentsOf: originalURL, options: [.mappedIfSafe])
+            } else {
+                baselineData = nil
+            }
+        }
+
+        guard let baselineData else {
+            return "No baseline snapshot available for \(canonicalPath)"
+        }
+
+        let currentData = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+        guard let diffLines = DiffEngine().diff(beforeData: baselineData, afterData: currentData) else {
+            return "No inline text diff available for \(canonicalPath)"
+        }
+
+        if diffLines.isEmpty {
+            return "No changes in \(canonicalPath) relative to the baseline snapshot."
+        }
+
+        let rendered = diffLines.map { line -> String in
+            switch line.type {
+            case .addition:
+                return "+\(line.text)"
+            case .removal:
+                return "-\(line.text)"
+            case .context:
+                return " \(line.text)"
+            }
+        }.joined(separator: "\n")
+
+        return rendered
+    }
+
+    public func searchStructured(query: String, limit: Int = 10) async throws -> String {
+        await logToolCall(tool: "search_structured", arguments: ["query": query, "limit": "\(limit)"])
+        let (grant, grantSources) = try await requireGrant()
+        let mounts = grantMounts(grant: grant, sources: grantSources)
+        try await ensureIndexed(grant: grant, mounts: mounts)
+
+        let hits = try await artifactIndex.search(
+            grantID: grant.grantID,
+            query: query,
+            limit: limit,
+            kinds: [.file, .email, .emailAttachment, .sessionSummary]
+        )
+        let payload: [[String: Any]] = hits.map { hit in
+            [
+                "kind": hit.handle.kind.rawValue,
+                "path": hit.handle.path,
+                "source": hit.handle.mountName,
+                "score": hit.score,
+                "preview": hit.preview,
+                "selection": selectionJSON(hit.selection),
+            ]
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "[]"
     }
 
     // MARK: - Changes
@@ -529,25 +691,6 @@ public actor ManifoldBridge {
         }
     }
 
-    // MARK: - File Enumeration
-
-    private func enumerateFiles(in directory: URL) throws -> [URL] {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        var files: [URL] = []
-        while let url = enumerator.nextObject() as? URL {
-            guard let vals = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-                  vals.isRegularFile == true else { continue }
-            files.append(url)
-        }
-        return files
-    }
-
     private func relativePath(file: URL, base: URL) -> String {
         let filePath = file.standardizedFileURL.path
         let basePath = base.standardizedFileURL.path + "/"
@@ -555,6 +698,15 @@ public actor ManifoldBridge {
             return String(filePath.dropFirst(basePath.count))
         }
         return file.lastPathComponent
+    }
+
+    private func selectionJSON(_ selection: ArtifactSelection?) -> [String: Any] {
+        [
+            "line_start": (selection?.lineStart as Any?) ?? NSNull(),
+            "line_end": (selection?.lineEnd as Any?) ?? NSNull(),
+            "byte_start": (selection?.byteStart as Any?) ?? NSNull(),
+            "byte_end": (selection?.byteEnd as Any?) ?? NSNull(),
+        ]
     }
 
     // MARK: - Sessions
@@ -616,6 +768,8 @@ public actor ManifoldBridge {
             endedAt: now,
             markdown: note
         )
+        let summaries = try await grantStore.summaries(grantID: grant.grantID)
+        try await artifactIndex.syncSessionSummaries(grantID: grant.grantID, summaries: summaries)
         return "Session note saved for grant \(grant.grantID.prefix(12))..."
     }
 
@@ -642,7 +796,6 @@ public actor ManifoldBridge {
             let all = try emailStore.allEmailMessages(limit: 200)
             emails = all.filter { filter.isVisible(email: $0) }
         }
-
         return emails.map {
             EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
@@ -651,7 +804,6 @@ public actor ManifoldBridge {
     public func readEmail(id: String) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
         let (grant, _) = try await requireGrant()
-
         let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
 
         guard let email = try emailStore.emailMessage(id: id) else {

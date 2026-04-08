@@ -43,6 +43,7 @@ struct ManifoldMCPServer {
         let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
         let grantStore = GrantStore(db: db)
         let emailStore = EmailStore(db: db)
+        let artifactIndex = try ArtifactIndex(db: db)
 
         // Log MCP connection and notify the app
         try? await auditStore.log(action: .mcpConnection, metadata: ["event": "connected"])
@@ -55,7 +56,8 @@ struct ManifoldMCPServer {
             contentStore: contentStore,
             grantStore: grantStore,
             emailStore: emailStore,
-            snapshotStore: snapshotStore
+            snapshotStore: snapshotStore,
+            artifactIndex: artifactIndex
         )
 
         // Create MCP server

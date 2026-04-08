@@ -53,6 +53,7 @@ class ManifoldStore {
     private var leaseManager: WorkspaceLeaseManager?
     private(set) var grantStore: GrantStore?
     private(set) var emailStore: EmailStore?
+    private(set) var artifactIndex: ArtifactIndex?
     private var db: DatabaseConnection?
     private var pollTimer: Timer?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -91,12 +92,14 @@ class ManifoldStore {
             let leaseManager = try WorkspaceLeaseManager(db: connection, snapshotStore: snapshotStore)
             let grantStore = GrantStore(db: connection)
             let emailStore = EmailStore(db: connection)
+            let artifactIndex = try ArtifactIndex(db: connection)
 
             self.auditStore = auditStore
             self.snapshotStore = snapshotStore
             self.leaseManager = leaseManager
             self.grantStore = grantStore
             self.emailStore = emailStore
+            self.artifactIndex = artifactIndex
 
             // Initialize email sync engine
             let syncEngine = EmailSyncEngine(emailStore: emailStore)
@@ -109,6 +112,7 @@ class ManifoldStore {
                 snapshotStore: snapshotStore,
                 grantStore: grantStore,
                 emailStore: emailStore,
+                artifactIndex: artifactIndex,
                 db: connection,
                 syncEngine: syncEngine
             )
@@ -141,11 +145,24 @@ class ManifoldStore {
         snapshotStore: SnapshotStore,
         grantStore: GrantStore,
         emailStore: EmailStore,
+        artifactIndex: ArtifactIndex,
         db: DatabaseConnection,
         syncEngine: EmailSyncEngine
     ) {
-        session.configure(grantStore: grantStore, snapshotStore: snapshotStore, contentStore: contentStore, auditStore: auditStore, emailStore: emailStore)
-        history.configure(auditStore: auditStore, snapshotStore: snapshotStore, contentStore: contentStore)
+        session.configure(
+            grantStore: grantStore,
+            snapshotStore: snapshotStore,
+            contentStore: contentStore,
+            auditStore: auditStore,
+            emailStore: emailStore,
+            artifactIndex: artifactIndex
+        )
+        history.configure(
+            auditStore: auditStore,
+            snapshotStore: snapshotStore,
+            contentStore: contentStore,
+            artifactIndex: artifactIndex
+        )
         storage.configure(snapshotStore: snapshotStore, contentStore: contentStore, db: db)
         emailAccounts.configure(emailStore: emailStore, syncEngine: syncEngine)
 

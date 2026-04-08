@@ -16,13 +16,20 @@ final class HistoryModel {
     private var auditStore: AuditStore?
     private var snapshotStore: SnapshotStore?
     private var contentStore: ContentStore?
+    private var artifactIndex: ArtifactIndex?
 
     init() {}
 
-    func configure(auditStore: AuditStore, snapshotStore: SnapshotStore, contentStore: ContentStore) {
+    func configure(
+        auditStore: AuditStore,
+        snapshotStore: SnapshotStore,
+        contentStore: ContentStore,
+        artifactIndex: ArtifactIndex
+    ) {
         self.auditStore = auditStore
         self.snapshotStore = snapshotStore
         self.contentStore = contentStore
+        self.artifactIndex = artifactIndex
     }
 
     func loadActivity() async {
@@ -95,6 +102,16 @@ final class HistoryModel {
                 filePath: filePath,
                 restoredData: blobData
             )
+            try await artifactIndex?.upsertFile(
+                grantID: grant.grantID,
+                mount: ArtifactMount(
+                    sourceID: resolved.mount.sourceID,
+                    mountName: resolved.mount.mountName,
+                    mountPath: resolved.mount.mountPath
+                ),
+                relativePath: resolved.relativePath,
+                fileURL: resolved.fileURL
+            )
             return .success
         } catch {
             return .error(error.localizedDescription)
@@ -119,6 +136,16 @@ final class HistoryModel {
                 workspaceID: resolved.mount.sourceID,
                 filePath: filePath,
                 restoredData: blobData
+            )
+            try await artifactIndex?.upsertFile(
+                grantID: grant.grantID,
+                mount: ArtifactMount(
+                    sourceID: resolved.mount.sourceID,
+                    mountName: resolved.mount.mountName,
+                    mountPath: resolved.mount.mountPath
+                ),
+                relativePath: resolved.relativePath,
+                fileURL: resolved.fileURL
             )
             return .success
         } catch {
