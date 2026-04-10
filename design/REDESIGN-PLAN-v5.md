@@ -149,31 +149,149 @@ Label("Activity", systemImage: "waveform.path")
 
 Shorter label, SF Symbol, consistent with the rest of the app's icon language.
 
-### 1.5 Fix Track Changes button styling
+### 1.5 Fix Track Changes — give it real weight as a mode entry point
 
 **File**: `Views/OverviewView.swift` (lines 21-32)
 
-Current: `.controlSize(.large)` + `.buttonStyle(.plain)` + `.foregroundStyle(.secondary)` — conflicting signals.
+Current: `.controlSize(.large)` + `.buttonStyle(.plain)` + `.foregroundStyle(.secondary)` — conflicting signals. Reads like a developer option, not the app's signature feature.
 
 **Change to**:
 ```swift
-Button {
-    reviewSheetChange = ReviewAccessChange(
-        description: "Start tracking changes",
-        kind: .startWorkBlock
-    )
-} label: {
-    Label("Track Changes", systemImage: "timeline.selection")
+// Track Changes as a first-class mode CTA
+if store.isConnected && !store.sources.isEmpty && store.policy.activeWorkBlock == nil {
+    VStack(spacing: Spacing.standard) {
+        Button {
+            reviewSheetChange = ReviewAccessChange(
+                description: "Start tracking changes",
+                kind: .startWorkBlock
+            )
+        } label: {
+            Label("Start Tracked Session", systemImage: "timeline.selection")
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        
+        Text("Monitor and review all AI file access in real time")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+    .padding(.top, Spacing.section)
 }
-.buttonStyle(.bordered)
-.controlSize(.regular)
 ```
 
-No longer `.large` + `.plain` + `.secondary`. Now `.bordered` + `.regular` — secondary but visually present. The system handles the rest.
+This is now `.borderedProminent` + `.large` — the primary action on the Overview when no work block is active. The explanatory subtitle tells the user what the mode does. When a work block *is* active, this disappears and the toolbar Track Changes indicator takes over.
+
+### 1.6 Fix "disconnected but configured" vs "disconnected and unconfigured"
+
+**File**: `Views/AgentPolicyCard.swift`
+
+Current: both states show the same card with "disconnected" text. The review correctly identified that these need different remedies.
+
+```swift
+// In the header, after the status badges:
+if !isConnected {
+    if isConfigured {
+        // Configured but offline → verify connection
+        Button("Verify Connection") {
+            // Re-check health
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+    } else {
+        // Not configured → go to setup
+        Button("Set Up") {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+        .controlSize(.small)
+        .buttonStyle(.borderedProminent)
+    }
+}
+```
+
+Add `isConfigured: Bool` to the card's parameters. This comes from `IntegrationHealthModel` — whether the agent's MCP config exists, regardless of current connection state.
 
 ---
 
-## Phase 2: Redesign Major Layouts — One Clear Primary Surface Per Screen
+## Phase 2: Separate Global Chrome from Local Toolbars
+
+**The most urgent shell problem.** The title bar is doing double duty as global navigation AND local task controls. That's why the app feels webby.
+
+### The rule:
+
+| Layer | Contents |
+|-------|----------|
+| **Title bar** | App name/section title, global tab picker (Overview/Files/Emails), compact connection indicator, search (⌘K) |
+| **Local toolbar** | Agent Focus, Compare, Search [tab-specific], Add Folder, Sort, Sensitivity — these belong to the *tab*, not the *window* |
+| **Sidebar** | Navigation only |
+| **Content** | Data |
+| **Inspector** | Explanation, detail, context |
+
+### 2.0 Move local controls out of the title bar
+
+**File**: `Views/MainView.swift` (toolbar section)
+
+Currently the toolbar at `.primaryAction` holds connection indicators, and per-tab views push their own controls (Agent Focus, Search Sources, etc.) into the toolbar. All of these end up in one flat row.
+
+**Change**: Keep only the tab picker and connection indicator in the global toolbar. Each tab view owns its own local toolbar *below* the title bar using `.toolbar` with content-area placements:
+
+```swift
+// MainView — global toolbar stays minimal
+.toolbar {
+    ToolbarItem(placement: .principal) {
+        Picker("Tab", selection: $store.selectedTab) { ... }
+            .pickerStyle(.segmented)
+            .frame(width: 280)
+    }
+    
+    ToolbarItemGroup(placement: .primaryAction) {
+        // Search and connection indicator only
+        Button { commands.isPresented.toggle() } label: {
+            Image(systemName: "magnifyingglass")
+        }
+        .keyboardShortcut("k", modifiers: .command)
+        
+        if store.isConnected, let agent = store.connectedAgent {
+            HStack(spacing: 4) {
+                Circle().fill(agent.lowercased().contains("codex") ? Color.purple : Color.blue)
+                    .frame(width: 8, height: 8)
+                Text(agent.capitalized).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+    
+    // Track Changes stays at .secondaryAction (only when active)
+    if let block = store.policy.activeWorkBlock {
+        ToolbarItemGroup(placement: .secondaryAction) {
+            TrackChangesToolbarContent(block: block, ...)
+        }
+    }
+}
+```
+
+Then in `SourcesTableView`, `DomainsTableView`, `FilesView` — each view defines its own toolbar items for Agent Focus, search, sort, etc. These appear in the content area's toolbar, not the window title bar.
+
+```swift
+// SourcesTableView — local toolbar
+.toolbar {
+    ToolbarItem(placement: .automatic) {
+        AgentFocusControl(selection: $agentFocus)
+    }
+    ToolbarItem(placement: .automatic) {
+        TextField("Search sources", text: $searchText)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 160)
+    }
+    ToolbarItem(placement: .primaryAction) {
+        Button("Add Folder\u{2026}", systemImage: "folder.badge.plus") { ... }
+    }
+}
+```
+
+**The visual effect**: The title bar becomes clean and stable. Tab-specific controls appear below it in a secondary toolbar row. This immediately makes the app feel more like Finder/Xcode and less like a web app header.
+
+---
+
+## Phase 2.5: Redesign Major Layouts — One Clear Primary Surface Per Screen
 
 ### 2.1 Overview: Fill the dead space with trust context
 
@@ -463,50 +581,72 @@ HStack(spacing: Spacing.standard) {
 }
 ```
 
-### 3.4 Fix the Domains/Messages navigation toggle
+### 3.4 Rebuild Emails as one stable split-view (the biggest structural fix)
 
-**File**: `Views/MainView.swift` (EmailsTab, lines 239-265)
+**File**: `Views/MainView.swift` (EmailsTab, lines 239-265) + `Views/Email/EmailView.swift`
 
-Current: A text button "View Messages" / "← Domains" toggles between two entirely different views.
+**The problem**: Domains and Messages are currently two separate screens with a text-button toggle. This breaks the stable sidebar model that the spec called for. The user experiences a structural jump between two different architectures.
 
-**Change**: Make this a sidebar-driven navigation, or at minimum a segmented control:
+**The fix**: One NavigationSplitView, always. The sidebar always shows accounts and a top-level "All Domains" entry. Selecting "All Domains" shows DomainsTableView in the content area. Selecting a mailbox shows the message list. This is exactly how Apple Mail works: sidebar is persistent, content changes based on selection.
 
 ```swift
 private struct EmailsTab: View {
-    @State private var emailMode: EmailMode = .domains
+    @Environment(ManifoldStore.self) var store
+    @State private var emailSelection: EmailSidebarSelection? = .allDomains
     
-    enum EmailMode: String, CaseIterable {
-        case domains = "Domains"
-        case messages = "Messages"
+    enum EmailSidebarSelection: Hashable {
+        case allDomains
+        case account(EmailAccountID)
+        case mailbox(MailboxID)
     }
     
     var body: some View {
-        Group {
-            switch emailMode {
-            case .domains:
+        NavigationSplitView {
+            EmailSidebar(selection: $emailSelection)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+        } content: {
+            switch emailSelection {
+            case .allDomains, nil:
                 DomainsTableView()
-            case .messages:
-                EmailView()
+            case .account(let accountID):
+                // Show mailboxes for this account, or default to inbox
+                EmailMessageList(accountID: accountID)
+            case .mailbox(let mailboxID):
+                EmailMessageList(mailboxID: mailboxID)
             }
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                // This sits alongside the main tab picker or replaces
-                // the navigation button with a proper segmented control
-                Picker("Email View", selection: $emailMode) {
-                    ForEach(EmailMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
+        } detail: {
+            // Reading pane (only in message mode)
+            if case .mailbox = emailSelection {
+                EmailReadingPane()
+            } else if case .account = emailSelection {
+                EmailReadingPane()
+            } else {
+                // Domain detail or empty state
+                ContentUnavailableView("Select a domain or mailbox",
+                    systemImage: "envelope.badge.shield.half.filled",
+                    description: Text("Choose an item from the sidebar to view details"))
             }
         }
     }
 }
 ```
 
-**Problem**: This competes with the main tab picker at `.principal`. Alternative: put the Domains/Messages picker at `.navigation` placement as a secondary segmented control, or use the sidebar for this split.
+**The sidebar structure**:
+```
+All Domains          ← default, shows DomainsTableView
+─────────────
+amar.gandhi@me.com
+  ├ All (784)
+  ├ INBOX
+  ├ Flagged
+  ├ Sent
+  ├ Archive
+  └ ...
+```
+
+**What this changes**: No more "View Messages" / "← Domains" toggle. No more structural jump. The sidebar is always there. "All Domains" is the email governance view. Mailboxes are the email browsing view. Same window grammar throughout.
+
+**EmailSidebar.swift** needs modification to add the "All Domains" entry at the top and remove the old standalone sidebar-less behavior from DomainsTableView.
 
 ### 3.5 Declutter the Emails toolbar
 
@@ -528,6 +668,128 @@ ToolbarItem(placement: .primaryAction) {
 ```
 
 This reduces the toolbar from 8+ controls to ~5.
+
+---
+
+## Phase 3.6: Row-level trust signaling in Files and Emails
+
+**The review's core demand**: "Access should live where the data lives." Tiny checkboxes at the far edge are not enough. The trust boundary must be visible at row level.
+
+### Files: Subtle row tinting for granted sources
+
+**File**: `Views/SourcesTableView.swift` or new `FilesLandingView.swift`
+
+```swift
+// Per-source row with trust tinting
+HStack {
+    Label(source.displayName, systemImage: source.isDirectory ? "folder.fill" : "doc")
+    Spacer()
+    agentAccessBadge(for: source, agent: .cowork)
+    agentAccessBadge(for: source, agent: .codex)
+}
+.listRowBackground(
+    source.isGrantedToFocusedAgent
+        ? agentColor.opacity(0.04)  // very subtle tint for shared rows
+        : Color.clear
+)
+```
+
+The tint is 4% opacity — barely visible, but enough that when scanning a list of 20 sources, the granted ones form a visible band. This is the same technique Safari uses for tab group coloring.
+
+### Domains: Show hidden sections with reasons
+
+Currently, domains hidden by sensitivity are invisible. The spec called for them to be visible with disabled controls and reason badges.
+
+```swift
+// In DomainsTableView, after the main domain list
+if !hiddenDomains.isEmpty {
+    Section("Hidden by Sensitivity") {
+        ForEach(hiddenDomains) { domain in
+            HStack {
+                Text("@\(domain.name)")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text("Blocked: \(domain.hiddenReason)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.secondary.opacity(0.08), in: Capsule())
+            }
+        }
+    }
+}
+```
+
+### Messages: Show why a message is visible
+
+In `EmailMessageRow`, add a small trust indicator:
+
+```swift
+// After the subject/preview
+if message.visibilityReason == .domainGrant {
+    // No indicator needed — default state
+} else if message.visibilityReason == .temporaryReveal {
+    Text("Revealed temporarily")
+        .font(.caption2)
+        .foregroundStyle(.orange)
+} else if message.isHiddenBySensitivity {
+    Text("Hidden")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+}
+```
+
+---
+
+## Phase 3.7: Redesign Settings AI Apps as integration cards
+
+The current checklist format feels like QA output, not a product surface.
+
+**File**: `Views/Settings/AIAppsSettingsPane.swift`
+
+```swift
+// Claude integration card
+VStack(alignment: .leading, spacing: Spacing.section) {
+    HStack {
+        Circle().fill(.blue).frame(width: 10, height: 10)
+        Text("Claude").font(.title3.weight(.medium))
+        Spacer()
+        // Headline state chip
+        Text("Connected")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.green)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.green.opacity(0.12), in: Capsule())
+    }
+    
+    // Health checks — compact, not the headline
+    VStack(alignment: .leading, spacing: 6) {
+        checkRow("App installed", status: .ok)
+        checkRow("MCP configured", status: .ok)
+        checkRow("Connection verified", status: .ok)
+    }
+    .font(.callout)
+    .foregroundStyle(.secondary)
+    
+    // Primary action
+    Button("Reconnect") { ... }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+}
+.padding(Spacing.edge)
+.background(.background, in: RoundedRectangle(cornerRadius: Spacing.cornerMedium))
+.overlay {
+    RoundedRectangle(cornerRadius: Spacing.cornerMedium)
+        .strokeBorder(.separator, lineWidth: 0.5)
+}
+```
+
+**For Codex when not configured**: The headline chip says "Needs Setup" in orange. The primary action is "Set Up Codex" as `.borderedProminent`. The health checks show pending states.
+
+**For Mail Settings**: Show each account as a row with provider icon, status, last sync time, and enabled toggle. Move technical paths into a disclosure group.
 
 ---
 

@@ -177,8 +177,9 @@ class ManifoldStore {
             let gs = grantStore
             Task.detached { await SessionModel.cleanupOrphanedMaterializations(grantStore: gs) }
 
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-                Task { [weak self] in await self?.refresh() }
+            // Slow background timer for stale grant expiration only (60s instead of 5s)
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+                Task { [weak self] in await self?.expireStaleGrants() }
             }
         } catch {
             logger.error("Failed to init stores: \(error.localizedDescription)")
@@ -230,9 +231,27 @@ class ManifoldStore {
             Task { @MainActor in self?.showAccessDeniedNotification(info: info) }
         }
         let dataChanged = ManifoldNotification.observe(ManifoldNotification.dataChanged) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+            Task { @MainActor in self?.debouncedRefresh() }
         }
         notificationObservers = [connected, disconnected, denied, dataChanged]
+    }
+
+    /// Check and expire stale grants (called from 60s background timer).
+    private func expireStaleGrants() async {
+        guard let grantStore else { return }
+        _ = try? await grantStore.expireStaleGrants()
+    }
+
+    /// Debounced refresh — coalesces rapid dataChanged notifications into a single refresh.
+    /// Prevents redundant DB queries when multiple writes happen in quick succession.
+    private var refreshDebounceTask: Task<Void, Never>?
+    private func debouncedRefresh() {
+        refreshDebounceTask?.cancel()
+        refreshDebounceTask = Task {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            await refresh()
+        }
     }
 
     private func requestNotificationPermission() {
