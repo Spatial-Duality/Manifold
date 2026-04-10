@@ -46,6 +46,22 @@ struct MainView: View {
                 .environment(store)
                 .frame(minWidth: 560, minHeight: 500)
         }
+        .sheet(item: $store.reviewSheetTrigger) { change in
+            ReviewAccessSheet(pendingChange: change)
+                .environment(store)
+                .frame(minWidth: 560, minHeight: 500)
+        }
+        .inspector(isPresented: $store.showActivityDrawer) {
+            ActivityDrawer(isPresented: $store.showActivityDrawer)
+                .environment(store)
+                .inspectorColumnWidth(min: 300, ideal: 360, max: 480)
+        }
+        .sheet(isPresented: reviewChangesBinding) {
+            if let block = store.policy.activeWorkBlock {
+                ReviewChangesSheet(block: block)
+                    .environment(store)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Tab", selection: $store.selectedTab) {
@@ -106,6 +122,14 @@ struct MainView: View {
         case .emails:
             EmailsTab()
         }
+    }
+
+    /// Presents ReviewChangesSheet when a work block enters .reviewing status.
+    private var reviewChangesBinding: Binding<Bool> {
+        Binding(
+            get: { store.policy.activeWorkBlock?.status == .reviewing },
+            set: { if !$0 { Task { await store.policy.completeWorkBlock() } } }
+        )
     }
 
     // MARK: - Connection Indicators

@@ -81,6 +81,8 @@
 		E7CBB062F8FE422EAD9CCFD9 /* ConnectClaudeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F4DD2292FA43609BD5CB10 /* ConnectClaudeSheet.swift */; };
 		C425B2246DA3466D86D18A32 /* ConnectCodexSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDD40A0FC44454BB68AA8F4 /* ConnectCodexSheet.swift */; };
 		7B720B87452445EF821E01B5 /* EmailAccountSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A24DBC67E3D81F2706D723 /* EmailAccountSetupView.swift */; };
+		5F513BA027EE4D8FAAE37259 /* ReviewChangesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EC6A16ACCF48C0BC39AE60 /* ReviewChangesSheet.swift */; };
+		0BE3DA79CDD040A0B63DD21B /* AddMailAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -160,6 +162,8 @@
 		92F4DD2292FA43609BD5CB10 /* ConnectClaudeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/ConnectClaudeSheet.swift; sourceTree = "<group>"; };
 		0EDD40A0FC44454BB68AA8F4 /* ConnectCodexSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/ConnectCodexSheet.swift; sourceTree = "<group>"; };
 		B5A24DBC67E3D81F2706D723 /* EmailAccountSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailAccountSetupView.swift; sourceTree = "<group>"; };
+		44EC6A16ACCF48C0BC39AE60 /* ReviewChangesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewChangesSheet.swift; sourceTree = "<group>"; };
+		DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/AddMailAccountSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -244,6 +248,8 @@
 				4DCA5106EDE14D709572E7AD /* SetupAssistantView.swift */,
 				92F4DD2292FA43609BD5CB10 /* ConnectClaudeSheet.swift */,
 				0EDD40A0FC44454BB68AA8F4 /* ConnectCodexSheet.swift */,
+				44EC6A16ACCF48C0BC39AE60 /* ReviewChangesSheet.swift */,
+				DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -522,6 +528,8 @@
 				E7CBB062F8FE422EAD9CCFD9 /* ConnectClaudeSheet.swift in Sources */,
 				C425B2246DA3466D86D18A32 /* ConnectCodexSheet.swift in Sources */,
 				7B720B87452445EF821E01B5 /* EmailAccountSetupView.swift in Sources */,
+				5F513BA027EE4D8FAAE37259 /* ReviewChangesSheet.swift in Sources */,
+				0BE3DA79CDD040A0B63DD21B /* AddMailAccountSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

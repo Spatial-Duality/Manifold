@@ -34,32 +34,53 @@ struct ManifoldApp: App {
 
             CommandMenu("Access") {
                 Button("Review Access\u{2026}") {
-                    // TODO: open Review Access sheet
+                    store.reviewSheetTrigger = ReviewAccessChange(
+                        description: "Review access",
+                        kind: .explicit
+                    )
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
                 Button("Track Changes") {
-                    // TODO: start track changes flow
+                    store.reviewSheetTrigger = ReviewAccessChange(
+                        description: "Start tracking changes",
+                        kind: .startWorkBlock
+                    )
                 }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
 
-                Button("Pause Access") {
-                    // TODO: Phase 5 — pause focused agent
+                Button(pauseLabel) {
+                    Task {
+                        let agent: TargetApp = store.agentFocus == .codex ? .codex : .cowork
+                        let policy = store.policy.policy(for: agent)
+                        if policy?.isPaused == true {
+                            await store.policy.resumeAgent(agent)
+                        } else {
+                            await store.policy.pauseAgent(agent)
+                        }
+                    }
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
 
-                Button("End Session") {
-                    Task { await store.endSession() }
+                Divider()
+
+                Button("Toggle Activity") {
+                    store.showActivityDrawer.toggle()
                 }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(!store.hasActiveSession)
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+
+                Button("Toggle Inspector") {
+                    if store.inspectedFilePath != nil {
+                        store.inspectedFilePath = nil
+                    }
+                }
+                .keyboardShortcut("i", modifiers: .command)
 
                 Divider()
 
-                Button("Add Source...") {
+                Button("Add Source\u{2026}") {
                     store.addSourceFromPicker()
                 }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
             }
         }
 
@@ -71,6 +92,12 @@ struct ManifoldApp: App {
             SettingsView()
                 .environment(store)
         }
+    }
+
+    private var pauseLabel: String {
+        let agent: TargetApp = store.agentFocus == .codex ? .codex : .cowork
+        let policy = store.policy.policy(for: agent)
+        return policy?.isPaused == true ? "Resume Access" : "Pause Access"
     }
 
     // MARK: - Menu Bar Content

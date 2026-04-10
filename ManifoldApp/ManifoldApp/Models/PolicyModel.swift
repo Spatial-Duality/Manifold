@@ -128,10 +128,8 @@ final class PolicyModel {
         do {
             try await store.markReviewing(id: block.id)
             await loadActiveWorkBlock()
-            // TODO: Present ReviewChangesSheet with dryRun results
-            // For now, complete immediately until the sheet is wired
-            try await store.endBlock(id: block.id, status: .promoted)
-            activeWorkBlock = nil
+            // ReviewChangesSheet is presented by the caller (MainView)
+            // based on activeWorkBlock?.status == .reviewing
         } catch {
             logger.error("Failed to finish work block: \(error.localizedDescription)")
         }

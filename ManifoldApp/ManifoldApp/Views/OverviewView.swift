@@ -80,7 +80,7 @@ struct OverviewView: View {
                 )
             },
             onViewActivity: {
-                // TODO: open Activity drawer
+                store.showActivityDrawer = true
             }
         )
 
@@ -107,7 +107,9 @@ struct OverviewView: View {
                     kind: .explicit
                 )
             },
-            onViewActivity: {}
+            onViewActivity: {
+                store.showActivityDrawer = true
+            }
         )
     }
 

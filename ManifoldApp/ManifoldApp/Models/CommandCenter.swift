@@ -52,10 +52,19 @@ final class CommandCenter {
                 store.addSourceFromPicker()
             },
             ManifoldCommand("Review Access", icon: "lock.shield") {
-                // TODO: open Review Access sheet
+                store.reviewSheetTrigger = ReviewAccessChange(
+                    description: "Review access",
+                    kind: .explicit
+                )
             },
             ManifoldCommand("Track Changes", icon: "timeline.selection") {
-                // TODO: start track changes flow
+                store.reviewSheetTrigger = ReviewAccessChange(
+                    description: "Start tracking changes",
+                    kind: .startWorkBlock
+                )
+            },
+            ManifoldCommand("Toggle Activity", icon: "list.bullet.rectangle") {
+                store.showActivityDrawer.toggle()
             },
             ManifoldCommand("Open Settings", icon: "gearshape") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)

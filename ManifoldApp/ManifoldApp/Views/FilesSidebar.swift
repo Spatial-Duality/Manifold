@@ -47,7 +47,7 @@ struct FilesSidebar: View {
             // Activity link
             Section {
                 Button {
-                    // TODO: Phase 10 — open Activity drawer
+                    store.showActivityDrawer = true
                 } label: {
                     Label("View Activity", systemImage: "list.bullet.rectangle")
                         .foregroundStyle(.secondary)

@@ -52,6 +52,11 @@ class ManifoldStore {
     var selectedTab: AppTab = .overview
     var agentFocus: AgentFocus = .claude
 
+    // Global sheet/drawer state
+    var showReviewSheet = false
+    var showActivityDrawer = false
+    var reviewSheetTrigger: ReviewAccessChange?
+
     // Legacy navigation (kept during transition)
     var selectedSidebarItem: SidebarItem? = .home
     var inspectedFilePath: String?
@@ -161,8 +166,6 @@ class ManifoldStore {
                 syncEngine: syncEngine
             )
 
-            setup.checkMCPInstalled()
-            setup.checkAgentConfigs()
             await refresh()
 
             // Background maintenance
@@ -565,13 +568,13 @@ class ManifoldStore {
     var allTrackedFiles: [String] { storage.allTrackedFiles }
     var storageUsed: Int64 { storage.storageUsed }
     var blobCount: Int { storage.blobCount }
-    var mcpInstalled: Bool { setup.mcpInstalled }
+    var mcpInstalled: Bool { integrationHealth.claude.mcpConfigured == .installed }
     var installError: String? {
-        get { setup.installError }
-        set { setup.installError = newValue }
+        get { integrationHealth.claude.errorDetail }
+        set { integrationHealth.claude.errorDetail = newValue }
     }
-    var claudeDesktopConfigured: Bool { setup.claudeDesktopConfigured }
-    var codexConfigured: Bool { setup.codexConfigured }
+    var claudeDesktopConfigured: Bool { integrationHealth.claude.mcpConfigured == .installed }
+    var codexConfigured: Bool { integrationHealth.codex.mcpAdded == .installed }
     var launchAtLogin: Bool {
         get { setup.launchAtLogin }
         set { setup.launchAtLogin = newValue }
@@ -607,9 +610,24 @@ class ManifoldStore {
     func loadTrackedFiles() async { await storage.loadTrackedFiles() }
     func loadStorageStats() async { await storage.loadStorageStats() }
 
-    func checkMCPInstalled() { setup.checkMCPInstalled() }
-    func checkAgentConfigs() { setup.checkAgentConfigs() }
-    func installMCP() { setup.installMCP() }
+    func checkMCPInstalled() { Task { await integrationHealth.checkClaude() } }
+    func checkAgentConfigs() { Task { await integrationHealth.checkAll() } }
+    func installMCP() {
+        do {
+            let destPath = Self.mcpBinaryPath
+            let destURL = URL(fileURLWithPath: destPath)
+            try FileManager.default.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let bundled = Bundle.main.url(forResource: "manifold-mcp", withExtension: nil) {
+                if FileManager.default.fileExists(atPath: destPath) { try FileManager.default.removeItem(at: destURL) }
+                try FileManager.default.copyItem(at: bundled, to: destURL)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destPath)
+            }
+            try ConfigWriter(binaryPath: destPath).installAll()
+            Task { await integrationHealth.checkAll(force: true) }
+        } catch {
+            integrationHealth.claude.errorDetail = error.localizedDescription
+        }
+    }
 
     func loadSessions() async { await history.loadSessions() }
     func loadSessionEvents(sessionID: String) async { await history.loadSessionEvents(sessionID: sessionID) }

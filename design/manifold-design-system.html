@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manifold Design System — Current State</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --surface: #242424;
+    --surface-2: #2e2e2e;
+    --border: #3a3a3a;
+    --text: #e8e8e8;
+    --text-2: #a0a0a0;
+    --text-3: #6a6a6a;
+    --blue: #007AFF;
+    --purple: #AF52DE;
+    --green: #34C759;
+    --red: #FF3B30;
+    --orange: #FF9500;
+    --yellow: #FFD60A;
+    --accent: #007AFF;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.5px; }
+  .subtitle { color: var(--text-2); font-size: 14px; margin-bottom: 48px; }
+
+  .section { margin-bottom: 56px; }
+  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-3); margin-bottom: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+  .grid { display: grid; gap: 12px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card-label { font-size: 11px; font-weight: 500; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+  .card-value { font-size: 15px; font-weight: 500; }
+  .card-code { font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px; color: var(--text-2); margin-top: 4px; }
+  .card-note { font-size: 12px; color: var(--text-2); margin-top: 6px; line-height: 1.4; }
+
+  /* Color swatches */
+  .swatch-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .swatch-row:last-child { border-bottom: none; }
+  .swatch { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.06); }
+  .swatch-info { flex: 1; }
+  .swatch-name { font-size: 14px; font-weight: 500; }
+  .swatch-usage { font-size: 12px; color: var(--text-2); }
+  .swatch-files { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
+  /* Opacity chips */
+  .opacity-row { display: grid; grid-template-columns: 60px 1fr 2fr; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .opacity-chip { height: 28px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06); }
+  .opacity-val { font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 500; }
+  .opacity-use { font-size: 12px; color: var(--text-2); }
+
+  /* Type specimens */
+  .type-row { display: grid; grid-template-columns: 280px 1fr; align-items: baseline; gap: 16px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .type-specimen { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .type-meta { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text-3); }
+  .type-where { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
+  /* Spacing scale */
+  .space-row { display: grid; grid-template-columns: 80px 60px 1fr auto; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .space-bar { height: 24px; background: var(--blue); border-radius: 4px; opacity: 0.5; }
+  .space-name { font-size: 13px; font-weight: 500; }
+  .space-val { font-family: 'SF Mono', monospace; font-size: 13px; color: var(--text-2); }
+  .space-use { font-size: 12px; color: var(--text-2); }
+
+  /* Corner radius */
+  .radius-demo { display: flex; align-items: center; gap: 24px; }
+  .radius-shape { border: 2px solid var(--blue); background: rgba(0,122,255,0.08); display: flex; align-items: center; justify-content: center; flex-direction: column; }
+  .radius-label { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text-2); margin-top: 4px; }
+
+  /* Animation table */
+  .anim-row { display: grid; grid-template-columns: 180px 160px 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: start; }
+  .anim-type { font-size: 13px; font-weight: 500; }
+  .anim-code { font-family: 'SF Mono', monospace; font-size: 12px; color: var(--accent); }
+  .anim-where { font-size: 12px; color: var(--text-2); }
+
+  /* Window sizes */
+  .window-row { display: grid; grid-template-columns: 180px 120px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
+  .window-name { font-size: 13px; font-weight: 500; }
+  .window-size { font-family: 'SF Mono', monospace; font-size: 13px; color: var(--accent); }
+  .window-note { font-size: 12px; color: var(--text-2); }
+
+  /* Control styles */
+  .ctrl-row { display: grid; grid-template-columns: 160px 180px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: start; }
+  .ctrl-name { font-size: 13px; font-weight: 500; }
+  .ctrl-style { font-family: 'SF Mono', monospace; font-size: 12px; color: var(--accent); }
+  .ctrl-use { font-size: 12px; color: var(--text-2); }
+
+  /* Icons */
+  .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .icon-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; background: var(--surface-2); font-size: 12px; }
+  .icon-name { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text-2); flex: 1; }
+  .icon-cat { font-size: 10px; color: var(--text-3); background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; }
+
+  /* Flag badge */
+  .flag { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
+  .flag-change { background: rgba(255,149,0,0.15); color: var(--orange); }
+  .flag-ok { background: rgba(52,199,89,0.12); color: var(--green); }
+  .flag-add { background: rgba(0,122,255,0.15); color: var(--blue); }
+  .flag-remove { background: rgba(255,59,48,0.12); color: var(--red); }
+
+  .review-note { background: var(--surface-2); border-left: 3px solid var(--orange); padding: 12px 16px; border-radius: 0 8px 8px 0; margin-top: 16px; font-size: 13px; color: var(--text-2); line-height: 1.5; }
+  .review-note strong { color: var(--text); }
+
+  .summary-stat { text-align: center; padding: 20px; }
+  .summary-num { font-size: 32px; font-weight: 700; letter-spacing: -1px; }
+  .summary-label { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+
+  .tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.06); color: var(--text-3); margin: 1px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Manifold Design System</h1>
+<p class="subtitle">Extracted from codebase on main &mdash; 81 Swift files analyzed &mdash; April 2026</p>
+
+<!-- Summary stats -->
+<div class="section">
+  <div class="grid grid-4">
+    <div class="card summary-stat">
+      <div class="summary-num" style="color:var(--blue)">6</div>
+      <div class="summary-label">Spacing tokens</div>
+    </div>
+    <div class="card summary-stat">
+      <div class="summary-num" style="color:var(--purple)">3</div>
+      <div class="summary-label">Corner radii</div>
+    </div>
+    <div class="card summary-stat">
+      <div class="summary-num" style="color:var(--green)">15+</div>
+      <div class="summary-label">Type styles</div>
+    </div>
+    <div class="card summary-stat">
+      <div class="summary-num" style="color:var(--orange)">50+</div>
+      <div class="summary-label">SF Symbols</div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== COLORS ======================== -->
+<div class="section">
+  <div class="section-title">1. Color Palette</div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-label">Agent Identity Colors</div>
+      <div class="swatch-row">
+        <div class="swatch" style="background: #007AFF;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">Claude &mdash; <code>.blue</code></div>
+          <div class="swatch-usage">Agent cards, toolbar tint, status dots, banner</div>
+        </div>
+      </div>
+      <div class="swatch-row">
+        <div class="swatch" style="background: #AF52DE;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">Codex &mdash; <code>.purple</code></div>
+          <div class="swatch-usage">Agent cards, toolbar tint, status dots, banner</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Semantic Status Colors</div>
+      <div class="swatch-row">
+        <div class="swatch" style="background: #34C759;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">Success / Granted &mdash; <code>.green</code></div>
+          <div class="swatch-usage">Checkmarks, granted access, connected</div>
+        </div>
+      </div>
+      <div class="swatch-row">
+        <div class="swatch" style="background: #FF3B30;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">Destructive / Removed &mdash; <code>.red</code></div>
+          <div class="swatch-usage">Delete, revoke, diff removals</div>
+        </div>
+      </div>
+      <div class="swatch-row">
+        <div class="swatch" style="background: #FF9500;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">Warning / Paused &mdash; <code>.orange</code></div>
+          <div class="swatch-usage">Paused state, conflicts, health warnings</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 16px;">
+    <div class="card">
+      <div class="card-label">Opacity Scale (background tints &amp; overlays)</div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.05</div>
+        <div class="opacity-chip" style="background: rgba(0,122,255,0.05);"></div>
+        <div class="opacity-use">Minimal tints &mdash; FilesView selected row alternative</div>
+      </div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.06</div>
+        <div class="opacity-chip" style="background: rgba(0,122,255,0.06);"></div>
+        <div class="opacity-use">Toolbar active-work tint &mdash; MainView toolbar background</div>
+      </div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.08</div>
+        <div class="opacity-chip" style="background: rgba(0,122,255,0.08);"></div>
+        <div class="opacity-use">Subtle highlights &mdash; ReviewAccessSheet, DiffView additions/removals</div>
+      </div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.10</div>
+        <div class="opacity-chip" style="background: rgba(0,122,255,0.10);"></div>
+        <div class="opacity-use">Medium tint &mdash; DomainsTableView selected</div>
+      </div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.12</div>
+        <div class="opacity-chip" style="background: rgba(0,122,255,0.12);"></div>
+        <div class="opacity-use">Hover/selected states &mdash; AgentPolicyCard, CommandPalette</div>
+      </div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.15</div>
+        <div class="opacity-chip" style="background: rgba(0,122,255,0.15);"></div>
+        <div class="opacity-use">Notice backgrounds &mdash; EmailMessageRow flags</div>
+      </div>
+      <div class="opacity-row">
+        <div class="opacity-val">0.30</div>
+        <div class="opacity-chip" style="background: rgba(0,0,0,0.30);"></div>
+        <div class="opacity-use">Overlay dimming &mdash; command palette backdrop, setup dividers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-note">
+    <strong>Review note:</strong> The opacity scale is well-structured but inconsistent in spots. 0.05 and 0.06 do nearly identical work &mdash; consider consolidating to a single "subtle" tier. The 0.08 value is used for both highlights and diff backgrounds, which is correct. No changes needed to agent colors &mdash; blue/purple is a strong differentiator.
+  </div>
+</div>
+
+<!-- ======================== TYPOGRAPHY ======================== -->
+<div class="section">
+  <div class="section-title">2. Typography</div>
+
+  <div class="card">
+    <div class="card-label">Type Scale (System SF Pro, all dynamic type)</div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 22px; font-weight: 600;">Review & Update Access</div>
+      <div>
+        <div class="type-meta">.title2.weight(.semibold)</div>
+        <div class="type-where">Sheet titles, section headings</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 18px; font-weight: 500;">Claude Desktop</div>
+      <div>
+        <div class="type-meta">.title3.weight(.medium)</div>
+        <div class="type-where">Card titles, drawer headers</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 15px; font-weight: 600;">12 Sources Granted</div>
+      <div>
+        <div class="type-meta">.headline</div>
+        <div class="type-where">Field labels, emphasis in email view</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 14px; font-weight: 400;">Standard body text and descriptions</div>
+      <div>
+        <div class="type-meta">.callout</div>
+        <div class="type-where">Primary body text across all views</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 14px; font-weight: 500;">Emphasized callout text</div>
+      <div>
+        <div class="type-meta">.callout.weight(.medium)</div>
+        <div class="type-where">Source names, review labels</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 13px; font-weight: 400;">Body text alternative</div>
+      <div>
+        <div class="type-meta">.body</div>
+        <div class="type-where">Table cells, source/domain names</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 12px; font-weight: 400;">Secondary info and metadata</div>
+      <div>
+        <div class="type-meta">.caption</div>
+        <div class="type-where">Timestamps, file paths, metadata</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 12px; font-weight: 500;">Emphasized caption</div>
+      <div>
+        <div class="type-meta">.caption.weight(.medium)</div>
+        <div class="type-where">Agent card stats, review change counts</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 12px; font-family: 'SF Mono', monospace;">/Users/amar/Documents/project</div>
+      <div>
+        <div class="type-meta">.caption.monospaced()</div>
+        <div class="type-where">File paths, code snippets</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 11px; font-weight: 400;">Smallest metadata text</div>
+      <div>
+        <div class="type-meta">.caption2</div>
+        <div class="type-where">Activity timestamps, email thread counts</div>
+      </div>
+    </div>
+
+    <div class="type-row">
+      <div class="type-specimen" style="font-size: 11px; font-weight: 500;">Status badge labels</div>
+      <div>
+        <div class="type-meta">.caption2.weight(.medium)</div>
+        <div class="type-where">StatusBadge text</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-note">
+    <strong>Review note:</strong> Good adherence to system text styles &mdash; no hardcoded font sizes found. The <code>.callout</code> vs <code>.body</code> split is slightly ambiguous though. Both serve as "regular text" in different views. Consider standardizing on one as the primary body style and the other as secondary. On macOS, <code>.body</code> is 13pt and <code>.callout</code> is 14pt &mdash; the 1pt difference creates visual inconsistency when views mix them.
+  </div>
+</div>
+
+<!-- ======================== SPACING ======================== -->
+<div class="section">
+  <div class="section-title">3. Spacing Scale (from Spacing.swift)</div>
+
+  <div class="card">
+    <div class="card-label">Named Spacing Tokens</div>
+
+    <div class="space-row">
+      <div class="space-name">tight</div>
+      <div class="space-val">4pt</div>
+      <div><div class="space-bar" style="width: 16px;"></div></div>
+      <div class="space-use">Icon-to-text gaps, minimal internal padding</div>
+    </div>
+    <div class="space-row">
+      <div class="space-name">standard</div>
+      <div class="space-val">8pt</div>
+      <div><div class="space-bar" style="width: 32px;"></div></div>
+      <div class="space-use">List row internal padding, HStack spacing defaults</div>
+    </div>
+    <div class="space-row">
+      <div class="space-name">section</div>
+      <div class="space-val">12pt</div>
+      <div><div class="space-bar" style="width: 48px;"></div></div>
+      <div class="space-use">Section spacing within views, VStack gaps</div>
+    </div>
+    <div class="space-row">
+      <div class="space-name">edge</div>
+      <div class="space-val">16pt</div>
+      <div><div class="space-bar" style="width: 64px;"></div></div>
+      <div class="space-use">View edge padding, card internal padding</div>
+    </div>
+    <div class="space-row">
+      <div class="space-name">large</div>
+      <div class="space-val">24pt</div>
+      <div><div class="space-bar" style="width: 96px;"></div></div>
+      <div class="space-use">Section separation, onboarding screen spacing</div>
+    </div>
+    <div class="space-row">
+      <div class="space-name">xlarge</div>
+      <div class="space-val">32pt</div>
+      <div><div class="space-bar" style="width: 128px;"></div></div>
+      <div class="space-use">Major section separation</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 16px;">
+    <div class="card">
+      <div class="card-label">Corner Radii</div>
+      <div style="display: flex; gap: 32px; align-items: end; padding: 16px 0;">
+        <div style="text-align: center;">
+          <div style="width: 56px; height: 56px; border: 2px solid var(--blue); border-radius: 6px; background: rgba(0,122,255,0.08); margin: 0 auto;"></div>
+          <div style="font-family: 'SF Mono',monospace; font-size: 12px; color: var(--text-2); margin-top: 8px;">6pt</div>
+          <div style="font-size: 11px; color: var(--text-3);">cornerSmall</div>
+          <div style="font-size: 10px; color: var(--text-3); margin-top: 2px;">Pills, hover states</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="width: 80px; height: 80px; border: 2px solid var(--purple); border-radius: 10px; background: rgba(175,82,222,0.08); margin: 0 auto;"></div>
+          <div style="font-family: 'SF Mono',monospace; font-size: 12px; color: var(--text-2); margin-top: 8px;">10pt</div>
+          <div style="font-size: 11px; color: var(--text-3);">cornerMedium</div>
+          <div style="font-size: 10px; color: var(--text-3); margin-top: 2px;">Cards, inline setup</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="width: 104px; height: 104px; border: 2px solid var(--green); border-radius: 12px; background: rgba(52,199,89,0.08); margin: 0 auto;"></div>
+          <div style="font-family: 'SF Mono',monospace; font-size: 12px; color: var(--text-2); margin-top: 8px;">12pt</div>
+          <div style="font-size: 11px; color: var(--text-3);">cornerLarge</div>
+          <div style="font-size: 10px; color: var(--text-3); margin-top: 2px;">Section cards, overlays</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-note">
+    <strong>Review note:</strong> The spacing scale is clean and well-tokenized. The 4-8-12-16-24-32 progression is solid (Apple's own HIG spacing follows multiples of 4/8). Corner radii are limited to 3 values, which is disciplined. <strong>One concern:</strong> check that every view is actually using the Spacing constants rather than hardcoded values &mdash; any magic numbers should be replaced with the tokens.
+  </div>
+</div>
+
+<!-- ======================== SHADOWS & BORDERS ======================== -->
+<div class="section">
+  <div class="section-title">4. Shadows, Borders &amp; Materials</div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-label">Shadows</div>
+      <div style="padding: 12px 0; border-bottom: 1px solid var(--border);">
+        <div style="font-size: 13px; font-weight: 500;">Card Shadow (subtle)</div>
+        <div class="card-code">shadow(color: .black.opacity(0.06), radius: 2, y: 1)</div>
+        <div class="card-note">AgentPolicyCard &mdash; light lift effect</div>
+      </div>
+      <div style="padding: 12px 0;">
+        <div style="font-size: 13px; font-weight: 500;">Modal Shadow (prominent)</div>
+        <div class="card-code">shadow(color: .black.opacity(0.15), radius: 24, y: 12)</div>
+        <div class="card-note">CommandPaletteView &mdash; floating modal depth</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Borders</div>
+      <div style="padding: 12px 0; border-bottom: 1px solid var(--border);">
+        <div style="font-size: 13px; font-weight: 500;">Card stroke</div>
+        <div class="card-code">strokeBorder(.separator, lineWidth: 0.5)</div>
+        <div class="card-note">AgentPolicyCard, Setup screens &mdash; standard Apple separator</div>
+      </div>
+      <div style="padding: 12px 0;">
+        <div style="font-size: 13px; font-weight: 500;">Section dividers</div>
+        <div class="card-code">Divider()</div>
+        <div class="card-note">30+ instances throughout &mdash; system-provided</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <div class="card">
+      <div class="card-label">Materials &amp; Backgrounds</div>
+      <div class="grid grid-3" style="gap: 8px; margin-top: 8px;">
+        <div style="padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.06); text-align: center;">
+          <div style="font-size: 12px; font-weight: 500;">.regularMaterial</div>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">Activity drawer, error banner, undo toasts</div>
+        </div>
+        <div style="padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.03); text-align: center;">
+          <div style="font-size: 12px; font-weight: 500;">.ultraThinMaterial</div>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">Window toolbar bg, glass fallback</div>
+        </div>
+        <div style="padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.09); text-align: center;">
+          <div style="font-size: 12px; font-weight: 500;">.background</div>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">Default card/section bg</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-note">
+    <strong>Review note:</strong> Shadow + stroke on AgentPolicyCard is correct Apple style. The two shadow levels (card vs modal) is the right number. <strong>Question for you:</strong> the <code>.regularMaterial</code> on the activity drawer &mdash; now that the drawer is in the trailing toolbar area, should this stay material or switch to system-provided inspector/toolbar chrome?
+  </div>
+</div>
+
+<!-- ======================== ANIMATIONS ======================== -->
+<div class="section">
+  <div class="section-title">5. Motion &amp; Animation</div>
+
+  <div class="card">
+    <div class="card-label">Animation Types In Use</div>
+
+    <div class="anim-row">
+      <div class="anim-type">.snappy <span class="flag flag-ok">good</span></div>
+      <div class="anim-code">.animation(.snappy)</div>
+      <div class="anim-where">Agent card status changes, tab switching &mdash; fast, no bounce</div>
+    </div>
+    <div class="anim-row">
+      <div class="anim-type">.spring <span class="flag flag-ok">good</span></div>
+      <div class="anim-code">.animation(.spring)</div>
+      <div class="anim-where">Error banner, undo toasts &mdash; default spring behavior</div>
+    </div>
+    <div class="anim-row">
+      <div class="anim-type">.spring(duration:) <span class="flag flag-ok">good</span></div>
+      <div class="anim-code">.spring(duration: 0.2)</div>
+      <div class="anim-where">DomainsTableView undo toast &mdash; quick spring</div>
+    </div>
+    <div class="anim-row">
+      <div class="anim-type">.easeOut(1.0) <span class="flag flag-change">review</span></div>
+      <div class="anim-code">.easeOut(duration: 1.0)</div>
+      <div class="anim-where">SessionEventRow revert success animation &mdash; should this be a spring?</div>
+    </div>
+    <div class="anim-row">
+      <div class="anim-type">.none (a11y) <span class="flag flag-ok">good</span></div>
+      <div class="anim-code">reduceMotion ? .none : .spring</div>
+      <div class="anim-where">SetupAssistantView &mdash; respects Reduced Motion</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <div class="card">
+      <div class="card-label">Transitions</div>
+
+      <div class="anim-row">
+        <div class="anim-type">Slide + Fade</div>
+        <div class="anim-code">.move(edge:).combined(.opacity)</div>
+        <div class="anim-where">Error banner (top), undo toasts (bottom), activity drawer (trailing)</div>
+      </div>
+      <div class="anim-row">
+        <div class="anim-type">Asymmetric slide</div>
+        <div class="anim-code">insertion: trailing, removal: leading</div>
+        <div class="anim-where">Setup assistant screen changes &mdash; directional flow</div>
+      </div>
+      <div class="anim-row">
+        <div class="anim-type">Simple opacity</div>
+        <div class="anim-code">.opacity</div>
+        <div class="anim-where">Command palette overlay dimming</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <div class="card">
+      <div class="card-label">Timing / Debounce Durations</div>
+
+      <div class="anim-row">
+        <div class="anim-type">Debounce (search)</div>
+        <div class="anim-code">150ms</div>
+        <div class="anim-where">FilesView search, ActivityView filter</div>
+      </div>
+      <div class="anim-row">
+        <div class="anim-type">Coalesce</div>
+        <div class="anim-code">50ms</div>
+        <div class="anim-where">FilesView rapid state changes</div>
+      </div>
+      <div class="anim-row">
+        <div class="anim-type">Confirmation</div>
+        <div class="anim-code">1.5 &ndash; 3s</div>
+        <div class="anim-where">Revert success, restore success displays</div>
+      </div>
+      <div class="anim-row">
+        <div class="anim-type">Undo window</div>
+        <div class="anim-code">5s</div>
+        <div class="anim-where">SourcesTableView, DomainsTableView undo toasts</div>
+      </div>
+      <div class="anim-row">
+        <div class="anim-type">Copy feedback</div>
+        <div class="anim-code">2s</div>
+        <div class="anim-where">ActivityView &mdash; "Copied" confirmation</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-note">
+    <strong>Review note:</strong> Motion is almost entirely spring-based already &mdash; this is strong. The one <code>.easeOut(duration: 1.0)</code> in SessionEventRow is the main outlier to convert. Timing values are reasonable. The 5s undo window is short but functional &mdash; the v2 guide correctly notes undo should also work via &#8984;Z as a non-time-limited fallback.
+  </div>
+</div>
+
+<!-- ======================== WINDOW SIZES ======================== -->
+<div class="section">
+  <div class="section-title">6. Window &amp; Frame Sizes</div>
+
+  <div class="card">
+    <div class="card-label">Windows</div>
+
+    <div class="window-row">
+      <div class="window-name">Main Window</div>
+      <div class="window-size">960 &times; 640</div>
+      <div class="window-note">Default size. Min: 780 &times; 520</div>
+    </div>
+    <div class="window-row">
+      <div class="window-name">Setup Assistant</div>
+      <div class="window-size">580 &times; 500</div>
+      <div class="window-note">Fixed sheet size</div>
+    </div>
+    <div class="window-row">
+      <div class="window-name">Settings</div>
+      <div class="window-size">580 &times; 500</div>
+      <div class="window-note">Minimum, auto-sizes per pane</div>
+    </div>
+    <div class="window-row">
+      <div class="window-name">Review Access Sheet</div>
+      <div class="window-size">560 &times; 500</div>
+      <div class="window-note">Minimum sheet size</div>
+    </div>
+    <div class="window-row">
+      <div class="window-name">Command Palette</div>
+      <div class="window-size">480 &times; 360</div>
+      <div class="window-note">Fixed overlay size</div>
+    </div>
+    <div class="window-row">
+      <div class="window-name">Email Account Detail</div>
+      <div class="window-size">480 &times; 520</div>
+      <div class="window-note">Sheet size</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <div class="card">
+      <div class="card-label">Panel &amp; Column Widths</div>
+
+      <div class="window-row">
+        <div class="window-name">Files Sidebar</div>
+        <div class="window-size">200 / 220 / 300</div>
+        <div class="window-note">min / ideal / max</div>
+      </div>
+      <div class="window-row">
+        <div class="window-name">Files Inspector</div>
+        <div class="window-size">280 / 360 / 480</div>
+        <div class="window-note">min / ideal / max</div>
+      </div>
+      <div class="window-row">
+        <div class="window-name">Activity Drawer</div>
+        <div class="window-size">300 / 360 / &mdash;</div>
+        <div class="window-note">min / ideal / unbounded</div>
+      </div>
+      <div class="window-row">
+        <div class="window-name">Segmented Picker</div>
+        <div class="window-size">280</div>
+        <div class="window-note">Fixed width for tab bar &amp; review sheet</div>
+      </div>
+      <div class="window-row">
+        <div class="window-name">Agent Focus Control</div>
+        <div class="window-size">220</div>
+        <div class="window-note">Fixed width toolbar picker</div>
+      </div>
+      <div class="window-row">
+        <div class="window-name">Search Fields</div>
+        <div class="window-size">160</div>
+        <div class="window-note">Standard across Files, Domains views</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== CONTROL STYLES ======================== -->
+<div class="section">
+  <div class="section-title">7. Control Styles</div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-label">Buttons</div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Primary CTA</div>
+        <div class="ctrl-style">.borderedProminent</div>
+        <div class="ctrl-use">Setup "Continue", "Add Source", "Track Changes"</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Secondary</div>
+        <div class="ctrl-style">.bordered</div>
+        <div class="ctrl-use">Activity export, version actions</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Tertiary / Flat</div>
+        <div class="ctrl-style">.plain</div>
+        <div class="ctrl-use">Card actions, inline links</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Glass (macOS 26)</div>
+        <div class="ctrl-style">.glassButton()</div>
+        <div class="ctrl-use">MessageFilterBar, custom modifier</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Destructive</div>
+        <div class="ctrl-style">role: .destructive</div>
+        <div class="ctrl-use">Pause access, stop tracking, revoke</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Other Controls</div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Checkbox</div>
+        <div class="ctrl-style">.checkbox</div>
+        <div class="ctrl-use">Source/domain table toggles</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Switch</div>
+        <div class="ctrl-style">.switch</div>
+        <div class="ctrl-use">Activity auto-scroll toggle</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Segmented</div>
+        <div class="ctrl-style">.segmented</div>
+        <div class="ctrl-use">Main tab bar, review sheet agent picker</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Menu Picker</div>
+        <div class="ctrl-style">.borderlessButton</div>
+        <div class="ctrl-use">Activity filter, message sort</div>
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-name">Form Style</div>
+        <div class="ctrl-style">.grouped</div>
+        <div class="ctrl-use">Email account detail, Settings panes</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-note">
+    <strong>Review note:</strong> All native SwiftUI control styles &mdash; no custom controls. This is exactly right for a macOS app. The <code>.glassButton()</code> modifier is a custom helper for macOS 26 compatibility, which is fine as long as it falls back cleanly on older systems.
+  </div>
+</div>
+
+<!-- ======================== ICON INVENTORY ======================== -->
+<div class="section">
+  <div class="section-title">8. SF Symbol Usage (50+ icons)</div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-label">Navigation &amp; Chrome</div>
+      <div class="icon-grid">
+        <div class="icon-item"><div class="icon-name">magnifyingglass</div><div class="icon-cat">search</div></div>
+        <div class="icon-item"><div class="icon-name">xmark.circle.fill</div><div class="icon-cat">close</div></div>
+        <div class="icon-item"><div class="icon-name">chevron.down</div><div class="icon-cat">expand</div></div>
+        <div class="icon-item"><div class="icon-name">chevron.right</div><div class="icon-cat">expand</div></div>
+        <div class="icon-item"><div class="icon-name">sidebar.right</div><div class="icon-cat">inspect</div></div>
+        <div class="icon-item"><div class="icon-name">gearshape</div><div class="icon-cat">settings</div></div>
+        <div class="icon-item"><div class="icon-name">terminal</div><div class="icon-cat">tool</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Status &amp; Connection</div>
+      <div class="icon-grid">
+        <div class="icon-item"><div class="icon-name">circle.fill</div><div class="icon-cat">active</div></div>
+        <div class="icon-item"><div class="icon-name">circle</div><div class="icon-cat">inactive</div></div>
+        <div class="icon-item"><div class="icon-name">checkmark.circle.fill</div><div class="icon-cat">verified</div></div>
+        <div class="icon-item"><div class="icon-name">circle.dashed</div><div class="icon-cat">pending</div></div>
+        <div class="icon-item"><div class="icon-name">exclamationmark.triangle.fill</div><div class="icon-cat">error</div></div>
+        <div class="icon-item"><div class="icon-name">antenna.radiowaves.left.and.right</div><div class="icon-cat">connected</div></div>
+        <div class="icon-item"><div class="icon-name">antenna.radiowaves.left.and.right.slash</div><div class="icon-cat">disconnected</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2" style="margin-top: 12px;">
+    <div class="card">
+      <div class="card-label">Files &amp; Content</div>
+      <div class="icon-grid">
+        <div class="icon-item"><div class="icon-name">folder.fill</div><div class="icon-cat">folder</div></div>
+        <div class="icon-item"><div class="icon-name">folder.badge.plus</div><div class="icon-cat">add</div></div>
+        <div class="icon-item"><div class="icon-name">doc</div><div class="icon-cat">file</div></div>
+        <div class="icon-item"><div class="icon-name">doc.plaintext</div><div class="icon-cat">text</div></div>
+        <div class="icon-item"><div class="icon-name">photo</div><div class="icon-cat">image</div></div>
+        <div class="icon-item"><div class="icon-name">film</div><div class="icon-cat">video</div></div>
+        <div class="icon-item"><div class="icon-name">music.note</div><div class="icon-cat">audio</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Actions</div>
+      <div class="icon-grid">
+        <div class="icon-item"><div class="icon-name">eye</div><div class="icon-cat">read</div></div>
+        <div class="icon-item"><div class="icon-name">pencil</div><div class="icon-cat">write</div></div>
+        <div class="icon-item"><div class="icon-name">trash</div><div class="icon-cat">delete</div></div>
+        <div class="icon-item"><div class="icon-name">arrow.uturn.backward</div><div class="icon-cat">undo</div></div>
+        <div class="icon-item"><div class="icon-name">timeline.selection</div><div class="icon-cat">track</div></div>
+        <div class="icon-item"><div class="icon-name">envelope.fill</div><div class="icon-cat">email</div></div>
+        <div class="icon-item"><div class="icon-name">shield.checkered</div><div class="icon-cat">security</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== LAYOUT PATTERNS ======================== -->
+<div class="section">
+  <div class="section-title">9. Layout Architecture</div>
+
+  <div class="card">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+      <div>
+        <div class="card-label">Files Tab Layout</div>
+        <div style="display: flex; gap: 2px; height: 120px; margin-top: 8px;">
+          <div style="width: 60px; background: rgba(0,122,255,0.12); border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-2); writing-mode: vertical-lr;">Sidebar<br>200-300pt</div>
+          <div style="flex: 1; background: rgba(0,122,255,0.06); display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-2);">Content<br>(SourcesTable / DomainsTable)</div>
+          <div style="width: 80px; background: rgba(175,82,222,0.12); border-radius: 0 6px 6px 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-2); writing-mode: vertical-lr;">Inspector<br>280-480pt</div>
+        </div>
+        <div style="font-size: 11px; color: var(--text-3); margin-top: 6px;">NavigationSplitView + .inspector()</div>
+      </div>
+
+      <div>
+        <div class="card-label">Email Tab Layout</div>
+        <div style="display: flex; gap: 2px; height: 120px; margin-top: 8px;">
+          <div style="width: 60px; background: rgba(0,122,255,0.12); border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-2); writing-mode: vertical-lr;">Sidebar<br>Accounts</div>
+          <div style="flex: 1; background: rgba(0,122,255,0.06); display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-2);">Message List</div>
+          <div style="flex: 1; background: rgba(52,199,89,0.08); border-radius: 0 6px 6px 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-2);">Reading Pane</div>
+        </div>
+        <div style="font-size: 11px; color: var(--text-3); margin-top: 6px;">NavigationSplitView(.balanced) &mdash; 3-column</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+      <div class="card-label">Overview Tab</div>
+      <div style="height: 80px; max-width: 400px; margin: 8px auto 0; background: rgba(0,122,255,0.06); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-2);">Centered content &mdash; maxWidth 640pt<br>Agent cards + empty state</div>
+      <div style="font-size: 11px; color: var(--text-3); margin-top: 6px; text-align: center;">No sidebar, no split view</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <div class="card">
+      <div class="card-label">List &amp; Table Styles</div>
+      <div class="grid grid-3" style="gap: 8px; margin-top: 4px;">
+        <div style="padding: 10px; border-radius: 6px; background: var(--surface-2); font-size: 12px;">
+          <strong>.listStyle(.sidebar)</strong>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">FilesSidebar, EmailSidebar</div>
+        </div>
+        <div style="padding: 10px; border-radius: 6px; background: var(--surface-2); font-size: 12px;">
+          <strong>.listStyle(.inset(alternatesRowBackgrounds: true))</strong>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">ActivityView, FilesView</div>
+        </div>
+        <div style="padding: 10px; border-radius: 6px; background: var(--surface-2); font-size: 12px;">
+          <strong>.tableStyle(.inset(alternatesRowBackgrounds: true))</strong>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">SourcesTable, DomainsTable</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== ACCESSIBILITY ======================== -->
+<div class="section">
+  <div class="section-title">10. Accessibility Coverage</div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-label">What's in place</div>
+      <div style="font-size: 13px; line-height: 1.8; color: var(--text-2);">
+        &#x2713; <code>@Environment(\.accessibilityReduceMotion)</code> in SetupAssistantView<br>
+        &#x2713; <code>.accessibilityHidden(true)</code> on decorative icons<br>
+        &#x2713; <code>.accessibilityElement(children: .combine)</code> on compound rows<br>
+        &#x2713; <code>.accessibilityAddTraits(.isSelected)</code> on command palette<br>
+        &#x2713; All system controls (inherits VoiceOver support)<br>
+        &#x2713; System text styles (Dynamic Type scales)
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Gaps to address</div>
+      <div style="font-size: 13px; line-height: 1.8; color: var(--text-2);">
+        &#x2717; <code>reduceMotion</code> not checked in MainView animations<br>
+        &#x2717; <code>reduceMotion</code> not checked in AgentPolicyCard<br>
+        &#x2717; Missing <code>.accessibilityHint()</code> on AgentFocusControl<br>
+        &#x2717; Undo toasts time out even for VoiceOver users<br>
+        &#x2717; No &#8984;Z keyboard fallback for undo actions<br>
+        &#x2717; Not all custom buttons have explicit labels
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== DECISIONS NEEDED ======================== -->
+<div class="section">
+  <div class="section-title" style="color: var(--orange); border-color: var(--orange);">Decisions For Review</div>
+
+  <div class="card" style="border-color: rgba(255,149,0,0.3);">
+    <div style="display: grid; gap: 20px;">
+
+      <div>
+        <div style="font-size: 14px; font-weight: 600;">1. Body text: .callout vs .body</div>
+        <div style="font-size: 13px; color: var(--text-2); margin-top: 4px;">Currently mixed across views. <code>.callout</code> is 14pt, <code>.body</code> is 13pt on macOS. Pick one as the default and use the other for a specific purpose, or accept the 1pt difference as intentional hierarchy.</div>
+      </div>
+
+      <div>
+        <div style="font-size: 14px; font-weight: 600;">2. Opacity consolidation: 0.05 vs 0.06</div>
+        <div style="font-size: 13px; color: var(--text-2); margin-top: 4px;">Nearly indistinguishable. Should we collapse to a single "subtle" tier at 0.06 (or 0.05)?</div>
+      </div>
+
+      <div>
+        <div style="font-size: 14px; font-weight: 600;">3. The .easeOut(1.0) in SessionEventRow</div>
+        <div style="font-size: 13px; color: var(--text-2); margin-top: 4px;">Only remaining bezier curve animation. Convert to <code>.spring(duration: 0.8)</code> for consistency, or keep as a deliberate slow fade for "revert success"?</div>
+      </div>
+
+      <div>
+        <div style="font-size: 14px; font-weight: 600;">4. Activity drawer material</div>
+        <div style="font-size: 13px; color: var(--text-2); margin-top: 4px;"><code>.regularMaterial</code> on the activity drawer background. Should it use system inspector chrome instead now that it's positioned as a side panel? Or is the material intentional for the floating overlay feel?</div>
+      </div>
+
+      <div>
+        <div style="font-size: 14px; font-weight: 600;">5. Toolbar tint opacity</div>
+        <div style="font-size: 13px; color: var(--text-2); margin-top: 4px;">Currently 0.06 for active work block toolbar tint. The design guide suggested 0.08. Which feels right? Lower = more subtle, higher = more noticeable.</div>
+      </div>
+
+      <div>
+        <div style="font-size: 14px; font-weight: 600;">6. Empty state upgrade scope</div>
+        <div style="font-size: 13px; color: var(--text-2); margin-top: 4px;">OverviewView empty state is currently passive text. Should it get an actionable "Connect an AI Agent" button that opens setup? That's a behavior change, not just polish.</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

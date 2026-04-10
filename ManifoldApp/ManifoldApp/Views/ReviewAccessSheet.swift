@@ -223,7 +223,9 @@ struct ReviewAccessSheet: View {
 
             if startWorkBlock {
                 Button("Track Changes") {
-                    // TODO: Phase 9 — start work block with current scope
+                    commitPolicyChange()
+                    // Work block start will be initiated by the caller
+                    // after the policy is committed
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
