@@ -196,74 +196,34 @@ private struct FilesTab: View {
 
 // MARK: - Emails Tab (sidebar + content)
 
-/// Emails tab with sidebar-driven navigation.
-/// When "All Mail" or no selection → Domains overview (access controls).
-/// When specific account/mailbox selected → Messages (existing EmailView).
-/// EmailView is kept alive (hidden) to preserve selection/search state.
+/// Emails tab with mode-driven navigation.
+/// Domains mode → DomainsTableView with its own sidebar.
+/// Messages mode → EmailView (which has its own NavigationSplitView).
+/// Uses if/else to avoid nesting NavigationSplitViews which crashes on macOS.
 private struct EmailsTab: View {
-    @State private var selectedMailbox: String? = "all-mail"
-
-    private var showingDomains: Bool {
-        selectedMailbox == nil || selectedMailbox == "all-mail"
-    }
+    @State private var showingDomains = true
 
     var body: some View {
-        NavigationSplitView {
-            EmailsSidebar(selectedMailbox: $selectedMailbox)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
-        } detail: {
-            ZStack {
-                // Domains table (visible when All Mail selected)
-                DomainsTableView()
-                    .opacity(showingDomains ? 1 : 0)
-                    .allowsHitTesting(showingDomains)
-
-                // Email messages (visible when specific mailbox selected)
-                EmailView()
-                    .opacity(showingDomains ? 0 : 1)
-                    .allowsHitTesting(!showingDomains)
-            }
+        if showingDomains {
+            DomainsTableView()
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button("View Messages") {
+                            showingDomains = false
+                        }
+                        .controlSize(.small)
+                    }
+                }
+        } else {
+            EmailView()
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button("\u{2190} Domains") {
+                            showingDomains = true
+                        }
+                        .controlSize(.small)
+                    }
+                }
         }
-    }
-}
-
-/// Emails tab sidebar: accounts tree, smart mailboxes, activity link.
-/// Pure navigation — no sensitivity controls (those are in toolbar).
-private struct EmailsSidebar: View {
-    @Environment(ManifoldStore.self) var store
-    @Binding var selectedMailbox: String?
-
-    var body: some View {
-        List(selection: $selectedMailbox) {
-            Section("Mail") {
-                Label("All Mail", systemImage: "tray.full")
-                    .tag("all-mail")
-            }
-
-            Section("Accounts") {
-                ForEach(store.emailAccounts.accounts) { account in
-                    Label(account.displayName, systemImage: "envelope")
-                        .tag("account-\(account.accountID)")
-                }
-
-                if store.emailAccounts.accounts.isEmpty {
-                    Text("No accounts configured")
-                        .foregroundStyle(.tertiary)
-                        .font(.callout)
-                }
-            }
-
-            Section {
-                Button {
-                    // TODO: open Activity drawer
-                } label: {
-                    Label("View Activity", systemImage: "list.bullet.rectangle")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .listStyle(.sidebar)
-        .navigationTitle("Emails")
     }
 }
