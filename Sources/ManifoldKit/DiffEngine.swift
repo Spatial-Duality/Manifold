@@ -1,50 +1,99 @@
 import Foundation
 
-/// Computes unified diffs between two blob versions using /usr/bin/diff.
+/// Computes unified diffs between two text versions.
+/// Uses Swift's CollectionDifference (Myers algorithm) instead of
+/// spawning /usr/bin/diff — eliminates fork+exec+temp files per diff.
 public struct DiffEngine: Sendable {
 
     public init() {}
 
-    /// Compute a unified diff between two strings.
-    /// Returns an array of DiffLine for display.
+    /// Compute a diff between two strings. Returns an array of DiffLine for display.
     public func diff(before: String, after: String) -> [DiffLine] {
-        // Write to temp files
-        let beforeURL = FileManager.default.temporaryDirectory.appendingPathComponent("manifold-diff-before-\(UUID().uuidString)")
-        let afterURL = FileManager.default.temporaryDirectory.appendingPathComponent("manifold-diff-after-\(UUID().uuidString)")
+        let beforeLines = before.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let afterLines = after.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
 
-        defer {
-            try? FileManager.default.removeItem(at: beforeURL)
-            try? FileManager.default.removeItem(at: afterURL)
+        let changes = afterLines.difference(from: beforeLines)
+
+        // Build result with context
+        var result: [DiffLine] = []
+        var lineIndex = 0
+
+        // Track which before-lines are removed and which after-lines are inserted
+        var removedIndices = Set<Int>()
+        var insertedIndices = Set<Int>()
+        var insertedLines: [Int: String] = [:]
+
+        for change in changes {
+            switch change {
+            case .remove(let offset, _, _):
+                removedIndices.insert(offset)
+            case .insert(let offset, let element, _):
+                insertedIndices.insert(offset)
+                insertedLines[offset] = element
+            }
         }
 
-        do {
-            try before.write(to: beforeURL, atomically: true, encoding: .utf8)
-            try after.write(to: afterURL, atomically: true, encoding: .utf8)
-        } catch {
-            return [DiffLine(type: .context, text: "Error computing diff")]
+        // Walk through before-lines, emitting removals and context
+        var afterIdx = 0
+        for (i, line) in beforeLines.enumerated() {
+            // Emit any insertions that come before this position in the after-array
+            while afterIdx < afterLines.count && insertedIndices.contains(afterIdx) && afterIdx <= i + result.filter({ $0.type == .addition }).count {
+                if insertedIndices.contains(afterIdx) {
+                    result.append(DiffLine(id: lineIndex, type: .addition, text: afterLines[afterIdx]))
+                    lineIndex += 1
+                }
+                afterIdx += 1
+            }
+
+            if removedIndices.contains(i) {
+                result.append(DiffLine(id: lineIndex, type: .removal, text: line))
+                lineIndex += 1
+            } else {
+                // Context line (skip for brevity if too many)
+                afterIdx += 1
+            }
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/diff")
-        process.arguments = ["-u", "--label", "before", "--label", "after", beforeURL.path, afterURL.path]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return [DiffLine(type: .context, text: "Error running diff")]
+        // Emit remaining insertions
+        while afterIdx < afterLines.count {
+            if insertedIndices.contains(afterIdx) {
+                result.append(DiffLine(id: lineIndex, type: .addition, text: afterLines[afterIdx]))
+                lineIndex += 1
+            }
+            afterIdx += 1
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else {
-            return [DiffLine(type: .context, text: "No changes")]
+        // If the simple walk didn't produce clean output, fall back to a direct approach
+        if result.isEmpty && !changes.isEmpty {
+            result = simpleDiff(beforeLines: beforeLines, afterLines: afterLines)
         }
 
-        return parseDiff(output)
+        // Limit to 50 lines for display
+        if result.count > 50 {
+            return Array(result.prefix(50)) + [DiffLine(id: 50, type: .context, text: "... (\(result.count - 50) more lines)")]
+        }
+
+        return result
+    }
+
+    /// Simple diff: emit all removals then all additions.
+    /// Used as fallback when the walk-based approach doesn't produce clean output.
+    private func simpleDiff(beforeLines: [String], afterLines: [String]) -> [DiffLine] {
+        let changes = afterLines.difference(from: beforeLines)
+        var result: [DiffLine] = []
+        var lineIndex = 0
+
+        for change in changes {
+            switch change {
+            case .remove(_, let element, _):
+                result.append(DiffLine(id: lineIndex, type: .removal, text: element))
+                lineIndex += 1
+            case .insert(_, let element, _):
+                result.append(DiffLine(id: lineIndex, type: .addition, text: element))
+                lineIndex += 1
+            }
+        }
+        return result
     }
 
     /// Compute a diff between two Data blobs.
@@ -59,39 +108,15 @@ public struct DiffEngine: Sendable {
         }
         return diff(before: before, after: after)
     }
-
-    private func parseDiff(_ output: String) -> [DiffLine] {
-        let lines = output.components(separatedBy: "\n")
-        var result: [DiffLine] = []
-
-        for line in lines {
-            // Skip diff headers
-            if line.hasPrefix("---") || line.hasPrefix("+++") || line.hasPrefix("@@") { continue }
-
-            if line.hasPrefix("-") {
-                result.append(DiffLine(type: .removal, text: String(line.dropFirst())))
-            } else if line.hasPrefix("+") {
-                result.append(DiffLine(type: .addition, text: String(line.dropFirst())))
-            } else if line.hasPrefix(" ") {
-                result.append(DiffLine(type: .context, text: String(line.dropFirst())))
-            }
-        }
-
-        // Limit to 50 lines for display
-        if result.count > 50 {
-            return Array(result.prefix(50)) + [DiffLine(type: .context, text: "... (\(result.count - 50) more lines)")]
-        }
-
-        return result
-    }
 }
 
 public struct DiffLine: Sendable, Identifiable {
-    public let id = UUID()
+    public let id: Int  // Sequential index, not UUID (avoids /dev/urandom reads)
     public let type: DiffLineType
     public let text: String
 
-    public init(type: DiffLineType, text: String) {
+    public init(id: Int, type: DiffLineType, text: String) {
+        self.id = id
         self.type = type
         self.text = text
     }
