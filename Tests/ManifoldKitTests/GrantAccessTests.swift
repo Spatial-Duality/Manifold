@@ -205,6 +205,58 @@ struct GrantAccessTests {
         #expect(original == "user version")
     }
 
+    @Test("Explicit file scopes block promotion outside approved paths")
+    func explicitScopesBlockOutOfScopePromotion() async throws {
+        let (store, _, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        let sourceDir = try createSourceDir(in: tempDir, name: "Scoped")
+        let sourceID = try await store.addSource(displayName: "Scoped", rootPath: sourceDir.path)
+
+        let matRoot = tempDir.appendingPathComponent("materializations/scoped-test")
+        let grant = try await store.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: matRoot.path,
+            explicitSelection: true
+        )
+
+        try await store.replaceGrantFileScopes(
+            grantID: grant.grantID,
+            scopes: [
+                FileSelectionScope(sourceID: sourceID, relativePath: "README.md", isDirectory: false),
+            ]
+        )
+
+        let source = try await store.source(id: sourceID)!
+        let grantSources = try await store.grantSources(grantID: grant.grantID)
+        _ = try MaterializationEngine.materialize(
+            grantID: grant.grantID,
+            sources: [(source: source, mountName: grantSources[0].mountName)],
+            materializationRoot: grant.materializationRoot
+        )
+
+        let mountPath = matRoot.appendingPathComponent(grantSources[0].mountName)
+        try Data("out of scope".utf8).write(to: mountPath.appendingPathComponent("notes.txt"))
+
+        let summary = try PromoteEngine.promote(
+            sourceID: sourceID,
+            mountName: grantSources[0].mountName,
+            mountURL: mountPath,
+            originalURL: URL(fileURLWithPath: sourceDir.path),
+            allowedScopes: [
+                FileSelectionScope(sourceID: sourceID, relativePath: "README.md", isDirectory: false),
+            ]
+        )
+
+        #expect(summary.newFiles.isEmpty)
+        #expect(summary.conflicts.count == 1)
+        #expect(summary.conflicts[0].relativePath == "notes.txt")
+        #expect(summary.conflicts[0].conflictReason == "Path is outside the approved grant scope")
+        #expect(!FileManager.default.fileExists(atPath: sourceDir.appendingPathComponent("notes.txt").path))
+    }
+
     @Test("No grant returns nil from activeGrant")
     func noGrantFallback() async throws {
         let (store, _, tempDir) = try makeStores()

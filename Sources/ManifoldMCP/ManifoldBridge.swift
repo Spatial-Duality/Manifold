@@ -12,6 +12,10 @@ public actor ManifoldBridge {
     private let emailStore: EmailStore
     private let snapshotStore: SnapshotStore
     private let artifactIndex: ArtifactIndex
+    private let targetApp: TargetApp
+    private let profileID: String
+    private var runtimeContext: AgentRuntimeContext
+    private var connectionLogged = false
 
     public init(
         db: DatabaseConnection,
@@ -20,7 +24,11 @@ public actor ManifoldBridge {
         grantStore: GrantStore,
         emailStore: EmailStore,
         snapshotStore: SnapshotStore,
-        artifactIndex: ArtifactIndex
+        artifactIndex: ArtifactIndex,
+        targetApp: TargetApp = .cowork,
+        profileID: String = "default",
+        serverName: String = "manifold",
+        serverVersion: String = "0.0.0"
     ) {
         self.db = db
         self.auditStore = auditStore
@@ -29,14 +37,121 @@ public actor ManifoldBridge {
         self.emailStore = emailStore
         self.snapshotStore = snapshotStore
         self.artifactIndex = artifactIndex
+        self.targetApp = targetApp
+        self.profileID = profileID
+        self.runtimeContext = AgentRuntimeContext(
+            targetApp: targetApp,
+            profileID: profileID,
+            serverName: serverName,
+            serverVersion: serverVersion
+        )
+    }
+
+    private var agentName: String { targetApp.rawValue }
+
+    private func mergedMetadata(_ metadata: [String: String] = [:]) -> [String: String] {
+        runtimeContext.eventContextMetadata.merging(metadata) { _, new in new }
+    }
+
+    private func recordAutomaticSessionNote(
+        grant: GrantRecord,
+        kind: SessionSummaryKind,
+        markdown: String
+    ) async {
+        let now = ISO8601DateFormatter().string(from: Date())
+        _ = try? await grantStore.saveSummary(
+            grantID: grant.grantID,
+            targetApp: TargetApp(rawValue: grant.targetApp) ?? .cowork,
+            startedAt: grant.startedAt,
+            endedAt: now,
+            markdown: markdown,
+            kind: kind,
+            origin: .system
+        )
+        if let summaries = try? await grantStore.summaries(grantID: grant.grantID) {
+            try? await artifactIndex.syncSessionSummaries(grantID: grant.grantID, summaries: summaries)
+        }
+    }
+
+    private func maybeRecordVerboseCheckpointNote(
+        grant: GrantRecord,
+        canonicalPath: String,
+        byteCount: Int
+    ) async {
+        guard grant.sessionNoteCaptureMode == .verbose else { return }
+        let existing = (try? await grantStore.summaries(grantID: grant.grantID, kind: .checkpointNote)) ?? []
+        guard existing.isEmpty else { return }
+
+        let modelLabel = runtimeContext.modelHint ?? "unknown"
+        let providerLabel = runtimeContext.providerHint ?? "unknown"
+        let markdown = """
+        # Session Checkpoint Note
+
+        - **Captured by:** Manifold system note
+        - **Target app:** \(grant.targetApp)
+        - **Checkpoint:** first material change
+        - **Changed path:** `\(canonicalPath)`
+        - **Bytes written:** \(byteCount)
+        - **Provider hint:** \(providerLabel)
+        - **Model hint:** \(modelLabel)
+
+        Optional agent follow-up: add a checkpoint note only if the plan changed materially, the task split into phases, or the reason for this change would not be obvious from the file diff.
+        """
+        await recordAutomaticSessionNote(grant: grant, kind: .checkpointNote, markdown: markdown)
+    }
+
+    private func preferredSummary(from summaries: [SessionSummaryRecord]) -> SessionSummaryRecord? {
+        summaries.first(where: { $0.kind == .summary })
+            ?? summaries.first(where: { $0.kind == .endNote })
+            ?? summaries.first
+    }
+
+    private func noteGuidance(for grant: GrantRecord, summaries: [SessionSummaryRecord]) -> String? {
+        let mode = grant.sessionNoteCaptureMode
+        guard mode != .off else { return nil }
+
+        let systemNotes = summaries.filter { $0.kind != .summary && $0.origin == .system }.count
+        let agentNotes = summaries.filter { $0.kind != .summary && $0.origin == .agent }.count
+
+        switch mode {
+        case .off:
+            return nil
+        case .basic:
+            return "Session notes: BASIC. System start/end notes are captured automatically. Add agent notes only when the objective or final handoff needs extra context. Agent notes: \(agentNotes). System notes: \(systemNotes)."
+        case .verbose:
+            return "Session notes: VERBOSE. System start, first-write checkpoint, and end notes are captured automatically. Add agent checkpoint notes only for major plan changes or handoff context. Agent notes: \(agentNotes). System notes: \(systemNotes)."
+        }
+    }
+
+    public func registerClientContext(initializeParams: [String: Any]) async {
+        runtimeContext.mergeInitializeParams(initializeParams)
+        guard !connectionLogged else { return }
+        connectionLogged = true
+        try? await auditStore.log(
+            action: .mcpConnection,
+            agent: agentName,
+            metadata: runtimeContext.connectionMetadata.merging(["event": "connected"]) { _, new in new }
+        )
+    }
+
+    public func recordDisconnection() async {
+        guard connectionLogged else { return }
+        try? await auditStore.log(
+            action: .mcpConnection,
+            agent: agentName,
+            metadata: runtimeContext.connectionMetadata.merging([
+                "event": "disconnected",
+                "disconnected_at": ISO8601DateFormatter().string(from: Date()),
+            ]) { _, new in new }
+        )
     }
 
     // MARK: - Grant Resolution
 
     /// Resolve the active grant or throw. Fail-closed: no grant = no access.
-    private func requireGrant(targetApp: TargetApp = .cowork, profileID: String = "default") async throws -> (GrantRecord, [GrantSourceRecord]) {
+    private func requireGrant() async throws -> (GrantRecord, [GrantSourceRecord]) {
         guard let grant = try await grantStore.activeGrant(targetApp: targetApp, profileID: profileID) else {
-            let sources = try await grantStore.activeSources()
+            let sources = (try await grantStore.allSources()).filter { !$0.isRemoved }
             if sources.isEmpty {
                 throw ManifoldMCPError.noSources
             }
@@ -88,6 +203,9 @@ public actor ManifoldBridge {
     }
 
     private func accessibleEmails(grant: GrantRecord, limit: Int) throws -> [EmailMessageRecord] {
+        if grant.explicitSelection {
+            return try emailStore.grantEmails(grantID: grant.grantID, limit: limit)
+        }
         let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
         if filter.level == .strict {
             return try emailStore.sharedEmails(limit: limit)
@@ -128,6 +246,23 @@ public actor ManifoldBridge {
         return nil
     }
 
+    private func assertWritableScope(relativePath: String, mount: GrantMount, grant: GrantRecord) async throws {
+        guard grant.explicitSelection else { return }
+        let scopes = try await grantStore.grantFileScopes(grantID: grant.grantID)
+        let allowedScopes = scopes.compactMap { scope -> FileSelectionScope? in
+            guard scope.sourceID == mount.sourceID else { return nil }
+            return FileSelectionScope(
+                sourceID: scope.sourceID,
+                relativePath: scope.relativePath,
+                isDirectory: scope.isDirectory
+            )
+        }
+        guard !allowedScopes.isEmpty else { return }
+        guard FileSelectionScope.allows(relativePath, in: allowedScopes) else {
+            throw ManifoldMCPError.invalidPath("Path is outside the approved grant scope")
+        }
+    }
+
     /// Resolve bare path to a single unambiguous mount. Throws if ambiguous.
     private func resolveBarePath(_ path: String, in mounts: [GrantMount]) throws -> (GrantMount, String) {
         var matches: [(mount: GrantMount, url: URL)] = []
@@ -154,8 +289,11 @@ public actor ManifoldBridge {
         let argsJSON = arguments.isEmpty ? "{}" : (arguments.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))
         try? await auditStore.log(
             action: .toolCall,
-            agent: "cowork",
-            metadata: ["tool": tool, "arguments": argsJSON]
+            agent: agentName,
+            metadata: mergedMetadata([
+                "tool": tool,
+                "arguments": argsJSON,
+            ])
         )
         ManifoldNotification.post(ManifoldNotification.dataChanged)
     }
@@ -170,6 +308,8 @@ public actor ManifoldBridge {
             try await ensureIndexed(grant: grant, mounts: mounts)
             let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
             let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
+            let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
+            let noteGuidance = noteGuidance(for: grant, summaries: summaries)
             let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
             let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
 
@@ -180,10 +320,12 @@ public actor ManifoldBridge {
                 pausedSources: [],
                 fileCount: totalFiles,
                 emailCount: emailCount,
-                message: message
+                message: message,
+                noteCaptureMode: grant.noteCaptureMode,
+                noteGuidance: noteGuidance
             )
         } catch ManifoldMCPError.noActiveSession {
-            let sources = (try? await grantStore.activeSources()) ?? []
+            let sources = (try? await grantStore.allSources()) ?? []
             let paused = sources.filter(\.isPaused)
             let active = sources.filter(\.isAccessible)
             return StatusResult(
@@ -193,12 +335,16 @@ public actor ManifoldBridge {
                 pausedSources: paused.map(\.displayName),
                 fileCount: 0,
                 emailCount: 0,
-                message: "No active session. \(active.count) source(s) configured. Start a session in Manifold to grant access."
+                message: "No active session. \(active.count) source(s) configured. Start a session in Manifold to grant access.",
+                noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
+                noteGuidance: nil
             )
         } catch {
             return StatusResult(
                 active: false, grantID: nil, sources: [], pausedSources: [], fileCount: 0, emailCount: 0,
-                message: "Error: \(error.localizedDescription)"
+                message: "Error: \(error.localizedDescription)",
+                noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
+                noteGuidance: nil
             )
         }
     }
@@ -257,18 +403,18 @@ public actor ManifoldBridge {
 
         try? await auditStore.log(
             action: .fileRead,
-            agent: "cowork",
+            agent: agentName,
             filePath: canonicalPath,
-            metadata: [
+            metadata: mergedMetadata([
                 "grant_id": grantID,
                 "mount": mountName,
                 "bytes": "\(read.bytesRead)",
                 "truncated": read.truncated ? "true" : "false",
-            ],
+            ]),
             grantID: grantID
         )
         ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
-            "path": canonicalPath, "action": "read", "agent": "cowork"
+            "path": canonicalPath, "action": "read", "agent": agentName
         ])
         return read.text
     }
@@ -305,20 +451,10 @@ public actor ManifoldBridge {
         }
 
         let fileURL = try validatePath(resolvedPath, rootPath: resolved.mountPath)
+        try await assertWritableScope(relativePath: resolvedPath, mount: resolved, grant: grant)
         let canonicalPath = "\(resolved.mountName)/\(resolvedPath)"
 
-        // Snapshot BEFORE writing (capture previous state)
         let existed = FileManager.default.fileExists(atPath: fileURL.path)
-        if existed {
-            let beforeData = try Data(contentsOf: fileURL)
-            try await snapshotStore.recordModification(
-                runID: grant.grantID,
-                workspaceID: resolved.sourceID,
-                filePath: canonicalPath,
-                newData: beforeData,
-                source: "mcp"
-            )
-        }
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
@@ -332,8 +468,7 @@ public actor ManifoldBridge {
             fileURL: fileURL
         )
 
-        // Snapshot AFTER writing (capture new state)
-        try await snapshotStore.recordModification(
+        let snapshot = try await snapshotStore.recordModification(
             runID: grant.grantID,
             workspaceID: resolved.sourceID,
             filePath: canonicalPath,
@@ -345,10 +480,22 @@ public actor ManifoldBridge {
             action: existed ? .fileModified : .fileCreated,
             runID: grant.grantID,
             workspaceID: resolved.sourceID,
-            agent: "cowork",
+            agent: agentName,
             filePath: canonicalPath,
-            metadata: ["grant_id": grant.grantID, "mount": resolved.mountName, "bytes": "\(data.count)"],
+            beforeHash: snapshot.beforeHash,
+            afterHash: snapshot.afterHash,
+            metadata: mergedMetadata([
+                "grant_id": grant.grantID,
+                "mount": resolved.mountName,
+                "bytes": "\(data.count)",
+                "snapshot_id": "\(snapshot.id)",
+            ]),
             grantID: grant.grantID
+        )
+        await maybeRecordVerboseCheckpointNote(
+            grant: grant,
+            canonicalPath: canonicalPath,
+            byteCount: data.count
         )
         ManifoldNotification.post(ManifoldNotification.dataChanged)
 
@@ -526,14 +673,14 @@ public actor ManifoldBridge {
 
         try? await auditStore.log(
             action: .fileRead,
-            agent: "cowork",
+            agent: agentName,
             filePath: canonicalPath,
-            metadata: [
+            metadata: mergedMetadata([
                 "grant_id": grant.grantID,
                 "mount": resolved.mount.mountName,
                 "selection": "lines:\(startLine)-\(endLine)",
                 "truncated": read.truncated ? "true" : "false",
-            ],
+            ]),
             grantID: grant.grantID
         )
 
@@ -718,7 +865,7 @@ public actor ManifoldBridge {
         var results: [SessionSummary] = []
         for grant in ended {
             let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
-            let preview = summaries.first?.summaryMarkdown.prefix(200).description ?? "No summary"
+            let preview = preferredSummary(from: summaries)?.summaryMarkdown.prefix(200).description ?? "No summary"
             results.append(SessionSummary(
                 grantID: grant.grantID,
                 targetApp: grant.targetApp,
@@ -738,9 +885,25 @@ public actor ManifoldBridge {
         }
         let grantSources = try await grantStore.grantSources(grantID: grantID)
         let summaries = try await grantStore.summaries(grantID: grantID)
+        let primarySummary = preferredSummary(from: summaries)
+        let notes = summaries
+            .filter { $0.kind != .summary }
+            .map {
+                SessionNoteDetail(
+                    summaryID: $0.summaryID,
+                    kind: $0.summaryKind,
+                    origin: $0.summaryOrigin,
+                    endedAt: $0.endedAt,
+                    markdown: $0.summaryMarkdown
+                )
+            }
         let entries = try await auditStore.recentEntries(limit: 200)
         let grantEntries = entries.filter { $0.grantID == grantID }
         let filesModified = Set(grantEntries.compactMap(\.filePath)).sorted()
+        let promotions = try await grantStore.promotions(grantID: grantID)
+        let conflicts = promotions
+            .filter(\.isConflict)
+            .map(\.relativePath)
 
         return SessionDetail(
             grantID: grantID,
@@ -749,15 +912,20 @@ public actor ManifoldBridge {
             startedAt: grant.startedAt,
             endedAt: grant.endedAt,
             sources: grantSources.map(\.mountName),
-            summaryMarkdown: summaries.first?.summaryMarkdown,
+            summaryMarkdown: primarySummary?.summaryMarkdown,
+            noteCaptureMode: grant.noteCaptureMode,
+            sessionNotes: notes,
             filesApplied: filesModified,
-            filesConflicted: [],
-            totalPromotions: filesModified.count
+            filesConflicted: conflicts,
+            totalPromotions: promotions.count
         )
     }
 
-    public func saveSessionNote(note: String) async throws -> String {
-        await logToolCall(tool: "save_session_note", arguments: ["note_length": "\(note.count)"])
+    public func saveSessionNote(note: String, noteType: SessionSummaryKind = .checkpointNote) async throws -> String {
+        await logToolCall(
+            tool: "save_session_note",
+            arguments: ["note_length": "\(note.count)", "note_type": noteType.rawValue]
+        )
         let (grant, _) = try await requireGrant()
         let now = ISO8601DateFormatter().string(from: Date())
 
@@ -766,17 +934,23 @@ public actor ManifoldBridge {
             targetApp: TargetApp(rawValue: grant.targetApp) ?? .cowork,
             startedAt: grant.startedAt,
             endedAt: now,
-            markdown: note
+            markdown: note,
+            kind: noteType,
+            origin: .agent
         )
         let summaries = try await grantStore.summaries(grantID: grant.grantID)
         try await artifactIndex.syncSessionSummaries(grantID: grant.grantID, summaries: summaries)
-        return "Session note saved for grant \(grant.grantID.prefix(12))..."
+        return "Session \(noteType.displayName.lowercased()) saved for grant \(grant.grantID.prefix(12))..."
     }
 
     // MARK: - Email Tools (reads from .eml-backed email index)
 
     /// Check if a single email is accessible under the given sensitivity filter.
-    private func isEmailAccessible(email: EmailMessageRecord, filter: EmailSensitivityFilter) throws -> Bool {
+    private func isEmailAccessible(email: EmailMessageRecord, grant: GrantRecord) throws -> Bool {
+        if grant.explicitSelection {
+            return try emailStore.isEmailInGrant(grantID: grant.grantID, emailID: email.emailID)
+        }
+        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
         if filter.level == .strict {
             return try emailStore.isEmailShared(emailID: email.emailID)
         }
@@ -786,16 +960,7 @@ public actor ManifoldBridge {
     public func listEmails() async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
         let (grant, _) = try await requireGrant()
-
-        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
-
-        let emails: [EmailMessageRecord]
-        if filter.level == .strict {
-            emails = try emailStore.sharedEmails(limit: 200)
-        } else {
-            let all = try emailStore.allEmailMessages(limit: 200)
-            emails = all.filter { filter.isVisible(email: $0) }
-        }
+        let emails = try accessibleEmails(grant: grant, limit: 200)
         return emails.map {
             EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
@@ -804,13 +969,12 @@ public actor ManifoldBridge {
     public func readEmail(id: String) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
         let (grant, _) = try await requireGrant()
-        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
 
         guard let email = try emailStore.emailMessage(id: id) else {
             throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
         }
 
-        guard try isEmailAccessible(email: email, filter: filter) else {
+        guard try isEmailAccessible(email: email, grant: grant) else {
             throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
         }
 
@@ -821,9 +985,13 @@ public actor ManifoldBridge {
             try? await auditStore.log(
                 action: .fileRead,
                 runID: grant.grantID,
-                agent: "cowork",
+                agent: agentName,
                 filePath: emlPath,
-                metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID],
+                metadata: mergedMetadata([
+                    "type": "email",
+                    "messageID": id,
+                    "grant_id": grant.grantID,
+                ]),
                 grantID: grant.grantID
             )
             return content
@@ -833,8 +1001,12 @@ public actor ManifoldBridge {
         try? await auditStore.log(
             action: .fileRead,
             runID: grant.grantID,
-            agent: "cowork",
-            metadata: ["type": "email", "messageID": id, "grant_id": grant.grantID],
+            agent: agentName,
+            metadata: mergedMetadata([
+                "type": "email",
+                "messageID": id,
+                "grant_id": grant.grantID,
+            ]),
             grantID: grant.grantID
         )
 
@@ -859,6 +1031,8 @@ public struct StatusResult: Sendable {
     public let fileCount: Int
     public let emailCount: Int
     public let message: String
+    public let noteCaptureMode: String
+    public let noteGuidance: String?
 }
 
 public struct FileInfo: Sendable {
@@ -902,9 +1076,19 @@ public struct SessionDetail: Sendable {
     public let endedAt: String?
     public let sources: [String]
     public let summaryMarkdown: String?
+    public let noteCaptureMode: String
+    public let sessionNotes: [SessionNoteDetail]
     public let filesApplied: [String]
     public let filesConflicted: [String]
     public let totalPromotions: Int
+}
+
+public struct SessionNoteDetail: Sendable {
+    public let summaryID: String
+    public let kind: String
+    public let origin: String
+    public let endedAt: String
+    public let markdown: String
 }
 
 public struct EmailSummary: Sendable {

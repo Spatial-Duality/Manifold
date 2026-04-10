@@ -30,6 +30,7 @@ struct ConfigWriterTests {
         let manifold = servers["manifold"] as! [String: Any]
 
         #expect(manifold["command"] as? String == "/usr/bin/manifold-mcp")
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork"])
         #expect(servers.count == 1, "Only manifold server should be present")
     }
 
@@ -96,6 +97,7 @@ struct ConfigWriterTests {
 
         #expect(servers.count == 1, "No duplicate manifold entry")
         #expect(manifold["command"] as? String == "/new/path/manifold-mcp", "Path updated")
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork"], "Cowork agent args preserved")
     }
 
     // MARK: - Codex Config Tests
@@ -136,11 +138,12 @@ struct ConfigWriterTests {
         let content = try String(contentsOf: codexDir.appendingPathComponent("config.toml"), encoding: .utf8)
         #expect(content.contains("[mcp_servers.filesystem]"), "Existing server preserved")
         #expect(content.contains("[mcp_servers.manifold]"), "Manifold added")
+        #expect(content.contains("args = [\"--agent\", \"codex\"]"), "Codex agent args configured")
         #expect(content.contains("model = \"claude-sonnet-4-20250514\""), "Other config preserved")
     }
 
-    @Test("Codex install skips when manifold already configured")
-    func codexSkipDuplicate() throws {
+    @Test("Codex install updates existing manifold config")
+    func codexUpdatesExisting() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }
 
@@ -158,7 +161,9 @@ struct ConfigWriterTests {
         try writer.installCodex()
 
         let content = try String(contentsOf: codexDir.appendingPathComponent("config.toml"), encoding: .utf8)
-        #expect(content == existing, "Config unchanged when manifold already present")
+        #expect(content.contains("command = \"/new/manifold-mcp\""), "Existing command updated")
+        #expect(content.contains("args = [\"--agent\", \"codex\"]"), "Codex agent args updated")
+        #expect(content.components(separatedBy: "[mcp_servers.manifold]").count == 2, "Single manifold section remains")
     }
 
     // MARK: - Claude Code Config Tests
@@ -178,6 +183,7 @@ struct ConfigWriterTests {
         let manifold = servers["manifold"] as! [String: Any]
 
         #expect(manifold["command"] as? String == "/usr/bin/manifold-mcp")
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork"])
     }
 
     @Test("Claude Code install preserves existing settings")
@@ -209,8 +215,8 @@ struct ConfigWriterTests {
         #expect(config["permissions"] != nil, "Non-MCP settings preserved")
     }
 
-    @Test("Claude Code install skips when manifold already configured")
-    func claudeCodeSkipDuplicate() throws {
+    @Test("Claude Code install updates existing manifold config")
+    func claudeCodeUpdatesExisting() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }
 
@@ -227,12 +233,12 @@ struct ConfigWriterTests {
         let writer = ConfigWriter(binaryPath: "/new/path/manifold-mcp", homeDir: home)
         try writer.installClaudeCode()
 
-        // Should not update existing entry
         let result = try Data(contentsOf: configDir.appendingPathComponent("settings.json"))
         let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
         let servers = config["mcpServers"] as! [String: Any]
         let manifold = servers["manifold"] as! [String: Any]
-        #expect(manifold["command"] as? String == "/old/path", "Existing entry not overwritten")
+        #expect(manifold["command"] as? String == "/new/path/manifold-mcp", "Existing entry updated")
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork"], "Cowork agent args added")
     }
 
     // MARK: - installAll

@@ -153,6 +153,16 @@ final class EmailAccountModel {
         }
     }
 
+    func messages(ids: [String]) async -> [EmailMessageRecord] {
+        guard let emailStore else { return [] }
+        do {
+            return try await emailStore.emailMessages(ids: ids)
+        } catch {
+            logger.error("Failed to load selected messages: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     func messages(accountID: String, mailbox: String, limit: Int = 500) async -> [EmailMessageRecord] {
         guard let emailStore else { return [] }
         do {

@@ -41,7 +41,8 @@ public struct PromoteEngine: Sendable {
         sourceID: String,
         mountName: String,
         mountURL: URL,
-        originalURL: URL
+        originalURL: URL,
+        allowedScopes: [FileSelectionScope] = []
     ) throws -> PromotionSummary {
         let fm = FileManager.default
 
@@ -65,11 +66,14 @@ public struct PromoteEngine: Sendable {
         var conflicts: [FileResult] = []
         var skipped = 0
         var newFiles: [FileResult] = []
+        let sourceScopes = allowedScopes.filter { $0.sourceID == sourceID }
 
         // Check every file in the materialized workspace
         for (path, matHash) in materialized {
             let baseHash = baseline[path]
             let origHash = originals[path]
+            let scopeRestricted = !sourceScopes.isEmpty
+            let withinApprovedScope = FileSelectionScope.allows(path, in: sourceScopes)
 
             if let baseHash {
                 // File existed at baseline
@@ -80,6 +84,17 @@ public struct PromoteEngine: Sendable {
                 }
 
                 // Agent changed the file
+                if scopeRestricted && !withinApprovedScope {
+                    conflicts.append(FileResult(
+                        relativePath: path,
+                        result: .conflict,
+                        originalBeforeHash: origHash,
+                        promotedHash: matHash,
+                        conflictReason: "Path is outside the approved grant scope"
+                    ))
+                    continue
+                }
+
                 if origHash == baseHash {
                     // Original unchanged since baseline → safe to promote
                     let matFileURL = mountURL.appendingPathComponent(path)
@@ -111,6 +126,17 @@ public struct PromoteEngine: Sendable {
                 }
             } else {
                 // New file created by agent (no baseline)
+                if scopeRestricted && !withinApprovedScope {
+                    conflicts.append(FileResult(
+                        relativePath: path,
+                        result: .conflict,
+                        originalBeforeHash: nil,
+                        promotedHash: matHash,
+                        conflictReason: "Path is outside the approved grant scope"
+                    ))
+                    continue
+                }
+
                 let matFileURL = mountURL.appendingPathComponent(path)
                 let origFileURL = originalURL.appendingPathComponent(path)
                 try copyFile(from: matFileURL, to: origFileURL)

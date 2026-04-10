@@ -93,12 +93,19 @@ struct AuditStoreSessionTests {
         #expect(sessions[0].agent == "Unknown Agent")
     }
 
-    @Test("Session events include snapshot join data for writes")
-    func sessionEventsWriteJoin() async throws {
+    @Test("Session events preserve write hashes and snapshot metadata")
+    func sessionEventsWriteMetadata() async throws {
         let (store, _, tempDir) = try makeStore()
         defer { cleanup(tempDir) }
 
-        try await store.log(action: .fileModified, agent: "cowork", filePath: "code.swift")
+        try await store.log(
+            action: .fileModified,
+            agent: "cowork",
+            filePath: "code.swift",
+            beforeHash: "before-hash",
+            afterHash: "after-hash",
+            metadata: ["snapshot_id": "42"]
+        )
 
         let sessions = try await store.recentSessions(limit: 20)
         #expect(sessions.count == 1)
@@ -107,7 +114,9 @@ struct AuditStoreSessionTests {
         #expect(events.count == 1)
         #expect(events[0].action == "file_modified")
         #expect(events[0].filePath == "code.swift")
-        // snapshot join may be nil if no matching snapshot exists
+        #expect(events[0].snapshotID == 42)
+        #expect(events[0].beforeHash == "before-hash")
+        #expect(events[0].afterHash == "after-hash")
     }
 
     @Test("Session events show nil snapshot for reads")

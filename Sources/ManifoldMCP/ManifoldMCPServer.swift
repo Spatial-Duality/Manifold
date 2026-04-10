@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 struct ManifoldMCPServer {
     static func main() async throws {
         let version = "0.4.0"
+        let targetApp = parsedTargetApp(from: CommandLine.arguments)
 
         // Handle --version flag
         if CommandLine.arguments.contains("--version") {
@@ -20,7 +21,7 @@ struct ManifoldMCPServer {
             let binaryPath = CommandLine.arguments[0]
             let writer = ConfigWriter(binaryPath: binaryPath)
             try writer.installAll()
-            fputs("Manifold MCP server installed. Restart Claude Desktop to connect.\n", stderr)
+            fputs("Manifold MCP server installed. Restart Claude/Codex clients to connect.\n", stderr)
             logger.info("MCP server installed via --install flag")
             return
         }
@@ -45,10 +46,6 @@ struct ManifoldMCPServer {
         let emailStore = EmailStore(db: db)
         let artifactIndex = try ArtifactIndex(db: db)
 
-        // Log MCP connection and notify the app
-        try? await auditStore.log(action: .mcpConnection, metadata: ["event": "connected"])
-        ManifoldNotification.post(ManifoldNotification.agentConnected, userInfo: ["agent": "cowork"])
-
         // Create bridge (grant-only, no legacy workspace access)
         let bridge = ManifoldBridge(
             db: db,
@@ -57,11 +54,18 @@ struct ManifoldMCPServer {
             grantStore: grantStore,
             emailStore: emailStore,
             snapshotStore: snapshotStore,
-            artifactIndex: artifactIndex
+            artifactIndex: artifactIndex,
+            targetApp: targetApp,
+            serverName: "manifold",
+            serverVersion: version
         )
 
         // Create MCP server
         let server = MCPServer(name: "manifold", version: version)
+        server.registerInitializeHandler { params in
+            await bridge.registerClientContext(initializeParams: params.value)
+            ManifoldNotification.post(ManifoldNotification.agentConnected, userInfo: ["agent": targetApp.rawValue])
+        }
 
         // Register tools
         server.registerTools(ToolHandlers.allTools()) { name, arguments in
@@ -96,14 +100,26 @@ struct ManifoldMCPServer {
         }
 
         // Start stdio transport (blocks until stdin closes)
-        defer {
-            ManifoldNotification.post(ManifoldNotification.agentDisconnected, userInfo: ["agent": "cowork"])
+        do {
+            try await server.start()
+        } catch {
+            await bridge.recordDisconnection()
+            ManifoldNotification.post(ManifoldNotification.agentDisconnected, userInfo: ["agent": targetApp.rawValue])
+            throw error
         }
-        try await server.start()
+        await bridge.recordDisconnection()
+        ManifoldNotification.post(ManifoldNotification.agentDisconnected, userInfo: ["agent": targetApp.rawValue])
     }
 
     static func manifoldStoreURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport.appendingPathComponent("Manifold/store")
+    }
+
+    static func parsedTargetApp(from arguments: [String]) -> TargetApp {
+        guard let flagIndex = arguments.firstIndex(of: "--agent"), arguments.indices.contains(flagIndex + 1) else {
+            return .cowork
+        }
+        return TargetApp(rawValue: arguments[flagIndex + 1]) ?? .cowork
     }
 }

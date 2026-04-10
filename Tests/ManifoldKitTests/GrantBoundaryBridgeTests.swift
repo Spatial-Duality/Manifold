@@ -15,9 +15,10 @@ struct GrantBoundaryBridgeTests {
         let artifactIndex: ArtifactIndex
         let bridge: ManifoldBridge
         let tempDir: URL
+        let targetApp: TargetApp
     }
 
-    func makeHarness() throws -> Harness {
+    func makeHarness(targetApp: TargetApp = .cowork) throws -> Harness {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("manifold-bridge-grant-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -38,7 +39,8 @@ struct GrantBoundaryBridgeTests {
             grantStore: grantStore,
             emailStore: emailStore,
             snapshotStore: snapshotStore,
-            artifactIndex: artifactIndex
+            artifactIndex: artifactIndex,
+            targetApp: targetApp
         )
         return Harness(
             db: db,
@@ -49,12 +51,22 @@ struct GrantBoundaryBridgeTests {
             emailStore: emailStore,
             artifactIndex: artifactIndex,
             bridge: bridge,
-            tempDir: tempDir
+            tempDir: tempDir,
+            targetApp: targetApp
         )
     }
 
     func cleanup(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
+    }
+
+    func metadataJSON(_ metadata: String?) -> [String: String] {
+        guard let metadata,
+              let data = metadata.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return json
     }
 
     func createSource(in root: URL, name: String, files: [String: String]) throws -> URL {
@@ -70,14 +82,17 @@ struct GrantBoundaryBridgeTests {
 
     func startMaterializedGrant(
         harness: Harness,
-        sources: [(id: String, record: SourceRecord)]
+        sources: [(id: String, record: SourceRecord)],
+        targetApp: TargetApp? = nil,
+        noteCaptureMode: SessionNoteCaptureMode = .off
     ) async throws -> GrantRecord {
         let materializationRoot = harness.tempDir.appendingPathComponent("materialized/\(UUID().uuidString)")
         let grant = try await harness.grantStore.startGrant(
-            targetApp: .cowork,
+            targetApp: targetApp ?? harness.targetApp,
             profileID: "default",
             sourceIDs: sources.map(\.id),
-            materializationRoot: materializationRoot.path
+            materializationRoot: materializationRoot.path,
+            noteCaptureMode: noteCaptureMode
         )
         let grantSources = try await harness.grantStore.grantSources(grantID: grant.grantID)
         let mountInputs = grantSources.compactMap { grantSource -> (source: SourceRecord, mountName: String)? in
@@ -155,15 +170,160 @@ struct GrantBoundaryBridgeTests {
         #expect(message.contains("alpha/notes.md"))
 
         let history = try await harness.snapshotStore.history(runID: grant.grantID, filePath: "alpha/notes.md")
-        #expect(!history.isEmpty)
-        #expect(history.last?.source == "mcp")
-        #expect(history.last?.afterHash != nil)
+        let mcpSnapshots = history.filter { $0.source == "mcp" }
+        #expect(mcpSnapshots.count == 1)
+        #expect(mcpSnapshots.last?.afterHash != nil)
 
         let entries = try await harness.auditStore.recentEntries(limit: 10)
         let writeEntry = entries.first { $0.action == "file_modified" }
         #expect(writeEntry?.runID == grant.grantID)
         #expect(writeEntry?.workspaceID == sourceID)
         #expect(writeEntry?.filePath == "alpha/notes.md")
+        #expect(writeEntry?.beforeHash == mcpSnapshots.last?.beforeHash?.nilIfEmpty)
+        #expect(writeEntry?.afterHash == mcpSnapshots.last?.afterHash?.nilIfEmpty)
+    }
+
+    @Test("Bridge uses Codex target app for grant resolution and audit entries")
+    func bridgeUsesCodexTargetApp() async throws {
+        let harness = try makeHarness(targetApp: .codex)
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "original"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated by codex")
+
+        let status = await harness.bridge.getStatus()
+        #expect(status.grantID == grant.grantID)
+
+        let entries = try await harness.auditStore.recentEntries(limit: 20)
+        let writeEntry = entries.first { $0.action == "file_modified" }
+        #expect(writeEntry?.agent == "codex")
+        #expect(writeEntry?.runID == grant.grantID)
+    }
+
+    @Test("Bridge records free connection context and carries it into later audit entries")
+    func bridgeRecordsConnectionContext() async throws {
+        let harness = try makeHarness(targetApp: .codex)
+        defer { cleanup(harness.tempDir) }
+
+        await harness.bridge.registerClientContext(initializeParams: [
+            "protocolVersion": "2024-11-05",
+            "clientInfo": [
+                "name": "Codex Desktop",
+                "version": "1.2.3",
+            ] as [String: Any],
+            "capabilities": [
+                "roots": [:] as [String: Any],
+                "sampling": [:] as [String: Any],
+            ] as [String: Any],
+            "metadata": [
+                "provider": "openai",
+                "model": "gpt-5.4",
+            ] as [String: Any],
+        ])
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "original"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated with context")
+        await harness.bridge.recordDisconnection()
+
+        let entries = try await harness.auditStore.recentEntries(limit: 20)
+        let connectionEntry = entries.first { $0.action == "mcp_connection" }
+        let connectionMetadata = metadataJSON(connectionEntry?.metadata)
+        #expect(connectionEntry?.agent == "codex")
+        #expect(connectionMetadata["event"] == "disconnected")
+        #expect(connectionMetadata["client_name"] == "Codex Desktop")
+        #expect(connectionMetadata["client_version"] == "1.2.3")
+        #expect(connectionMetadata["provider_hint"] == "openai")
+        #expect(connectionMetadata["model_hint"] == "gpt-5.4")
+        #expect(connectionMetadata["target_app"] == "codex")
+        #expect(connectionMetadata["protocol_version"] == "2024-11-05")
+        #expect(connectionMetadata["connection_id"] != nil)
+
+        let writeEntry = entries.first { $0.action == "file_modified" }
+        let writeMetadata = metadataJSON(writeEntry?.metadata)
+        #expect(writeMetadata["connection_id"] == connectionMetadata["connection_id"])
+        #expect(writeMetadata["client_name"] == "Codex Desktop")
+        #expect(writeMetadata["provider_hint"] == "openai")
+        #expect(writeMetadata["model_hint"] == "gpt-5.4")
+    }
+
+    @Test("Bridge records one automatic verbose checkpoint note on first write")
+    func bridgeRecordsAutomaticVerboseCheckpointNote() async throws {
+        let harness = try makeHarness(targetApp: .codex)
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "original"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        let grant = try await startMaterializedGrant(
+            harness: harness,
+            sources: [(sourceID, source!)],
+            noteCaptureMode: .verbose
+        )
+
+        _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "first change")
+        _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "second change")
+
+        let notes = try await harness.grantStore.summaries(grantID: grant.grantID, kind: .checkpointNote)
+        #expect(notes.count == 1)
+        #expect(notes[0].origin == .system)
+        #expect(notes[0].summaryMarkdown.contains("first material change"))
+
+        let status = await harness.bridge.getStatus()
+        #expect(status.noteCaptureMode == SessionNoteCaptureMode.verbose.rawValue)
+        #expect(status.noteGuidance?.contains("VERBOSE") == true)
+    }
+
+    @Test("Bridge saves typed agent session notes")
+    func bridgeSavesTypedAgentSessionNotes() async throws {
+        let harness = try makeHarness(targetApp: .cowork)
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "original"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        let grant = try await startMaterializedGrant(
+            harness: harness,
+            sources: [(sourceID, source!)],
+            noteCaptureMode: .basic
+        )
+
+        let response = try await harness.bridge.saveSessionNote(
+            note: "Objective is to draft a concise board-ready summary.",
+            noteType: .startNote
+        )
+        #expect(response.contains("start note"))
+
+        let startNotes = try await harness.grantStore.summaries(grantID: grant.grantID, kind: .startNote)
+        #expect(startNotes.count == 1)
+        #expect(startNotes[0].origin == .agent)
     }
 
     @Test("Bridge rejects ambiguous bare paths across multiple mounts")
@@ -184,6 +344,44 @@ struct GrantBoundaryBridgeTests {
 
         await #expect(throws: ManifoldMCPError.self) {
             _ = try await harness.bridge.readFile(path: "notes.md")
+        }
+    }
+
+    @Test("Bridge write_file rejects paths outside explicit grant scope")
+    func bridgeRejectsOutOfScopeWrite() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "original"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        let grant = try await harness.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: harness.tempDir.appendingPathComponent("scoped-write").path,
+            explicitSelection: true
+        )
+        try await harness.grantStore.replaceGrantFileScopes(
+            grantID: grant.grantID,
+            scopes: [
+                FileSelectionScope(sourceID: sourceID, relativePath: "notes.md", isDirectory: false),
+            ]
+        )
+        let grantSources = try await harness.grantStore.grantSources(grantID: grant.grantID)
+        _ = try MaterializationEngine.materialize(
+            grantID: grant.grantID,
+            sources: [(source: source!, mountName: grantSources[0].mountName)],
+            materializationRoot: grant.materializationRoot
+        )
+
+        await #expect(throws: ManifoldMCPError.self) {
+            _ = try await harness.bridge.writeFile(path: "alpha/outside.md", content: "blocked")
         }
     }
 

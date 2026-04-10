@@ -12,16 +12,18 @@ struct SessionPreview {
         let displayName: String
         let fileCount: Int
         let totalBytes: Int64
+        let scopeCount: Int
     }
     let sources: [SourceEstimate]
     let emailCount: Int
     let visibleEmailCount: Int
     let sensitivityLevel: EmailSensitivityFilter.Level
+    let selectedEmailCount: Int
+    var emailsFiltered: Bool { visibleEmailCount < emailCount }
     var totalFiles: Int { sources.reduce(0) { $0 + $1.fileCount } }
     var totalBytes: Int64 { sources.reduce(0) { $0 + $1.totalBytes } }
     var exceedsWarnThreshold: Bool { totalBytes > MaterializationEngine.warnThreshold }
     var exceedsBlockThreshold: Bool { totalBytes > MaterializationEngine.blockThreshold }
-    var emailsFiltered: Bool { visibleEmailCount < emailCount }
 }
 
 // MARK: - Session Model
@@ -31,6 +33,7 @@ struct SessionPreview {
 final class SessionModel {
     var activeGrant: GrantRecord?
     var activeGrantSources: [GrantSourceRecord] = []
+    var activeTargetApp: TargetApp = .cowork
     var lastCompletedSession: Session?
     var selectedPreset: DomainPreset?
     var preview: SessionPreview?
@@ -67,50 +70,90 @@ final class SessionModel {
     // MARK: - Pre-session Preview
 
     /// Compute a preview of what the session will contain without materializing.
-    func computePreview(targetApp: TargetApp = .cowork) async {
+    func computePreview(
+        targetApp: TargetApp = .cowork,
+        fileScopes: [FileSelectionScope] = [],
+        selectedEmailIDs: Set<String> = []
+    ) async {
         guard let grantStore else { return }
         isComputing = true
         previewError = nil
         do {
             let activeSources = try await grantStore.activeSources()
-            guard !activeSources.isEmpty else {
+            let explicitScopes = normalizedScopes(fileScopes)
+            let usingExplicitSelection = !explicitScopes.isEmpty || !selectedEmailIDs.isEmpty
+
+            guard usingExplicitSelection || !activeSources.isEmpty else {
                 isComputing = false
                 previewError = "Select at least one folder before starting a session."
                 return
             }
 
-            let mountInputs = activeSources.map { source in
-                (source: source, mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased())
+            let activeSourceMap = Dictionary(uniqueKeysWithValues: activeSources.map { ($0.sourceID, $0) })
+            let groupedScopes = Dictionary(grouping: explicitScopes, by: \.sourceID)
+            let inputs: [MaterializationEngine.MaterializationSource]
+            if usingExplicitSelection {
+                guard !groupedScopes.isEmpty || !selectedEmailIDs.isEmpty else {
+                    isComputing = false
+                    previewError = "Select at least one folder, file, or email before starting a session."
+                    return
+                }
+                inputs = groupedScopes.keys.sorted().compactMap { sourceID in
+                    guard let source = activeSourceMap[sourceID] else { return nil }
+                    return MaterializationEngine.MaterializationSource(
+                        source: source,
+                        mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased(),
+                        selectedScopes: groupedScopes[sourceID] ?? []
+                    )
+                }
+            } else {
+                inputs = activeSources.map { source in
+                    MaterializationEngine.MaterializationSource(
+                        source: source,
+                        mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased()
+                    )
+                }
             }
 
-            let perSource = try MaterializationEngine.estimateSizePerSource(sources: mountInputs)
+            let perSource = try MaterializationEngine.estimateSizePerSource(sources: inputs)
             let estimates = perSource.map {
                 SessionPreview.SourceEstimate(
                     sourceID: $0.sourceID,
                     displayName: $0.displayName,
                     fileCount: $0.fileCount,
-                    totalBytes: $0.totalBytes
+                    totalBytes: $0.totalBytes,
+                    scopeCount: max(1, groupedScopes[$0.sourceID]?.count ?? 1)
                 )
             }
 
-            let emailCount = (try? await emailStore?.emailMessageCount()) ?? 0
-            let preset = selectedPreset ?? DomainPreset.presets.first { $0.id == "general" }
-            let sensitivity = EmailSensitivityFilter(rawValue: preset?.emailSensitivity.rawValue ?? "moderate")
+            let previewSensitivity = resolvedSensitivityLevel(usingExplicitSelection: usingExplicitSelection)
+            let totalEmailCount: Int
             let visibleEmailCount: Int
-            if sensitivity.level == .strict {
-                visibleEmailCount = (try? await emailStore?.sharedEmailCount()) ?? 0
-            } else if sensitivity.level == .open {
-                visibleEmailCount = emailCount
+            if usingExplicitSelection {
+                totalEmailCount = selectedEmailIDs.count
+                visibleEmailCount = selectedEmailIDs.count
             } else {
-                visibleEmailCount = (try? await emailStore?.visibleEmailCount(hiddenDomains: sensitivity.hiddenDomains)) ?? emailCount
+                let allEmails = try await emailStore?.allEmailMessages(limit: 5_000) ?? []
+                totalEmailCount = allEmails.count
+                switch previewSensitivity {
+                case .strict:
+                    visibleEmailCount = (try await emailStore?.sharedEmails(limit: 5_000).count) ?? 0
+                case .moderate, .open:
+                    let filter = EmailSensitivityFilter(level: previewSensitivity)
+                    visibleEmailCount = allEmails.filter { filter.isVisible(email: $0) }.count
+                }
             }
 
             preview = SessionPreview(
                 sources: estimates,
-                emailCount: emailCount,
+                emailCount: totalEmailCount,
                 visibleEmailCount: visibleEmailCount,
-                sensitivityLevel: sensitivity.level
+                sensitivityLevel: previewSensitivity,
+                selectedEmailCount: usingExplicitSelection
+                    ? selectedEmailIDs.count
+                    : visibleEmailCount
             )
+            activeTargetApp = targetApp
             isComputing = false
         } catch {
             isComputing = false
@@ -129,34 +172,51 @@ final class SessionModel {
     /// Start a new session: creates a grant, materializes sources, sets baseline hashes.
     func startSession(
         targetApp: TargetApp = .cowork,
+        fileScopes: [FileSelectionScope] = [],
+        selectedEmailIDs: Set<String> = [],
+        summaryFraming: String? = nil,
+        noteCaptureMode: SessionNoteCaptureMode? = nil,
         onError: (String) -> Void
     ) async {
         guard let grantStore, let snapshotStore else { return }
         do {
+            activeTargetApp = targetApp
+            let effectiveNoteCaptureMode = noteCaptureMode ?? Self.defaultSessionNoteCaptureMode()
             let activeSources = try await grantStore.activeSources()
-            guard !activeSources.isEmpty else {
+            let explicitScopes = normalizedScopes(fileScopes)
+            let usingExplicitSelection = !explicitScopes.isEmpty || !selectedEmailIDs.isEmpty
+
+            guard usingExplicitSelection || !activeSources.isEmpty else {
                 onError("Select at least one folder before starting a session.")
                 return
             }
 
-            let sourceIDs = activeSources.map(\.sourceID)
-            let preset = selectedPreset ?? DomainPreset.presets.first { $0.id == "general" }
+            let activeSourceMap = Dictionary(uniqueKeysWithValues: activeSources.map { ($0.sourceID, $0) })
+            let explicitSourceIDs = Array(Set(explicitScopes.map(\.sourceID))).sorted()
+            let sourceIDs = usingExplicitSelection ? explicitSourceIDs : activeSources.map(\.sourceID)
             let grant = try await grantStore.startGrant(
                 targetApp: targetApp,
                 profileID: "default",
                 sourceIDs: sourceIDs,
                 materializationRoot: Self.materializationRoot(grantID: "").path,
-                emailSensitivity: preset?.emailSensitivity.rawValue ?? "moderate",
-                summaryFraming: preset?.summaryFraming
+                emailSensitivity: usingExplicitSelection ? "strict" : (selectedPreset?.emailSensitivity.rawValue ?? "moderate"),
+                summaryFraming: usingExplicitSelection ? (summaryFraming ?? "Curated access session") : selectedPreset?.summaryFraming,
+                explicitSelection: usingExplicitSelection,
+                noteCaptureMode: effectiveNoteCaptureMode
             )
 
             let actualRoot = Self.materializationRoot(grantID: grant.grantID)
             try await grantStore.updateMaterializationRoot(grantID: grant.grantID, root: actualRoot.path)
 
             let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
-            let mountInputs = grantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
-                guard let source = activeSources.first(where: { $0.sourceID == gs.sourceID }) else { return nil }
-                return (source: source, mountName: gs.mountName)
+            let scopesBySource = Dictionary(grouping: explicitScopes, by: \.sourceID)
+            let mountInputs = grantSources.compactMap { gs -> MaterializationEngine.MaterializationSource? in
+                guard let source = activeSourceMap[gs.sourceID] else { return nil }
+                return MaterializationEngine.MaterializationSource(
+                    source: source,
+                    mountName: gs.mountName,
+                    selectedScopes: scopesBySource[gs.sourceID] ?? []
+                )
             }
 
             let results = try MaterializationEngine.materialize(
@@ -164,6 +224,11 @@ final class SessionModel {
                 sources: mountInputs,
                 materializationRoot: actualRoot.path
             )
+
+            if usingExplicitSelection {
+                try await grantStore.replaceGrantFileScopes(grantID: grant.grantID, scopes: explicitScopes)
+                try emailStore?.replaceGrantEmails(grantID: grant.grantID, emailIDs: Array(selectedEmailIDs))
+            }
 
             for result in results {
                 try await grantStore.setBaselineHash(
@@ -205,11 +270,30 @@ final class SessionModel {
             activeGrant = try await grantStore.grant(id: grant.grantID)
             activeGrantSources = try await grantStore.grantSources(grantID: grant.grantID)
 
+            if effectiveNoteCaptureMode != .off,
+               let activeGrant {
+                let visibleEmailCount = try accessibleEmails(for: activeGrant, limit: 5_000).count
+                try? await recordSystemSessionNote(
+                    grant: activeGrant,
+                    kind: .startNote,
+                    markdown: startNoteMarkdown(
+                        grant: activeGrant,
+                        grantSources: activeGrantSources,
+                        results: results,
+                        visibleEmailCount: visibleEmailCount,
+                        selectedEmailCount: selectedEmailIDs.count
+                    )
+                )
+            }
+
             try? await auditStore?.log(
                 action: .runStart,
                 runID: grant.grantID,
                 agent: targetApp.rawValue,
-                metadata: ["grant_id": grant.grantID],
+                metadata: [
+                    "grant_id": grant.grantID,
+                    "note_capture_mode": effectiveNoteCaptureMode.rawValue,
+                ],
                 grantID: grant.grantID
             )
             logger.info("Session started: \(grant.grantID) with \(results.count) sources")
@@ -226,6 +310,16 @@ final class SessionModel {
             let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
             let activeSrcs = try await grantStore.allSources()
             let matRoot = URL(fileURLWithPath: grant.materializationRoot)
+            var allPromotions: [PromotionRecord] = []
+            let allowedScopes = grant.explicitSelection
+                ? (try await grantStore.grantFileScopes(grantID: grant.grantID)).map {
+                    FileSelectionScope(
+                        sourceID: $0.sourceID,
+                        relativePath: $0.relativePath,
+                        isDirectory: $0.isDirectory
+                    )
+                }
+                : []
 
             for gs in grantSources {
                 guard let source = activeSrcs.first(where: { $0.sourceID == gs.sourceID }) else { continue }
@@ -237,7 +331,8 @@ final class SessionModel {
                     sourceID: gs.sourceID,
                     mountName: gs.mountName,
                     mountURL: mountURL,
-                    originalURL: originalURL
+                    originalURL: originalURL,
+                    allowedScopes: allowedScopes
                 )
 
                 for file in summary.applied + summary.newFiles {
@@ -293,9 +388,29 @@ final class SessionModel {
                 }
             }
 
+            allPromotions = try await grantStore.promotions(grantID: grant.grantID)
+            if grant.sessionNoteCaptureMode != .off {
+                try? await recordSystemSessionNote(
+                    grant: grant,
+                    kind: .endNote,
+                    markdown: endNoteMarkdown(
+                        grant: grant,
+                        grantSources: grantSources,
+                        promotions: allPromotions
+                    )
+                )
+            }
             try? await generateSessionSummary(grantID: grant.grantID)
             try await grantStore.endGrant(grantID: grant.grantID)
-            try? await auditStore?.log(action: .runEnd, runID: grant.grantID, metadata: ["grant_id": grant.grantID], grantID: grant.grantID)
+            try? await auditStore?.log(
+                action: .runEnd,
+                runID: grant.grantID,
+                metadata: [
+                    "grant_id": grant.grantID,
+                    "note_capture_mode": grant.sessionNoteCaptureMode.rawValue,
+                ],
+                grantID: grant.grantID
+            )
 
             // Clean up materialization directory after successful promotion
             Self.cleanupMaterialization(for: grant)
@@ -310,10 +425,27 @@ final class SessionModel {
     }
 
     /// Refresh grant state from database.
-    func refreshGrantState() async {
+    func refreshGrantState(targetApp: TargetApp? = nil) async {
         guard let grantStore else { return }
         do {
-            activeGrant = try await grantStore.activeGrant(targetApp: .cowork, profileID: "default")
+            let preferredTargetApp = targetApp ?? activeTargetApp
+            let candidateApps = [preferredTargetApp] + TargetApp.allCases.filter { $0 != preferredTargetApp }
+
+            activeGrant = nil
+            activeGrantSources = []
+
+            for candidate in candidateApps {
+                if let grant = try await grantStore.activeGrant(targetApp: candidate, profileID: "default") {
+                    activeTargetApp = candidate
+                    activeGrant = grant
+                    activeGrantSources = try await grantStore.grantSources(grantID: grant.grantID)
+                    if let grantTarget = TargetApp(rawValue: grant.targetApp) {
+                        activeTargetApp = grantTarget
+                    }
+                    break
+                }
+            }
+
             if let grant = activeGrant {
                 activeGrantSources = try await grantStore.grantSources(grantID: grant.grantID)
             } else {
@@ -468,10 +600,89 @@ final class SessionModel {
             targetApp: TargetApp(rawValue: grant?.targetApp ?? "cowork") ?? .cowork,
             startedAt: grant?.startedAt ?? now,
             endedAt: grant?.endedAt ?? now,
-            markdown: lines.joined(separator: "\n")
+            markdown: lines.joined(separator: "\n"),
+            kind: .summary,
+            origin: .system
         )
         let summaries = try await grantStore.summaries(grantID: grantID)
         try await artifactIndex?.syncSessionSummaries(grantID: grantID, summaries: summaries)
+    }
+
+    private func recordSystemSessionNote(
+        grant: GrantRecord,
+        kind: SessionSummaryKind,
+        markdown: String
+    ) async throws {
+        guard let grantStore else { return }
+        let now = ISO8601DateFormatter().string(from: Date())
+        _ = try await grantStore.saveSummary(
+            grantID: grant.grantID,
+            targetApp: TargetApp(rawValue: grant.targetApp) ?? .cowork,
+            startedAt: grant.startedAt,
+            endedAt: now,
+            markdown: markdown,
+            kind: kind,
+            origin: .system
+        )
+        let summaries = try await grantStore.summaries(grantID: grant.grantID)
+        try await artifactIndex?.syncSessionSummaries(grantID: grant.grantID, summaries: summaries)
+    }
+
+    private func startNoteMarkdown(
+        grant: GrantRecord,
+        grantSources: [GrantSourceRecord],
+        results: [MaterializationEngine.MountResult],
+        visibleEmailCount: Int,
+        selectedEmailCount: Int
+    ) -> String {
+        let totalFiles = results.reduce(0) { $0 + $1.fileCount }
+        let totalBytes = results.reduce(Int64(0)) { $0 + $1.totalBytes }
+        let scopeLabel = grant.explicitSelection ? "Curated selection" : "Standard workspace share"
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        let emailLine = grant.explicitSelection ? selectedEmailCount : visibleEmailCount
+
+        return """
+        # Session Start Note
+
+        - **Captured by:** Manifold system note
+        - **Target app:** \(grant.targetApp)
+        - **Started:** \(grant.startedAt)
+        - **Session notes:** \(grant.sessionNoteCaptureMode.statusLabel)
+        - **Scope:** \(scopeLabel)
+        - **Sources:** \(grantSources.map(\.mountName).joined(separator: ", "))
+        - **Files materialized:** \(totalFiles)
+        - **Workspace size:** \(formatter.string(fromByteCount: totalBytes))
+        - **Emails available:** \(emailLine)
+
+        Optional agent follow-up: add a short start note only if the objective, expected output, or access rationale needs more context than the factual session scope above.
+        """
+    }
+
+    private func endNoteMarkdown(
+        grant: GrantRecord,
+        grantSources: [GrantSourceRecord],
+        promotions: [PromotionRecord]
+    ) -> String {
+        let applied = promotions.filter { $0.result == PromotionResult.applied.rawValue && $0.originalBeforeHash != nil }.count
+        let created = promotions.filter { $0.result == PromotionResult.applied.rawValue && $0.originalBeforeHash == nil }.count
+        let conflicts = promotions.filter { $0.result == PromotionResult.conflict.rawValue }.count
+
+        return """
+        # Session End Note
+
+        - **Captured by:** Manifold system note
+        - **Target app:** \(grant.targetApp)
+        - **Ended:** \(ISO8601DateFormatter().string(from: Date()))
+        - **Session notes:** \(grant.sessionNoteCaptureMode.statusLabel)
+        - **Sources:** \(grantSources.map(\.mountName).joined(separator: ", "))
+        - **Files modified:** \(applied)
+        - **Files created:** \(created)
+        - **Conflicts:** \(conflicts)
+        - **Promotions recorded:** \(promotions.count)
+
+        Optional agent follow-up: add a short end note only if the handoff, open questions, or next step are not obvious from the generated session summary.
+        """
     }
 
     private func baselineSnapshotMount(
@@ -556,6 +767,9 @@ final class SessionModel {
 
     private func accessibleEmails(for grant: GrantRecord, limit: Int = 1_000) throws -> [EmailMessageRecord] {
         guard let emailStore else { return [] }
+        if grant.explicitSelection {
+            return try emailStore.grantEmails(grantID: grant.grantID, limit: limit)
+        }
         let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
 
         if filter.level == .strict {
@@ -565,5 +779,31 @@ final class SessionModel {
         return try emailStore
             .allEmailMessages(limit: limit)
             .filter { filter.isVisible(email: $0) }
+    }
+
+    private func normalizedScopes(_ scopes: [FileSelectionScope]) -> [FileSelectionScope] {
+        var unique: [String: FileSelectionScope] = [:]
+        for scope in scopes {
+            let normalized = FileSelectionScope(
+                sourceID: scope.sourceID,
+                relativePath: scope.normalizedRelativePath,
+                isDirectory: scope.isDirectory
+            )
+            unique[normalized.id] = normalized
+        }
+        return Array(unique.values)
+    }
+
+    private func resolvedSensitivityLevel(usingExplicitSelection: Bool) -> EmailSensitivityFilter.Level {
+        if usingExplicitSelection {
+            return .strict
+        }
+        return EmailSensitivityFilter.Level(rawValue: selectedPreset?.emailSensitivity.rawValue ?? "moderate") ?? .moderate
+    }
+
+    private static func defaultSessionNoteCaptureMode() -> SessionNoteCaptureMode {
+        SessionNoteCaptureMode(
+            rawValue: UserDefaults.standard.string(forKey: "manifold.sessionNotes.mode") ?? ""
+        ) ?? .off
     }
 }

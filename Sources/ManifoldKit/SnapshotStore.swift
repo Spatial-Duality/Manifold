@@ -53,19 +53,33 @@ public actor SnapshotStore {
     }
 
     /// Record a file modification (agent wrote to a file).
-    public func recordModification(runID: String, workspaceID: String, filePath: String, newData: Data, source: String = "agent") async throws {
+    @discardableResult
+    public func recordModification(runID: String, workspaceID: String, filePath: String, newData: Data, source: String = "agent") async throws -> SnapshotWriteResult {
         let afterHash = try await contentStore.ingest(data: newData)
         let beforeHash = try latestHash(runID: runID, filePath: filePath)
         let timestamp = ISO8601DateFormatter().string(from: Date())
+        var snapshotID: Int?
 
         try db.transaction {
             try db.execute("""
                 INSERT INTO snapshots (run_id, workspace_id, timestamp, file_path, after_hash, before_hash, is_baseline, source)
                 VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-            """, params: [runID, workspaceID, timestamp, filePath, afterHash, beforeHash ?? "", source])
+            """, params: [runID, workspaceID, timestamp, filePath, afterHash, beforeHash, source])
+
+            snapshotID = try db.queryScalar("SELECT last_insert_rowid()").flatMap(Int.init)
 
             try db.execute("UPDATE content_meta SET ref_count = ref_count + 1 WHERE hash = ?", params: [afterHash])
         }
+
+        guard let snapshotID else {
+            throw ManifoldError.snapshotFailed("Failed to record snapshot id for \(filePath)")
+        }
+
+        return SnapshotWriteResult(
+            id: snapshotID,
+            beforeHash: beforeHash,
+            afterHash: afterHash
+        )
     }
 
     /// Record a file creation (agent created a new file).
@@ -301,6 +315,18 @@ public actor SnapshotStore {
             }
         }
         return pruned
+    }
+}
+
+public struct SnapshotWriteResult: Sendable, Hashable {
+    public let id: Int
+    public let beforeHash: String?
+    public let afterHash: String
+
+    public init(id: Int, beforeHash: String?, afterHash: String) {
+        self.id = id
+        self.beforeHash = beforeHash
+        self.afterHash = afterHash
     }
 }
 

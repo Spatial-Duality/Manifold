@@ -215,4 +215,47 @@ struct DatabaseMigratorTests {
         let sources = try db.queryAll("SELECT * FROM sources")
         #expect(sources.count == 1, "Should only have the pre-existing source, not the workspace")
     }
+
+    @Test("Migration v12 creates explicit access selection schema")
+    func explicitAccessSelectionSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let grantColumns = try db.queryAll("PRAGMA table_info(grants)")
+        let grantColumnNames = Set(grantColumns.compactMap { $0["name"] })
+        #expect(grantColumnNames.contains("explicit_selection"))
+
+        for table in [
+            "grant_file_scopes",
+            "access_presets",
+            "access_preset_file_scopes",
+            "access_preset_emails",
+        ] {
+            let rows = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='\(table)'"
+            )
+            #expect(!rows.isEmpty, "Table '\(table)' should exist after migration v12")
+        }
+    }
+
+    @Test("Migration v13 adds session note policy columns")
+    func sessionNotePolicySchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let grantColumns = try db.queryAll("PRAGMA table_info(grants)")
+        let grantColumnNames = Set(grantColumns.compactMap { $0["name"] })
+        #expect(grantColumnNames.contains("note_capture_mode"))
+
+        let summaryColumns = try db.queryAll("PRAGMA table_info(session_summaries)")
+        let summaryColumnNames = Set(summaryColumns.compactMap { $0["name"] })
+        #expect(summaryColumnNames.contains("summary_kind"))
+        #expect(summaryColumnNames.contains("summary_origin"))
+    }
 }

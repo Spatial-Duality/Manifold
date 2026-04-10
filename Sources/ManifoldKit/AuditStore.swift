@@ -221,36 +221,16 @@ public actor AuditStore {
         return rows.compactMap { Session(row: $0) }
     }
 
-    /// Get all events for a session, with snapshot data joined for write events.
+    /// Get all events for a session.
+    /// Write events rely on hashes captured in audit_log at write time plus an optional
+    /// `snapshot_id` stored in metadata, so history does not need a lossy timestamp join.
     public func sessionEvents(sessionID: String) throws -> [SessionEvent] {
-        // Check if snapshots table exists (it's created by SnapshotStore, which may not be initialized)
-        let hasSnapshots = (try? db.queryScalar(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'"
-        )) != nil
-
-        let sql: String
-        if hasSnapshots {
-            sql = """
-                SELECT a.id, a.timestamp, a.action, a.agent, a.file_path, a.metadata,
-                       s.id as snapshot_id, s.before_hash, s.after_hash
-                FROM audit_log a
-                LEFT JOIN snapshots s
-                    ON a.file_path = s.file_path
-                    AND a.action IN ('file_modified', 'file_created')
-                    AND ABS(julianday(a.timestamp) - julianday(s.timestamp)) * 86400 < 2
-                WHERE a.session_id = ?
-                ORDER BY a.id ASC
-            """
-        } else {
-            sql = """
-                SELECT id, timestamp, action, agent, file_path, metadata
-                FROM audit_log
-                WHERE session_id = ?
-                ORDER BY id ASC
-            """
-        }
-
-        let rows = try db.queryAll(sql, params: [sessionID])
+        let rows = try db.queryAll("""
+            SELECT id, timestamp, action, agent, file_path, metadata, before_hash, after_hash
+            FROM audit_log
+            WHERE session_id = ?
+            ORDER BY id ASC
+        """, params: [sessionID])
         return rows.compactMap { SessionEvent(row: $0) }
     }
 }
@@ -356,18 +336,29 @@ public struct SessionEvent: Sendable, Identifiable {
               let action = row["action"] else {
             return nil
         }
+        let metadata = row["metadata"]?.nilIfEmpty
         self.id = id
         self.timestamp = timestamp
         self.action = action
         self.agent = row["agent"]?.nilIfEmpty
         self.filePath = row["file_path"]?.nilIfEmpty
-        self.metadata = row["metadata"]?.nilIfEmpty
-        self.snapshotID = row["snapshot_id"].flatMap { Int($0) }
+        self.metadata = metadata
+        self.snapshotID = row["snapshot_id"].flatMap { Int($0) } ?? Self.snapshotID(from: metadata)
         self.beforeHash = row["before_hash"]?.nilIfEmpty
         self.afterHash = row["after_hash"]?.nilIfEmpty
     }
 
     public var isWriteEvent: Bool {
         action == "file_modified" || action == "file_created"
+    }
+
+    private static func snapshotID(from metadata: String?) -> Int? {
+        guard let metadata,
+              let data = metadata.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let snapshotID = json["snapshot_id"].flatMap(Int.init) else {
+            return nil
+        }
+        return snapshotID
     }
 }

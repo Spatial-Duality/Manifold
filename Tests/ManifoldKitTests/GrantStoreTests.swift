@@ -109,6 +109,24 @@ struct GrantStoreTests {
         #expect(source?.status == "active")
     }
 
+    @Test("Grant stores session note capture mode")
+    func grantStoresNoteCaptureMode() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let srcID = try await store.addSource(displayName: "App", rootPath: "/path/app")
+        let grant = try await store.startGrant(
+            targetApp: .cowork,
+            profileID: "profile-1",
+            sourceIDs: [srcID],
+            materializationRoot: "/tmp/mat/grant-test",
+            noteCaptureMode: .verbose
+        )
+
+        #expect(grant.noteCaptureMode == SessionNoteCaptureMode.verbose.rawValue)
+        #expect(grant.sessionNoteCaptureMode == .verbose)
+    }
+
     @Test("Only one active grant per target/profile")
     func singleActiveGrant() async throws {
         let (store, _, tempDir) = try makeStore()
@@ -204,6 +222,43 @@ struct GrantStoreTests {
         #expect(refreshed?.inactivityDeadline != originalDeadline)
     }
 
+    @Test("Explicit grant selection stores file scopes")
+    func explicitGrantFileScopes() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let srcID = try await store.addSource(displayName: "Project", rootPath: "/path/project")
+        let grant = try await store.startGrant(
+            targetApp: .cowork,
+            profileID: "p1",
+            sourceIDs: [srcID],
+            materializationRoot: "/tmp/mat/explicit",
+            explicitSelection: true
+        )
+
+        try await store.replaceGrantFileScopes(
+            grantID: grant.grantID,
+            scopes: [
+                FileSelectionScope(sourceID: srcID, relativePath: "Sources/App", isDirectory: true),
+                FileSelectionScope(sourceID: srcID, relativePath: "README.md", isDirectory: false),
+            ]
+        )
+
+        let refreshed = try await store.grant(id: grant.grantID)
+        #expect(refreshed?.explicitSelection == true)
+
+        let scopes = try await store.grantFileScopes(grantID: grant.grantID)
+        let hasReadmeScope = scopes.contains(where: { scope in
+            scope.sourceID == srcID && scope.relativePath == "README.md" && scope.isDirectory == false
+        })
+        let hasSourcesScope = scopes.contains(where: { scope in
+            scope.sourceID == srcID && scope.relativePath == "Sources/App" && scope.isDirectory == true
+        })
+        #expect(scopes.count == 2)
+        #expect(hasReadmeScope)
+        #expect(hasSourcesScope)
+    }
+
     @Test("Expire stale grants")
     func expireStale() async throws {
         let (store, db, tempDir) = try makeStore()
@@ -288,6 +343,34 @@ struct GrantStoreTests {
 
         let bySummary = try await store.summaries(grantID: grant.grantID)
         #expect(bySummary.count == 1)
+    }
+
+    @Test("Save summary stores kind and origin")
+    func sessionSummaryKindAndOrigin() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let srcID = try await store.addSource(displayName: "Typed", rootPath: "/path/typed")
+        let grant = try await store.startGrant(
+            targetApp: .codex, profileID: "p1",
+            sourceIDs: [srcID], materializationRoot: "/tmp/mat/typed"
+        )
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        try await store.saveSummary(
+            grantID: grant.grantID,
+            targetApp: .codex,
+            startedAt: now,
+            endedAt: now,
+            markdown: "Checkpoint note",
+            kind: .checkpointNote,
+            origin: .agent
+        )
+
+        let checkpointNotes = try await store.summaries(grantID: grant.grantID, kind: .checkpointNote)
+        #expect(checkpointNotes.count == 1)
+        #expect(checkpointNotes[0].kind == .checkpointNote)
+        #expect(checkpointNotes[0].origin == .agent)
     }
 
     // MARK: - Baseline Hash

@@ -98,7 +98,9 @@ public actor GrantStore {
         inactivityTimeout: TimeInterval = 3600,
         refreshOfGrantID: String? = nil,
         emailSensitivity: String = "moderate",
-        summaryFraming: String? = nil
+        summaryFraming: String? = nil,
+        explicitSelection: Bool = false,
+        noteCaptureMode: SessionNoteCaptureMode = .off
     ) throws -> GrantRecord {
         // End existing active grant for this target/profile
         try endActiveGrant(targetApp: targetApp, profileID: profileID, reason: .timedOut)
@@ -121,12 +123,13 @@ public actor GrantStore {
             try db.execute("""
                 INSERT INTO grants (grant_id, target_app, profile_id, status, started_at,
                     materialization_root, inactivity_deadline, refresh_of_grant_id,
-                    email_sensitivity, summary_framing)
-                VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+                    email_sensitivity, summary_framing, explicit_selection, note_capture_mode)
+                VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
             """, params: [
                 grantID, targetApp.rawValue, profileID, now,
                 materializationRoot, deadline, refreshOfGrantID,
-                emailSensitivity, summaryFraming,
+                emailSensitivity, summaryFraming, explicitSelection ? "1" : "0",
+                noteCaptureMode.rawValue,
             ])
 
             // Link sources to this grant
@@ -256,6 +259,42 @@ public actor GrantStore {
         return rows.compactMap { GrantSourceRecord(row: $0) }
     }
 
+    public func replaceGrantFileScopes(grantID: String, scopes: [FileSelectionScope]) throws {
+        try db.transaction {
+            try db.execute(
+                "DELETE FROM grant_file_scopes WHERE grant_id = ?",
+                params: [grantID]
+            )
+            for scope in scopes {
+                try db.execute(
+                    """
+                    INSERT INTO grant_file_scopes (
+                        grant_id, source_id, relative_path, is_directory
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    params: [
+                        grantID,
+                        scope.sourceID,
+                        scope.normalizedRelativePath,
+                        scope.isDirectory ? "1" : "0",
+                    ]
+                )
+            }
+        }
+    }
+
+    public func grantFileScopes(grantID: String) throws -> [GrantFileScopeRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM grant_file_scopes
+            WHERE grant_id = ?
+            ORDER BY source_id ASC, relative_path ASC
+            """,
+            params: [grantID]
+        )
+        return rows.compactMap { GrantFileScopeRecord(row: $0) }
+    }
+
     /// Update the materialization root path for a grant (e.g. after resolving the actual grant ID).
     public func updateMaterializationRoot(grantID: String, root: String) throws {
         try db.execute(
@@ -317,16 +356,18 @@ public actor GrantStore {
         startedAt: String,
         endedAt: String,
         markdown: String,
-        jsonHash: String? = nil
+        jsonHash: String? = nil,
+        kind: SessionSummaryKind = .summary,
+        origin: SessionSummaryOrigin = .system
     ) throws -> String {
         let summaryID = "sum-\(UUID().uuidString.prefix(8).lowercased())"
         try db.execute("""
             INSERT INTO session_summaries (summary_id, grant_id, target_app,
-                started_at, ended_at, summary_markdown, summary_json_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                started_at, ended_at, summary_markdown, summary_json_hash, summary_kind, summary_origin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, params: [
             summaryID, grantID, targetApp.rawValue,
-            startedAt, endedAt, markdown, jsonHash,
+            startedAt, endedAt, markdown, jsonHash, kind.rawValue, origin.rawValue,
         ])
         return summaryID
     }
@@ -345,6 +386,18 @@ public actor GrantStore {
         let rows = try db.queryAll(
             "SELECT * FROM session_summaries WHERE grant_id = ? ORDER BY ended_at DESC",
             params: [grantID]
+        )
+        return rows.compactMap { SessionSummaryRecord(row: $0) }
+    }
+
+    public func summaries(grantID: String, kind: SessionSummaryKind) throws -> [SessionSummaryRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM session_summaries
+            WHERE grant_id = ? AND summary_kind = ?
+            ORDER BY ended_at DESC
+            """,
+            params: [grantID, kind.rawValue]
         )
         return rows.compactMap { SessionSummaryRecord(row: $0) }
     }

@@ -45,9 +45,55 @@ public enum GrantStatus: String, Sendable {
     case timedOut = "timed_out"
 }
 
-public enum TargetApp: String, Sendable {
+public enum TargetApp: String, Sendable, CaseIterable {
     case cowork
     case codex
+}
+
+public enum SessionNoteCaptureMode: String, Sendable, CaseIterable {
+    case off
+    case basic
+    case verbose
+
+    public var automaticNoteKinds: [SessionSummaryKind] {
+        switch self {
+        case .off:
+            return []
+        case .basic:
+            return [.startNote, .endNote]
+        case .verbose:
+            return [.startNote, .checkpointNote, .endNote]
+        }
+    }
+
+    public var statusLabel: String {
+        rawValue.uppercased()
+    }
+}
+
+public enum SessionSummaryKind: String, Sendable, CaseIterable {
+    case summary
+    case startNote = "start_note"
+    case checkpointNote = "checkpoint_note"
+    case endNote = "end_note"
+
+    public var displayName: String {
+        switch self {
+        case .summary:
+            return "Summary"
+        case .startNote:
+            return "Start Note"
+        case .checkpointNote:
+            return "Checkpoint Note"
+        case .endNote:
+            return "End Note"
+        }
+    }
+}
+
+public enum SessionSummaryOrigin: String, Sendable, CaseIterable {
+    case system
+    case agent
 }
 
 public struct GrantRecord: Sendable, Identifiable {
@@ -63,8 +109,13 @@ public struct GrantRecord: Sendable, Identifiable {
     public let refreshOfGrantID: String?
     public let emailSensitivity: String  // strict, moderate, open
     public let summaryFraming: String?
+    public let explicitSelection: Bool
+    public let noteCaptureMode: String
 
     public var isActive: Bool { status == GrantStatus.active.rawValue }
+    public var sessionNoteCaptureMode: SessionNoteCaptureMode {
+        SessionNoteCaptureMode(rawValue: noteCaptureMode) ?? .off
+    }
 
     init?(row: [String: String]) {
         guard let grantID = row["grant_id"],
@@ -87,6 +138,8 @@ public struct GrantRecord: Sendable, Identifiable {
         self.refreshOfGrantID = row["refresh_of_grant_id"]
         self.emailSensitivity = row["email_sensitivity"] ?? "moderate"
         self.summaryFraming = row["summary_framing"]
+        self.explicitSelection = row["explicit_selection"] == "1"
+        self.noteCaptureMode = row["note_capture_mode"] ?? SessionNoteCaptureMode.off.rawValue
     }
 }
 
@@ -121,6 +174,88 @@ public struct GrantMount: Sendable, Hashable {
         self.sourceID = sourceID
         self.mountName = mountName
         self.mountPath = mountPath
+    }
+}
+
+public struct FileSelectionScope: Sendable, Hashable, Identifiable {
+    public var id: String { "\(sourceID):\(normalizedRelativePath):\(isDirectory ? "dir" : "file")" }
+    public let sourceID: String
+    public let relativePath: String
+    public let isDirectory: Bool
+
+    public var normalizedRelativePath: String {
+        Self.normalize(relativePath)
+    }
+
+    public init(sourceID: String, relativePath: String, isDirectory: Bool) {
+        self.sourceID = sourceID
+        self.relativePath = Self.normalize(relativePath)
+        self.isDirectory = isDirectory
+    }
+
+    public func contains(relativePath: String) -> Bool {
+        let normalizedPath = Self.normalize(relativePath)
+        if isDirectory {
+            if normalizedRelativePath.isEmpty {
+                return true
+            }
+            return normalizedPath == normalizedRelativePath
+                || normalizedPath.hasPrefix(normalizedRelativePath + "/")
+        }
+        return normalizedPath == normalizedRelativePath
+    }
+
+    public static func allows(_ relativePath: String, in scopes: [FileSelectionScope]) -> Bool {
+        let normalizedPath = Self.normalize(relativePath)
+        return scopes.contains { $0.contains(relativePath: normalizedPath) }
+    }
+
+    private static func normalize(_ path: String) -> String {
+        path
+            .replacingOccurrences(of: "\\\\", with: "/")
+            .replacingOccurrences(of: "//", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+}
+
+public struct GrantFileScopeRecord: Sendable, Hashable, Identifiable {
+    public var id: String { "\(grantID):\(sourceID):\(relativePath):\(isDirectory ? "dir" : "file")" }
+    public let grantID: String
+    public let sourceID: String
+    public let relativePath: String
+    public let isDirectory: Bool
+
+    public init?(row: [String: String]) {
+        guard let grantID = row["grant_id"],
+              let sourceID = row["source_id"],
+              let relativePath = row["relative_path"] else {
+            return nil
+        }
+        self.grantID = grantID
+        self.sourceID = sourceID
+        self.relativePath = relativePath
+        self.isDirectory = row["is_directory"] == "1"
+    }
+}
+
+public struct AccessPresetRecord: Sendable, Hashable, Identifiable {
+    public var id: String { presetID }
+    public let presetID: String
+    public let name: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init?(row: [String: String]) {
+        guard let presetID = row["preset_id"],
+              let name = row["name"],
+              let createdAt = row["created_at"],
+              let updatedAt = row["updated_at"] else {
+            return nil
+        }
+        self.presetID = presetID
+        self.name = name
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -576,6 +711,16 @@ public struct SessionSummaryRecord: Sendable, Identifiable {
     public let endedAt: String
     public let summaryMarkdown: String
     public let summaryJSONHash: String?
+    public let summaryKind: String
+    public let summaryOrigin: String
+
+    public var kind: SessionSummaryKind {
+        SessionSummaryKind(rawValue: summaryKind) ?? .summary
+    }
+
+    public var origin: SessionSummaryOrigin {
+        SessionSummaryOrigin(rawValue: summaryOrigin) ?? .system
+    }
 
     init?(row: [String: String]) {
         guard let summaryID = row["summary_id"],
@@ -594,5 +739,7 @@ public struct SessionSummaryRecord: Sendable, Identifiable {
         self.endedAt = endedAt
         self.summaryMarkdown = summaryMarkdown
         self.summaryJSONHash = row["summary_json_hash"]
+        self.summaryKind = row["summary_kind"] ?? SessionSummaryKind.summary.rawValue
+        self.summaryOrigin = row["summary_origin"] ?? SessionSummaryOrigin.system.rawValue
     }
 }

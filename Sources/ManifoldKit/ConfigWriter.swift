@@ -39,10 +39,7 @@ public struct ConfigWriter {
 
         // Merge manifold server entry
         var mcpServers = config["mcpServers"] as? [String: Any] ?? [:]
-        mcpServers["manifold"] = [
-            "command": binaryPath,
-            "args": [] as [String]
-        ] as [String: Any]
+        mcpServers["manifold"] = jsonMCPServerConfig(agent: .cowork)
         config["mcpServers"] = mcpServers
 
         // Write back
@@ -68,14 +65,7 @@ public struct ConfigWriter {
 
         // Merge manifold MCP server entry
         var mcpServers = config["mcpServers"] as? [String: Any] ?? [:]
-        if mcpServers["manifold"] != nil {
-            print("Manifold already configured in Claude Code settings. Skipping.")
-            return
-        }
-        mcpServers["manifold"] = [
-            "command": binaryPath,
-            "args": [] as [String],
-        ] as [String: Any]
+        mcpServers["manifold"] = jsonMCPServerConfig(agent: .cowork)
         config["mcpServers"] = mcpServers
 
         // Write back
@@ -102,23 +92,53 @@ public struct ConfigWriter {
             content = existing
         }
 
-        // Check if manifold is already configured
-        if content.contains("[mcp_servers.manifold]") || content.contains("[mcp.manifold]") {
-            print("Manifold already configured in Codex config. Skipping.")
-            return
-        }
-
-        // Append manifold MCP server config
-        if !content.hasSuffix("\n") { content += "\n" }
-        content += """
-
-        [mcp_servers.manifold]
-        command = "\(binaryPath)"
-        args = []
-
-        """
+        content = upsertCodexServerConfig(content, agent: .codex)
 
         try content.write(to: configFile, atomically: true, encoding: .utf8)
         print("Wrote Codex config: \(configFile.path)")
+    }
+
+    private func jsonMCPServerConfig(agent: TargetApp) -> [String: Any] {
+        [
+            "command": binaryPath,
+            "args": ["--agent", agent.rawValue],
+        ]
+    }
+
+    private func upsertCodexServerConfig(_ content: String, agent: TargetApp) -> String {
+        let block = codexMCPServerBlock(agent: agent)
+        let patterns = [
+            #"\n?\[mcp_servers\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
+            #"\n?\[mcp\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
+        ]
+
+        var updated = content
+        for pattern in patterns {
+            let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+            let regex = try? NSRegularExpression(pattern: pattern, options: [])
+            updated = regex?.stringByReplacingMatches(
+                in: updated,
+                options: [],
+                range: range,
+                withTemplate: "\n" + block + "\n"
+            ) ?? updated
+        }
+
+        if updated == content {
+            if !updated.isEmpty, !updated.hasSuffix("\n") {
+                updated += "\n"
+            }
+            updated += "\n" + block + "\n"
+        }
+
+        return updated
+    }
+
+    private func codexMCPServerBlock(agent: TargetApp) -> String {
+        """
+        [mcp_servers.manifold]
+        command = "\(binaryPath)"
+        args = ["--agent", "\(agent.rawValue)"]
+        """
     }
 }

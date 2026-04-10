@@ -35,6 +35,7 @@ final class MCPServer: @unchecked Sendable {
     let version: String
 
     private var toolHandler: ((_ name: String, _ arguments: JSONDict) async -> JSONDict)?
+    private var initializeHandler: ((_ params: JSONDict) async -> Void)?
     private var tools: [MCPTool] = []
     private var resources: [MCPResource] = []
     private var resourceReader: ((_ uri: String) async -> String)?
@@ -54,6 +55,10 @@ final class MCPServer: @unchecked Sendable {
     func registerResources(_ resources: [MCPResource], reader: @escaping @Sendable (_ uri: String) async -> String) {
         self.resources = resources
         self.resourceReader = reader
+    }
+
+    func registerInitializeHandler(_ handler: @escaping @Sendable (_ params: JSONDict) async -> Void) {
+        self.initializeHandler = handler
     }
 
     // MARK: - Run
@@ -99,7 +104,7 @@ final class MCPServer: @unchecked Sendable {
         let result: Any?
         switch method {
         case "initialize":
-            result = handleInitialize()
+            result = await handleInitialize(params: params)
         case "initialized", "notifications/initialized":
             return nil
         case "tools/list":
@@ -122,8 +127,11 @@ final class MCPServer: @unchecked Sendable {
 
     // MARK: - Method Handlers
 
-    private func handleInitialize() -> [String: Any] {
-        [
+    private func handleInitialize(params: [String: Any]) async -> [String: Any] {
+        if let initializeHandler {
+            await initializeHandler(JSONDict(params))
+        }
+        return [
             "protocolVersion": "2024-11-05",
             "capabilities": [
                 "tools": ["listChanged": false],

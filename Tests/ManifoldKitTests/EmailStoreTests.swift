@@ -352,6 +352,29 @@ struct EmailStoreTests {
         #expect(uids == [100, 200])
     }
 
+    @Test("Mailbox queries use membership when messages appear in multiple folders")
+    func mailboxQueriesUseMembership() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        _ = try await insertTestMessage(store: store, emailID: "msg-1", mailbox: "INBOX")
+        _ = try await insertTestMessage(store: store, emailID: "msg-2", mailbox: "Sent")
+
+        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
+        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Archive", imapUID: 200, emailID: "msg-1")
+        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Sent", imapUID: 300, emailID: "msg-2")
+
+        let mailboxes = try await store.mailboxes(accountID: Self.testAccountID)
+        #expect(mailboxes.count == 3)
+        #expect(mailboxes.first(where: { $0.name == "Archive" })?.count == 1)
+        #expect(mailboxes.first(where: { $0.name == "INBOX" })?.count == 1)
+        #expect(mailboxes.first(where: { $0.name == "Sent" })?.count == 1)
+
+        let archiveMessages = try await store.emailMessages(accountID: Self.testAccountID, mailbox: "Archive")
+        #expect(archiveMessages.count == 1)
+        #expect(archiveMessages[0].emailID == "msg-1")
+    }
+
     @Test("markMissingFromMailbox sets missing_from timestamp")
     func markMissing() async throws {
         let (store, db, tempDir) = try await makeStore()

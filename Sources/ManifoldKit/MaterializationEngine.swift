@@ -9,6 +9,21 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 /// A baseline manifest (`.manifold-baseline.json`) records the SHA-256 hash of
 /// every file at copy time, enabling drift detection during promotion.
 public struct MaterializationEngine: Sendable {
+    public struct MaterializationSource: Sendable {
+        public let source: SourceRecord
+        public let mountName: String
+        public let selectedScopes: [FileSelectionScope]
+
+        public init(
+            source: SourceRecord,
+            mountName: String,
+            selectedScopes: [FileSelectionScope] = []
+        ) {
+            self.source = source
+            self.mountName = mountName
+            self.selectedScopes = selectedScopes
+        }
+    }
 
     /// Result of materializing a single source into a grant workspace.
     public struct MountResult: Sendable {
@@ -46,14 +61,28 @@ public struct MaterializationEngine: Sendable {
     public static func estimateSize(
         sources: [(source: SourceRecord, mountName: String)]
     ) throws -> SizeEstimate {
+        try estimateSize(
+            sources: sources.map {
+                MaterializationSource(source: $0.source, mountName: $0.mountName)
+            }
+        )
+    }
+
+    /// Estimate file count and total size of sources without copying.
+    /// When scopes are provided, only selected files and directories are counted.
+    public static func estimateSize(
+        sources: [MaterializationSource]
+    ) throws -> SizeEstimate {
         let fm = FileManager.default
         var totalBytes: Int64 = 0
         var fileCount = 0
 
-        for (source, _) in sources {
+        for input in sources {
+            let source = input.source
             let sourceURL = URL(fileURLWithPath: source.originalRootPath)
             let resolvedSource = sourceURL.resolvingSymlinksInPath()
             let ignoreMatcher = GlobMatcher.load(from: sourceURL.appendingPathComponent(".manifoldignore"))
+            let scopes = normalizedScopes(input.selectedScopes, for: source.sourceID)
 
             guard let enumerator = fm.enumerator(
                 at: resolvedSource,
@@ -66,14 +95,24 @@ public struct MaterializationEngine: Sendable {
                 let resolved = fileURL.resolvingSymlinksInPath()
                 guard resolved.path.hasPrefix(sourceBasePath) else { continue }
                 let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
+                let isDirectory = fileURL.hasDirectoryPath
 
                 if shouldSkip(relativePath: relativePath) {
-                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                    if isDirectory { enumerator.skipDescendants() }
                     continue
                 }
 
-                if ignoreMatcher.shouldExclude(relativePath: relativePath, isDirectory: fileURL.hasDirectoryPath) {
-                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                if ignoreMatcher.shouldExclude(relativePath: relativePath, isDirectory: isDirectory) {
+                    if isDirectory { enumerator.skipDescendants() }
+                    continue
+                }
+
+                if isDirectory, !shouldTraverseDirectory(relativePath: relativePath, scopes: scopes) {
+                    enumerator.skipDescendants()
+                    continue
+                }
+
+                if !shouldInclude(relativePath: relativePath, isDirectory: isDirectory, scopes: scopes) {
                     continue
                 }
 
@@ -91,11 +130,30 @@ public struct MaterializationEngine: Sendable {
     public static func estimateSizePerSource(
         sources: [(source: SourceRecord, mountName: String)]
     ) throws -> [SourceSizeEstimate] {
-        try sources.map { (source, _) in
-            let est = try estimateSize(sources: [(source, "")])
+        try estimateSizePerSource(
+            sources: sources.map {
+                MaterializationSource(source: $0.source, mountName: $0.mountName)
+            }
+        )
+    }
+
+    /// Per-source size estimates for session preview.
+    public static func estimateSizePerSource(
+        sources: [MaterializationSource]
+    ) throws -> [SourceSizeEstimate] {
+        try sources.map { input in
+            let est = try estimateSize(
+                sources: [
+                    MaterializationSource(
+                        source: input.source,
+                        mountName: input.mountName,
+                        selectedScopes: input.selectedScopes
+                    )
+                ]
+            )
             return SourceSizeEstimate(
-                sourceID: source.sourceID,
-                displayName: source.displayName,
+                sourceID: input.source.sourceID,
+                displayName: input.source.displayName,
                 fileCount: est.fileCount,
                 totalBytes: est.totalBytes
             )
@@ -107,6 +165,22 @@ public struct MaterializationEngine: Sendable {
     public static func materialize(
         grantID: String,
         sources: [(source: SourceRecord, mountName: String)],
+        materializationRoot: String
+    ) throws -> [MountResult] {
+        try materialize(
+            grantID: grantID,
+            sources: sources.map {
+                MaterializationSource(source: $0.source, mountName: $0.mountName)
+            },
+            materializationRoot: materializationRoot
+        )
+    }
+
+    /// Materialize all sources for a grant into the workspace directory.
+    /// Returns one MountResult per source.
+    public static func materialize(
+        grantID: String,
+        sources: [MaterializationSource],
         materializationRoot: String
     ) throws -> [MountResult] {
         let fm = FileManager.default
@@ -129,7 +203,9 @@ public struct MaterializationEngine: Sendable {
 
         var results: [MountResult] = []
 
-        for (source, mountName) in sources {
+        for input in sources {
+            let source = input.source
+            let mountName = input.mountName
             let mountURL = workspaceURL.appendingPathComponent(mountName)
             let sourceURL = URL(fileURLWithPath: source.originalRootPath)
 
@@ -142,7 +218,8 @@ public struct MaterializationEngine: Sendable {
                 sourceID: source.sourceID,
                 mountName: mountName,
                 sourceURL: sourceURL,
-                mountURL: mountURL
+                mountURL: mountURL,
+                selectedScopes: input.selectedScopes
             )
             results.append(result)
         }
@@ -198,7 +275,8 @@ public struct MaterializationEngine: Sendable {
         sourceID: String,
         mountName: String,
         sourceURL: URL,
-        mountURL: URL
+        mountURL: URL,
+        selectedScopes: [FileSelectionScope]
     ) throws -> MountResult {
         let fm = FileManager.default
 
@@ -214,6 +292,7 @@ public struct MaterializationEngine: Sendable {
 
         let resolvedSource = sourceURL.resolvingSymlinksInPath()
         let ignoreMatcher = GlobMatcher.load(from: sourceURL.appendingPathComponent(".manifoldignore"))
+        let scopes = normalizedScopes(selectedScopes, for: sourceID)
 
         guard let enumerator = fm.enumerator(
             at: resolvedSource,
@@ -229,24 +308,35 @@ public struct MaterializationEngine: Sendable {
                 let resolved = fileURL.resolvingSymlinksInPath()
                 guard resolved.path.hasPrefix(sourceBasePath) else { continue }
                 let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
+                let isDirectory = fileURL.hasDirectoryPath
 
                 // Skip noise directories
                 if shouldSkip(relativePath: relativePath) {
-                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                    if isDirectory { enumerator.skipDescendants() }
                     continue
                 }
 
                 // Skip .manifoldignore patterns
-                if ignoreMatcher.shouldExclude(relativePath: relativePath, isDirectory: fileURL.hasDirectoryPath) {
-                    if fileURL.hasDirectoryPath { enumerator.skipDescendants() }
+                if ignoreMatcher.shouldExclude(relativePath: relativePath, isDirectory: isDirectory) {
+                    if isDirectory { enumerator.skipDescendants() }
+                    continue
+                }
+
+                if isDirectory, !shouldTraverseDirectory(relativePath: relativePath, scopes: scopes) {
+                    enumerator.skipDescendants()
+                    continue
+                }
+
+                if !shouldInclude(relativePath: relativePath, isDirectory: isDirectory, scopes: scopes) {
                     continue
                 }
 
                 guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
                       values.isRegularFile == true else {
-                    // It's a directory — create it in mount
-                    let destDir = mountURL.appendingPathComponent(relativePath)
-                    try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+                    if isDirectory {
+                        let destDir = mountURL.appendingPathComponent(relativePath)
+                        try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+                    }
                     continue
                 }
 
@@ -301,5 +391,49 @@ public struct MaterializationEngine: Sendable {
         ]
         let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
         return noiseDirectories.contains(firstComponent)
+    }
+
+    private static func normalizedScopes(_ scopes: [FileSelectionScope], for sourceID: String) -> [FileSelectionScope] {
+        scopes
+            .filter { $0.sourceID == sourceID }
+            .map {
+                FileSelectionScope(
+                    sourceID: $0.sourceID,
+                    relativePath: normalizedRelativePath($0.relativePath),
+                    isDirectory: $0.isDirectory
+                )
+            }
+    }
+
+    private static func normalizedRelativePath(_ path: String) -> String {
+        path
+            .replacingOccurrences(of: "\\\\", with: "/")
+            .replacingOccurrences(of: "//", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private static func shouldTraverseDirectory(relativePath: String, scopes: [FileSelectionScope]) -> Bool {
+        guard !scopes.isEmpty else { return true }
+        let candidate = normalizedRelativePath(relativePath)
+        return scopes.contains { scope in
+            let scopePath = scope.normalizedRelativePath
+            return candidate.isEmpty
+                || scopePath == candidate
+                || scopePath.hasPrefix(candidate + "/")
+                || candidate.hasPrefix(scopePath + "/")
+        }
+    }
+
+    private static func shouldInclude(relativePath: String, isDirectory: Bool, scopes: [FileSelectionScope]) -> Bool {
+        guard !scopes.isEmpty else { return true }
+        let candidate = normalizedRelativePath(relativePath)
+        return scopes.contains { scope in
+            let scopePath = scope.normalizedRelativePath
+            if scope.isDirectory {
+                if scopePath.isEmpty { return true }
+                return candidate == scopePath || candidate.hasPrefix(scopePath + "/")
+            }
+            return !isDirectory && candidate == scopePath
+        }
     }
 }

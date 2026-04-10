@@ -502,9 +502,93 @@ public struct DatabaseMigrator {
 
         // v11: Domain preset wiring — store email sensitivity and summary framing on grants
         Migration(version: 11, name: "grant_domain_preset") { db in
-            try db.execute("ALTER TABLE grants ADD COLUMN email_sensitivity TEXT NOT NULL DEFAULT 'moderate'")
-            try db.execute("ALTER TABLE grants ADD COLUMN summary_framing TEXT")
+            let columns = try db.queryAll("PRAGMA table_info(grants)")
+            let columnNames = Set(columns.compactMap { $0["name"] })
+            if !columnNames.contains("email_sensitivity") {
+                try db.execute("ALTER TABLE grants ADD COLUMN email_sensitivity TEXT NOT NULL DEFAULT 'moderate'")
+            }
+            if !columnNames.contains("summary_framing") {
+                try db.execute("ALTER TABLE grants ADD COLUMN summary_framing TEXT")
+            }
             logger.info("Migration 11: grant email_sensitivity and summary_framing columns")
+        },
+
+        // v12: Explicit access selection — scoped files, selected emails, and reusable presets.
+        Migration(version: 12, name: "explicit_access_selection") { db in
+            let grantColumns = try db.queryAll("PRAGMA table_info(grants)")
+            let grantColumnNames = Set(grantColumns.compactMap { $0["name"] })
+            if !grantColumnNames.contains("explicit_selection") {
+                try db.execute("ALTER TABLE grants ADD COLUMN explicit_selection INTEGER NOT NULL DEFAULT 0")
+            }
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS grant_file_scopes (
+                    grant_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    is_directory INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(grant_id, source_id, relative_path),
+                    FOREIGN KEY(grant_id) REFERENCES grants(grant_id),
+                    FOREIGN KEY(source_id) REFERENCES sources(source_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_grant_file_scopes_grant ON grant_file_scopes(grant_id)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS access_presets (
+                    preset_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS access_preset_file_scopes (
+                    preset_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    is_directory INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(preset_id, source_id, relative_path),
+                    FOREIGN KEY(preset_id) REFERENCES access_presets(preset_id),
+                    FOREIGN KEY(source_id) REFERENCES sources(source_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_preset_file_scopes_preset ON access_preset_file_scopes(preset_id)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS access_preset_emails (
+                    preset_id TEXT NOT NULL,
+                    email_id TEXT NOT NULL,
+                    PRIMARY KEY(preset_id, email_id),
+                    FOREIGN KEY(preset_id) REFERENCES access_presets(preset_id),
+                    FOREIGN KEY(email_id) REFERENCES email_messages(email_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_preset_emails_preset ON access_preset_emails(preset_id)")
+            logger.info("Migration 12: explicit selection and access preset tables")
+        },
+
+        // v13: Session note policy and typed session note entries.
+        Migration(version: 13, name: "session_note_policy") { db in
+            let grantColumns = try db.queryAll("PRAGMA table_info(grants)")
+            let grantColumnNames = Set(grantColumns.compactMap { $0["name"] })
+            if !grantColumnNames.contains("note_capture_mode") {
+                try db.execute("ALTER TABLE grants ADD COLUMN note_capture_mode TEXT NOT NULL DEFAULT 'off'")
+            }
+
+            let summaryColumns = try db.queryAll("PRAGMA table_info(session_summaries)")
+            let summaryColumnNames = Set(summaryColumns.compactMap { $0["name"] })
+            if !summaryColumnNames.contains("summary_kind") {
+                try db.execute("ALTER TABLE session_summaries ADD COLUMN summary_kind TEXT NOT NULL DEFAULT 'summary'")
+            }
+            if !summaryColumnNames.contains("summary_origin") {
+                try db.execute("ALTER TABLE session_summaries ADD COLUMN summary_origin TEXT NOT NULL DEFAULT 'system'")
+            }
+
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_grants_note_capture_mode ON grants(note_capture_mode)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_session_summaries_kind ON session_summaries(grant_id, summary_kind, ended_at)")
+            logger.info("Migration 13: session note policy and typed note metadata")
         },
     ]
 }

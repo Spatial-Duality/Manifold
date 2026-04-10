@@ -82,18 +82,50 @@ public struct EmailStore: Sendable {
     }
 
     public func emailMessages(accountID: String, mailbox: String, limit: Int = 500) throws -> [EmailMessageRecord] {
-        let rows = try db.queryAll(
-            "SELECT * FROM email_messages WHERE account_id = ? AND mailbox = ? ORDER BY received_at DESC LIMIT ?",
-            params: [accountID, mailbox, "\(limit)"]
-        )
+        let membershipCount = try db.queryScalar(
+            "SELECT COUNT(*) FROM email_mailbox_membership WHERE account_id = ? AND mailbox = ?",
+            params: [accountID, mailbox]
+        ).flatMap(Int.init) ?? 0
+
+        let rows: [[String: String]]
+        if membershipCount > 0 {
+            rows = try db.queryAll("""
+                SELECT DISTINCT em.* FROM email_messages em
+                JOIN email_mailbox_membership emm ON em.email_id = emm.email_id
+                WHERE emm.account_id = ? AND emm.mailbox = ?
+                ORDER BY em.received_at DESC
+                LIMIT ?
+            """, params: [accountID, mailbox, "\(limit)"])
+        } else {
+            rows = try db.queryAll(
+                "SELECT * FROM email_messages WHERE account_id = ? AND mailbox = ? ORDER BY received_at DESC LIMIT ?",
+                params: [accountID, mailbox, "\(limit)"]
+            )
+        }
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
 
     public func mailboxes(accountID: String) throws -> [(name: String, count: Int)] {
-        let rows = try db.queryAll(
-            "SELECT mailbox, COUNT(*) as cnt FROM email_messages WHERE account_id = ? GROUP BY mailbox ORDER BY mailbox ASC",
+        let membershipCount = try db.queryScalar(
+            "SELECT COUNT(*) FROM email_mailbox_membership WHERE account_id = ?",
             params: [accountID]
-        )
+        ).flatMap(Int.init) ?? 0
+
+        let rows: [[String: String]]
+        if membershipCount > 0 {
+            rows = try db.queryAll("""
+                SELECT mailbox, COUNT(DISTINCT email_id) as cnt
+                FROM email_mailbox_membership
+                WHERE account_id = ?
+                GROUP BY mailbox
+                ORDER BY mailbox ASC
+            """, params: [accountID])
+        } else {
+            rows = try db.queryAll(
+                "SELECT mailbox, COUNT(*) as cnt FROM email_messages WHERE account_id = ? GROUP BY mailbox ORDER BY mailbox ASC",
+                params: [accountID]
+            )
+        }
         return rows.compactMap { row in
             guard let name = row["mailbox"], let countStr = row["cnt"], let count = Int(countStr) else { return nil }
             return (name, count)
@@ -104,6 +136,16 @@ public struct EmailStore: Sendable {
         let rows = try db.queryAll(
             "SELECT * FROM email_messages ORDER BY received_at DESC LIMIT ?",
             params: ["\(limit)"]
+        )
+        return rows.compactMap { EmailMessageRecord(row: $0) }
+    }
+
+    public func emailMessages(ids: [String]) throws -> [EmailMessageRecord] {
+        guard !ids.isEmpty else { return [] }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let rows = try db.queryAll(
+            "SELECT * FROM email_messages WHERE email_id IN (\(placeholders)) ORDER BY received_at DESC",
+            params: ids
         )
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
@@ -450,6 +492,56 @@ public struct EmailStore: Sendable {
             LIMIT ?
         """, params: [accountID, mailbox, "\(limit)"])
         return rows.compactMap { EmailMessageRecord(row: $0) }
+    }
+
+    public func replaceGrantEmails(grantID: String, emailIDs: [String]) throws {
+        try db.transaction {
+            try db.execute("DELETE FROM grant_emails WHERE grant_id = ?", params: [grantID])
+            for emailID in Set(emailIDs) {
+                let materializedPath = try db.queryScalar(
+                    "SELECT COALESCE(eml_path, 'selected://' || email_id) FROM email_messages WHERE email_id = ? LIMIT 1",
+                    params: [emailID]
+                )
+                guard let materializedPath else { continue }
+                try db.execute(
+                    """
+                    INSERT INTO grant_emails (grant_id, email_id, materialized_path)
+                    VALUES (?, ?, ?)
+                    """,
+                    params: [grantID, emailID, materializedPath]
+                )
+            }
+        }
+    }
+
+    public func grantEmails(grantID: String, limit: Int = 500) throws -> [EmailMessageRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT em.* FROM email_messages em
+            JOIN grant_emails ge ON em.email_id = ge.email_id
+            WHERE ge.grant_id = ?
+            ORDER BY em.received_at DESC
+            LIMIT ?
+            """,
+            params: [grantID, "\(limit)"]
+        )
+        return rows.compactMap { EmailMessageRecord(row: $0) }
+    }
+
+    public func grantEmailIDs(grantID: String) throws -> Set<String> {
+        let rows = try db.queryAll(
+            "SELECT email_id FROM grant_emails WHERE grant_id = ?",
+            params: [grantID]
+        )
+        return Set(rows.compactMap { $0["email_id"] })
+    }
+
+    public func isEmailInGrant(grantID: String, emailID: String) throws -> Bool {
+        let result = try db.queryScalar(
+            "SELECT COUNT(*) FROM grant_emails WHERE grant_id = ? AND email_id = ?",
+            params: [grantID, emailID]
+        )
+        return result.flatMap(Int.init) ?? 0 > 0
     }
 
     public func messageCountInMailbox(accountID: String, mailbox: String) throws -> Int {

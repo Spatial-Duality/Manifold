@@ -30,12 +30,18 @@ final class SetupModel {
     var notifyOnAccessDenied: Bool {
         didSet { UserDefaults.standard.set(notifyOnAccessDenied, forKey: "manifold.notify.accessDenied") }
     }
+    var sessionNotesMode: SessionNoteCaptureMode {
+        didSet { UserDefaults.standard.set(sessionNotesMode.rawValue, forKey: "manifold.sessionNotes.mode") }
+    }
 
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "manifold.onboarding.completed")
         launchAtLogin = UserDefaults.standard.bool(forKey: "manifold.launchAtLogin")
         notifyOnSessionEnd = UserDefaults.standard.object(forKey: "manifold.notify.sessionEnd") as? Bool ?? true
         notifyOnAccessDenied = UserDefaults.standard.object(forKey: "manifold.notify.accessDenied") as? Bool ?? true
+        sessionNotesMode = SessionNoteCaptureMode(
+            rawValue: UserDefaults.standard.string(forKey: "manifold.sessionNotes.mode") ?? ""
+        ) ?? .off
     }
 
     func checkMCPInstalled() {

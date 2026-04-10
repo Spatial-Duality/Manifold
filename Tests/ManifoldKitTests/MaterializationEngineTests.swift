@@ -236,6 +236,48 @@ struct MaterializationEngineTests {
         #expect(estimate.totalBytes == expectedBytes)
     }
 
+    @Test("Scoped materialization copies only selected files and folders")
+    func scopedMaterialization() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let sourceDir = tempDir.appendingPathComponent("scoped")
+        try createSourceTree(at: sourceDir)
+
+        let source = SourceRecord(row: [
+            "source_id": "src-scoped",
+            "display_name": "Scoped",
+            "original_root_path": sourceDir.path,
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        ])!
+
+        let matRoot = tempDir.appendingPathComponent("workspace")
+        let results = try MaterializationEngine.materialize(
+            grantID: "grant-scoped",
+            sources: [
+                MaterializationEngine.MaterializationSource(
+                    source: source,
+                    mountName: "Scoped",
+                    selectedScopes: [
+                        FileSelectionScope(sourceID: "src-scoped", relativePath: "src", isDirectory: true),
+                        FileSelectionScope(sourceID: "src-scoped", relativePath: "README.md", isDirectory: false),
+                    ]
+                )
+            ],
+            materializationRoot: matRoot.path
+        )
+
+        #expect(results.count == 1)
+        #expect(results[0].fileCount == 2)
+
+        let mountPath = matRoot.appendingPathComponent("Scoped")
+        #expect(FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("src/main.swift").path))
+        #expect(FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("README.md").path))
+        #expect(!FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("tests/test_a.swift").path))
+    }
+
     @Test("estimateSizePerSource returns per-source estimates")
     func estimateSizePerSource() throws {
         let tempDir = try makeTempDir()

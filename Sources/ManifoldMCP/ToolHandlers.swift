@@ -95,9 +95,13 @@ enum ToolHandlers {
             ),
             MCPTool(
                 name: "save_session_note",
-                description: "Save a note or summary for the current active session. Useful for recording what you accomplished.",
+                description: "Save a short session note for the current active session. Use sparingly for start, checkpoint, or end context when that intent would not be obvious from the audit trail.",
                 inputSchema: objectSchema(properties: [
                     "note": ["type": "string", "description": "Markdown note about the session"],
+                    "note_type": [
+                        "type": "string",
+                        "description": "Optional note type: start_note, checkpoint_note, or end_note",
+                    ],
                 ], required: ["note"])
             ),
             MCPTool(
@@ -242,7 +246,8 @@ enum ToolHandlers {
                 guard let note = arguments["note"] as? String else {
                     return errorResult("'note' parameter required")
                 }
-                let msg = try await bridge.saveSessionNote(note: note)
+                let noteType = (arguments["note_type"] as? String).flatMap(SessionSummaryKind.init(rawValue:)) ?? .checkpointNote
+                let msg = try await bridge.saveSessionNote(note: note, noteType: noteType)
                 return textResult(msg)
 
             case "read_range":
@@ -311,6 +316,12 @@ enum ToolHandlers {
             }
             lines.append("Files: \(status.fileCount)")
             lines.append("Emails: \(status.emailCount)")
+            if status.noteCaptureMode != SessionNoteCaptureMode.off.rawValue {
+                lines.append("Session notes: \(status.noteCaptureMode.uppercased())")
+            }
+            if let noteGuidance = status.noteGuidance {
+                lines.append(noteGuidance)
+            }
             lines.append(status.message)
             return lines.joined(separator: "\n")
         } else if !status.pausedSources.isEmpty {
@@ -332,12 +343,24 @@ enum ToolHandlers {
         lines.append("Started: \(d.startedAt)")
         if let ended = d.endedAt { lines.append("Ended: \(ended)") }
         lines.append("Sources: \(d.sources.joined(separator: ", "))")
+        lines.append("Session notes: \(d.noteCaptureMode.uppercased())")
         lines.append("")
 
         if let summary = d.summaryMarkdown {
             lines.append(summary)
         } else {
             lines.append("No summary recorded.")
+        }
+
+        if !d.sessionNotes.isEmpty {
+            lines.append("")
+            lines.append("Session Notes:")
+            for note in d.sessionNotes {
+                let kind = SessionSummaryKind(rawValue: note.kind)?.displayName ?? note.kind
+                lines.append("- \(kind) (\(note.origin), \(note.endedAt))")
+                lines.append(note.markdown)
+                lines.append("")
+            }
         }
 
         if !d.filesApplied.isEmpty {
