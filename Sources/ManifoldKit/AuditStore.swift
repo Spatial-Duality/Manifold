@@ -74,42 +74,55 @@ public actor AuditStore {
     }
 
     /// One-time migration: assign session_ids to historical entries that lack them.
+    /// Processes in batches of 500 to avoid loading 100K+ rows into memory at once.
+    /// Session state (currentSessionID, currentAgent, lastDate) carries across batches.
     private nonisolated func backfillSessionIDs() throws {
         let needsBackfill = try db.queryScalar("""
             SELECT COUNT(*) FROM audit_log WHERE session_id IS NULL OR session_id = ''
         """)
         guard let countStr = needsBackfill, let count = Int(countStr), count > 0 else { return }
 
-        let rows = try db.queryAll("""
-            SELECT id, timestamp, agent FROM audit_log
-            WHERE session_id IS NULL OR session_id = ''
-            ORDER BY id ASC
-        """)
-
         let isoFormatter = ISO8601DateFormatter.shared
         var currentSessionID: String?
         var currentAgent: String?
         var lastDate: Date?
+        let batchSize = 500
+        var offset = 0
 
-        for row in rows {
-            guard let idStr = row["id"], let ts = row["timestamp"] else { continue }
-            let agent = row["agent"]?.nilIfEmpty ?? ""
-            let date = isoFormatter.date(from: ts) ?? Date.distantPast
+        while true {
+            let rows = try db.queryAll("""
+                SELECT id, timestamp, agent FROM audit_log
+                WHERE session_id IS NULL OR session_id = ''
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+            """, params: ["\(batchSize)", "\(offset)"])
 
-            let needsNewSession = currentSessionID == nil
-                || agent != currentAgent
-                || lastDate.map({ date.timeIntervalSince($0) > Self.sessionGapSeconds }) ?? true
+            guard !rows.isEmpty else { break }
 
-            if needsNewSession {
-                currentSessionID = "session-\(UUID().uuidString.prefix(12).lowercased())"
-                currentAgent = agent
+            try db.transaction {
+                for row in rows {
+                    guard let idStr = row["id"], let ts = row["timestamp"] else { continue }
+                    let agent = row["agent"]?.nilIfEmpty ?? ""
+                    let date = isoFormatter.date(from: ts) ?? Date.distantPast
+
+                    let needsNewSession = currentSessionID == nil
+                        || agent != currentAgent
+                        || lastDate.map({ date.timeIntervalSince($0) > Self.sessionGapSeconds }) ?? true
+
+                    if needsNewSession {
+                        currentSessionID = "session-\(UUID().uuidString.prefix(12).lowercased())"
+                        currentAgent = agent
+                    }
+                    lastDate = date
+
+                    try db.execute(
+                        "UPDATE audit_log SET session_id = ? WHERE id = ?",
+                        params: [currentSessionID!, idStr]
+                    )
+                }
             }
-            lastDate = date
 
-            try db.execute(
-                "UPDATE audit_log SET session_id = ? WHERE id = ?",
-                params: [currentSessionID!, idStr]
-            )
+            offset += batchSize
         }
     }
 
