@@ -66,9 +66,41 @@ public actor ContentStore {
     }
 
     /// Ingest a file from disk by URL. Returns the SHA-256 hash.
+    /// Uses streaming SHA-256 (64KB chunks) to avoid loading the entire file into memory.
+    /// For a 50MB file, peak memory is 64KB instead of 50MB.
     public func ingest(fileURL: URL) throws -> String {
-        let data = try Data(contentsOf: fileURL)
-        return try ingest(data: data)
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        var totalSize = 0
+        while true {
+            let chunk = handle.readData(ofLength: 65536)
+            guard !chunk.isEmpty else { break }
+            hasher.update(data: chunk)
+            totalSize += chunk.count
+        }
+        let hash = hasher.finalize().hexString
+        let blobURL = blobURL(for: hash)
+
+        if FileManager.default.fileExists(atPath: blobURL.path) {
+            return hash
+        }
+
+        // Create shard directory
+        let shardURL = blobsURL.appendingPathComponent(String(hash.prefix(2)))
+        try FileManager.default.createDirectory(at: shardURL, withIntermediateDirectories: true)
+
+        // Copy file to blob store instead of writing Data
+        try FileManager.default.copyItem(at: fileURL, to: blobURL)
+
+        // Record metadata
+        try db.execute("""
+            INSERT OR IGNORE INTO content_meta (hash, size_bytes, ingested_at, ref_count)
+            VALUES (?, ?, ?, 0)
+        """, params: [hash, "\(totalSize)", ISO8601DateFormatter.shared.string(from: Date())])
+
+        return hash
     }
 
     /// Retrieve blob data by hash. Returns nil if not found.
@@ -138,7 +170,14 @@ public actor ContentStore {
 // MARK: - SHA256 Hex Extension
 
 extension SHA256Digest {
+    /// Pre-allocated hex string — avoids 32 intermediate String allocations.
     var hexString: String {
-        self.map { String(format: "%02x", $0) }.joined()
+        let hexDigits: [UInt8] = Array("0123456789abcdef".utf8)
+        var chars = [UInt8](repeating: 0, count: 64) // SHA-256 = 32 bytes = 64 hex chars
+        for (i, byte) in enumerated() {
+            chars[i &* 2] = hexDigits[Int(byte >> 4)]
+            chars[i &* 2 &+ 1] = hexDigits[Int(byte & 0x0F)]
+        }
+        return String(bytes: chars, encoding: .ascii)!
     }
 }
