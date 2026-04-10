@@ -132,6 +132,22 @@ public struct EmailStore: Sendable {
         }
     }
 
+    /// Aggregate email counts by sender domain using SQL GROUP BY.
+    /// Returns (domain, count) pairs sorted by count descending.
+    /// This is O(1) in Swift vs O(N) for loading all messages and counting in memory.
+    public func domainCounts() throws -> [(domain: String, count: Int)] {
+        let rows = try db.queryAll("""
+            SELECT COALESCE(sender_domain, 'unknown') as domain, COUNT(*) as cnt
+            FROM email_messages
+            GROUP BY domain
+            ORDER BY cnt DESC
+        """)
+        return rows.compactMap { row in
+            guard let domain = row["domain"], let cntStr = row["cnt"], let cnt = Int(cntStr) else { return nil }
+            return (domain, cnt)
+        }
+    }
+
     public func allEmailMessages(limit: Int = 1000) throws -> [EmailMessageRecord] {
         let rows = try db.queryAll(
             "SELECT * FROM email_messages ORDER BY received_at DESC LIMIT ?",
