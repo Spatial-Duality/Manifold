@@ -18,8 +18,15 @@ public final class DatabaseConnection: @unchecked Sendable {
 
         // WAL mode for crash resilience and concurrent reads
         try execute("PRAGMA journal_mode=WAL")
+        // NORMAL sync in WAL mode: safe on process crash, last txn may be lost on power loss
+        // sqlite.org: "With synchronous=NORMAL in WAL mode, data is safe if the OS crashes"
+        try execute("PRAGMA synchronous=NORMAL")
+        // 8MB page cache (default 2MB is small for heavy query workloads)
+        try execute("PRAGMA cache_size=-8000")
         // Foreign keys
         try execute("PRAGMA foreign_keys=ON")
+        // Run SQLite's query planner optimizer on open
+        try execute("PRAGMA optimize")
     }
 
     deinit {
@@ -35,13 +42,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         }
         defer { sqlite3_finalize(stmt) }
 
-        for (i, param) in params.enumerated() {
-            if let param {
-                sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
-            } else {
-                sqlite3_bind_null(stmt, Int32(i + 1))
-            }
-        }
+        bindParams(stmt, params)
 
         let result = sqlite3_step(stmt)
         guard result == SQLITE_DONE || result == SQLITE_ROW else {
@@ -57,13 +58,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         }
         defer { sqlite3_finalize(stmt) }
 
-        for (i, param) in params.enumerated() {
-            if let param {
-                sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
-            } else {
-                sqlite3_bind_null(stmt, Int32(i + 1))
-            }
-        }
+        bindParams(stmt, params)
 
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         guard let cStr = sqlite3_column_text(stmt, 0) else { return nil }
@@ -78,13 +73,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         }
         defer { sqlite3_finalize(stmt) }
 
-        for (i, param) in params.enumerated() {
-            if let param {
-                sqlite3_bind_text(stmt, Int32(i + 1), (param as NSString).utf8String, -1, nil)
-            } else {
-                sqlite3_bind_null(stmt, Int32(i + 1))
-            }
-        }
+        bindParams(stmt, params)
 
         var rows: [[String: String]] = []
         let colCount = sqlite3_column_count(stmt)
@@ -119,6 +108,22 @@ public final class DatabaseConnection: @unchecked Sendable {
     public func integrityCheck() throws -> Bool {
         let result = try queryScalar("PRAGMA integrity_check")
         return result == "ok"
+    }
+
+    /// Bind string parameters to a prepared statement.
+    /// Uses withCString + SQLITE_TRANSIENT instead of NSString bridging
+    /// to avoid Foundation allocation overhead per bind.
+    private func bindParams(_ stmt: OpaquePointer?, _ params: [String?]) {
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for (i, param) in params.enumerated() {
+            if let param {
+                param.withCString { cStr in
+                    sqlite3_bind_text(stmt, Int32(i + 1), cStr, -1, transient)
+                }
+            } else {
+                sqlite3_bind_null(stmt, Int32(i + 1))
+            }
+        }
     }
 
     private var errorMessage: String {
