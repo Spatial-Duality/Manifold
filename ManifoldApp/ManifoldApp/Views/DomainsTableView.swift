@@ -25,10 +25,10 @@ enum DomainCategory: String, CaseIterable {
 struct DomainsTableView: View {
     @Environment(ManifoldStore.self) var store
     @State private var searchText = ""
-    @State private var sensitivity: EmailSensitivityLevel = .moderate
     @State private var domains: [DomainAggregate] = []
     @State private var showUndoToast = false
     @State private var undoDomain: String?
+    @State private var broadenDomain: String?
 
     var body: some View {
         @Bindable var store = store
@@ -51,7 +51,7 @@ struct DomainsTableView: View {
                     Text("Sensitivity:")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Picker("Sensitivity", selection: $sensitivity) {
+                    Picker("Sensitivity", selection: sensitivityBinding) {
                         Text("Strict").tag(EmailSensitivityLevel.strict)
                         Text("Moderate").tag(EmailSensitivityLevel.moderate)
                         Text("Open").tag(EmailSensitivityLevel.open)
@@ -67,7 +67,13 @@ struct DomainsTableView: View {
             }
         }
         .animation(.spring(duration: 0.2), value: showUndoToast)
+        .sheet(item: broadenBinding) { change in
+            ReviewAccessSheet(pendingChange: change)
+                .environment(store)
+                .frame(minWidth: 560, minHeight: 500)
+        }
         .task {
+            await store.policy.loadPolicies()
             await computeDomains()
         }
     }
@@ -137,7 +143,7 @@ struct DomainsTableView: View {
                     .background(.secondary.opacity(0.1), in: Capsule())
             }
 
-            // Access checkbox
+            // Access checkbox — reads per-agent policy
             if domain.isHiddenBySensitivity {
                 Toggle(isOn: .constant(false)) { EmptyView() }
                     .toggleStyle(.checkbox)
@@ -145,12 +151,12 @@ struct DomainsTableView: View {
                     .disabled(true)
                     .accessibilityLabel("@\(domain.domain) — hidden by sensitivity")
             } else {
+                let isGranted = isDomainGranted(domain.domain)
                 Toggle(isOn: Binding(
-                    get: { false }, // TODO: Wire to PolicyStore per-agent
+                    get: { isGranted },
                     set: { newValue in
                         if newValue {
-                            // Broadening → Review sheet
-                            // TODO: Phase 8
+                            broadenDomain = domain.domain
                         } else {
                             handleNarrow(domain: domain.domain)
                         }
@@ -158,16 +164,59 @@ struct DomainsTableView: View {
                 )) { EmptyView() }
                 .toggleStyle(.checkbox)
                 .labelsHidden()
-                .accessibilityLabel("@\(domain.domain) access")
+                .accessibilityLabel("@\(domain.domain) access for \(focusedAgentName)")
             }
         }
         .padding(.vertical, 2)
     }
 
-    // MARK: - Narrowing
+    // MARK: - Per-Agent Policy Helpers
+
+    private var focusedAgent: TargetApp {
+        store.agentFocus == .codex ? .codex : .cowork
+    }
+
+    private var focusedAgentName: String {
+        focusedAgent == .codex ? "Codex" : "Claude"
+    }
+
+    private var focusedPolicy: AgentAccessPolicy? {
+        store.policy.policy(for: focusedAgent)
+    }
+
+    private var currentSensitivity: EmailSensitivityLevel {
+        focusedPolicy?.emailSensitivity ?? .moderate
+    }
+
+    private func isDomainGranted(_ domain: String) -> Bool {
+        focusedPolicy?.allowedEmailDomains.contains(domain.lowercased()) ?? false
+    }
+
+    /// Sensitivity binding — broadening (looser) opens Review sheet, tightening is inline.
+    private var sensitivityBinding: Binding<EmailSensitivityLevel> {
+        Binding(
+            get: { currentSensitivity },
+            set: { newLevel in
+                let current = currentSensitivity
+                let isBroadening = newLevel.isLooserThan(current)
+                if isBroadening {
+                    // Broadening → open Review sheet
+                    broadenDomain = "__sensitivity_\(newLevel.rawValue)"
+                } else {
+                    // Tightening → immediate + undo toast
+                    Task {
+                        await store.policy.updateSensitivity(newLevel, for: focusedAgent)
+                        await computeDomains()
+                    }
+                }
+            }
+        )
+    }
+
+    // MARK: - Narrowing (inline + undo)
 
     private func handleNarrow(domain: String) {
-        // TODO: Wire to PolicyStore
+        Task { await store.policy.removeEmailDomain(domain, from: focusedAgent) }
         undoDomain = domain
         showUndoToast = true
         Task {
@@ -180,9 +229,10 @@ struct DomainsTableView: View {
 
     private func undoToastView(domain: String) -> some View {
         HStack(spacing: Spacing.standard) {
-            Text("Removed access to @\(domain)")
+            Text("Removed \(focusedAgentName) access to @\(domain)")
                 .font(.callout)
             Button("Undo") {
+                Task { await store.policy.addEmailDomain(domain, to: focusedAgent) }
                 showUndoToast = false
             }
             .font(.callout.weight(.medium))
@@ -192,6 +242,27 @@ struct DomainsTableView: View {
         .padding(.vertical, Spacing.standard)
         .background(.regularMaterial, in: Capsule())
         .padding(.bottom, Spacing.edge)
+    }
+
+    private var broadenBinding: Binding<ReviewAccessChange?> {
+        Binding(
+            get: {
+                guard let domain = broadenDomain else { return nil }
+                if domain.hasPrefix("__sensitivity_") {
+                    let level = String(domain.dropFirst("__sensitivity_".count))
+                    return ReviewAccessChange(
+                        description: "Loosening \(focusedAgentName) sensitivity to \(level)",
+                        kind: .loosenSensitivity(from: currentSensitivity, to: EmailSensitivityLevel(rawValue: level) ?? .moderate)
+                    )
+                }
+                let count = domains.first(where: { $0.domain == domain })?.emailCount ?? 0
+                return ReviewAccessChange(
+                    description: "Adding @\(domain) to \(focusedAgentName) (\(count) emails + future mail)",
+                    kind: .addDomain(domain: domain, emailCount: count)
+                )
+            },
+            set: { if $0 == nil { broadenDomain = nil } }
+        )
     }
 
     // MARK: - Empty State
@@ -212,20 +283,24 @@ struct DomainsTableView: View {
     }
 
     /// Compute domain aggregates from EmailStore data.
+    /// Runs email counting off the main actor.
     private func computeDomains() async {
         guard let emailStore = store.emailStore else { return }
-        do {
-            let messages = try emailStore.allEmailMessages(limit: 10_000)
+        let sensitivity = currentSensitivity
+
+        let result = await Task.detached(priority: .userInitiated) {
+            () -> [DomainAggregate] in
+            guard let messages = try? emailStore.allEmailMessages(limit: 10_000) else { return [] }
             var domainCounts: [String: Int] = [:]
             for msg in messages {
                 let domain = msg.senderDomain ?? "unknown"
                 domainCounts[domain, default: 0] += 1
             }
 
-            domains = domainCounts.map { domain, count in
-                let reason = hiddenReason(for: domain)
+            return domainCounts.map { domain, count in
+                let reason = Self.hiddenReason(for: domain, sensitivity: sensitivity)
                 let isHidden = reason != nil
-                let category = categorize(domain: domain, isHidden: isHidden)
+                let category = Self.categorize(domain: domain, isHidden: isHidden)
                 return DomainAggregate(
                     domain: domain,
                     emailCount: count,
@@ -235,12 +310,12 @@ struct DomainsTableView: View {
                 )
             }
             .sorted { $0.emailCount > $1.emailCount }
-        } catch {
-            domains = []
-        }
+        }.value
+
+        domains = result
     }
 
-    private func categorize(domain: String, isHidden: Bool) -> DomainCategory {
+    private static func categorize(domain: String, isHidden: Bool) -> DomainCategory {
         if isHidden { return .hidden }
         let automated = ["github.com", "circleci.com", "gitlab.com", "bitbucket.org",
                          "linear.app", "notion.so", "slack.com", "vercel.com"]
@@ -251,14 +326,26 @@ struct DomainsTableView: View {
         return .work
     }
 
-    private func hiddenReason(for domain: String) -> String? {
+    private static func hiddenReason(for domain: String, sensitivity: EmailSensitivityLevel) -> String? {
+        // Always hidden regardless of sensitivity
+        if domain.hasPrefix("noreply.") || domain.hasPrefix("no-reply.") { return "2FA" }
+
         let banking = ["bankofamerica.com", "chase.com", "wellsfargo.com", "fidelity.com",
                        "schwab.com", "vanguard.com", "citi.com"]
-        if banking.contains(where: { domain.hasSuffix($0) }) { return "banking" }
         let health = ["mychart.com", "myhealth.com", "anthem.com", "cigna.com",
                       "unitedhealthcare.com"]
-        if health.contains(where: { domain.hasSuffix($0) }) { return "health" }
-        if domain.hasPrefix("noreply.") || domain.hasPrefix("no-reply.") { return "2FA" }
+
+        switch sensitivity {
+        case .strict:
+            // Everything is hidden in strict mode (only shared emails visible)
+            return "strict mode"
+        case .moderate:
+            if banking.contains(where: { domain.hasSuffix($0) }) { return "banking" }
+            if health.contains(where: { domain.hasSuffix($0) }) { return "health" }
+        case .open:
+            // Only always-hidden patterns (2FA above)
+            break
+        }
         return nil
     }
 }

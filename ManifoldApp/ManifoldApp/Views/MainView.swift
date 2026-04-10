@@ -200,18 +200,29 @@ private struct FilesTab: View {
 /// Emails tab with sidebar-driven navigation.
 /// When "All Mail" or no selection → Domains overview (access controls).
 /// When specific account/mailbox selected → Messages (existing EmailView).
+/// EmailView is kept alive (hidden) to preserve selection/search state.
 private struct EmailsTab: View {
-    @State private var selectedMailbox: String?
+    @State private var selectedMailbox: String? = "all-mail"
+
+    private var showingDomains: Bool {
+        selectedMailbox == nil || selectedMailbox == "all-mail"
+    }
 
     var body: some View {
         NavigationSplitView {
             EmailsSidebar(selectedMailbox: $selectedMailbox)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
         } detail: {
-            if selectedMailbox == nil || selectedMailbox == "all-mail" {
+            ZStack {
+                // Domains table (visible when All Mail selected)
                 DomainsTableView()
-            } else {
+                    .opacity(showingDomains ? 1 : 0)
+                    .allowsHitTesting(showingDomains)
+
+                // Email messages (visible when specific mailbox selected)
                 EmailView()
+                    .opacity(showingDomains ? 0 : 1)
+                    .allowsHitTesting(!showingDomains)
             }
         }
     }

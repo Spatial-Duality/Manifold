@@ -10,6 +10,7 @@ struct EmailView: View {
     @State private var messages: [EmailMessageRecord] = []
     @State private var showAddAccount = false
     @State private var showAccountDetail: EmailAccountRecord?
+    @State private var loadTask: Task<Void, Never>?
 
     var body: some View {
         mainContent
@@ -24,7 +25,8 @@ struct EmailView: View {
     }
 
     private func reloadMessages() {
-        Task { await loadMessages() }
+        loadTask?.cancel()
+        loadTask = Task { await loadMessages() }
     }
 
     @ViewBuilder

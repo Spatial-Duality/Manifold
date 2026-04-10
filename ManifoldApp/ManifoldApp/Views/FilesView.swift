@@ -185,18 +185,14 @@ struct FilesView: View {
     // MARK: - Data
 
     private func reloadFiles() {
-        // Standing access: enumerate from original source paths
-        // Grant-based: enumerate from materialized workspace
-        if store.hasActiveSession {
-            allFiles = store.enumerateAllFiles()
-        } else {
-            Task {
+        Task {
+            if store.hasActiveSession {
+                allFiles = await store.enumerateAllFiles()
+            } else {
                 allFiles = await store.enumerateSourceFiles()
-                applyFilters()
             }
-            return
+            applyFilters()
         }
-        applyFilters()
     }
 
     private func applyFilters() {

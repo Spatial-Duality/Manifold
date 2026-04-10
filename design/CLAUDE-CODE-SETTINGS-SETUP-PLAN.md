@@ -50,7 +50,7 @@ Every view in this plan must follow these eight rules. They are not style sugges
 | `Views/Setup/AddMailAccountSheet.swift` | Sheet: provider-first email setup flow |
 | `Models/IntegrationHealthModel.swift` | Per-agent connection state machine + polling |
 | `Models/AgentConnectionState.swift` | State enum + live-check logic per agent |
-| `Models/MailSetupModel.swift` | OAuth flow + IMAP validation state |
+| `Models/MailSetupModel.swift` | View-model wrapper around existing `OAuthManager` + `EmailAccountModel` |
 | `Views/EmptyStates/NoAgentsConnectedView.swift` | Overview empty state: no agents → show connect cards |
 | `Views/EmptyStates/NoEmailAccountsView.swift` | Emails empty state: no accounts → prompt setup |
 | `Views/EmptyStates/NoAccessGrantedView.swift` | Overview empty state: connected but no access |
@@ -70,6 +70,12 @@ Every view in this plan must follow these eight rules. They are not style sugges
 
 ### Step 11.1: Create `Models/AgentConnectionState.swift`
 
+> **Research-backed design decisions:**
+>
+> - **Claude has 3 checks**: app installed, MCP configured (via ConfigWriter JSON *or* .mcpb), live connection (via existing `ManifoldNotification` system). The `.mcpb` install is user-initiated (double-click) — Anthropic provides no programmatic install API. So "configured" means Manifold found its entry in `claude_desktop_config.json`, regardless of how it got there.
+> - **Codex has 2 checks, not 3**: CLI installed + Manifold MCP registered in `config.toml`. The original plan had a "Signed in" check, but Codex stores auth in macOS Keychain by default (service name "Codex Auth"), falling back to `~/.codex/auth.json` only if Keychain is unavailable. Querying another app's Keychain item requires entitlements we don't have. Checking `auth.json` would give false negatives on most installs. Drop it — if the user isn't signed in, `codex mcp add` will surface the error directly.
+> - **Live connection uses existing infrastructure**: `ManifoldStore` already tracks `isConnected` via `ManifoldNotification.agentConnected`/`.agentDisconnected` plus a 5-second audit-log polling fallback (300-second timeout). The health model should read this, not duplicate it.
+
 ```swift
 import Foundation
 
@@ -80,7 +86,7 @@ public enum AgentConnectionStatus: String, Sendable {
     case notInstalled   // App/CLI not found on disk
     case installed      // App/CLI found but not configured for Manifold
     case configured     // Config exists but connection not verified
-    case connected      // Live MCP handshake succeeded
+    case connected      // Live MCP handshake succeeded (via ManifoldNotification)
     case error          // Check failed with an error
 }
 
@@ -89,15 +95,14 @@ public enum AgentConnectionStatus: String, Sendable {
 public final class AgentConnectionState: Identifiable {
     public let id: TargetApp
 
-    // Claude-specific checks
-    var appInstalled: AgentConnectionStatus = .unknown      // Claude Desktop.app exists
-    var extensionInstalled: AgentConnectionStatus = .unknown // .mcpb extension registered
-    var connectionVerified: AgentConnectionStatus = .unknown // MCP handshake
+    // Claude-specific checks (3)
+    var appInstalled: AgentConnectionStatus = .unknown       // Claude Desktop.app exists
+    var mcpConfigured: AgentConnectionStatus = .unknown      // manifold entry in claude_desktop_config.json
+    var connectionVerified: AgentConnectionStatus = .unknown  // Live MCP connection (from ManifoldStore.isConnected)
 
-    // Codex-specific checks
+    // Codex-specific checks (2 — no "signed in" check, see note above)
     var cliInstalled: AgentConnectionStatus = .unknown       // `codex` binary in PATH
-    var cliSignedIn: AgentConnectionStatus = .unknown        // `codex` auth status
-    var mcpAdded: AgentConnectionStatus = .unknown           // `manifold` in codex MCP list
+    var mcpAdded: AgentConnectionStatus = .unknown           // `manifold` in ~/.codex/config.toml
 
     var errorDetail: String?
 
@@ -106,14 +111,23 @@ public final class AgentConnectionState: Identifiable {
         switch id {
         case .cowork:
             if connectionVerified == .connected { return .connected }
-            if [appInstalled, extensionInstalled, connectionVerified].contains(.error) { return .error }
+            if [appInstalled, mcpConfigured, connectionVerified].contains(.error) { return .error }
             if appInstalled == .notInstalled { return .notInstalled }
-            return .configured
+            if mcpConfigured == .installed { return .configured }
+            return .notInstalled
         case .codex:
-            if mcpAdded == .connected { return .connected }
-            if [cliInstalled, cliSignedIn, mcpAdded].contains(.error) { return .error }
+            if mcpAdded == .connected || mcpAdded == .installed { return .configured }
+            if [cliInstalled, mcpAdded].contains(.error) { return .error }
             if cliInstalled == .notInstalled { return .notInstalled }
-            return .configured
+            return .notInstalled
+        }
+    }
+
+    /// Number of checks for this agent (used by UI to render the right number of rows).
+    var checkCount: Int {
+        switch id {
+        case .cowork: return 3
+        case .codex: return 2
         }
     }
 
@@ -122,6 +136,13 @@ public final class AgentConnectionState: Identifiable {
 ```
 
 ### Step 11.2: Create `Models/IntegrationHealthModel.swift`
+
+> **Key design decisions backed by codebase research:**
+>
+> - **Claude "MCP configured" check**: `ConfigWriter` already writes to `claude_desktop_config.json` with a `"manifold"` key under `mcpServers`, passing `--agent cowork` as args. The health check reads the same file the same way. This is the same check the old `SetupModel.checkAgentConfigs()` did, but structured.
+> - **Claude "connection verified" check**: `ManifoldStore` already has `isConnected` (set by `ManifoldNotification.agentConnected`/`.agentDisconnected`) and `connectedAgent` (string). The health model reads these — it does NOT duplicate the notification/polling infrastructure.
+> - **Codex has 2 checks only**: CLI existence + `config.toml` manifold entry. Auth is in Keychain (inaccessible to us). The `config.toml` format is `[mcp_servers.manifold]` with `command` and `args` keys — this is what `ConfigWriter.writeCodexConfig()` writes.
+> - **No `.mcpb` detection**: The plan originally checked for `.mcpb` registration. But `.mcpb` is just a delivery mechanism — once installed, the result is the same `claude_desktop_config.json` entry. Checking the config file covers both install paths.
 
 ```swift
 import Foundation
@@ -135,6 +156,10 @@ final class IntegrationHealthModel {
     var claude = AgentConnectionState(agent: .cowork)
     var codex = AgentConnectionState(agent: .codex)
 
+    /// Reference to ManifoldStore for runtime connection state.
+    /// Set during ManifoldStore.init() — avoids circular init.
+    weak var store: ManifoldStore?
+
     func state(for agent: TargetApp) -> AgentConnectionState {
         switch agent {
         case .cowork: return claude
@@ -146,10 +171,10 @@ final class IntegrationHealthModel {
 
     func checkClaude() async {
         claude.appInstalled = .checking
-        claude.extensionInstalled = .checking
+        claude.mcpConfigured = .checking
         claude.connectionVerified = .checking
 
-        // 1. Claude Desktop installed?
+        // 1. Claude Desktop.app installed?
         let claudeAppPath = "/Applications/Claude.app"
         let altPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications/Claude.app").path
@@ -157,36 +182,43 @@ final class IntegrationHealthModel {
             || FileManager.default.fileExists(atPath: altPath)
             ? .installed : .notInstalled
 
-        // 2. Desktop Extension registered?
-        //    Check for manifold entry in claude_desktop_config.json
-        //    OR check the Extensions directory for manifold.mcpb
+        // 2. Manifold MCP configured in claude_desktop_config.json?
+        //    This covers BOTH install paths:
+        //    - ConfigWriter.installAll() writes the JSON entry directly
+        //    - .mcpb double-click also results in a config entry
+        //    Either way, the "manifold" key in mcpServers is the proof.
         let configPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json").path
         if let data = FileManager.default.contents(atPath: configPath),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let servers = json["mcpServers"] as? [String: Any],
            servers.keys.contains(where: { $0.lowercased().contains("manifold") }) {
-            claude.extensionInstalled = .installed
+            claude.mcpConfigured = .installed
         } else {
-            claude.extensionInstalled = .notInstalled
+            claude.mcpConfigured = .notInstalled
         }
 
-        // 3. Live connection verification
-        //    Attempt to reach ManifoldMCP via its expected STDIO/socket.
-        //    For now: check if the MCP binary exists and config points to it.
-        let binaryExists = FileManager.default.fileExists(atPath: ManifoldStore.mcpBinaryPath)
-        claude.connectionVerified = (claude.extensionInstalled == .installed && binaryExists)
-            ? .connected : .configured
+        // 3. Live connection verified?
+        //    ManifoldStore already tracks this via ManifoldNotification.agentConnected/
+        //    .agentDisconnected + 5-second audit-log polling (300s timeout).
+        //    We read the existing state rather than duplicating the mechanism.
+        if let store, store.isConnected, store.connectedAgent == "Claude" || store.connectedAgent == "cowork" {
+            claude.connectionVerified = .connected
+        } else if claude.mcpConfigured == .installed {
+            claude.connectionVerified = .configured  // Configured but not live right now
+        } else {
+            claude.connectionVerified = .notInstalled
+        }
     }
 
     // MARK: - Codex checks
 
     func checkCodex() async {
         codex.cliInstalled = .checking
-        codex.cliSignedIn = .checking
         codex.mcpAdded = .checking
 
         // 1. Codex CLI installed?
+        //    Check common install locations. Codex installs via npm/brew.
         let codexPaths = ["/usr/local/bin/codex", "/opt/homebrew/bin/codex"]
         let homeCodex = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/bin/codex").path
@@ -194,28 +226,27 @@ final class IntegrationHealthModel {
         codex.cliInstalled = found ? .installed : .notInstalled
 
         guard found else {
-            codex.cliSignedIn = .notInstalled
             codex.mcpAdded = .notInstalled
             return
         }
 
-        // 2. Signed in?
-        //    Check ~/.codex/auth.json or similar auth artifact
-        let authPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/auth.json").path
-        codex.cliSignedIn = FileManager.default.fileExists(atPath: authPath)
-            ? .installed : .notInstalled
-
-        // 3. Manifold MCP added?
-        //    Check ~/.codex/config.toml for manifold entry
+        // 2. Manifold MCP added to config.toml?
+        //    ConfigWriter writes: [mcp_servers.manifold] with command + args.
+        //    `codex mcp add manifold -- /path/to/binary` writes the same format.
         let tomlPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/config.toml").path
         if let contents = try? String(contentsOfFile: tomlPath, encoding: .utf8),
-           contents.lowercased().contains("manifold") {
-            codex.mcpAdded = .connected
+           contents.contains("[mcp_servers.manifold]") || contents.contains("mcp_servers.manifold") {
+            codex.mcpAdded = .installed
         } else {
             codex.mcpAdded = .notInstalled
         }
+
+        // NOTE: No "signed in" check. Codex stores auth in macOS Keychain
+        // (service "Codex Auth") by default. Querying another app's Keychain
+        // entry requires entitlements we don't have. Checking the fallback
+        // ~/.codex/auth.json would give false negatives on most installs.
+        // If the user isn't signed in, `codex mcp add` will surface the error.
     }
 
     /// Run all checks. Call on Settings open, sheet appear, and Setup Assistant load.
@@ -233,17 +264,30 @@ final class IntegrationHealthModel {
 In `ManifoldStore.swift`, replace the flat setup booleans:
 
 ```swift
-// REMOVE these from ManifoldStore (they currently delegate to SetupModel):
-// var mcpInstalled, claudeDesktopConfigured, codexConfigured
+// REMOVE these delegated properties from ManifoldStore:
+//   mcpInstalled, claudeDesktopConfigured, codexConfigured,
+//   checkMCPInstalled(), checkAgentConfigs()
+// They currently delegate to setup.xxx — replace with integrationHealth.
 
 // ADD:
 let integrationHealth = IntegrationHealthModel()
 
+// In ManifoldStore.init(), wire the back-reference:
+// integrationHealth.store = self
+
 // Computed compatibility shims (for existing code that reads the old booleans):
-var mcpInstalled: Bool { integrationHealth.claude.connectionVerified == .connected }
-var claudeDesktopConfigured: Bool { integrationHealth.claude.extensionInstalled == .installed }
-var codexConfigured: Bool { integrationHealth.codex.mcpAdded == .connected }
+var mcpInstalled: Bool {
+    integrationHealth.claude.mcpConfigured == .installed
+}
+var claudeDesktopConfigured: Bool {
+    integrationHealth.claude.mcpConfigured == .installed
+}
+var codexConfigured: Bool {
+    integrationHealth.codex.mcpAdded == .installed
+}
 ```
+
+> **Why `weak var store`?** IntegrationHealthModel needs to read `ManifoldStore.isConnected` and `connectedAgent` for the Claude "connection verified" check. These are already maintained by the existing notification + polling system. The alternative — passing `isConnected` as a parameter to `checkClaude()` — is cleaner but means the caller must know to pass it, which breaks the simple `checkAll()` API. The weak reference is a pragmatic tradeoff.
 
 ### Step 11.4: Migrate SetupModel
 
@@ -383,15 +427,14 @@ struct AgentSettingsCard: View {
                 OverallStatusBadge(status: state.overallStatus)
             }
 
-            // 3 check rows (different per agent)
+            // Check rows (3 for Claude, 2 for Codex — see Phase 11 notes)
             switch agent {
             case .cowork:
                 CheckRow("App installed", status: state.appInstalled)
-                CheckRow("Extension installed", status: state.extensionInstalled)
+                CheckRow("MCP configured", status: state.mcpConfigured)
                 CheckRow("Connection verified", status: state.connectionVerified)
             case .codex:
                 CheckRow("CLI installed", status: state.cliInstalled)
-                CheckRow("Signed in", status: state.cliSignedIn)
                 CheckRow("Manifold added", status: state.mcpAdded)
             }
 
@@ -909,15 +952,25 @@ It is fully replaced.
 
 ### Step 14.1: Create `Views/Setup/ConnectClaudeSheet.swift`
 
+> **Research finding — .mcpb cannot be installed programmatically.**
+> Anthropic's Desktop Extension system is explicitly designed to require user interaction (double-click or drag into Claude Desktop). There is no silent install API, URL scheme, or programmatic registration mechanism. The `.mcpb` file is a ZIP archive containing MCP server code + manifest.json, and Claude Desktop shows an interactive installation UI when the user opens it.
+>
+> **Two install paths, one check:**
+> 1. **Preferred (production):** Manifold ships a pre-built `.mcpb` in its app bundle. "Install" reveals it in Finder. User double-clicks it. Claude Desktop registers the extension. Result: a `"manifold"` entry appears in `claude_desktop_config.json`.
+> 2. **Fallback (development / .mcpb unavailable):** `ConfigWriter.installAll()` writes the JSON entry directly, same as the current `SetupModel.installMCP()`. This still works — Anthropic deprecated it as the *primary* user-facing path but it's still functional.
+>
+> Both paths produce the same result: a `"manifold"` key in `mcpServers`. The health check reads that key and doesn't care how it got there.
+
 Three live checks:
-1. **Claude Desktop installed** — check `/Applications/Claude.app`
-2. **Manifold extension installed** — Claude Desktop Extension (.mcpb)
-3. **Connection verified** — MCP handshake
+1. **Claude Desktop installed** — `/Applications/Claude.app` exists
+2. **MCP configured** — `"manifold"` entry in `claude_desktop_config.json` (covers both .mcpb and ConfigWriter paths)
+3. **Connection verified** — live MCP connection (via existing `ManifoldStore.isConnected` notification system)
 
 ```swift
 struct ConnectClaudeSheet: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
+    @State private var installing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -939,7 +992,6 @@ struct ConnectClaudeSheet: View {
                     label: "Claude Desktop installed",
                     status: store.integrationHealth.claude.appInstalled,
                     action: {
-                        // Open download page
                         if let url = URL(string: "https://claude.ai/download") {
                             NSWorkspace.shared.open(url)
                         }
@@ -947,15 +999,19 @@ struct ConnectClaudeSheet: View {
                     actionLabel: "Download"
                 )
 
-                // Check 2: Extension installed
+                // Check 2: MCP configured
                 LiveCheckRow(
-                    label: "Manifold extension installed",
-                    status: store.integrationHealth.claude.extensionInstalled,
+                    label: "MCP configured",
+                    status: store.integrationHealth.claude.mcpConfigured,
                     action: {
-                        // Install the .mcpb Desktop Extension
-                        store.installClaudeExtension()
+                        installing = true
+                        store.installManifoldForClaude()
+                        Task {
+                            await store.integrationHealth.checkClaude()
+                            installing = false
+                        }
                     },
-                    actionLabel: "Install Extension"
+                    actionLabel: installing ? "Installing…" : "Install"
                 )
 
                 // Check 3: Connection verified
@@ -973,6 +1029,11 @@ struct ConnectClaudeSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         DetailLine("Binary", value: ManifoldStore.mcpBinaryPath)
                         DetailLine("Config", value: "~/Library/Application Support/Claude/claude_desktop_config.json")
+                        if store.integrationHealth.claude.mcpConfigured == .notInstalled {
+                            Text("Manifold will write its MCP server entry to the Claude config file. If you prefer, you can install the .mcpb extension manually instead.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
                 .font(.caption)
@@ -992,7 +1053,7 @@ struct ConnectClaudeSheet: View {
                 }
                 .buttonStyle(.bordered)
 
-                if store.integrationHealth.claude.overallStatus == .connected {
+                if store.integrationHealth.claude.mcpConfigured == .installed {
                     Button("Done") { dismiss() }
                         .buttonStyle(.borderedProminent)
                 }
@@ -1005,37 +1066,62 @@ struct ConnectClaudeSheet: View {
 }
 ```
 
-**Claude Desktop Extension install flow**:
+**Claude install automation — two paths:**
 
 ```swift
-// In ManifoldStore or a dedicated MCPInstaller:
-func installClaudeExtension() {
-    // 1. Ensure the MCP binary is in place
-    // 2. Use mcpb pack to create the .mcpb bundle (if shipping unbundled)
-    //    OR copy the pre-built .mcpb from the app bundle
-    // 3. Open the .mcpb file — Claude Desktop handles registration
+// In ManifoldStore (or extract to a dedicated MCPInstaller):
+func installManifoldForClaude() {
+    // Try .mcpb first (preferred), fall back to ConfigWriter (always works).
     //
-    // For development: fall back to writing claude_desktop_config.json directly
-    //    (same as current installMCP() logic)
-    //
-    // The .mcpb is the preferred path because it's one-click and
-    // doesn't require the user to restart Claude Desktop.
+    // Path 1: .mcpb — reveal in Finder for user to double-click.
+    // Anthropic requires user interaction for extension registration.
+    if let mcpbURL = Bundle.main.url(forResource: "manifold", withExtension: "mcpb") {
+        // Reveal in Finder — user double-clicks to install
+        NSWorkspace.shared.activateFileViewerSelecting([mcpbURL])
+        return
+    }
+
+    // Path 2: ConfigWriter — writes claude_desktop_config.json directly.
+    // This is the existing installMCP() logic, battle-tested.
+    // Works silently, no user interaction needed, but Anthropic considers
+    // this the "legacy" path. Still fully functional as of April 2026.
+    do {
+        let destPath = Self.mcpBinaryPath
+        let destURL = URL(fileURLWithPath: destPath)
+        try FileManager.default.createDirectory(
+            at: destURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        // Copy binary from bundle or debug build...
+        // (same logic as current SetupModel.installMCP())
+        try ConfigWriter(binaryPath: destPath).installAll()
+    } catch {
+        integrationHealth.claude.errorDetail = error.localizedDescription
+    }
 }
 ```
 
-> **Critical**: Do NOT frame this as "paste JSON config." The user should never see a config file. The `.mcpb` extension install or the `installMCP()` automation handles everything. The config path only appears behind the disclosure group for debugging.
+> **Why not .mcpb-only?** Because it requires the user to leave Manifold, find a file in Finder, and double-click it. That's a broken flow in a Setup Assistant. ConfigWriter gives us a one-click "Install" that works silently. Ship both: ConfigWriter as the automation path, `.mcpb` mentioned in the disclosure group for users who prefer the official extension route. When Anthropic adds a programmatic install API (if ever), switch to that.
 
 ### Step 14.2: Create `Views/Setup/ConnectCodexSheet.swift`
 
-Three live checks:
-1. **Codex installed** — check PATH for `codex` binary
-2. **Signed in** — check auth artifact
-3. **Manifold added** — check `~/.codex/config.toml`
+> **Research finding — Codex auth is inaccessible, so 2 checks not 3.**
+> Codex stores authentication in macOS Keychain (service "Codex Auth") by default, with `~/.codex/auth.json` as a fallback only when Keychain is unavailable. We can't query another app's Keychain entry without entitlements. Checking `auth.json` would show "Not found" for the majority of users who have Keychain working fine. A "Signed in" check that gives false negatives is worse than no check — it creates unnecessary panic.
+>
+> If the user isn't signed in, `codex mcp add` will fail with a clear auth error. Let Codex handle its own auth UX.
+>
+> **Verified command format**: `codex mcp add <name> -- <command>` with optional `--env VAR=VALUE`. Config result is `[mcp_servers.manifold]` in `~/.codex/config.toml` with `command` and `args` keys.
+
+Two live checks:
+1. **Codex installed** — `codex` binary found in PATH
+2. **Manifold added** — `[mcp_servers.manifold]` section in `~/.codex/config.toml`
 
 ```swift
 struct ConnectCodexSheet: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
+    @State private var adding = false
+    @State private var addError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1057,40 +1143,41 @@ struct ConnectCodexSheet: View {
                     label: "Codex installed",
                     status: store.integrationHealth.codex.cliInstalled,
                     action: {
-                        // Open Codex install page or run brew install
-                        if let url = URL(string: "https://github.com/openai/codex") {
+                        if let url = URL(string: "https://openai.com/index/introducing-codex/") {
                             NSWorkspace.shared.open(url)
                         }
                     },
                     actionLabel: "Install"
                 )
 
-                // Check 2: Signed in
-                LiveCheckRow(
-                    label: "Signed in",
-                    status: store.integrationHealth.codex.cliSignedIn,
-                    action: {
-                        // Open terminal to run `codex auth login`
-                        // or launch codex directly
-                    },
-                    actionLabel: "Sign In"
-                )
-
-                // Check 3: Manifold MCP added
+                // Check 2: Manifold MCP added
                 LiveCheckRow(
                     label: "Manifold added",
                     status: store.integrationHealth.codex.mcpAdded,
                     action: {
-                        store.addManifoldToCodex()
+                        adding = true
+                        addError = nil
+                        store.addManifoldToCodex { error in
+                            adding = false
+                            addError = error
+                        }
                     },
-                    actionLabel: "Add to Codex"
+                    actionLabel: adding ? "Adding…" : "Add to Codex"
                 )
+
+                // Show error from codex mcp add (e.g. auth failure)
+                if let addError {
+                    Text(addError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.leading, 36)  // Align with check row text
+                }
 
                 DisclosureGroup("Details") {
                     VStack(alignment: .leading, spacing: 4) {
                         DetailLine("Binary", value: ManifoldStore.mcpBinaryPath)
                         DetailLine("Config", value: "~/.codex/config.toml")
-                        DetailLine("Command", value: "codex mcp add manifold -- \(ManifoldStore.mcpBinaryPath)")
+                        DetailLine("Command", value: "codex mcp add manifold -- \(ManifoldStore.mcpBinaryPath) --agent codex")
                     }
                 }
                 .font(.caption)
@@ -1109,38 +1196,56 @@ struct ConnectCodexSheet: View {
                 }
                 .buttonStyle(.bordered)
 
-                if store.integrationHealth.codex.overallStatus == .connected {
+                if store.integrationHealth.codex.mcpAdded == .installed {
                     Button("Done") { dismiss() }
                         .buttonStyle(.borderedProminent)
                 }
             }
             .padding(20)
         }
-        .frame(width: 460, height: 420)
+        .frame(width: 460, height: 380)  // Shorter than Claude sheet — 2 checks not 3
         .task { await store.integrationHealth.checkCodex() }
     }
 }
 ```
 
-**Codex MCP add automation**:
+**Codex MCP add automation:**
 
 ```swift
 // In ManifoldStore:
-func addManifoldToCodex() {
-    // Run: codex mcp add manifold -- /path/to/manifold-mcp
-    // This writes to ~/.codex/config.toml automatically.
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["codex", "mcp", "add", "manifold", "--", Self.mcpBinaryPath]
-    do {
-        try process.run()
-        process.waitUntilExit()
-        Task { await integrationHealth.checkCodex() }
-    } catch {
-        integrationHealth.codex.errorDetail = error.localizedDescription
+func addManifoldToCodex(completion: @escaping (String?) -> Void) {
+    // Runs: codex mcp add manifold -- /path/to/manifold-mcp --agent codex
+    // On success: writes [mcp_servers.manifold] to ~/.codex/config.toml
+    // On failure: returns stderr (e.g. "Not signed in — run `codex login`")
+    Task.detached {
+        let process = Process()
+        let stderr = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["codex", "mcp", "add", "manifold", "--", Self.mcpBinaryPath]
+        process.standardError = stderr
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let errorString = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            await MainActor.run {
+                if process.terminationStatus == 0 {
+                    completion(nil)
+                    Task { await self.integrationHealth.checkCodex() }
+                } else {
+                    completion(errorString ?? "codex mcp add failed (exit \(process.terminationStatus))")
+                }
+            }
+        } catch {
+            await MainActor.run {
+                completion(error.localizedDescription)
+            }
+        }
     }
 }
 ```
+
+> **Why surface stderr?** If Codex isn't signed in, the error message will say so explicitly. Showing it directly (in `.red` caption text below the check row) is more honest than a generic "Error" badge, and lets the user know exactly what to do ("run `codex login`") without us having to guess at their auth state.
 
 ### Step 14.3: `LiveCheckRow` reusable component
 
@@ -1441,34 +1546,82 @@ struct ProviderButton: View {
 }
 ```
 
-### Step 14.6: Create `Models/MailSetupModel.swift`
+### Step 14.6: `MailSetupModel` — Wrap Existing OAuth Infrastructure
+
+> **Codebase finding: full OAuth2 stack already exists.**
+> - `OAuthManager.swift` in ManifoldKit has PKCE-compliant flows for Gmail + Microsoft 365
+> - `OAuthConfig` structs define `clientID`, `authURL`, `tokenURL`, `scopes`, `redirectScheme`
+> - Redirect scheme: `com.spatialduality.manifold://oauth/callback`
+> - Token storage: `KeychainHelper` with service key `oauth.<accountID>`
+> - XOAUTH2 SASL support for IMAP auth via `xoauth2String(user:accessToken:)`
+> - `EmailAccountSetupView` already has provider detection via `MailProviderDetector.detectWithDiscovery()`
+> - The existing view has a multi-step connection test (DNS → TLS → Auth → Discover mailboxes)
+>
+> **What this means:** `MailSetupModel` is NOT a from-scratch OAuth implementation. It's a thin view-model wrapper around the existing `OAuthManager` + `EmailAccountModel` that adapts the provider-first flow for the new `AddMailAccountSheet`.
+>
+> **What's missing:** The OAuth client IDs. `OAuthManager` has the plumbing but `OAuthConfig` requires a registered `clientID` for Google Cloud and Azure AD. The current `EmailAccountSetupView` falls back to app-password flow when OAuth fails. The new sheet should do the same — OAuth as the happy path, app-password as fallback.
 
 ```swift
 @Observable
 @MainActor
 final class MailSetupModel {
     var selectedProvider: EmailProvider?
-    var oauthToken: String?
+    var phase: MailSetupPhase = .chooseProvider
+
+    // OAuth (delegates to existing OAuthManager)
+    var oauthInProgress = false
+    var oauthError: String?
+
+    // IMAP fallback
     var imapServer: String = ""
     var imapPort: Int = 993
     var username: String = ""
     var password: String = ""
     var useSSL: Bool = true
 
+    // Connection test
     var isValidating = false
     var validationError: String?
+    var connectionSteps: [ConnectionTestStep] = []
 
+    enum MailSetupPhase {
+        case chooseProvider
+        case authenticate(EmailProvider)
+        case importSettings(EmailProvider)
+        case startingProtection
+        case done
+    }
+
+    /// Trigger OAuth via existing OAuthManager.
+    /// On success, stores token in Keychain and advances phase.
+    func startOAuth(provider: EmailProvider) async {
+        oauthInProgress = true
+        oauthError = nil
+        do {
+            // OAuthManager.shared.authenticate(config:) already handles:
+            //   - PKCE code_verifier/challenge generation
+            //   - ASWebAuthenticationSession launch
+            //   - Token exchange
+            //   - KeychainHelper storage
+            let config = OAuthManager.config(for: provider)
+            let tokenPair = try await OAuthManager.shared.authenticate(config: config)
+            // Token stored in Keychain by OAuthManager
+            phase = .importSettings(provider)
+        } catch {
+            oauthError = "OAuth failed: \(error.localizedDescription). You can use an app password instead."
+        }
+        oauthInProgress = false
+    }
+
+    /// Validate IMAP connection (for .other providers or OAuth fallback).
+    /// Delegates to existing EmailAccountModel.testConnection().
     func validateIMAPConnection() async -> Bool {
         isValidating = true
         defer { isValidating = false }
-        // Attempt IMAP connection with provided credentials
+        // Use existing multi-step connection test from EmailAccountSetupView:
+        //   DNS resolve → TLS → Auth → Discover mailboxes
         // Return true on success, set validationError on failure
-        return false // placeholder
-    }
-
-    func startOAuthFlow(provider: EmailProvider) async {
-        // Launch ASWebAuthenticationSession for Google/Microsoft OAuth
-        // Store token on success
+        return false // placeholder — wire to existing test infrastructure
     }
 }
 ```
@@ -1565,12 +1718,12 @@ struct NoAccessGrantedView: View {
 ```
 
 ### Validation
-- Claude sheet shows 3 live checks, "Install Extension" triggers .mcpb install
-- Codex sheet shows 3 live checks, "Add to Codex" runs `codex mcp add`
+- Claude sheet shows 3 live checks; "Install" runs ConfigWriter (or reveals .mcpb if bundled)
+- Codex sheet shows 2 live checks (no "Signed in"); "Add to Codex" runs `codex mcp add` and surfaces stderr on failure
 - Both sheets re-check on appear (Rule 6)
 - Technical details (paths, commands) are behind disclosure groups (Rule 5)
-- Email setup flows: provider pick → authenticate → import → done
-- OAuth triggers for Google/Microsoft, IMAP form for Other
+- Email setup flows: provider pick → OAuth (or app-password fallback) → import → done
+- OAuth uses existing `OAuthManager` + `KeychainHelper` infrastructure
 - All three empty states render correctly and link to their setup sheets
 - No raw JSON or TOML is ever shown on the main surface
 
@@ -1656,21 +1809,29 @@ This lets you build the atomic pieces first (health model, sheets), then compose
 | 11 | `IntegrationHealthModel.checkAll()` populates states correctly. `AgentConnectionState.overallStatus` rollup logic. Shim compatibility for `mcpInstalled` etc. |
 | 12 | Settings opens with 4 tabs. AI Apps pane shows live status. Re-checks on appear. "Set Up" opens correct sheet. |
 | 13 | First launch shows assistant. 4 screens navigate correctly. Skip works. Finish sets `hasCompletedOnboarding`. Subsequent launches skip. |
-| 14 | Claude sheet: 3 checks update live. Extension install triggers. Codex sheet: `codex mcp add` runs. Email: provider flow completes. Empty states render and link to sheets. |
+| 14 | Claude sheet: 3 checks update live, ConfigWriter installs silently. Codex sheet: 2 checks, `codex mcp add` runs and surfaces errors. Email: OAuth via existing OAuthManager, app-password fallback. Empty states link to sheets. |
 
 ---
 
-## Reference: Connection Paths
+## Reference: Connection Paths (Research-Verified)
 
 | Agent | Check 1 | Check 2 | Check 3 |
 |-------|---------|---------|---------|
-| Claude | `/Applications/Claude.app` exists | `claude_desktop_config.json` has `manifold` entry OR `.mcpb` registered | MCP binary exists + config correct |
-| Codex | `codex` binary in PATH | `~/.codex/auth.json` exists | `~/.codex/config.toml` has `manifold` entry |
+| Claude | `/Applications/Claude.app` exists | `claude_desktop_config.json` has `"manifold"` in `mcpServers` | `ManifoldStore.isConnected` + `connectedAgent == "Claude"` |
+| Codex | `codex` binary in PATH (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`) | `~/.codex/config.toml` contains `[mcp_servers.manifold]` | *(no third check — auth is in Keychain, inaccessible)* |
 
-| Agent | Install method | User sees |
-|-------|---------------|-----------|
-| Claude | Claude Desktop Extension (`.mcpb` one-click) | "Install Extension" button |
-| Codex | `codex mcp add manifold -- /path/to/binary` | "Add to Codex" button |
+| Agent | Primary install | Fallback | User sees |
+|-------|----------------|----------|-----------|
+| Claude | `ConfigWriter.installAll()` — writes JSON silently | Reveal `.mcpb` in Finder for manual install | "Install" button |
+| Codex | `codex mcp add manifold -- /path/to/binary` (Process) | `ConfigWriter.writeCodexConfig()` | "Add to Codex" button |
+
+### Why these choices
+
+**Claude: ConfigWriter over .mcpb as primary.** Anthropic designed .mcpb for end-user distribution (double-click to install). There is no programmatic install API — NSWorkspace.shared.open() of a .mcpb would require user interaction outside Manifold. ConfigWriter gives us silent, one-click setup. The .mcpb path exists as a manual alternative behind the disclosure group.
+
+**Codex: 2 checks not 3.** Codex defaults to macOS Keychain for auth (service "Codex Auth"), with `~/.codex/auth.json` as fallback only when Keychain is unavailable (`cli_auth_credentials_store = "file"` in config). Checking another app's Keychain requires entitlements. Checking `auth.json` gives false negatives on default installs. If auth is missing, `codex mcp add` exits non-zero with a descriptive error — we surface that stderr directly.
+
+**Email: existing OAuth + app-password fallback.** `OAuthManager.swift` already has PKCE flows for Gmail/Microsoft, `KeychainHelper` for token storage, and `xoauth2String()` for IMAP SASL. The gap is registered OAuth client IDs (Google Cloud, Azure AD). Until those are provisioned, app-password is the working path. The UI should try OAuth first, catch the error, and offer app-password as fallback — not hide OAuth behind a feature flag.
 
 ---
 

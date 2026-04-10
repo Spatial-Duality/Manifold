@@ -86,6 +86,38 @@ final class PolicyModel {
         }
     }
 
+    // MARK: - Email Domain Actions
+
+    func addEmailDomain(_ domain: String, to agent: TargetApp) async {
+        guard let store = policyStore else { return }
+        do {
+            try await store.addEmailDomain(domain, to: agent)
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to add domain: \(error.localizedDescription)")
+        }
+    }
+
+    func removeEmailDomain(_ domain: String, from agent: TargetApp) async {
+        guard let store = policyStore else { return }
+        do {
+            try await store.removeEmailDomain(domain, from: agent)
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to remove domain: \(error.localizedDescription)")
+        }
+    }
+
+    func updateSensitivity(_ level: EmailSensitivityLevel, for agent: TargetApp) async {
+        guard let store = policyStore else { return }
+        do {
+            try await store.updateSensitivity(level, for: agent)
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to update sensitivity: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Work Block Actions
 
     /// Marks the work block as reviewing. The caller should then present

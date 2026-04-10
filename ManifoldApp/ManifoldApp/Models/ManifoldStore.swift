@@ -330,13 +330,20 @@ class ManifoldStore {
     // MARK: - File Enumeration
 
     /// Enumerate files from active source original paths. Works without an active session.
+    /// File walking runs off the main actor to avoid UI hitches.
     func enumerateSourceFiles() async -> [SourceFile] {
+        let activeSrcs = sources.filter { $0.isAccessible && !$0.isRemoved }
+        return await Task.detached(priority: .userInitiated) {
+            Self.walkSourceFiles(sources: activeSrcs)
+        }.value
+    }
+
+    /// Pure file-system walk — no actor isolation, no UI thread.
+    private nonisolated static func walkSourceFiles(sources: [SourceRecord]) -> [SourceFile] {
         let fm = FileManager.default
         var result: [SourceFile] = []
-        let activeSrcs = sources.filter { $0.isAccessible && !$0.isRemoved }
-        let tracked = Set(storage.allTrackedFiles)
 
-        for source in activeSrcs {
+        for source in sources {
             let root = URL(fileURLWithPath: source.originalRootPath)
             guard let enumerator = fm.enumerator(
                 at: root,
@@ -344,58 +351,29 @@ class ManifoldStore {
                 options: [.skipsHiddenFiles]
             ) else { continue }
 
+            let basePath = root.path + "/"
             while let url = enumerator.nextObject() as? URL {
                 guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
                       values.isRegularFile == true else { continue }
                 let path = url.path
-                let hasVersions = tracked.contains(path)
-                var file = SourceFile(
-                    name: url.lastPathComponent,
-                    path: path,
-                    relativePath: path.replacingOccurrences(of: source.originalRootPath + "/", with: ""),
-                    sourceName: source.displayName,
-                    sourceID: source.sourceID,
-                    fileExtension: url.pathExtension.lowercased(),
-                    sizeBytes: values.fileSize ?? 0,
-                    modifiedDate: values.contentModificationDate ?? Date.distantPast,
-                    isGrantedToClaude: true
-                )
-                if hasVersions {
-                    let fileHist = await storage.fileHistory(filePath: path)
-                    file.versionCount = fileHist.count
-                    file.hasAIActivity = fileHist.contains { $0.source == "agent" || $0.source == "mcp" }
+                guard path.hasPrefix(basePath) else { continue }
+                let relativePath = String(path.dropFirst(basePath.count))
+
+                // Skip noise
+                let first = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
+                let skip = [".git", "node_modules", ".build", "Build", "DerivedData",
+                            "Pods", "__pycache__", ".DS_Store"]
+                if skip.contains(first) {
+                    if url.hasDirectoryPath { enumerator.skipDescendants() }
+                    continue
                 }
-                result.append(file)
-            }
-        }
-        return result
-    }
 
-    /// Enumerate files from grant materialization mounts. Only works during active session.
-    func enumerateAllFiles() -> [SourceFile] {
-        let fm = FileManager.default
-        var result: [SourceFile] = []
-        let mounts = session.currentGrantMounts()
-
-        for mount in mounts {
-            let root = URL(fileURLWithPath: mount.mountPath)
-            guard let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-
-            while let url = enumerator.nextObject() as? URL {
-                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
-                      values.isRegularFile == true else { continue }
-                let relativePath = session.canonicalPath(for: url, base: root, mountName: mount.mountName)
-                guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
                 result.append(SourceFile(
                     name: url.lastPathComponent,
-                    path: url.path,
+                    path: path,
                     relativePath: relativePath,
-                    sourceName: mount.mountName,
-                    sourceID: mount.sourceID,
+                    sourceName: source.displayName,
+                    sourceID: source.sourceID,
                     fileExtension: url.pathExtension.lowercased(),
                     sizeBytes: values.fileSize ?? 0,
                     modifiedDate: values.contentModificationDate ?? Date.distantPast,
@@ -404,6 +382,44 @@ class ManifoldStore {
             }
         }
         return result
+    }
+
+    /// Enumerate files from grant materialization mounts. Only works during active session.
+    /// File walking runs off the main actor.
+    func enumerateAllFiles() async -> [SourceFile] {
+        let mounts = session.currentGrantMounts()
+        return await Task.detached(priority: .userInitiated) { [session] in
+            let fm = FileManager.default
+            var result: [SourceFile] = []
+
+            for mount in mounts {
+                let root = URL(fileURLWithPath: mount.mountPath)
+                guard let enumerator = fm.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+                    options: [.skipsHiddenFiles]
+                ) else { continue }
+
+                while let url = enumerator.nextObject() as? URL {
+                    guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                          values.isRegularFile == true else { continue }
+                    let relativePath = await session.canonicalPath(for: url, base: root, mountName: mount.mountName)
+                    guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
+                    result.append(SourceFile(
+                        name: url.lastPathComponent,
+                        path: url.path,
+                        relativePath: relativePath,
+                        sourceName: mount.mountName,
+                        sourceID: mount.sourceID,
+                        fileExtension: url.pathExtension.lowercased(),
+                        sizeBytes: values.fileSize ?? 0,
+                        modifiedDate: values.contentModificationDate ?? Date.distantPast,
+                        isGrantedToClaude: true
+                    ))
+                }
+            }
+            return result
+        }.value
     }
 
     /// Search file contents across all sources.

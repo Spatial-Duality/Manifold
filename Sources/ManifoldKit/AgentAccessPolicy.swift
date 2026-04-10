@@ -85,6 +85,20 @@ public enum EmailSensitivityLevel: String, Sendable, CaseIterable {
     case strict
     case moderate
     case open
+
+    /// Ordering: strict < moderate < open.
+    private var rank: Int {
+        switch self {
+        case .strict: 0
+        case .moderate: 1
+        case .open: 2
+        }
+    }
+
+    /// True if self allows more data visibility than `other`.
+    public func isLooserThan(_ other: EmailSensitivityLevel) -> Bool {
+        rank > other.rank
+    }
 }
 
 // MARK: - Temporary Reveal
