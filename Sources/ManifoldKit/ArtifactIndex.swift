@@ -509,7 +509,7 @@ public actor ArtifactIndex {
             try indexMount(grantID: grantID, mount: mount)
         }
 
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             INSERT INTO artifact_index_state (grant_id, materialization_root, indexed_at)
             VALUES (?, ?, ?)
@@ -536,7 +536,7 @@ public actor ArtifactIndex {
             }
 
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .contentModificationDateKey])
-            let modifiedAt = values?.contentModificationDate.map { ISO8601DateFormatter().string(from: $0) }
+            let modifiedAt = values?.contentModificationDate.map { ISO8601DateFormatter.shared.string(from: $0) }
 
             if values?.isDirectory == true {
                 try upsertDirectory(
@@ -833,7 +833,7 @@ public actor ArtifactIndex {
     ) {
         let values = try fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let sizeBytes = values.fileSize ?? 0
-        let lastModified = values.contentModificationDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
+        let lastModified = values.contentModificationDate.map { ISO8601DateFormatter.shared.string(from: $0) } ?? ""
         let fileExtension = fileURL.pathExtension.lowercased()
         let binary = ContextEngine.isBinary(fileExtension: fileExtension, fileURL: fileURL)
 

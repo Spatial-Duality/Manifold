@@ -30,7 +30,7 @@ public struct DatabaseMigrator {
             logger.info("Applying migration \(migration.version): \(migration.name)")
             try db.transaction {
                 try migration.apply(db)
-                let now = ISO8601DateFormatter().string(from: Date())
+                let now = ISO8601DateFormatter.shared.string(from: Date())
                 try db.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     params: ["\(migration.version)", now]

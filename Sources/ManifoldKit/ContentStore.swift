@@ -35,7 +35,7 @@ public actor ContentStore {
         let version = try db.queryScalar("SELECT value FROM manifold_meta WHERE key = 'schema_version'")
         if version == nil {
             try db.execute("INSERT INTO manifold_meta (key, value) VALUES ('schema_version', '1')")
-            try db.execute("INSERT INTO manifold_meta (key, value) VALUES ('created_at', '\(ISO8601DateFormatter().string(from: Date()))')")
+            try db.execute("INSERT INTO manifold_meta (key, value) VALUES ('created_at', '\(ISO8601DateFormatter.shared.string(from: Date()))')")
         }
     }
 
@@ -60,7 +60,7 @@ public actor ContentStore {
         try db.execute("""
             INSERT OR IGNORE INTO content_meta (hash, size_bytes, ingested_at, ref_count)
             VALUES (?, ?, ?, 0)
-        """, params: [hash, "\(data.count)", ISO8601DateFormatter().string(from: Date())])
+        """, params: [hash, "\(data.count)", ISO8601DateFormatter.shared.string(from: Date())])
 
         return hash
     }

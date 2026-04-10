@@ -40,7 +40,7 @@ public actor SnapshotStore {
     /// Record a baseline snapshot (the "before AI touched anything" state).
     public func recordBaseline(runID: String, workspaceID: String, filePath: String, data: Data) async throws {
         let hash = try await contentStore.ingest(data: data)
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = ISO8601DateFormatter.shared.string(from: Date())
 
         try db.transaction {
             try db.execute("""
@@ -57,7 +57,7 @@ public actor SnapshotStore {
     public func recordModification(runID: String, workspaceID: String, filePath: String, newData: Data, source: String = "agent") async throws -> SnapshotWriteResult {
         let afterHash = try await contentStore.ingest(data: newData)
         let beforeHash = try latestHash(runID: runID, filePath: filePath)
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = ISO8601DateFormatter.shared.string(from: Date())
         var snapshotID: Int?
 
         try db.transaction {
@@ -85,7 +85,7 @@ public actor SnapshotStore {
     /// Record a file creation (agent created a new file).
     public func recordCreation(runID: String, workspaceID: String, filePath: String, data: Data) async throws {
         let hash = try await contentStore.ingest(data: data)
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = ISO8601DateFormatter.shared.string(from: Date())
 
         try db.transaction {
             try db.execute("""
@@ -100,7 +100,7 @@ public actor SnapshotStore {
     /// Record a file deletion.
     public func recordDeletion(runID: String, workspaceID: String, filePath: String) throws {
         let beforeHash = try latestHash(runID: runID, filePath: filePath)
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = ISO8601DateFormatter.shared.string(from: Date())
 
         try db.execute("""
             INSERT INTO snapshots (run_id, workspace_id, timestamp, file_path, after_hash, before_hash, is_delete, source)
@@ -259,7 +259,7 @@ public actor SnapshotStore {
     @discardableResult
     public func pruneByAge(days: Int = 30) throws -> Int {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
-        let cutoffStr = ISO8601DateFormatter().string(from: cutoff)
+        let cutoffStr = ISO8601DateFormatter.shared.string(from: cutoff)
 
         // Don't delete if it's the only snapshot for a file
         let toDelete = try db.queryAll("""

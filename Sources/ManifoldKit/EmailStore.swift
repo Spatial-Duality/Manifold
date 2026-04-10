@@ -201,7 +201,7 @@ public struct EmailStore: Sendable {
         syncIntervalSeconds: Int = 300
     ) throws -> EmailAccountRecord {
         let accountID = "email-\(UUID().uuidString.prefix(8).lowercased())"
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             INSERT INTO email_accounts (
                 account_id, display_name, provider_type, server, port, username,
@@ -262,7 +262,7 @@ public struct EmailStore: Sendable {
     }
 
     public func setEmailAccountSyncEnabled(accountID: String, enabled: Bool) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE email_accounts SET sync_enabled = ?, updated_at = ? WHERE account_id = ?",
             params: [enabled ? "1" : "0", now, accountID]
@@ -296,7 +296,7 @@ public struct EmailStore: Sendable {
         syncStatus: SyncStatus,
         errorMessage: String? = nil
     ) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             INSERT INTO email_sync_state (
                 account_id, mailbox_name, uid_validity, last_sync_uid,
@@ -384,7 +384,7 @@ public struct EmailStore: Sendable {
 
     /// Mark a message as deleted on the server.
     public func markDeletedOnServer(emailID: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE email_messages SET deleted_on_server_at = ? WHERE email_id = ?",
             params: [now, emailID]
@@ -566,7 +566,7 @@ public struct EmailStore: Sendable {
     /// Mark UIDs as missing from a mailbox (first pass of EXPUNGE detection).
     public func markMissingFromMailbox(accountID: String, mailbox: String, missingUIDs: Set<UInt32>) throws {
         guard !missingUIDs.isEmpty else { return }
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         for uid in missingUIDs {
             try db.execute("""
                 UPDATE email_mailbox_membership SET missing_from = ?
@@ -658,7 +658,7 @@ public struct EmailStore: Sendable {
     @discardableResult
     public func shareEmails(emailIDs: [String], label: String? = nil) throws -> Int {
         guard !emailIDs.isEmpty else { return 0 }
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         var count = 0
         for emailID in emailIDs {
             let shareID = "share-\(UUID().uuidString.prefix(8).lowercased())"

@@ -36,7 +36,7 @@ struct AgentRuntimeContext: Sendable {
         self.serverName = serverName
         self.serverVersion = serverVersion
         self.transport = transport
-        self.connectedAt = ISO8601DateFormatter().string(from: Date())
+        self.connectedAt = ISO8601DateFormatter.shared.string(from: Date())
         self.serverPID = "\(ProcessInfo.processInfo.processIdentifier)"
         self.serverProcessName = ProcessInfo.processInfo.processName
         self.timeZoneIdentifier = TimeZone.current.identifier

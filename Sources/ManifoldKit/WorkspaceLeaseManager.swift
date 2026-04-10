@@ -43,7 +43,7 @@ public actor WorkspaceLeaseManager {
 
     /// Register a workspace in the database.
     public func registerWorkspace(id: String, profileID: String, rootPath: String, agent: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             INSERT OR REPLACE INTO workspaces (workspace_id, profile_id, root_path, agent, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, 'idle', ?, ?)
@@ -67,7 +67,7 @@ public actor WorkspaceLeaseManager {
 
     /// Update workspace status. Values: "active", "idle", "archived"
     public func updateWorkspaceStatus(workspaceID: String, status: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE workspaces SET status = ?, updated_at = ? WHERE workspace_id = ?",
             params: [status, now, workspaceID]
@@ -88,7 +88,7 @@ public actor WorkspaceLeaseManager {
         try endActiveRuns(workspaceID: workspaceID)
 
         let runID = "run-\(UUID().uuidString.prefix(8).lowercased())"
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
 
         try db.execute("""
             INSERT INTO runs (run_id, workspace_id, agent, status, trigger, started_at)
@@ -102,7 +102,7 @@ public actor WorkspaceLeaseManager {
 
     /// Mark baseline as completed for a run.
     public func markBaselineComplete(runID: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE runs SET baseline_completed_at = ? WHERE run_id = ?",
             params: [now, runID]
@@ -111,7 +111,7 @@ public actor WorkspaceLeaseManager {
 
     /// End a specific run. Called when user clicks "End Access".
     public func endRun(runID: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE runs SET status = 'closed', ended_at = ? WHERE run_id = ?",
             params: [now, runID]
@@ -135,7 +135,7 @@ public actor WorkspaceLeaseManager {
 
     /// End all active runs for a workspace.
     public func endActiveRuns(workspaceID: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE runs SET status = 'closed', ended_at = ? WHERE workspace_id = ? AND status = 'active'",
             params: [now, workspaceID]
@@ -163,8 +163,8 @@ public actor WorkspaceLeaseManager {
     /// Mark idle runs as closed after timeout.
     public func closeIdleRuns(idleTimeout: TimeInterval = 3600) throws {
         let cutoff = Date().addingTimeInterval(-idleTimeout)
-        let cutoffStr = ISO8601DateFormatter().string(from: cutoff)
-        let now = ISO8601DateFormatter().string(from: Date())
+        let cutoffStr = ISO8601DateFormatter.shared.string(from: cutoff)
+        let now = ISO8601DateFormatter.shared.string(from: Date())
 
         // Find runs where no snapshot has been recorded since cutoff
         let idleRuns = try db.queryAll("""

@@ -40,7 +40,7 @@ public actor PolicyStore {
 
     /// Update an existing policy. Overwrites all fields.
     public func updatePolicy(_ policy: AgentAccessPolicy) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             UPDATE agent_access_policies
             SET allowed_source_ids = ?, allowed_email_domains = ?,

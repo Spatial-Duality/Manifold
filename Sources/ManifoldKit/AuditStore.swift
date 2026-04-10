@@ -55,7 +55,7 @@ public actor AuditStore {
     /// for the same agent if within 5 minutes, otherwise generates a new one.
     private func resolveSessionID(agent: String?, timestamp: Date) throws -> String {
         let agentValue = agent ?? ""
-        let isoFormatter = ISO8601DateFormatter()
+        let isoFormatter = ISO8601DateFormatter.shared
 
         if let lastRow = try db.queryAll("""
             SELECT session_id, timestamp FROM audit_log
@@ -86,7 +86,7 @@ public actor AuditStore {
             ORDER BY id ASC
         """)
 
-        let isoFormatter = ISO8601DateFormatter()
+        let isoFormatter = ISO8601DateFormatter.shared
         var currentSessionID: String?
         var currentAgent: String?
         var lastDate: Date?
@@ -128,7 +128,7 @@ public actor AuditStore {
         grantID: String? = nil
     ) throws {
         let now = Date()
-        let timestamp = ISO8601DateFormatter().string(from: now)
+        let timestamp = ISO8601DateFormatter.shared.string(from: now)
         let sessionID = try resolveSessionID(agent: agent, timestamp: now)
         let metadataJSON: String? = metadata.flatMap { dict in
             do {

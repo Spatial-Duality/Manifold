@@ -349,7 +349,7 @@ public actor EmailSyncEngine {
                     recipients: envelope?.to ?? "",
                     cc: envelope?.cc ?? "",
                     subject: envelope?.subject ?? "(no subject)",
-                    receivedAt: Self.normalizeDate(envelope?.date ?? ISO8601DateFormatter().string(from: Date())),
+                    receivedAt: Self.normalizeDate(envelope?.date ?? ISO8601DateFormatter.shared.string(from: Date())),
                     emlPath: emlFile.path,
                     sizeBytes: item.rfc822Size,
                     preview: preview,
@@ -476,6 +476,25 @@ public actor EmailSyncEngine {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - Cached Date Formatters
+
+    private static let rfc2822Formatters: [DateFormatter] = {
+        let formats = [
+            "EEE, dd MMM yyyy HH:mm:ss Z",
+            "dd MMM yyyy HH:mm:ss Z",
+            "EEE, dd MMM yyyy HH:mm:ss zzz",
+            "dd MMM yyyy HH:mm:ss zzz",
+            "EEE, d MMM yyyy HH:mm:ss Z",
+            "d MMM yyyy HH:mm:ss Z",
+        ]
+        return formats.map { fmt in
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = fmt
+            return f
+        }
+    }()
+
     // MARK: - Connection Management
 
     private func ensureConnection(
@@ -568,28 +587,14 @@ public actor EmailSyncEngine {
 
         // Already ISO 8601?
         if trimmed.contains("T") && (trimmed.hasSuffix("Z") || trimmed.contains("+") || trimmed.contains("-")) {
-            let iso = ISO8601DateFormatter()
+            let iso = ISO8601DateFormatter.shared
             if iso.date(from: trimmed) != nil { return trimmed }
         }
 
-        // Try RFC 2822 formats
-        let rfc2822 = DateFormatter()
-        rfc2822.locale = Locale(identifier: "en_US_POSIX")
-        let formats = [
-            "EEE, dd MMM yyyy HH:mm:ss Z",     // "Mon, 05 Jan 2013 12:00:00 +0000"
-            "dd MMM yyyy HH:mm:ss Z",           // "05 Jan 2013 12:00:00 +0000"
-            "EEE, dd MMM yyyy HH:mm:ss zzz",    // "Mon, 05 Jan 2013 12:00:00 GMT"
-            "dd MMM yyyy HH:mm:ss zzz",          // "05 Jan 2013 12:00:00 GMT"
-            "EEE, d MMM yyyy HH:mm:ss Z",       // "Mon, 5 Jan 2013 12:00:00 +0000"
-            "d MMM yyyy HH:mm:ss Z",            // "5 Jan 2013 12:00:00 +0000"
-        ]
-
-        for format in formats {
-            rfc2822.dateFormat = format
-            if let date = rfc2822.date(from: trimmed) {
-                let iso = ISO8601DateFormatter()
-                iso.formatOptions = [.withInternetDateTime]
-                return iso.string(from: date)
+        // Try RFC 2822 formats (cached formatters — DateFormatter creation is expensive)
+        for formatter in Self.rfc2822Formatters {
+            if let date = formatter.date(from: trimmed) {
+                return ISO8601DateFormatter.shared.string(from: date)
             }
         }
 

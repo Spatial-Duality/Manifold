@@ -64,7 +64,7 @@ public actor ManifoldBridge {
         kind: SessionSummaryKind,
         markdown: String
     ) async {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         _ = try? await grantStore.saveSummary(
             grantID: grant.grantID,
             targetApp: TargetApp(rawValue: grant.targetApp) ?? .cowork,
@@ -147,7 +147,7 @@ public actor ManifoldBridge {
             agent: agentName,
             metadata: runtimeContext.connectionMetadata.merging([
                 "event": "disconnected",
-                "disconnected_at": ISO8601DateFormatter().string(from: Date()),
+                "disconnected_at": ISO8601DateFormatter.shared.string(from: Date()),
             ]) { _, new in new }
         )
     }
@@ -574,7 +574,7 @@ public actor ManifoldBridge {
     private func listFilesFromOriginals(mounts: [GrantMount]) throws -> [FileInfo] {
         let fm = FileManager.default
         var files: [FileInfo] = []
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
 
         for mount in mounts {
             let rootURL = URL(fileURLWithPath: mount.mountPath)
@@ -602,7 +602,7 @@ public actor ManifoldBridge {
                       values.isRegularFile == true else { continue }
 
                 let modified = values.contentModificationDate.map {
-                    ISO8601DateFormatter().string(from: $0)
+                    ISO8601DateFormatter.shared.string(from: $0)
                 } ?? now
 
                 files.append(FileInfo(
@@ -882,7 +882,7 @@ public actor ManifoldBridge {
         let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = artifact?.sizeBytes ?? ((attrs[.size] as? Int) ?? 0)
         let modified = (artifact?.lastModified.isEmpty == false ? artifact?.lastModified : nil)
-            ?? (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) }
+            ?? (attrs[.modificationDate] as? Date).map { ISO8601DateFormatter.shared.string(from: $0) }
             ?? ""
         let ext = artifact?.fileExtension ?? fileURL.pathExtension
         let isBinary = artifact?.isBinary ?? ContextEngine.isBinary(fileExtension: ext.lowercased(), fileURL: fileURL)
@@ -1267,7 +1267,7 @@ public actor ManifoldBridge {
             arguments: ["note_length": "\(note.count)", "note_type": noteType.rawValue]
         )
         let (grant, _) = try await requireGrant()
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
 
         _ = try await grantStore.saveSummary(
             grantID: grant.grantID,

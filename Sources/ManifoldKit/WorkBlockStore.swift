@@ -72,7 +72,7 @@ public actor WorkBlockStore {
 
     /// End a work block with a specific status.
     public func endBlock(id: String, status: WorkBlockStatus) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             UPDATE work_block_records
             SET status = ?, ended_at = ?

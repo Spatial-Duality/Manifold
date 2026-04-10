@@ -81,7 +81,7 @@ public actor AccessStore {
         emailIDs: [String]
     ) throws -> AccessPresetRecord {
         let presetID = id ?? "preset-\(UUID().uuidString.prefix(8).lowercased())"
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.transaction {
             if id == nil {
                 try db.execute(

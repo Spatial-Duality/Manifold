@@ -24,8 +24,8 @@ public struct AgentAccessPolicy: Sendable, Identifiable {
         emailSensitivity: EmailSensitivityLevel = .moderate,
         isPaused: Bool = false,
         hasCompletedFirstGrant: Bool = false,
-        createdAt: String = ISO8601DateFormatter().string(from: Date()),
-        updatedAt: String = ISO8601DateFormatter().string(from: Date())
+        createdAt: String = ISO8601DateFormatter.shared.string(from: Date()),
+        updatedAt: String = ISO8601DateFormatter.shared.string(from: Date())
     ) {
         self.id = id
         self.agent = agent
@@ -117,7 +117,7 @@ public struct TemporaryReveal: Sendable, Identifiable {
         agent: TargetApp,
         emailID: String,
         workBlockID: String? = nil,
-        createdAt: String = ISO8601DateFormatter().string(from: Date())
+        createdAt: String = ISO8601DateFormatter.shared.string(from: Date())
     ) {
         self.id = id
         self.agent = agent
@@ -163,7 +163,7 @@ public struct WorkBlockRecord: Sendable, Identifiable {
         agent: TargetApp,
         grantID: String,
         sourceIDs: [String] = [],
-        startedAt: String = ISO8601DateFormatter().string(from: Date()),
+        startedAt: String = ISO8601DateFormatter.shared.string(from: Date()),
         endedAt: String? = nil,
         status: WorkBlockStatus = .active,
         modifiedFileCount: Int = 0,

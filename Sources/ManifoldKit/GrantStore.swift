@@ -19,7 +19,7 @@ public actor GrantStore {
     @discardableResult
     public func addSource(displayName: String, rootPath: String) throws -> String {
         let sourceID = "src-\(UUID().uuidString.prefix(8).lowercased())"
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
             VALUES (?, ?, ?, 'idle', ?, ?)
@@ -62,7 +62,7 @@ public actor GrantStore {
 
     /// Update source status: idle, active, paused, removed.
     public func updateSourceStatus(sourceID: String, status: String) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE sources SET status = ?, updated_at = ? WHERE source_id = ?",
             params: [status, now, sourceID]
@@ -106,8 +106,8 @@ public actor GrantStore {
         try endActiveGrant(targetApp: targetApp, profileID: profileID, reason: .timedOut)
 
         let grantID = "grant-\(UUID().uuidString.prefix(8).lowercased())"
-        let now = ISO8601DateFormatter().string(from: Date())
-        let deadline = ISO8601DateFormatter().string(
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        let deadline = ISO8601DateFormatter.shared.string(
             from: Date().addingTimeInterval(inactivityTimeout)
         )
 
@@ -178,7 +178,7 @@ public actor GrantStore {
 
     /// End a specific grant.
     public func endGrant(grantID: String, reason: GrantStatus = .ended) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute(
             "UPDATE grants SET status = ?, ended_at = ? WHERE grant_id = ? AND status = 'active'",
             params: [reason.rawValue, now, grantID]
@@ -212,7 +212,7 @@ public actor GrantStore {
 
     /// Refresh inactivity deadline for an active grant.
     public func touchGrant(grantID: String, timeout: TimeInterval = 3600) throws {
-        let deadline = ISO8601DateFormatter().string(
+        let deadline = ISO8601DateFormatter.shared.string(
             from: Date().addingTimeInterval(timeout)
         )
         try db.execute(
@@ -223,7 +223,7 @@ public actor GrantStore {
 
     /// Find and end grants past their inactivity deadline.
     public func expireStaleGrants() throws -> Int {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         let stale = try db.queryAll("""
             SELECT grant_id FROM grants
             WHERE status = 'active' AND inactivity_deadline IS NOT NULL AND inactivity_deadline < ?
@@ -325,7 +325,7 @@ public actor GrantStore {
         conflictReason: String? = nil
     ) throws -> String {
         let promotionID = "promo-\(UUID().uuidString.prefix(8).lowercased())"
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             INSERT INTO promotions (promotion_id, grant_id, source_id, relative_path,
                 result, original_before_hash, promoted_hash, conflict_reason, created_at)
