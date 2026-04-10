@@ -9,6 +9,15 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 
 // MARK: - Navigation
 
+/// Top-level tabs in v4.1: Overview, Files, Emails.
+/// History is demoted to Activity drawer. Sources is merged into Files tab.
+enum AppTab: String, Hashable, CaseIterable {
+    case overview
+    case files
+    case emails
+}
+
+/// Legacy sidebar items — kept during transition for views that still reference them.
 enum SidebarItem: String, Hashable, CaseIterable {
     case home
     case files
@@ -17,12 +26,25 @@ enum SidebarItem: String, Hashable, CaseIterable {
     case sources
 }
 
+// MARK: - Agent Focus
+
+/// Which agent's access to display in Files/Emails tables.
+enum AgentFocus: String, Hashable, CaseIterable {
+    case claude
+    case codex
+    case compare
+}
+
 // MARK: - Store
 
 @Observable
 @MainActor
 class ManifoldStore {
-    // Navigation
+    // Navigation — v4.1 top-level tabs
+    var selectedTab: AppTab = .overview
+    var agentFocus: AgentFocus = .claude
+
+    // Legacy navigation (kept during transition)
     var selectedSidebarItem: SidebarItem? = .home
     var inspectedFilePath: String?
 
@@ -43,6 +65,7 @@ class ManifoldStore {
     let storage: StorageModel
     let setup: SetupModel
     let emailAccounts: EmailAccountModel
+    let policy: PolicyModel
 
     var menuBarIcon: String { isConnected ? "shield.checkered.fill" : "shield.checkered" }
 
@@ -67,6 +90,7 @@ class ManifoldStore {
         storage = StorageModel()
         setup = SetupModel()
         emailAccounts = EmailAccountModel()
+        policy = PolicyModel()
 
         Task {
             await initStores()
@@ -100,6 +124,11 @@ class ManifoldStore {
             self.grantStore = grantStore
             self.emailStore = emailStore
             self.artifactIndex = artifactIndex
+
+            // Initialize v4.1 standing access stores
+            let policyStore = PolicyStore(db: connection)
+            let workBlockStore = WorkBlockStore(db: connection)
+            policy.configure(policyStore: policyStore, workBlockStore: workBlockStore)
 
             // Initialize email sync engine
             let syncEngine = EmailSyncEngine(emailStore: emailStore)

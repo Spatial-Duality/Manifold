@@ -590,5 +590,65 @@ public struct DatabaseMigrator {
             try db.execute("CREATE INDEX IF NOT EXISTS idx_session_summaries_kind ON session_summaries(grant_id, summary_kind, ended_at)")
             logger.info("Migration 13: session note policy and typed note metadata")
         },
+
+        // v14: Standing access — agent access policies, temporary reveals, work block records.
+        // Supports persistent per-agent access without session ceremony.
+        Migration(version: 14, name: "standing_access") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_access_policies (
+                    policy_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL UNIQUE,
+                    allowed_source_ids TEXT NOT NULL DEFAULT '[]',
+                    allowed_email_domains TEXT NOT NULL DEFAULT '[]',
+                    email_sensitivity TEXT NOT NULL DEFAULT 'moderate',
+                    is_paused INTEGER NOT NULL DEFAULT 0,
+                    has_completed_first_grant INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_policies_agent ON agent_access_policies(agent)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS temporary_reveals (
+                    reveal_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    email_id TEXT NOT NULL,
+                    work_block_id TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_reveals_agent ON temporary_reveals(agent)"
+            )
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_reveals_workblock ON temporary_reveals(work_block_id)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS work_block_records (
+                    work_block_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    grant_id TEXT NOT NULL,
+                    source_ids TEXT NOT NULL DEFAULT '[]',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    modified_file_count INTEGER NOT NULL DEFAULT 0,
+                    new_file_count INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(grant_id) REFERENCES grants(grant_id)
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workblocks_agent ON work_block_records(agent)"
+            )
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workblocks_status ON work_block_records(status)"
+            )
+
+            logger.info("Migration 14: standing access policies, temporary reveals, work block records")
+        },
     ]
 }

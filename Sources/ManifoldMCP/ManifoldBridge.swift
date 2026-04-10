@@ -2,8 +2,8 @@ import Foundation
 import ManifoldKit
 
 /// Core logic layer between MCP protocol and ManifoldKit stores.
-/// Grant-only access: all file I/O routes through the materialized workspace.
-/// No active grant = no file access (fail-closed).
+/// Dual-path access: standing access via PolicyStore, work block via grant materialization.
+/// Fail-closed: no policy and no grant = no access.
 public actor ManifoldBridge {
     private let db: DatabaseConnection
     private let auditStore: AuditStore
@@ -12,6 +12,8 @@ public actor ManifoldBridge {
     private let emailStore: EmailStore
     private let snapshotStore: SnapshotStore
     private let artifactIndex: ArtifactIndex
+    private let policyStore: PolicyStore?
+    private let workBlockStore: WorkBlockStore?
     private let targetApp: TargetApp
     private let profileID: String
     private var runtimeContext: AgentRuntimeContext
@@ -25,6 +27,8 @@ public actor ManifoldBridge {
         emailStore: EmailStore,
         snapshotStore: SnapshotStore,
         artifactIndex: ArtifactIndex,
+        policyStore: PolicyStore? = nil,
+        workBlockStore: WorkBlockStore? = nil,
         targetApp: TargetApp = .cowork,
         profileID: String = "default",
         serverName: String = "manifold",
@@ -37,6 +41,8 @@ public actor ManifoldBridge {
         self.emailStore = emailStore
         self.snapshotStore = snapshotStore
         self.artifactIndex = artifactIndex
+        self.policyStore = policyStore
+        self.workBlockStore = workBlockStore
         self.targetApp = targetApp
         self.profileID = profileID
         self.runtimeContext = AgentRuntimeContext(
@@ -146,10 +152,60 @@ public actor ManifoldBridge {
         )
     }
 
-    // MARK: - Grant Resolution
+    // MARK: - Access Resolution (dual-path: standing policy + work block grant)
 
-    /// Resolve the active grant or throw. Fail-closed: no grant = no access.
-    private func requireGrant() async throws -> (GrantRecord, [GrantSourceRecord]) {
+    /// Resolved access context for a tool call.
+    /// Standing access: reads go to original source paths (no materialization).
+    /// Work block: reads/writes go to materialized workspace via grant.
+    enum AccessContext {
+        /// Standing access via persistent policy. Files are read from original paths.
+        case standing(policy: AgentAccessPolicy, sources: [SourceRecord])
+        /// Work block with materialized workspace via grant.
+        case workBlock(grant: GrantRecord, grantSources: [GrantSourceRecord], block: WorkBlockRecord)
+        /// Legacy grant-only path (no PolicyStore available).
+        case legacyGrant(grant: GrantRecord, grantSources: [GrantSourceRecord])
+    }
+
+    /// Resolve access for the current agent. Tries standing policy first,
+    /// then work block grant, then legacy grant. Fail-closed.
+    private func resolveAccess() async throws -> AccessContext {
+        // Path 1: Standing access via PolicyStore (v4.1)
+        if let policyStore {
+            let policy = try await policyStore.policy(for: targetApp)
+
+            // Check pause state first
+            if policy.isPaused {
+                throw ManifoldMCPError.accessPaused
+            }
+
+            // Check for active work block
+            if let wbStore = workBlockStore,
+               let block = try await wbStore.activeBlock(for: targetApp) {
+                // Work block active — route through grant/materialization
+                if let grant = try await grantStore.grant(id: block.grantID) {
+                    let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+                    try await grantStore.touchGrant(grantID: grant.grantID)
+                    return .workBlock(grant: grant, grantSources: grantSources, block: block)
+                }
+            }
+
+            // Standing access — check if any sources are allowed
+            if policy.allowedSourceIDs.isEmpty && policy.allowedEmailDomains.isEmpty {
+                throw ManifoldMCPError.noAccessConfigured
+            }
+
+            // Resolve allowed source records
+            let allSources = try await grantStore.allSources()
+            let allowedSources = allSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
+            return .standing(policy: policy, sources: allowedSources)
+        }
+
+        // Path 2: Legacy grant-only (PolicyStore not injected)
+        return try await legacyRequireGrant()
+    }
+
+    /// Legacy grant resolution — kept for backward compatibility during transition.
+    private func legacyRequireGrant() async throws -> AccessContext {
         guard let grant = try await grantStore.activeGrant(targetApp: targetApp, profileID: profileID) else {
             let sources = (try await grantStore.allSources()).filter { !$0.isRemoved }
             if sources.isEmpty {
@@ -159,7 +215,35 @@ public actor ManifoldBridge {
         }
         let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
         try await grantStore.touchGrant(grantID: grant.grantID)
-        return (grant, grantSources)
+        return .legacyGrant(grant: grant, grantSources: grantSources)
+    }
+
+    /// Resolve the active grant or throw. Fail-closed: no grant = no access.
+    /// Used by tool methods that require grant-specific context (work blocks, sessions).
+    private func requireGrant() async throws -> (GrantRecord, [GrantSourceRecord]) {
+        let context = try await resolveAccess()
+        switch context {
+        case .workBlock(let grant, let grantSources, _):
+            return (grant, grantSources)
+        case .legacyGrant(let grant, let grantSources):
+            return (grant, grantSources)
+        case .standing:
+            // Standing access with no work block — need a grant for grant-specific operations.
+            // Try to find an active grant anyway (backward compat).
+            if let grant = try await grantStore.activeGrant(targetApp: targetApp, profileID: profileID) {
+                let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+                return (grant, grantSources)
+            }
+            throw ManifoldMCPError.noActiveSession
+        }
+    }
+
+    /// Build mounts for standing access: each source gets a "mount" that points to the original path.
+    private func standingMounts(sources: [SourceRecord]) -> [GrantMount] {
+        sources.map { source in
+            let name = URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased()
+            return GrantMount(sourceID: source.sourceID, mountName: name, mountPath: source.originalRootPath)
+        }
     }
 
     /// Get mount directories for a grant, including source IDs.
@@ -303,26 +387,97 @@ public actor ManifoldBridge {
     public func getStatus() async -> StatusResult {
         await logToolCall(tool: "get_status")
         do {
-            let (grant, grantSources) = try await requireGrant()
-            let mounts = grantMounts(grant: grant, sources: grantSources)
-            try await ensureIndexed(grant: grant, mounts: mounts)
-            let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
-            let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
-            let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
-            let noteGuidance = noteGuidance(for: grant, summaries: summaries)
-            let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
-            let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
+            let context = try await resolveAccess()
+            switch context {
+            case .standing(let policy, let sources):
+                let sourceNames = sources.map(\.displayName).joined(separator: ", ")
+                // Count files across allowed sources
+                var totalFiles = 0
+                for source in sources {
+                    let url = URL(fileURLWithPath: source.originalRootPath)
+                    if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                        while let fileURL = enumerator.nextObject() as? URL {
+                            if (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                                totalFiles += 1
+                            }
+                        }
+                    }
+                }
+                let emailCount = policy.allowedEmailDomains.count > 0 ? (try? emailStore.emailMessageCount()) ?? 0 : 0
+                let message = "Manifold standing access active. \(sources.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails. Sensitivity: \(policy.emailSensitivity.rawValue)."
+                return StatusResult(
+                    active: true,
+                    grantID: nil,
+                    sources: sources.map(\.displayName),
+                    pausedSources: [],
+                    fileCount: totalFiles,
+                    emailCount: emailCount,
+                    message: message,
+                    noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
+                    noteGuidance: nil
+                )
 
+            case .workBlock(let grant, let grantSources, let block):
+                let mounts = grantMounts(grant: grant, sources: grantSources)
+                try await ensureIndexed(grant: grant, mounts: mounts)
+                let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
+                let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
+                let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
+                let noteGuidance = noteGuidance(for: grant, summaries: summaries)
+                let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
+                let blockStatus = block.isPaused ? " (paused)" : ""
+                let message = "Manifold work block active\(blockStatus) (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
+                return StatusResult(
+                    active: true,
+                    grantID: grant.grantID,
+                    sources: mounts.map(\.mountName),
+                    pausedSources: [],
+                    fileCount: totalFiles,
+                    emailCount: emailCount,
+                    message: message,
+                    noteCaptureMode: grant.noteCaptureMode,
+                    noteGuidance: noteGuidance
+                )
+
+            case .legacyGrant(let grant, let grantSources):
+                let mounts = grantMounts(grant: grant, sources: grantSources)
+                try await ensureIndexed(grant: grant, mounts: mounts)
+                let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
+                let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
+                let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
+                let noteGuidance = noteGuidance(for: grant, summaries: summaries)
+                let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
+                let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
+                return StatusResult(
+                    active: true,
+                    grantID: grant.grantID,
+                    sources: mounts.map(\.mountName),
+                    pausedSources: [],
+                    fileCount: totalFiles,
+                    emailCount: emailCount,
+                    message: message,
+                    noteCaptureMode: grant.noteCaptureMode,
+                    noteGuidance: noteGuidance
+                )
+            }
+        } catch ManifoldMCPError.accessPaused {
             return StatusResult(
-                active: true,
-                grantID: grant.grantID,
-                sources: mounts.map(\.mountName),
-                pausedSources: [],
-                fileCount: totalFiles,
-                emailCount: emailCount,
-                message: message,
-                noteCaptureMode: grant.noteCaptureMode,
-                noteGuidance: noteGuidance
+                active: false, grantID: nil, sources: [], pausedSources: [],
+                fileCount: 0, emailCount: 0,
+                message: "Access is paused. Resume access in Manifold to continue.",
+                noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
+                noteGuidance: nil
+            )
+        } catch ManifoldMCPError.noAccessConfigured {
+            let sources = (try? await grantStore.allSources()) ?? []
+            return StatusResult(
+                active: false, grantID: nil,
+                sources: sources.filter(\.isAccessible).map(\.displayName),
+                pausedSources: sources.filter(\.isPaused).map(\.displayName),
+                fileCount: 0, emailCount: 0,
+                message: "No access configured. Use Review & Update Access in Manifold to grant file or email access.",
+                noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
+                noteGuidance: nil
             )
         } catch ManifoldMCPError.noActiveSession {
             let sources = (try? await grantStore.allSources()) ?? []
@@ -1103,6 +1258,8 @@ public enum ManifoldMCPError: Error, LocalizedError {
     case noSources
     case fileNotFound(String)
     case invalidPath(String)
+    case accessPaused
+    case noAccessConfigured
 
     public var errorDescription: String? {
         switch self {
@@ -1110,6 +1267,8 @@ public enum ManifoldMCPError: Error, LocalizedError {
         case .noSources: "No sources configured"
         case .fileNotFound(let path): "File not found: \(path)"
         case .invalidPath(let msg): "Invalid path: \(msg)"
+        case .accessPaused: "Access is paused for this agent. Resume access in Manifold to continue."
+        case .noAccessConfigured: "No file or email access configured. Use Review & Update Access in Manifold to grant access."
         }
     }
 }

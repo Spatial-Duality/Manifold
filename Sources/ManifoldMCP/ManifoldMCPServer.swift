@@ -45,8 +45,10 @@ struct ManifoldMCPServer {
         let grantStore = GrantStore(db: db)
         let emailStore = EmailStore(db: db)
         let artifactIndex = try ArtifactIndex(db: db)
+        let policyStore = PolicyStore(db: db)
+        let workBlockStore = WorkBlockStore(db: db)
 
-        // Create bridge (grant-only, no legacy workspace access)
+        // Create bridge (dual-path: standing access + work block grants)
         let bridge = ManifoldBridge(
             db: db,
             auditStore: auditStore,
@@ -55,6 +57,8 @@ struct ManifoldMCPServer {
             emailStore: emailStore,
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
+            policyStore: policyStore,
+            workBlockStore: workBlockStore,
             targetApp: targetApp,
             serverName: "manifold",
             serverVersion: version

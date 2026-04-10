@@ -24,24 +24,29 @@ struct ManifoldApp: App {
 
                 Divider()
 
-                Button("Home") { store.selectedSidebarItem = .home }
+                Button("Overview") { store.selectedTab = .overview }
                     .keyboardShortcut("1", modifiers: .command)
-                Button("Files") { store.selectedSidebarItem = .files }
+                Button("Files") { store.selectedTab = .files }
                     .keyboardShortcut("2", modifiers: .command)
-                Button("Emails") { store.selectedSidebarItem = .emails }
+                Button("Emails") { store.selectedTab = .emails }
                     .keyboardShortcut("3", modifiers: .command)
-                Button("History") { store.selectedSidebarItem = .history }
-                    .keyboardShortcut("4", modifiers: .command)
-                Button("Sources") { store.selectedSidebarItem = .sources }
-                    .keyboardShortcut("5", modifiers: .command)
             }
 
-            CommandMenu("Session") {
-                Button("Start Session") {
-                    Task { await store.startSession() }
+            CommandMenu("Access") {
+                Button("Review & Update Access") {
+                    // TODO: Phase 8 — open Review Access sheet
                 }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-                .disabled(store.hasActiveSession || store.approvedSources.isEmpty)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+
+                Button("Start Tracked Work Block") {
+                    // TODO: Phase 9 — start work block flow
+                }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+
+                Button("Pause Access") {
+                    // TODO: Phase 5 — pause focused agent
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
 
                 Button("End Session") {
                     Task { await store.endSession() }

@@ -1,0 +1,261 @@
+import SwiftUI
+import ManifoldKit
+
+/// What triggered the Review sheet to open.
+struct ReviewAccessChange: Identifiable {
+    let id = UUID()
+    let description: String
+    let kind: Kind
+
+    enum Kind {
+        case addSource(sourceID: String, sourceName: String)
+        case addDomain(domain: String, emailCount: Int)
+        case loosenSensitivity(from: EmailSensitivityLevel, to: EmailSensitivityLevel)
+        case bulkSources(sourceIDs: [String])
+        case explicit // User clicked "Review & Update Access"
+        case startWorkBlock
+    }
+}
+
+/// Full-height attached sheet for ALL broadening access changes.
+/// This is the product's commitment surface — every grant is deliberate.
+struct ReviewAccessSheet: View {
+    @Environment(ManifoldStore.self) var store
+    @Environment(\.dismiss) private var dismiss
+
+    /// The specific change that triggered this sheet.
+    let pendingChange: ReviewAccessChange?
+
+    /// Which agent is being configured.
+    @State private var selectedAgent: TargetApp = .cowork
+
+    /// Internal tab: Files or Emails
+    @State private var selectedTab: ReviewTab = .files
+
+    /// Whether to start a tracked work block
+    @State private var startWorkBlock = false
+
+    /// Advanced section expanded
+    @State private var showAdvanced = false
+
+    enum ReviewTab: Hashable {
+        case files
+        case emails
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            sheetHeader
+
+            Divider()
+
+            // What's changing (green tinted section)
+            if let change = pendingChange, change.kind != .explicit {
+                whatsChangingSection(change)
+            }
+
+            // Files | Emails tab bar
+            Picker("Review", selection: $selectedTab) {
+                Text("Files").tag(ReviewTab.files)
+                Text("Emails").tag(ReviewTab.emails)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+            .padding(Spacing.section)
+
+            // Content
+            ScrollView {
+                switch selectedTab {
+                case .files:
+                    filesContent
+                case .emails:
+                    emailsContent
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Advanced disclosure
+            DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+                VStack(alignment: .leading, spacing: Spacing.standard) {
+                    Toggle("Start Tracked Work Block with this access", isOn: $startWorkBlock)
+                        .toggleStyle(.checkbox)
+                    Text("Creates baseline snapshots and enables rollback for all included sources.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.top, Spacing.standard)
+            }
+            .padding(.horizontal, Spacing.edge)
+            .padding(.vertical, Spacing.standard)
+
+            Divider()
+
+            // Footer with counts + CTAs
+            sheetFooter
+        }
+        .frame(minWidth: 520, minHeight: 500)
+    }
+
+    // MARK: - Header
+
+    private var sheetHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Review & Update Access")
+                    .font(.title2.weight(.semibold))
+                Text("Review what \(selectedAgent == .codex ? "Codex" : "Claude") can access")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // Agent switcher
+            Picker("Agent", selection: $selectedAgent) {
+                HStack(spacing: 4) {
+                    Circle().fill(.blue).frame(width: 8, height: 8)
+                    Text("Claude")
+                }.tag(TargetApp.cowork)
+                HStack(spacing: 4) {
+                    Circle().fill(.purple).frame(width: 8, height: 8)
+                    Text("Codex")
+                }.tag(TargetApp.codex)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+        }
+        .padding(Spacing.edge)
+    }
+
+    // MARK: - What's Changing
+
+    private func whatsChangingSection(_ change: ReviewAccessChange) -> some View {
+        HStack(spacing: Spacing.standard) {
+            Image(systemName: "plus.circle.fill")
+                .foregroundStyle(.green)
+            Text(change.description)
+                .font(.callout.weight(.medium))
+            Spacer()
+        }
+        .padding(Spacing.section)
+        .background(Color.green.opacity(0.08))
+    }
+
+    // MARK: - Files Content
+
+    private var filesContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.standard) {
+            ForEach(store.sources.filter { !$0.isRemoved }) { source in
+                HStack(spacing: Spacing.standard) {
+                    Toggle(isOn: .constant(source.isAccessible)) { EmptyView() }
+                        .toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .disabled(true) // Changes happen via confirm button
+
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(source.isAccessible ? .blue : .secondary)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(source.displayName)
+                            .font(.body)
+                        Text(shortenedPath(source.originalRootPath))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Spacer()
+
+                    if isNewAddition(source) {
+                        Text("new ✦")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.green)
+                    } else if source.isAccessible {
+                        Text("current")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(Spacing.edge)
+    }
+
+    // MARK: - Emails Content
+
+    private var emailsContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.standard) {
+            Text("Domain access configuration")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("Email domain controls will be wired in a future phase.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(Spacing.edge)
+    }
+
+    // MARK: - Footer
+
+    private var sheetFooter: some View {
+        HStack {
+            let sourceCount = store.sources.filter { $0.isAccessible && !$0.isRemoved }.count
+            Text("\(sourceCount) sources accessible")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button("Cancel") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+
+            if startWorkBlock {
+                Button("Start Tracked Work Block") {
+                    // TODO: Phase 9 — start work block with current scope
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            } else {
+                Button(primaryButtonLabel) {
+                    // TODO: Commit policy changes via PolicyStore
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(Spacing.edge)
+    }
+
+    // MARK: - Helpers
+
+    private var primaryButtonLabel: String {
+        if let change = pendingChange {
+            switch change.kind {
+            case .explicit: return "Update Access"
+            case .startWorkBlock: return "Start Tracked Work Block"
+            default: return "Allow Access"
+            }
+        }
+        return "Update Access"
+    }
+
+    private func isNewAddition(_ source: SourceRecord) -> Bool {
+        guard let change = pendingChange else { return false }
+        switch change.kind {
+        case .addSource(let sourceID, _):
+            return source.sourceID == sourceID
+        case .bulkSources(let ids):
+            return ids.contains(source.sourceID)
+        default:
+            return false
+        }
+    }
+
+    private func shortenedPath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+}

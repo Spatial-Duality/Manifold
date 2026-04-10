@@ -39,35 +39,23 @@ final class CommandCenter {
 
     private func buildCommands(for store: ManifoldStore) -> [ManifoldCommand] {
         [
-            ManifoldCommand("Start Session", icon: "play.fill") {
-                await store.startSession()
+            ManifoldCommand("Go to Overview", icon: "square.grid.2x2") {
+                store.selectedTab = .overview
             },
-            ManifoldCommand("End Session", icon: "stop.fill") {
-                await store.endSession()
+            ManifoldCommand("Go to Files", icon: "doc.text.magnifyingglass") {
+                store.selectedTab = .files
+            },
+            ManifoldCommand("Go to Emails", icon: "envelope.badge.shield.half.filled") {
+                store.selectedTab = .emails
             },
             ManifoldCommand("Add Folder", icon: "folder.badge.plus") {
                 store.addSourceFromPicker()
             },
-            ManifoldCommand("Search Files", icon: "magnifyingglass") {
-                store.selectedSidebarItem = .files
+            ManifoldCommand("Review & Update Access", icon: "lock.shield") {
+                // TODO: Phase 8 — open Review Access sheet
             },
-            ManifoldCommand("Review Changes", icon: "doc.text.magnifyingglass") {
-                store.selectedSidebarItem = .history
-            },
-            ManifoldCommand("Go to Home", icon: "house") {
-                store.selectedSidebarItem = .home
-            },
-            ManifoldCommand("Go to Files", icon: "doc.text.magnifyingglass") {
-                store.selectedSidebarItem = .files
-            },
-            ManifoldCommand("Go to Emails", icon: "envelope.badge.shield.half.filled") {
-                store.selectedSidebarItem = .emails
-            },
-            ManifoldCommand("Go to History", icon: "clock.arrow.circlepath") {
-                store.selectedSidebarItem = .history
-            },
-            ManifoldCommand("Go to Sources", icon: "folder.badge.gearshape") {
-                store.selectedSidebarItem = .sources
+            ManifoldCommand("Start Tracked Work Block", icon: "play.fill") {
+                // TODO: Phase 9 — start work block flow
             },
             ManifoldCommand("Open Settings", icon: "gearshape") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
