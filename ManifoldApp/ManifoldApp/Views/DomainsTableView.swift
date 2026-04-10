@@ -2,7 +2,7 @@ import SwiftUI
 import ManifoldKit
 
 /// A computed domain aggregate for the domains table.
-struct DomainAggregate: Identifiable, Hashable {
+struct DomainAggregate: Identifiable, Hashable, Sendable {
     let domain: String
     let emailCount: Int
     let category: DomainCategory
@@ -12,7 +12,7 @@ struct DomainAggregate: Identifiable, Hashable {
     var id: String { domain }
 }
 
-enum DomainCategory: String, CaseIterable {
+enum DomainCategory: String, CaseIterable, Sendable {
     case work = "Work"
     case automated = "Automated"
     case personal = "Personal"
@@ -28,6 +28,7 @@ struct DomainsTableView: View {
     @State private var domains: [DomainAggregate] = []
     @State private var showUndoToast = false
     @State private var undoDomain: String?
+    @State private var undoTimerTask: Task<Void, Never>?
     @State private var broadenDomain: String?
 
     var body: some View {
@@ -72,7 +73,7 @@ struct DomainsTableView: View {
                 .environment(store)
                 .frame(minWidth: 560, minHeight: 500)
         }
-        .task {
+        .task(id: domainsRefreshKey) {
             await store.policy.loadPolicies()
             await computeDomains()
         }
@@ -188,6 +189,18 @@ struct DomainsTableView: View {
         focusedPolicy?.emailSensitivity ?? .moderate
     }
 
+    private var domainsRefreshKey: String {
+        let policy = focusedPolicy
+        let allowedDomains = policy?.allowedEmailDomains.sorted().joined(separator: ",") ?? ""
+        return [
+            store.agentFocus.rawValue,
+            policy?.updatedAt ?? "no-policy",
+            currentSensitivity.rawValue,
+            allowedDomains,
+            "\(store.emailAccounts.totalMessageCount)",
+        ].joined(separator: "|")
+    }
+
     private func isDomainGranted(_ domain: String) -> Bool {
         focusedPolicy?.allowedEmailDomains.contains(domain.lowercased()) ?? false
     }
@@ -219,9 +232,10 @@ struct DomainsTableView: View {
         Task { await store.policy.removeEmailDomain(domain, from: focusedAgent) }
         undoDomain = domain
         showUndoToast = true
-        Task {
+        undoTimerTask?.cancel()
+        undoTimerTask = Task {
             try? await Task.sleep(for: .seconds(5))
-            if showUndoToast { showUndoToast = false }
+            if !Task.isCancelled { showUndoToast = false }
         }
     }
 
@@ -315,7 +329,7 @@ struct DomainsTableView: View {
         domains = result
     }
 
-    private static func categorize(domain: String, isHidden: Bool) -> DomainCategory {
+    nonisolated private static func categorize(domain: String, isHidden: Bool) -> DomainCategory {
         if isHidden { return .hidden }
         let automated = ["github.com", "circleci.com", "gitlab.com", "bitbucket.org",
                          "linear.app", "notion.so", "slack.com", "vercel.com"]
@@ -326,7 +340,7 @@ struct DomainsTableView: View {
         return .work
     }
 
-    private static func hiddenReason(for domain: String, sensitivity: EmailSensitivityLevel) -> String? {
+    nonisolated private static func hiddenReason(for domain: String, sensitivity: EmailSensitivityLevel) -> String? {
         // Always hidden regardless of sensitivity
         if domain.hasPrefix("noreply.") || domain.hasPrefix("no-reply.") { return "2FA" }
 

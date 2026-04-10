@@ -164,19 +164,19 @@ private struct OverviewTab: View {
 /// When source selected → file browser.
 private struct FilesTab: View {
     @Environment(ManifoldStore.self) var store
-    @State private var selectedSource: String?
+    @State private var selection: FilesSidebarSelection?
 
     var body: some View {
         NavigationSplitView {
-            FilesSidebar(selectedSource: $selectedSource)
+            FilesSidebar(selection: $selection)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
         } detail: {
-            if selectedSource != nil {
-                // Source selected → file browser
-                FilesView()
-            } else {
+            if selection == nil {
                 // No source selected → Sources overview with agent access controls
                 SourcesTableView()
+            } else {
+                // Sidebar selection → file browser
+                FilesView(sidebarSelection: selection)
             }
         }
         .inspector(isPresented: inspectorBinding) {

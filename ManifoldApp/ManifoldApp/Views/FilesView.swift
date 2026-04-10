@@ -4,6 +4,7 @@ import ManifoldKit
 
 struct FilesView: View {
     @Environment(ManifoldStore.self) var store
+    let sidebarSelection: FilesSidebarSelection?
 
     @State private var allFiles: [SourceFile] = []
     @State private var filteredFiles: [SourceFile] = []
@@ -12,6 +13,7 @@ struct FilesView: View {
     @State private var contentSearchResults: [SearchResult] = []
     @State private var isSearchingContent = false
     @State private var nameFilterTask: Task<Void, Never>?
+    @State private var reloadTask: Task<Void, Never>?
 
     // Filters
     @State private var filterSource = "All"
@@ -33,6 +35,38 @@ struct FilesView: View {
         ["All"] + Array(Set(allFiles.map(\.fileExtension).filter { !$0.isEmpty })).sorted()
     }
 
+    private var selectedSourceID: String? {
+        guard case let .source(sourceID)? = sidebarSelection else { return nil }
+        return sourceID
+    }
+
+    private var selectedSourceName: String? {
+        guard let selectedSourceID else { return nil }
+        return store.sources.first(where: { $0.sourceID == selectedSourceID })?.displayName
+    }
+
+    private var isRecentlyModifiedSelection: Bool {
+        if case .recentlyModified? = sidebarSelection { return true }
+        return false
+    }
+
+    private var isAITouchedSelection: Bool {
+        if case .aiTouched? = sidebarSelection { return true }
+        return false
+    }
+
+    private var navigationTitleText: String {
+        if let selectedSourceName { return selectedSourceName }
+        if isRecentlyModifiedSelection { return "Recently Modified" }
+        if isAITouchedSelection { return "AI-Touched Files" }
+        return "Files"
+    }
+
+    private var navigationSubtitleText: String {
+        let sourceCount = selectedSourceID == nil ? store.sources.filter { !$0.isRemoved }.count : 1
+        return "\(filteredFiles.count) of \(allFiles.count) files across \(sourceCount) source\(sourceCount == 1 ? "" : "s")"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Filter bar
@@ -41,6 +75,7 @@ struct FilesView: View {
                     ForEach(sourceNames, id: \.self) { Text($0) }
                 }
                 .frame(maxWidth: 160)
+                .disabled(selectedSourceID != nil)
 
                 Picker("Sort", selection: $sortBy) {
                     ForEach(SortOption.allCases, id: \.self) { Text($0.rawValue) }
@@ -141,12 +176,15 @@ struct FilesView: View {
                 .listStyle(.inset(alternatesRowBackgrounds: true))
             }
         }
-        .navigationTitle("Files")
-        .navigationSubtitle("\(allFiles.count) files across \(store.sources.filter { !$0.isRemoved }.count) sources")
-        .task { reloadFiles() }
-        .onChange(of: store.sources.count) { _, _ in Task { @MainActor in reloadFiles() } }
-        .onChange(of: store.hasActiveSession) { _, _ in Task { @MainActor in reloadFiles() } }
-        .onChange(of: store.activeGrantSources.count) { _, _ in Task { @MainActor in reloadFiles() } }
+        .navigationTitle(navigationTitleText)
+        .navigationSubtitle(navigationSubtitleText)
+        .task(id: sidebarSelection) {
+            syncSidebarSelection()
+            reloadFiles()
+        }
+        .onChange(of: store.sources.count) { _, _ in scheduleReload() }
+        .onChange(of: store.hasActiveSession) { _, _ in scheduleReload() }
+        .onChange(of: store.activeGrantSources.count) { _, _ in scheduleReload() }
         .onChange(of: searchText) { _, _ in
             nameFilterTask?.cancel()
             nameFilterTask = Task { @MainActor in
@@ -155,9 +193,9 @@ struct FilesView: View {
                 applyFilters()
             }
         }
-        .onChange(of: filterSource) { _, _ in Task { @MainActor in applyFilters() } }
-        .onChange(of: filterType) { _, _ in Task { @MainActor in applyFilters() } }
-        .onChange(of: sortBy) { _, _ in Task { @MainActor in applyFilters() } }
+        .onChange(of: filterSource) { _, _ in applyFilters() }
+        .onChange(of: filterType) { _, _ in applyFilters() }
+        .onChange(of: sortBy) { _, _ in applyFilters() }
     }
 
     // MARK: - Context Menu
@@ -184,6 +222,17 @@ struct FilesView: View {
 
     // MARK: - Data
 
+    /// Debounced reload — cancels any pending reload and waits 50ms to coalesce
+    /// rapid onChange triggers (e.g. session start fires sources + grants + session changes).
+    private func scheduleReload() {
+        reloadTask?.cancel()
+        reloadTask = Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            reloadFiles()
+        }
+    }
+
     private func reloadFiles() {
         Task {
             if store.hasActiveSession {
@@ -198,11 +247,16 @@ struct FilesView: View {
     private func applyFilters() {
         var result = allFiles
 
-        if filterSource != "All" {
+        if let selectedSourceID {
+            result = result.filter { $0.sourceID == selectedSourceID }
+        } else if filterSource != "All" {
             result = result.filter { $0.sourceName == filterSource }
         }
         if filterType != "All" {
             result = result.filter { $0.fileExtension == filterType }
+        }
+        if isAITouchedSelection {
+            result = result.filter(\.hasAIActivity)
         }
         if !searchText.isEmpty {
             result = result.filter { $0.name.localizedStandardContains(searchText) || $0.relativePath.localizedStandardContains(searchText) }
@@ -216,6 +270,18 @@ struct FilesView: View {
         }
 
         filteredFiles = result
+    }
+
+    private func syncSidebarSelection() {
+        if let selectedSourceName {
+            filterSource = selectedSourceName
+        } else {
+            filterSource = "All"
+        }
+
+        if isRecentlyModifiedSelection {
+            sortBy = .modified
+        }
     }
 
     private func searchContent() {

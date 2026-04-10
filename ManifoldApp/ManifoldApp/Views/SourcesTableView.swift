@@ -12,6 +12,7 @@ struct SourcesTableView: View {
     @State private var undoSource: (SourceRecord, AgentFocus)?
     @State private var undoAgent: TargetApp?
     @State private var showUndoToast = false
+    @State private var undoTimerTask: Task<Void, Never>?
     @State private var broadenSource: (SourceRecord, TargetApp)?
 
     private var visibleSources: [SourceRecord] {
@@ -179,10 +180,11 @@ struct SourcesTableView: View {
         undoAgent = agent
         showUndoToast = true
 
-        // Auto-dismiss after 5 seconds
-        Task {
+        // Auto-dismiss after 5 seconds — cancel previous timer
+        undoTimerTask?.cancel()
+        undoTimerTask = Task {
             try? await Task.sleep(for: .seconds(5))
-            if showUndoToast { showUndoToast = false }
+            if !Task.isCancelled { showUndoToast = false }
         }
     }
 

@@ -33,6 +33,7 @@ struct ReviewAccessSheet: View {
 
     /// Which agent is being configured.
     @State private var selectedAgent: TargetApp = .cowork
+    @State private var hasInitializedAgent = false
 
     /// Internal tab: Files or Emails
     @State private var selectedTab: ReviewTab = .files
@@ -100,6 +101,11 @@ struct ReviewAccessSheet: View {
             sheetFooter
         }
         .frame(minWidth: 520, minHeight: 500)
+        .task {
+            guard !hasInitializedAgent else { return }
+            selectedAgent = store.agentFocus == .codex ? .codex : .cowork
+            hasInitializedAgent = true
+        }
     }
 
     // MARK: - Header
@@ -255,13 +261,14 @@ struct ReviewAccessSheet: View {
             case .addSource(let sourceID, _):
                 await store.policy.addSource(sourceID, to: selectedAgent)
             case .addDomain(let domain, _):
-                // TODO: Wire domain policy
-                _ = domain
+                await store.policy.addEmailDomain(domain, to: selectedAgent)
             case .bulkSources(let sourceIDs):
                 for id in sourceIDs {
                     await store.policy.addSource(id, to: selectedAgent)
                 }
-            case .loosenSensitivity, .explicit, .startWorkBlock:
+            case .loosenSensitivity(_, let newLevel):
+                await store.policy.updateSensitivity(newLevel, for: selectedAgent)
+            case .explicit, .startWorkBlock:
                 break
             }
         }

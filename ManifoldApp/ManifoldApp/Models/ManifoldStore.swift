@@ -94,6 +94,9 @@ class ManifoldStore {
 
         Task {
             await initStores()
+            if db == nil {
+                lastError = "Failed to initialize database. Try restarting Manifold."
+            }
             setupNotificationObservers()
             requestNotificationPermission()
         }
@@ -160,7 +163,7 @@ class ManifoldStore {
             Task.detached { await SessionModel.cleanupOrphanedMaterializations(grantStore: gs) }
 
             pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in await self?.refresh() }
+                Task { [weak self] in await self?.refresh() }
             }
         } catch {
             logger.error("Failed to init stores: \(error.localizedDescription)")

@@ -27,8 +27,7 @@ public actor EmailSyncEngine {
         syncTasks[accountID]?.cancel()
         isStopped = false
 
-        let task = Task { [weak self] in
-            guard let self else { return }
+        let task = Task {
             await self.periodicSync(accountID: accountID)
         }
         syncTasks[accountID] = task
@@ -55,8 +54,7 @@ public actor EmailSyncEngine {
     /// Processes in batches, resumable across app launches.
     public func startBackfill() {
         guard backfillTask == nil else { return }
-        backfillTask = Task { [weak self] in
-            guard let self else { return }
+        backfillTask = Task {
             await self.runBackfill()
         }
     }

@@ -1,14 +1,20 @@
 import SwiftUI
 import ManifoldKit
 
+enum FilesSidebarSelection: Hashable {
+    case source(String)
+    case recentlyModified
+    case aiTouched
+}
+
 /// Files tab sidebar: source navigation with agent-colored dots,
 /// version filters, and activity link. Pure navigation — no settings.
 struct FilesSidebar: View {
     @Environment(ManifoldStore.self) var store
-    @Binding var selectedSource: String?
+    @Binding var selection: FilesSidebarSelection?
 
     var body: some View {
-        List(selection: $selectedSource) {
+        List(selection: $selection) {
             // Sources section
             Section("Sources") {
                 ForEach(visibleSources) { source in
@@ -18,7 +24,7 @@ struct FilesSidebar: View {
                         Image(systemName: "folder.fill")
                             .foregroundStyle(source.isAccessible ? .blue : .gray)
                     }
-                    .tag(source.sourceID)
+                    .tag(FilesSidebarSelection.source(source.sourceID))
                 }
 
                 Button {
@@ -32,12 +38,10 @@ struct FilesSidebar: View {
 
             // Versions section
             Section("Versions") {
-                NavigationLink(value: "recently-modified") {
-                    Label("Recently Modified", systemImage: "clock")
-                }
-                NavigationLink(value: "ai-touched") {
-                    Label("AI-Touched Files", systemImage: "sparkles")
-                }
+                Label("Recently Modified", systemImage: "clock")
+                    .tag(FilesSidebarSelection.recentlyModified)
+                Label("AI-Touched Files", systemImage: "sparkles")
+                    .tag(FilesSidebarSelection.aiTouched)
             }
 
             // Activity link

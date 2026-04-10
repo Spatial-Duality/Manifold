@@ -30,7 +30,8 @@ struct JSONDict: @unchecked Sendable {
 
 /// Minimal MCP server. Reads JSON-RPC 2.0 from stdin, dispatches to handlers, writes responses to stdout.
 /// Zero external dependencies. Uses Foundation only.
-final class MCPServer: @unchecked Sendable {
+/// Actor ensures registration and start are serialized — no races on handler state.
+actor MCPServer {
     let name: String
     let version: String
 

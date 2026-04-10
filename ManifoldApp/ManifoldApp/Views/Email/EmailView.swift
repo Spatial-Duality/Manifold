@@ -73,7 +73,7 @@ struct EmailView: View {
 
         // Smart mailbox query
         if let rules = selection.selectedSmartMailboxRules, let emailStore = store.emailStore {
-            messages = (try? await emailStore.smartMailboxMessages(rules: rules, sortKey: selection.sortKey)) ?? []
+            messages = (try? emailStore.smartMailboxMessages(rules: rules, sortKey: selection.sortKey)) ?? []
             return
         }
 
@@ -108,17 +108,24 @@ private struct EmailAccountDetailSheet: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
     let account: EmailAccountRecord
-    @State private var syncStates: [SyncStateRecord] = []
     @State private var confirmDelete = false
+
+    private var currentAccount: EmailAccountRecord {
+        store.emailAccounts.accounts.first(where: { $0.accountID == account.accountID }) ?? account
+    }
+
+    private var currentSyncStates: [SyncStateRecord] {
+        store.emailAccounts.syncStates[currentAccount.accountID] ?? []
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Image(systemName: account.provider.systemImage)
+                Image(systemName: currentAccount.provider.systemImage)
                     .font(.title2).foregroundStyle(providerColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(account.displayName).font(.headline)
-                    Text(account.username ?? "").font(.caption).foregroundStyle(.secondary)
+                    Text(currentAccount.displayName).font(.headline)
+                    Text(currentAccount.username ?? "").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Done") { dismiss() }
@@ -130,18 +137,18 @@ private struct EmailAccountDetailSheet: View {
 
             Form {
                 Section("Connection") {
-                    LabeledContent("Server") { Text(account.server ?? "Unknown").font(.caption.monospaced()) }
-                    LabeledContent("Port") { Text("\(account.port ?? 993)").font(.caption.monospaced()) }
-                    LabeledContent("Auth") { Text(account.authType).font(.caption) }
-                    LabeledContent("Sync Interval") { Text("\(account.syncIntervalSeconds / 60) min") }
+                    LabeledContent("Server") { Text(currentAccount.server ?? "Unknown").font(.caption.monospaced()) }
+                    LabeledContent("Port") { Text("\(currentAccount.port ?? 993)").font(.caption.monospaced()) }
+                    LabeledContent("Auth") { Text(currentAccount.authType).font(.caption) }
+                    LabeledContent("Sync Interval") { Text("\(currentAccount.syncIntervalSeconds / 60) min") }
                 }
 
                 Section("Mailboxes") {
-                    if syncStates.isEmpty {
+                    if currentSyncStates.isEmpty {
                         Text("No mailboxes synced yet")
                             .foregroundStyle(.tertiary)
                     } else {
-                        ForEach(syncStates) { state in
+                        ForEach(currentSyncStates) { state in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(state.mailboxName)
@@ -165,13 +172,13 @@ private struct EmailAccountDetailSheet: View {
 
                 Section("Sync") {
                     Toggle("Sync Enabled", isOn: Binding(
-                        get: { account.syncEnabled },
+                        get: { currentAccount.syncEnabled },
                         set: { enabled in
-                            Task { await store.emailAccounts.toggleSync(accountID: account.accountID, enabled: enabled) }
+                            Task { await store.emailAccounts.toggleSync(accountID: currentAccount.accountID, enabled: enabled) }
                         }
                     ))
                     Button("Sync Now") {
-                        Task { await store.emailAccounts.syncNow(accountID: account.accountID) }
+                        Task { await store.emailAccounts.syncNow(accountID: currentAccount.accountID) }
                     }
                 }
 
@@ -184,19 +191,16 @@ private struct EmailAccountDetailSheet: View {
             .formStyle(.grouped)
         }
         .frame(width: 480, height: 520)
-        .task {
-            syncStates = store.emailAccounts.syncStates[account.accountID] ?? []
-        }
         .alert("Remove Account?", isPresented: $confirmDelete) {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
                 Task {
-                    await store.emailAccounts.removeAccount(id: account.accountID)
+                    await store.emailAccounts.removeAccount(id: currentAccount.accountID)
                     dismiss()
                 }
             }
         } message: {
-            Text("This will remove \(account.displayName) and stop syncing. Backed up .eml files on disk will not be deleted.")
+            Text("This will remove \(currentAccount.displayName) and stop syncing. Backed up .eml files on disk will not be deleted.")
         }
     }
 
@@ -221,7 +225,7 @@ private struct EmailAccountDetailSheet: View {
     }
 
     private var providerColor: Color {
-        switch account.provider {
+        switch currentAccount.provider {
         case .gmail:    .red
         case .outlook:  .blue
         case .icloud:   .cyan

@@ -66,19 +66,19 @@ struct ManifoldMCPServer {
 
         // Create MCP server
         let server = MCPServer(name: "manifold", version: version)
-        server.registerInitializeHandler { params in
+        await server.registerInitializeHandler { params in
             await bridge.registerClientContext(initializeParams: params.value)
             ManifoldNotification.post(ManifoldNotification.agentConnected, userInfo: ["agent": targetApp.rawValue])
         }
 
         // Register tools
-        server.registerTools(ToolHandlers.allTools()) { name, arguments in
+        await server.registerTools(ToolHandlers.allTools()) { name, arguments in
             let result = await ToolHandlers.handle(name: name, arguments: arguments.value, bridge: bridge)
             return JSONDict(result)
         }
 
         // Register resources
-        server.registerResources([
+        await server.registerResources([
             MCPResource(name: "Manifold Status", uri: "manifold://status", description: "Current access status"),
             MCPResource(name: "Approved Files", uri: "manifold://files", description: "List of files in workspace"),
             MCPResource(name: "Shared Emails", uri: "manifold://emails", description: "Emails available to agent"),
