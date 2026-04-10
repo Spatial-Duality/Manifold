@@ -42,10 +42,16 @@ struct DomainsTableView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .searchable(text: $searchText, prompt: "Search domains...")
+        // NOTE: .searchable() removed — collides with EmailView's .searchable()
+        //       when both views exist in the same window toolbar.
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 AgentFocusControl(focus: $store.agentFocus)
+            }
+            ToolbarItem(placement: .automatic) {
+                TextField("Search domains", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
             }
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: Spacing.tight) {

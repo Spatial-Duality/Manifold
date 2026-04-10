@@ -35,10 +35,14 @@ struct SourcesTableView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .searchable(text: $searchText, prompt: "Search sources...")
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 AgentFocusControl(focus: $store.agentFocus)
+            }
+            ToolbarItem(placement: .automatic) {
+                TextField("Search sources", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("Add Folder", systemImage: "folder.badge.plus") {
