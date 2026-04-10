@@ -1,0 +1,55 @@
+import Foundation
+import ManifoldKit
+
+/// Health status for a single check.
+public enum AgentConnectionStatus: String, Sendable {
+    case unknown, checking, notInstalled, installed, configured, connected, error
+
+    var displayLabel: String {
+        switch self {
+        case .unknown: ""
+        case .checking: "Checking\u{2026}"
+        case .notInstalled: "Not found"
+        case .installed: "Installed"
+        case .configured: "Configured"
+        case .connected: "Connected"
+        case .error: "Error"
+        }
+    }
+}
+
+/// Per-agent connection state: Claude has 3 checks, Codex has 2.
+@Observable
+@MainActor
+public final class AgentConnectionState: Identifiable {
+    public let id: TargetApp
+
+    // Claude (3 checks)
+    var appInstalled: AgentConnectionStatus = .unknown
+    var mcpConfigured: AgentConnectionStatus = .unknown
+    var connectionVerified: AgentConnectionStatus = .unknown
+
+    // Codex (2 checks)
+    var cliInstalled: AgentConnectionStatus = .unknown
+    var mcpAdded: AgentConnectionStatus = .unknown
+
+    var errorDetail: String?
+
+    var overallStatus: AgentConnectionStatus {
+        switch id {
+        case .cowork:
+            if connectionVerified == .connected { return .connected }
+            if [appInstalled, mcpConfigured, connectionVerified].contains(.error) { return .error }
+            if appInstalled == .notInstalled { return .notInstalled }
+            if mcpConfigured == .installed { return .configured }
+            return .notInstalled
+        case .codex:
+            if mcpAdded == .installed { return .configured }
+            if [cliInstalled, mcpAdded].contains(.error) { return .error }
+            if cliInstalled == .notInstalled { return .notInstalled }
+            return .notInstalled
+        }
+    }
+
+    init(agent: TargetApp) { self.id = agent }
+}

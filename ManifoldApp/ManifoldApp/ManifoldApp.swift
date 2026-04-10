@@ -33,13 +33,13 @@ struct ManifoldApp: App {
             }
 
             CommandMenu("Access") {
-                Button("Review & Update Access") {
-                    // TODO: Phase 8 — open Review Access sheet
+                Button("Review Access\u{2026}") {
+                    // TODO: open Review Access sheet
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
-                Button("Start Tracked Work Block") {
-                    // TODO: Phase 9 — start work block flow
+                Button("Track Changes") {
+                    // TODO: start track changes flow
                 }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
 
@@ -68,9 +68,8 @@ struct ManifoldApp: App {
         }
 
         Settings {
-            SetupView()
+            SettingsView()
                 .environment(store)
-                .frame(minWidth: 520, minHeight: 420)
         }
     }
 

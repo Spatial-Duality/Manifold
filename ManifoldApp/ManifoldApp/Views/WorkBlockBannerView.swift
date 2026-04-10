@@ -36,7 +36,7 @@ struct WorkBlockBannerView: View {
                         .fill(agentColor)
                         .frame(width: 8, height: 8)
 
-                    Text("Work Block")
+                    Text("Tracking Changes")
                         .font(.callout.weight(.medium))
 
                     Text("—")
@@ -80,7 +80,7 @@ struct WorkBlockBannerView: View {
 
                 // Actions
                 HStack(spacing: Spacing.standard) {
-                    Button("Finish & Review", action: onFinish)
+                    Button("Review Changes", action: onFinish)
                         .buttonStyle(.borderedProminent)
                         .tint(agentColor)
                         .controlSize(.small)
@@ -100,7 +100,7 @@ struct WorkBlockBannerView: View {
             .padding(.horizontal, Spacing.edge)
             .padding(.vertical, Spacing.standard)
             .background(.regularMaterial)
-            .alert("Stop this work block?", isPresented: $showStopConfirmation) {
+            .alert("Stop tracking changes?", isPresented: $showStopConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Discard Changes", role: .destructive, action: onStop)
             } message: {
@@ -108,7 +108,7 @@ struct WorkBlockBannerView: View {
             }
             .transition(.move(edge: .top).combined(with: .opacity))
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Work block active for \(block.agent == .codex ? "Codex" : "Claude")")
+            .accessibilityLabel("Tracking changes for \(block.agent == .codex ? "Codex" : "Claude")")
         }
     }
 }

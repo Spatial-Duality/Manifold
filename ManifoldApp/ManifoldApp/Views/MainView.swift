@@ -11,20 +11,7 @@ struct MainView: View {
         @Bindable var commands = commands
         @Bindable var store = store
 
-        VStack(spacing: 0) {
-            // Work Block Banner (global, visible on ALL tabs when active)
-            if let block = store.policy.activeWorkBlock {
-                WorkBlockBannerView(
-                    block: block,
-                    onFinish: { Task { await store.policy.finishWorkBlock() } },
-                    onPause: { Task { await store.policy.pauseWorkBlock() } },
-                    onStop: { Task { await store.policy.stopWorkBlock() } }
-                )
-            }
-
-            // Tab content
-            tabContent
-        }
+        tabContent
         .frame(minWidth: 780, minHeight: 520)
         .overlay {
             if commands.isPresented {
@@ -51,7 +38,7 @@ struct MainView: View {
             }
         }
         .sheet(isPresented: $showOnboarding) {
-            OnboardingView()
+            SetupAssistantView()
                 .environment(store)
         }
         .sheet(item: $reviewSheetChange) { change in
@@ -68,6 +55,18 @@ struct MainView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 280)
+            }
+
+            // Track Changes indicator (when active)
+            ToolbarItemGroup(placement: .secondaryAction) {
+                if let block = store.policy.activeWorkBlock {
+                    TrackChangesToolbarContent(
+                        block: block,
+                        onFinish: { Task { await store.policy.finishWorkBlock() } },
+                        onPause: { Task { await store.policy.pauseWorkBlock() } },
+                        onStop: { Task { await store.policy.stopWorkBlock() } }
+                    )
+                }
             }
 
             ToolbarItemGroup(placement: .primaryAction) {

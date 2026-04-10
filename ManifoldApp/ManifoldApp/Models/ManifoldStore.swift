@@ -33,6 +33,14 @@ enum AgentFocus: String, Hashable, CaseIterable {
     case claude
     case codex
     case compare
+
+    var displayName: String {
+        switch self {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .compare: "both agents"
+        }
+    }
 }
 
 // MARK: - Store
@@ -66,6 +74,7 @@ class ManifoldStore {
     let setup: SetupModel
     let emailAccounts: EmailAccountModel
     let policy: PolicyModel
+    let integrationHealth = IntegrationHealthModel()
 
     var menuBarIcon: String { isConnected ? "shield.checkered.fill" : "shield.checkered" }
 
@@ -92,6 +101,8 @@ class ManifoldStore {
         emailAccounts = EmailAccountModel()
         policy = PolicyModel()
 
+        integrationHealth.store = self
+
         Task {
             await initStores()
             if db == nil {
@@ -99,6 +110,7 @@ class ManifoldStore {
             }
             setupNotificationObservers()
             requestNotificationPermission()
+            await integrationHealth.checkAll()
         }
     }
 

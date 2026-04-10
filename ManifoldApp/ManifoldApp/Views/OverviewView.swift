@@ -16,12 +16,15 @@ struct OverviewView: View {
                     agentCards
                 }
 
-                // Start Tracked Work Block button (below cards)
+                // Track Changes button (below cards)
                 if store.isConnected && !store.sources.isEmpty {
                     Button {
-                        // TODO: Phase 9 — open Review sheet with work block CTA
+                        reviewSheetChange = ReviewAccessChange(
+                            description: "Start tracking changes",
+                            kind: .startWorkBlock
+                        )
                     } label: {
-                        Label("Start Tracked Work Block", systemImage: "play.rectangle.fill")
+                        Label("Track Changes", systemImage: "timeline.selection")
                     }
                     .controlSize(.large)
                     .buttonStyle(.plain)

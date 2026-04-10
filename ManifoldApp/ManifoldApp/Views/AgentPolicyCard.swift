@@ -16,11 +16,8 @@ struct AgentPolicyCard: View {
     let onReviewAccess: () -> Void
     let onViewActivity: () -> Void
 
-    @State private var pauseHovered = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.section) {
-            // Header: agent dot + name + connection + pause
             header
 
             // Files summary
@@ -45,7 +42,7 @@ struct AgentPolicyCard: View {
                     .foregroundStyle(.secondary)
                     .imageScale(.small)
                 if emailAccountCount > 0 {
-                    Text("\(emailAccountCount) email account\(emailAccountCount == 1 ? "" : "s")")
+                    Text("\(emailAccountCount) domain\(emailAccountCount == 1 ? "" : "s") visible")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -55,19 +52,15 @@ struct AgentPolicyCard: View {
                 }
             }
 
-            // Actions
+            // Actions — "Update Access…" (shortened per review A.2)
             HStack(spacing: Spacing.section) {
-                Button("Review & Update Access", action: onReviewAccess)
+                Button("Update Access\u{2026}", action: onReviewAccess)
                     .controlSize(.regular)
 
-                Button {
-                    onViewActivity()
-                } label: {
-                    Text("View Activity →")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .font(.callout)
+                Button("View Activity \u{2192}", action: onViewActivity)
+                    .buttonStyle(.plain)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(Spacing.edge)
@@ -111,21 +104,12 @@ struct AgentPolicyCard: View {
 
             Spacer()
 
-            // Pause Access button — emergency control
-            Button {
+            // Pause Access — uses destructive role (review fix A.3, no hover-to-red)
+            Button(isPaused ? "Resume Access" : "Pause Access", role: isPaused ? nil : .destructive) {
                 onPauseToggle()
-            } label: {
-                Text(isPaused ? "Resume Access" : "Pause Access")
-                    .font(.callout)
-                    .foregroundStyle(pauseButtonColor)
             }
             .buttonStyle(.plain)
-            .onHover { pauseHovered = $0 }
+            .font(.callout)
         }
-    }
-
-    private var pauseButtonColor: Color {
-        if isPaused { return .green }
-        return pauseHovered ? .red : agentColor
     }
 }

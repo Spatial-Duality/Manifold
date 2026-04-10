@@ -1,0 +1,345 @@
+import SwiftUI
+import ManifoldKit
+
+/// 4-screen first-run setup assistant. No nested sheets.
+/// Screen 2 shows connection checks inline. Screen 3 uses multi-select folder picker.
+struct SetupAssistantView: View {
+    @Environment(ManifoldStore.self) var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var screen: SetupScreen = .welcome
+
+    enum SetupScreen: Int, CaseIterable {
+        case welcome = 0, connectApps = 1, addData = 2, reviewFinish = 3
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Progress dots
+            HStack(spacing: 8) {
+                ForEach(SetupScreen.allCases, id: \.rawValue) { s in
+                    Circle()
+                        .fill(s.rawValue <= screen.rawValue ? Color.accentColor : Color.gray.opacity(0.3))
+                        .frame(width: 8, height: 8)
+                }
+            }
+            .padding(.top, 20)
+            .accessibilityLabel("Step \(screen.rawValue + 1) of \(SetupScreen.allCases.count)")
+
+            Spacer()
+
+            Group {
+                switch screen {
+                case .welcome: WelcomeScreen(advance: advance)
+                case .connectApps: ConnectAppsScreen(advance: advance, skip: advance)
+                case .addData: AddDataScreen(advance: advance, skip: advance)
+                case .reviewFinish: ReviewFinishScreen(finish: finish)
+                }
+            }
+            .transition(.asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)
+            ))
+
+            Spacer()
+
+            if screen.rawValue > 0 && screen != .reviewFinish {
+                HStack {
+                    Button("Back") {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            screen = SetupScreen(rawValue: screen.rawValue - 1) ?? .welcome
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+            }
+        }
+        .frame(width: 580, height: 500)
+        .interactiveDismissDisabled(screen != .reviewFinish)
+    }
+
+    private func advance() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            if let next = SetupScreen(rawValue: screen.rawValue + 1) { screen = next }
+        }
+    }
+
+    private func finish() {
+        store.hasCompletedOnboarding = true
+        dismiss()
+    }
+}
+
+// MARK: - Screen 1: Welcome
+
+private struct WelcomeScreen: View {
+    let advance: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 56))
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+
+            Text("Manifold controls what AI agents see on your Mac.")
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+
+            Text("Nothing is shared until you decide. Every change is versioned automatically.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button("Continue") { advance() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        }
+        .padding(.horizontal, 48)
+    }
+}
+
+// MARK: - Screen 2: Connect Apps (Inline — no nested sheets)
+
+private struct ConnectAppsScreen: View {
+    let advance: () -> Void
+    let skip: () -> Void
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Connect Claude or Codex")
+                .font(.title2.weight(.semibold))
+
+            Text("Manifold works with either or both. You can add more later in Settings.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            VStack(spacing: 16) {
+                // Claude — inline checks
+                InlineAgentCard(
+                    agentName: "Claude",
+                    agentColor: .blue,
+                    checks: [
+                        CheckRow("App installed", status: store.integrationHealth.claude.appInstalled),
+                        CheckRow("MCP configured", status: store.integrationHealth.claude.mcpConfigured),
+                        CheckRow("Connection verified", status: store.integrationHealth.claude.connectionVerified),
+                    ]
+                )
+
+                // Codex — inline checks
+                InlineAgentCard(
+                    agentName: "Codex",
+                    agentColor: .purple,
+                    checks: [
+                        CheckRow("CLI installed", status: store.integrationHealth.codex.cliInstalled),
+                        CheckRow("Manifold added", status: store.integrationHealth.codex.mcpAdded),
+                    ]
+                )
+            }
+            .frame(maxWidth: 440)
+
+            if store.integrationHealth.claude.overallStatus != .notInstalled
+                || store.integrationHealth.codex.overallStatus != .notInstalled {
+                Button("Continue") { advance() }
+                    .buttonStyle(.borderedProminent)
+            }
+
+            Button("Skip, I'll do this later") { skip() }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 32)
+        .task { await store.integrationHealth.checkAll(force: true) }
+    }
+}
+
+private struct InlineAgentCard: View {
+    let agentName: String
+    let agentColor: Color
+    let checks: [CheckRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Circle().fill(agentColor).frame(width: 8, height: 8)
+                Text(agentName).font(.callout.weight(.medium))
+            }
+
+            ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
+                check
+            }
+        }
+        .padding(16)
+        .background(.background, in: .rect(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        }
+    }
+}
+
+// MARK: - Screen 3: Add Data
+
+private struct AddDataScreen: View {
+    let advance: () -> Void
+    let skip: () -> Void
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Choose what to share")
+                .font(.title2.weight(.semibold))
+
+            Text("Add folders or email accounts. Agents can only see what you allow.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            VStack(alignment: .leading, spacing: 16) {
+                // Folders
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Folders", systemImage: "folder")
+                        .font(.callout.weight(.medium))
+
+                    ForEach(store.sources.filter { !$0.isRemoved }, id: \.sourceID) { source in
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .imageScale(.small)
+                            Text(source.displayName)
+                                .font(.caption)
+                        }
+                    }
+
+                    Button("Add Folders\u{2026}") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.allowsMultipleSelection = true
+                        panel.message = "Select folders to share with AI agents"
+                        panel.prompt = "Add"
+                        if panel.runModal() == .OK {
+                            for url in panel.urls {
+                                store.addSource(path: url.path)
+                            }
+                        }
+                    }
+                    .controlSize(.small)
+                }
+
+                Divider()
+
+                // Email
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Email", systemImage: "envelope")
+                        .font(.callout.weight(.medium))
+
+                    ForEach(store.emailAccounts.accounts) { account in
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .imageScale(.small)
+                            Text(account.displayName).font(.caption)
+                        }
+                    }
+
+                    Button("Add Email Account\u{2026}") {
+                        // Opens standard email setup
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 400)
+            .background(.background, in: .rect(cornerRadius: 10))
+
+            if !store.sources.filter({ !$0.isRemoved }).isEmpty || !store.emailAccounts.accounts.isEmpty {
+                Button("Continue") { advance() }
+                    .buttonStyle(.borderedProminent)
+            }
+
+            Button("Skip for now") { skip() }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 48)
+    }
+}
+
+// MARK: - Screen 4: Review & Finish
+
+private struct ReviewFinishScreen: View {
+    let finish: () -> Void
+    @Environment(ManifoldStore.self) var store
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+
+            Text("You're ready.")
+                .font(.title2.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 10) {
+                SummaryRow(
+                    label: "AI Apps",
+                    detail: agentSummary,
+                    done: store.integrationHealth.claude.overallStatus != .notInstalled
+                        || store.integrationHealth.codex.overallStatus != .notInstalled
+                )
+                SummaryRow(
+                    label: "Folders",
+                    detail: "\(store.sources.filter { !$0.isRemoved }.count) added",
+                    done: !store.sources.filter({ !$0.isRemoved }).isEmpty
+                )
+                SummaryRow(
+                    label: "Email",
+                    detail: "\(store.emailAccounts.accounts.count) account\(store.emailAccounts.accounts.count == 1 ? "" : "s")",
+                    done: !store.emailAccounts.accounts.isEmpty
+                )
+            }
+            .frame(maxWidth: 360)
+
+            Text("You can change all of this anytime in Settings.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            Button("Done") { finish() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        }
+        .padding(.horizontal, 48)
+    }
+
+    private var agentSummary: String {
+        var parts: [String] = []
+        if store.integrationHealth.claude.overallStatus != .notInstalled { parts.append("Claude") }
+        if store.integrationHealth.codex.overallStatus != .notInstalled { parts.append("Codex") }
+        return parts.isEmpty ? "Not configured" : parts.joined(separator: " + ")
+    }
+}
+
+private struct SummaryRow: View {
+    let label: String
+    let detail: String
+    let done: Bool
+
+    var body: some View {
+        HStack {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(done ? .green : .secondary)
+            Text(label).font(.callout.weight(.medium))
+            Spacer()
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}

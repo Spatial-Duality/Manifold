@@ -51,11 +51,11 @@ final class CommandCenter {
             ManifoldCommand("Add Folder", icon: "folder.badge.plus") {
                 store.addSourceFromPicker()
             },
-            ManifoldCommand("Review & Update Access", icon: "lock.shield") {
-                // TODO: Phase 8 — open Review Access sheet
+            ManifoldCommand("Review Access", icon: "lock.shield") {
+                // TODO: open Review Access sheet
             },
-            ManifoldCommand("Start Tracked Work Block", icon: "play.fill") {
-                // TODO: Phase 9 — start work block flow
+            ManifoldCommand("Track Changes", icon: "timeline.selection") {
+                // TODO: start track changes flow
             },
             ManifoldCommand("Open Settings", icon: "gearshape") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)

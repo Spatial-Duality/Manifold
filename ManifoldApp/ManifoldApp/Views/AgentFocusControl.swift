@@ -15,6 +15,6 @@ struct AgentFocusControl: View {
         .pickerStyle(.segmented)
         .frame(width: 220)
         .accessibilityLabel("Agent focus")
-        .accessibilityHint("Switch between Claude, Codex, or Compare view")
+        .accessibilityHint("Shows \(focus.displayName) access columns in the table")
     }
 }

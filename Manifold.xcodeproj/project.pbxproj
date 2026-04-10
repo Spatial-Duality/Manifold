@@ -82,6 +82,15 @@
 		46503FAF9373441582743A18 /* ReviewAccessSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A5127F4EF84F2BA6A4240A /* ReviewAccessSheet.swift */; };
 		5F39BBA0B4694D689785A28B /* SourcesTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C60A6FDB11F4E89A7A531E9 /* SourcesTableView.swift */; };
 		9B0FD781995F4F5A9B0D807E /* WorkBlockBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */; };
+		BE9D5BE898F84A08B9BDE4CC /* TrackChangesToolbarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8FB18E5540B4923A9D0FCE5 /* TrackChangesToolbarContent.swift */; };
+		C6A2CAD11DC74190AB4EE305 /* AgentConnectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57FAB8738DFE4AEB8A20E3A4 /* AgentConnectionState.swift */; };
+		72801AAD69024EFDA04ABF66 /* IntegrationHealthModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D66485DDB84D0B9C8D51A6 /* IntegrationHealthModel.swift */; };
+		738365AD1BF443EA852EFE94 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3D2A1D247044D00A8AB48FB /* SettingsView.swift */; };
+		549C9444D449451F89951F63 /* GeneralSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E747635498B4D1F8BA21F48 /* GeneralSettingsPane.swift */; };
+		AB71F3B7C8ED47FABAA0B8EE /* AIAppsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102F3788D49943BEA7D6F5ED /* AIAppsSettingsPane.swift */; };
+		B3A742ED2777467984FB6A36 /* MailSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56386BD93074434BA8465A9E /* MailSettingsPane.swift */; };
+		8495C790CCAE4A808BCD482C /* StorageSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E56DF2DB8A41BC8558EA2F /* StorageSettingsPane.swift */; };
+		DA99D7FD65B84EB0AFAFEB8E /* SetupAssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCA5106EDE14D709572E7AD /* SetupAssistantView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -162,6 +171,15 @@
 		88A5127F4EF84F2BA6A4240A /* ReviewAccessSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewAccessSheet.swift; sourceTree = "<group>"; };
 		1C60A6FDB11F4E89A7A531E9 /* SourcesTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourcesTableView.swift; sourceTree = "<group>"; };
 		BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkBlockBannerView.swift; sourceTree = "<group>"; };
+		C8FB18E5540B4923A9D0FCE5 /* TrackChangesToolbarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackChangesToolbarContent.swift; sourceTree = "<group>"; };
+		57FAB8738DFE4AEB8A20E3A4 /* AgentConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentConnectionState.swift; sourceTree = "<group>"; };
+		B6D66485DDB84D0B9C8D51A6 /* IntegrationHealthModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationHealthModel.swift; sourceTree = "<group>"; };
+		D3D2A1D247044D00A8AB48FB /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
+		8E747635498B4D1F8BA21F48 /* GeneralSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/GeneralSettingsPane.swift; sourceTree = "<group>"; };
+		102F3788D49943BEA7D6F5ED /* AIAppsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/AIAppsSettingsPane.swift; sourceTree = "<group>"; };
+		56386BD93074434BA8465A9E /* MailSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/MailSettingsPane.swift; sourceTree = "<group>"; };
+		13E56DF2DB8A41BC8558EA2F /* StorageSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/StorageSettingsPane.swift; sourceTree = "<group>"; };
+		4DCA5106EDE14D709572E7AD /* SetupAssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/SetupAssistantView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -246,6 +264,12 @@
 				88A5127F4EF84F2BA6A4240A /* ReviewAccessSheet.swift */,
 				1C60A6FDB11F4E89A7A531E9 /* SourcesTableView.swift */,
 				BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */,
+				D3D2A1D247044D00A8AB48FB /* SettingsView.swift */,
+				8E747635498B4D1F8BA21F48 /* GeneralSettingsPane.swift */,
+				102F3788D49943BEA7D6F5ED /* AIAppsSettingsPane.swift */,
+				56386BD93074434BA8465A9E /* MailSettingsPane.swift */,
+				13E56DF2DB8A41BC8558EA2F /* StorageSettingsPane.swift */,
+				4DCA5106EDE14D709572E7AD /* SetupAssistantView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -351,6 +375,7 @@
 				ADFE22B107DA01C6DC2C67C7 /* Spacing.swift */,
 				B254DE85A21F139AF88969F6 /* StatusBadge.swift */,
 				83794677BF621BEDB36F8287 /* TimeLabel.swift */,
+				C8FB18E5540B4923A9D0FCE5 /* TrackChangesToolbarContent.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -371,6 +396,8 @@
 				FB68B0854C6DD4AA29058275 /* SetupModel.swift */,
 				C1F98624E0F332E367EEC45F /* StorageModel.swift */,
 				4CF3372BBB8E469B95371CD8 /* PolicyModel.swift */,
+				57FAB8738DFE4AEB8A20E3A4 /* AgentConnectionState.swift */,
+				B6D66485DDB84D0B9C8D51A6 /* IntegrationHealthModel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -526,6 +553,15 @@
 				46503FAF9373441582743A18 /* ReviewAccessSheet.swift in Sources */,
 				5F39BBA0B4694D689785A28B /* SourcesTableView.swift in Sources */,
 				9B0FD781995F4F5A9B0D807E /* WorkBlockBannerView.swift in Sources */,
+				BE9D5BE898F84A08B9BDE4CC /* TrackChangesToolbarContent.swift in Sources */,
+				C6A2CAD11DC74190AB4EE305 /* AgentConnectionState.swift in Sources */,
+				72801AAD69024EFDA04ABF66 /* IntegrationHealthModel.swift in Sources */,
+				738365AD1BF443EA852EFE94 /* SettingsView.swift in Sources */,
+				549C9444D449451F89951F63 /* GeneralSettingsPane.swift in Sources */,
+				AB71F3B7C8ED47FABAA0B8EE /* AIAppsSettingsPane.swift in Sources */,
+				B3A742ED2777467984FB6A36 /* MailSettingsPane.swift in Sources */,
+				8495C790CCAE4A808BCD482C /* StorageSettingsPane.swift in Sources */,
+				DA99D7FD65B84EB0AFAFEB8E /* SetupAssistantView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

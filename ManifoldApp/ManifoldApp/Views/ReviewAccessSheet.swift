@@ -84,7 +84,7 @@ struct ReviewAccessSheet: View {
             // Advanced disclosure
             DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
                 VStack(alignment: .leading, spacing: Spacing.standard) {
-                    Toggle("Start Tracked Work Block with this access", isOn: $startWorkBlock)
+                    Toggle("Track changes with this access", isOn: $startWorkBlock)
                         .toggleStyle(.checkbox)
                     Text("Creates baseline snapshots and enables rollback for all included sources.")
                         .font(.caption)
@@ -222,7 +222,7 @@ struct ReviewAccessSheet: View {
                 .keyboardShortcut(.cancelAction)
 
             if startWorkBlock {
-                Button("Start Tracked Work Block") {
+                Button("Track Changes") {
                     // TODO: Phase 9 — start work block with current scope
                     dismiss()
                 }
@@ -246,7 +246,7 @@ struct ReviewAccessSheet: View {
         if let change = pendingChange {
             switch change.kind {
             case .explicit: return "Update Access"
-            case .startWorkBlock: return "Start Tracked Work Block"
+            case .startWorkBlock: return "Track Changes"
             default: return "Allow Access"
             }
         }
