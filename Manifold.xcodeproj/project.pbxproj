@@ -72,6 +72,16 @@
 		EEC5E06B942FC7FB102B405E /* DomainPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20C4114B01F2F0D7E024DD0 /* DomainPreset.swift */; };
 		F1E6236E38A106FEDE8B666A /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FC9F995A8250393B7018353 /* MainView.swift */; };
 		F711EC11A62C0798BB1112B6 /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11AF6365CF4386C43F2463FD /* CommandPaletteView.swift */; };
+		74E110E9E0DF4A85A67F4B3F /* PolicyModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF3372BBB8E469B95371CD8 /* PolicyModel.swift */; };
+		0D61289FD2BE4552BA035A63 /* ActivityDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 385AC0FA09A64D6AAAC34F2B /* ActivityDrawer.swift */; };
+		5CB48BF0B1A84D44AE1B58FB /* AgentFocusControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3301B48D13542ADB97E9D90 /* AgentFocusControl.swift */; };
+		F7FA1FF728BB4FAE87E776B0 /* AgentPolicyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2D2A1339D247D1B2B118F4 /* AgentPolicyCard.swift */; };
+		E087650C8B4746CB8DA2172B /* DomainsTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDDDFF8763A64C0BA264E344 /* DomainsTableView.swift */; };
+		48D403DF7ED94F4B87C307A3 /* FilesSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4B74EAAED84E9A92DE870B /* FilesSidebar.swift */; };
+		2669B744EAA14D19934B2151 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7779D8DADAB74471B3E9B1C5 /* OverviewView.swift */; };
+		46503FAF9373441582743A18 /* ReviewAccessSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A5127F4EF84F2BA6A4240A /* ReviewAccessSheet.swift */; };
+		5F39BBA0B4694D689785A28B /* SourcesTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C60A6FDB11F4E89A7A531E9 /* SourcesTableView.swift */; };
+		9B0FD781995F4F5A9B0D807E /* WorkBlockBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -142,6 +152,16 @@
 		F720C06EC0FB6CA359373233 /* AddAccountButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddAccountButton.swift; sourceTree = "<group>"; };
 		FB68B0854C6DD4AA29058275 /* SetupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupModel.swift; sourceTree = "<group>"; };
 		FED1A1FA5FCB24F9C0446604 /* EmailMessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailMessageRow.swift; sourceTree = "<group>"; };
+		4CF3372BBB8E469B95371CD8 /* PolicyModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolicyModel.swift; sourceTree = "<group>"; };
+		385AC0FA09A64D6AAAC34F2B /* ActivityDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityDrawer.swift; sourceTree = "<group>"; };
+		D3301B48D13542ADB97E9D90 /* AgentFocusControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentFocusControl.swift; sourceTree = "<group>"; };
+		8C2D2A1339D247D1B2B118F4 /* AgentPolicyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPolicyCard.swift; sourceTree = "<group>"; };
+		CDDDFF8763A64C0BA264E344 /* DomainsTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainsTableView.swift; sourceTree = "<group>"; };
+		3B4B74EAAED84E9A92DE870B /* FilesSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesSidebar.swift; sourceTree = "<group>"; };
+		7779D8DADAB74471B3E9B1C5 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		88A5127F4EF84F2BA6A4240A /* ReviewAccessSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewAccessSheet.swift; sourceTree = "<group>"; };
+		1C60A6FDB11F4E89A7A531E9 /* SourcesTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourcesTableView.swift; sourceTree = "<group>"; };
+		BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkBlockBannerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -217,6 +237,15 @@
 				C11BD52E21738EDD3CC89CFD /* Email */,
 				0C0E7D11569D44E56773221A /* Library */,
 				A613F12D37285340CBD46099 /* Versions */,
+				385AC0FA09A64D6AAAC34F2B /* ActivityDrawer.swift */,
+				D3301B48D13542ADB97E9D90 /* AgentFocusControl.swift */,
+				8C2D2A1339D247D1B2B118F4 /* AgentPolicyCard.swift */,
+				CDDDFF8763A64C0BA264E344 /* DomainsTableView.swift */,
+				3B4B74EAAED84E9A92DE870B /* FilesSidebar.swift */,
+				7779D8DADAB74471B3E9B1C5 /* OverviewView.swift */,
+				88A5127F4EF84F2BA6A4240A /* ReviewAccessSheet.swift */,
+				1C60A6FDB11F4E89A7A531E9 /* SourcesTableView.swift */,
+				BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -341,6 +370,7 @@
 				EEAA3C58A30F803C5586F7A1 /* SessionModel.swift */,
 				FB68B0854C6DD4AA29058275 /* SetupModel.swift */,
 				C1F98624E0F332E367EEC45F /* StorageModel.swift */,
+				4CF3372BBB8E469B95371CD8 /* PolicyModel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -486,6 +516,16 @@
 				E594B741E10D22BBCE9417E2 /* UnifiedInboxRow.swift in Sources */,
 				299780E7A90848E928A18544 /* VersionDetailView.swift in Sources */,
 				CC89E3C4C9FC8FCFA49C18E3 /* VersionsView.swift in Sources */,
+				74E110E9E0DF4A85A67F4B3F /* PolicyModel.swift in Sources */,
+				0D61289FD2BE4552BA035A63 /* ActivityDrawer.swift in Sources */,
+				5CB48BF0B1A84D44AE1B58FB /* AgentFocusControl.swift in Sources */,
+				F7FA1FF728BB4FAE87E776B0 /* AgentPolicyCard.swift in Sources */,
+				E087650C8B4746CB8DA2172B /* DomainsTableView.swift in Sources */,
+				48D403DF7ED94F4B87C307A3 /* FilesSidebar.swift in Sources */,
+				2669B744EAA14D19934B2151 /* OverviewView.swift in Sources */,
+				46503FAF9373441582743A18 /* ReviewAccessSheet.swift in Sources */,
+				5F39BBA0B4694D689785A28B /* SourcesTableView.swift in Sources */,
+				9B0FD781995F4F5A9B0D807E /* WorkBlockBannerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

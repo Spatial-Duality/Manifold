@@ -213,7 +213,6 @@ struct DomainsTableView: View {
 
     /// Compute domain aggregates from EmailStore data.
     private func computeDomains() async {
-        // Aggregate emails by sender_domain
         guard let emailStore = store.emailStore else { return }
         do {
             let messages = try emailStore.allEmailMessages(limit: 10_000)
@@ -223,11 +222,9 @@ struct DomainsTableView: View {
                 domainCounts[domain, default: 0] += 1
             }
 
-            let filter = EmailSensitivityFilter(rawValue: sensitivity.rawValue)
             domains = domainCounts.map { domain, count in
-                let testEmail = makeTestEmailForDomain(domain)
-                let isHidden = !filter.isVisible(email: testEmail)
-                let reason = hiddenReason(for: domain, sensitivity: sensitivity)
+                let reason = hiddenReason(for: domain)
+                let isHidden = reason != nil
                 let category = categorize(domain: domain, isHidden: isHidden)
                 return DomainAggregate(
                     domain: domain,
@@ -254,7 +251,7 @@ struct DomainsTableView: View {
         return .work
     }
 
-    private func hiddenReason(for domain: String, sensitivity: EmailSensitivityLevel) -> String? {
+    private func hiddenReason(for domain: String) -> String? {
         let banking = ["bankofamerica.com", "chase.com", "wellsfargo.com", "fidelity.com",
                        "schwab.com", "vanguard.com", "citi.com"]
         if banking.contains(where: { domain.hasSuffix($0) }) { return "banking" }
@@ -263,25 +260,5 @@ struct DomainsTableView: View {
         if health.contains(where: { domain.hasSuffix($0) }) { return "health" }
         if domain.hasPrefix("noreply.") || domain.hasPrefix("no-reply.") { return "2FA" }
         return nil
-    }
-
-    private func makeTestEmailForDomain(_ domain: String) -> EmailMessageRecord {
-        EmailMessageRecord(row: [
-            "email_id": "test",
-            "account_id": "test",
-            "mailbox": "INBOX",
-            "sender": "test@\(domain)",
-            "sender_email": "test@\(domain)",
-            "sender_domain": domain,
-            "recipients": "",
-            "subject": "test",
-            "received_at": "2026-01-01",
-            "size_bytes": "0",
-            "is_read": "0",
-            "is_flagged": "0",
-            "attachment_count": "0",
-            "local_is_viewed": "0",
-            "is_junk": "0",
-        ])!
     }
 }

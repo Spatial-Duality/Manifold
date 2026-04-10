@@ -14,6 +14,11 @@ struct ReviewAccessChange: Identifiable {
         case bulkSources(sourceIDs: [String])
         case explicit // User clicked "Review & Update Access"
         case startWorkBlock
+
+        var isExplicit: Bool {
+            if case .explicit = self { return true }
+            return false
+        }
     }
 }
 
@@ -51,7 +56,7 @@ struct ReviewAccessSheet: View {
             Divider()
 
             // What's changing (green tinted section)
-            if let change = pendingChange, change.kind != .explicit {
+            if let change = pendingChange, !change.kind.isExplicit {
                 whatsChangingSection(change)
             }
 
