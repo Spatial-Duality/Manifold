@@ -92,9 +92,11 @@ public struct MaterializationEngine: Sendable {
 
             let sourceBasePath = resolvedSource.path + "/"
             while let fileURL = enumerator.nextObject() as? URL {
-                let resolved = fileURL.resolvingSymlinksInPath()
-                guard resolved.path.hasPrefix(sourceBasePath) else { continue }
-                let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
+                // Use standardizedFileURL (resolves . and .. without stat syscalls)
+                // instead of resolvingSymlinksInPath (calls realpath → N stat calls per path component)
+                let standardized = fileURL.standardizedFileURL
+                guard standardized.path.hasPrefix(sourceBasePath) else { continue }
+                let relativePath = String(standardized.path.dropFirst(sourceBasePath.count))
                 let isDirectory = fileURL.hasDirectoryPath
 
                 if shouldSkip(relativePath: relativePath) {
@@ -305,9 +307,11 @@ public struct MaterializationEngine: Sendable {
         let sourceBasePath = resolvedSource.path + "/"
         do {
             while let fileURL = enumerator.nextObject() as? URL {
-                let resolved = fileURL.resolvingSymlinksInPath()
-                guard resolved.path.hasPrefix(sourceBasePath) else { continue }
-                let relativePath = String(resolved.path.dropFirst(sourceBasePath.count))
+                // Use standardizedFileURL (resolves . and .. without stat syscalls)
+                // instead of resolvingSymlinksInPath (calls realpath → N stat calls per path component)
+                let standardized = fileURL.standardizedFileURL
+                guard standardized.path.hasPrefix(sourceBasePath) else { continue }
+                let relativePath = String(standardized.path.dropFirst(sourceBasePath.count))
                 let isDirectory = fileURL.hasDirectoryPath
 
                 // Skip noise directories
