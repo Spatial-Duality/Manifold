@@ -256,22 +256,31 @@ public actor SnapshotStore {
     }
 
     /// Prune snapshots older than a number of days.
+    /// Uses CTE instead of correlated subquery (O(n) vs O(n²)).
+    /// Batches all deletes into a single transaction (1 fsync vs N fsyncs).
     @discardableResult
     public func pruneByAge(days: Int = 30) throws -> Int {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
         let cutoffStr = ISO8601DateFormatter.shared.string(from: cutoff)
 
-        // Don't delete if it's the only snapshot for a file
+        // CTE pre-computes file counts once, then JOINs — O(n) not O(n²)
         let toDelete = try db.queryAll("""
-            SELECT s.id, s.after_hash FROM snapshots s
-            WHERE s.timestamp < ?
-            AND (SELECT COUNT(*) FROM snapshots s2 WHERE s2.file_path = s.file_path) > 1
+            WITH file_counts AS (
+                SELECT file_path, COUNT(*) as cnt FROM snapshots GROUP BY file_path
+            )
+            SELECT s.id, s.after_hash
+            FROM snapshots s
+            JOIN file_counts fc ON s.file_path = fc.file_path
+            WHERE s.timestamp < ? AND fc.cnt > 1
         """, params: [cutoffStr])
 
+        guard !toDelete.isEmpty else { return 0 }
+
+        // Single transaction for all deletes — 1 fsync instead of N
         var pruned = 0
-        for row in toDelete {
-            guard let idStr = row["id"] else { continue }
-            try db.transaction {
+        try db.transaction {
+            for row in toDelete {
+                guard let idStr = row["id"] else { continue }
                 try db.execute("DELETE FROM snapshots WHERE id = ?", params: [idStr])
                 if let hash = row["after_hash"], !hash.isEmpty {
                     try db.execute(
@@ -279,30 +288,31 @@ public actor SnapshotStore {
                         params: [hash]
                     )
                 }
+                pruned += 1
             }
-            pruned += 1
         }
         return pruned
     }
 
     /// Prune excess versions per file, keeping the most recent N.
+    /// Batches all deletes into a single transaction.
     @discardableResult
     public func pruneByFileCount(maxPerFile: Int = 50) throws -> Int {
         let files = try db.queryAll("SELECT DISTINCT file_path FROM snapshots")
         var pruned = 0
 
-        for file in files {
-            guard let filePath = file["file_path"] else { continue }
-            let excess = try db.queryAll("""
-                SELECT id, after_hash FROM snapshots
-                WHERE file_path = ?
-                ORDER BY id DESC
-                LIMIT -1 OFFSET ?
-            """, params: [filePath, "\(maxPerFile)"])
+        try db.transaction {
+            for file in files {
+                guard let filePath = file["file_path"] else { continue }
+                let excess = try db.queryAll("""
+                    SELECT id, after_hash FROM snapshots
+                    WHERE file_path = ?
+                    ORDER BY id DESC
+                    LIMIT -1 OFFSET ?
+                """, params: [filePath, "\(maxPerFile)"])
 
-            for row in excess {
-                guard let idStr = row["id"] else { continue }
-                try db.transaction {
+                for row in excess {
+                    guard let idStr = row["id"] else { continue }
                     try db.execute("DELETE FROM snapshots WHERE id = ?", params: [idStr])
                     if let hash = row["after_hash"], !hash.isEmpty {
                         try db.execute(
@@ -310,8 +320,8 @@ public actor SnapshotStore {
                             params: [hash]
                         )
                     }
+                    pruned += 1
                 }
-                pruned += 1
             }
         }
         return pruned

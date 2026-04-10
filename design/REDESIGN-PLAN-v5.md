@@ -962,19 +962,27 @@ The pattern: the app name appears when you're at a top-level tab. Section names 
 
 ## Implementation Order (for Claude Code)
 
+The order follows the review's corrected priorities: visual noise first, shell grammar second, state truthfulness third, architecture fourth, meaning layer fifth.
+
 ```
-Phase 1  →  ~2 hours  →  AgentPolicyCard + OverviewView copy/state fixes
-Phase 4.1 →  ~1 hour  →  Date formatter utility (unblocks Phase 4.2)
-Phase 2.2 →  ~3 hours →  Files source deduplication (new FilesLandingView)
-Phase 3  →  ~4 hours  →  Domains grouping, policy text, checkbox position, toolbar
-Phase 2.1 →  ~2 hours →  Overview activity summary
-Phase 4  →  ~2 hours  →  Formatting, truncation, density normalization
-Phase 5  →  ~1 hour  →  Card visual hierarchy + shadow
-Phase 6  →  ~2 hours →  Motion, a11y, undo
-Phase 7  →  ~1 hour  →  Window titles
+Phase 0    →  30 min   →  Remove fake row strips (immediate visual quality jump)
+Phase 2    →  3 hours  →  Separate global chrome from local toolbars (shell fix)
+Phase 1    →  3 hours  →  Fix Overview state model, copy, toggle, Track Changes weight
+Phase 3.4  →  4 hours  →  Rebuild Emails as one stable split-view
+Phase 3.1-3 → 2 hours →  Domains: grouping, "future" text, checkbox position
+Phase 3.6  →  2 hours  →  Row-level trust signaling (tints, hidden sections, reasons)
+Phase 2.5.2 → 2 hours →  Files source deduplication (FilesLandingView)
+Phase 4    →  2 hours  →  Date formatting, truncation, density, "Cowork" rename
+Phase 3.7  →  2 hours  →  Settings AI Apps + Mail redesign as cards
+Phase 2.5.1 → 1 hour  →  Overview activity summary
+Phase 5    →  1 hour   →  Card visual hierarchy + shadow
+Phase 6    →  2 hours  →  Motion cleanup, a11y, Reduced Motion, ⌘Z undo
+Phase 7    →  1 hour   →  Window title consistency
 ```
 
-Total: ~18 hours of implementation work.
+Total: ~25 hours of implementation work.
+
+**Critical path**: Phases 0 → 2 → 1 → 3.4 are the structural fixes. Everything after is polish on top of a correct shell. Do not start Phase 3.6 (trust signaling) until Phase 2 (toolbar separation) is done — the controls need to be in the right place before you tune their styling.
 
 ---
 
