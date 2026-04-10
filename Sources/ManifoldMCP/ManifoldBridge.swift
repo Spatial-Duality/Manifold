@@ -430,18 +430,9 @@ public actor ManifoldBridge {
             switch context {
             case .standing(let policy, let sources):
                 let sourceNames = sources.map(\.displayName).joined(separator: ", ")
-                // Count files across allowed sources
-                var totalFiles = 0
-                for source in sources {
-                    let url = URL(fileURLWithPath: source.originalRootPath)
-                    if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-                        while let fileURL = enumerator.nextObject() as? URL {
-                            if (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
-                                totalFiles += 1
-                            }
-                        }
-                    }
-                }
+                // Use cached file list for count (avoids full enumeration on every getStatus)
+                let mounts = standingMounts(sources: sources)
+                let totalFiles = (try? listFilesFromOriginals(mounts: mounts).count) ?? 0
                 let emailCount = policy.allowedEmailDomains.count > 0 ? (try? emailStore.emailMessageCount()) ?? 0 : 0
                 let message = "Manifold standing access active. \(sources.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails. Sensitivity: \(policy.emailSensitivity.rawValue)."
                 return StatusResult(
@@ -570,14 +561,33 @@ public actor ManifoldBridge {
         }
     }
 
-    /// List files directly from original source paths (standing access, no materialization).
+    // MARK: - File Enumeration Cache
+
+    private var fileListCache: (entries: [FileInfo], timestamp: Date, mountPaths: Set<String>)?
+    private let fileListCacheTTL: TimeInterval = 10
+
+    /// List files from original source paths with 10-second TTL cache.
+    /// Avoids re-enumerating 5,000+ files on every list_files MCP call.
     private func listFilesFromOriginals(mounts: [GrantMount]) throws -> [FileInfo] {
+        let currentPaths = Set(mounts.map(\.mountPath))
+        if let cache = fileListCache,
+           Date().timeIntervalSince(cache.timestamp) < fileListCacheTTL,
+           cache.mountPaths == currentPaths {
+            return cache.entries
+        }
+        let files = try enumerateOriginalFiles(mounts: mounts)
+        fileListCache = (files, Date(), currentPaths)
+        return files
+    }
+
+    /// Actual file enumeration — only called when cache is stale or mount set changed.
+    private func enumerateOriginalFiles(mounts: [GrantMount]) throws -> [FileInfo] {
         let fm = FileManager.default
         var files: [FileInfo] = []
         let now = ISO8601DateFormatter.shared.string(from: Date())
 
         for mount in mounts {
-            let rootURL = URL(fileURLWithPath: mount.mountPath)
+            let rootURL = URL(fileURLWithPath: mount.mountPath).standardizedFileURL
             guard let enumerator = fm.enumerator(
                 at: rootURL,
                 includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
@@ -586,8 +596,9 @@ public actor ManifoldBridge {
 
             let basePath = rootURL.path + "/"
             while let fileURL = enumerator.nextObject() as? URL {
-                guard fileURL.path.hasPrefix(basePath) else { continue }
-                let relativePath = String(fileURL.path.dropFirst(basePath.count))
+                let filePath = fileURL.standardizedFileURL.path
+                guard filePath.hasPrefix(basePath) else { continue }
+                let relativePath = String(filePath.dropFirst(basePath.count))
 
                 // Skip noise directories
                 let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
