@@ -3,6 +3,8 @@ import ManifoldKit
 
 struct AIAppsSettingsPane: View {
     @Environment(ManifoldStore.self) var store
+    @State private var showClaudeSheet = false
+    @State private var showCodexSheet = false
 
     var body: some View {
         Form {
@@ -10,19 +12,29 @@ struct AIAppsSettingsPane: View {
                 AgentHealthCard(
                     agentName: "Claude",
                     agentColor: .blue,
-                    state: store.integrationHealth.claude
+                    state: store.integrationHealth.claude,
+                    onSetup: { showClaudeSheet = true }
                 )
             }
             Section {
                 AgentHealthCard(
                     agentName: "Codex",
                     agentColor: .purple,
-                    state: store.integrationHealth.codex
+                    state: store.integrationHealth.codex,
+                    onSetup: { showCodexSheet = true }
                 )
             }
         }
         .formStyle(.grouped)
         .task { await store.integrationHealth.checkAll() }
+        .sheet(isPresented: $showClaudeSheet) {
+            ConnectClaudeSheet()
+                .environment(store)
+        }
+        .sheet(isPresented: $showCodexSheet) {
+            ConnectCodexSheet()
+                .environment(store)
+        }
     }
 }
 
@@ -32,6 +44,7 @@ private struct AgentHealthCard: View {
     let agentName: String
     let agentColor: Color
     let state: AgentConnectionState
+    var onSetup: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -57,6 +70,20 @@ private struct AgentHealthCard: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+
+            if let onSetup {
+                Button(setupLabel) { onSetup() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var setupLabel: String {
+        switch state.overallStatus {
+        case .connected: "Reconnect"
+        case .error: "Repair Connection"
+        default: "Set Up \(agentName)"
         }
     }
 }
