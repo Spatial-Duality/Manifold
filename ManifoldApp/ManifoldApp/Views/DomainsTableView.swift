@@ -74,6 +74,20 @@ struct DomainsTableView: View {
             }
         }
         .animation(.spring(duration: 0.2), value: showUndoToast)
+        .background {
+            // Hidden ⌘Z handler for undo
+            if showUndoToast {
+                Button("") {
+                    guard let domain = undoDomain else { return }
+                    Task { await store.policy.addEmailDomain(domain, to: focusedAgent) }
+                    showUndoToast = false
+                    undoTimerTask?.cancel()
+                }
+                .keyboardShortcut("z", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+            }
+        }
         .sheet(item: broadenBinding) { change in
             ReviewAccessSheet(pendingChange: change)
                 .environment(store)

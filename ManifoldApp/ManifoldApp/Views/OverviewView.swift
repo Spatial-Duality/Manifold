@@ -122,11 +122,16 @@ struct OverviewView: View {
             Text("No AI agents connected")
                 .font(.title3.weight(.medium))
 
-            Text("Manifold will appear here when Claude or Codex connects via MCP.")
+            Text("Connect Claude or Codex to start managing what AI can access on your Mac.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
+
+            Button("Open Settings\u{2026}") {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
+            .controlSize(.regular)
         }
         .frame(maxWidth: .infinity)
         .padding(Spacing.xlarge)

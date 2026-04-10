@@ -6,6 +6,7 @@ import ManifoldKit
 struct SetupAssistantView: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var screen: SetupScreen = .welcome
 
     enum SetupScreen: Int, CaseIterable {
@@ -35,7 +36,7 @@ struct SetupAssistantView: View {
                 case .reviewFinish: ReviewFinishScreen(finish: finish)
                 }
             }
-            .transition(.asymmetric(
+            .transition(reduceMotion ? .opacity : .asymmetric(
                 insertion: .move(edge: .trailing).combined(with: .opacity),
                 removal: .move(edge: .leading).combined(with: .opacity)
             ))
@@ -45,7 +46,7 @@ struct SetupAssistantView: View {
             if screen.rawValue > 0 && screen != .reviewFinish {
                 HStack {
                     Button("Back") {
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        withAnimation(reduceMotion ? .none : .spring) {
                             screen = SetupScreen(rawValue: screen.rawValue - 1) ?? .welcome
                         }
                     }
@@ -62,7 +63,7 @@ struct SetupAssistantView: View {
     }
 
     private func advance() {
-        withAnimation(.easeInOut(duration: 0.25)) {
+        withAnimation(reduceMotion ? .none : .spring) {
             if let next = SetupScreen(rawValue: screen.rawValue + 1) { screen = next }
         }
     }

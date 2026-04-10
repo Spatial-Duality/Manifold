@@ -29,6 +29,7 @@ struct AgentPolicyCard: View {
                     Text("\(sourceCount) of \(totalSources) sources")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 } else {
                     Text("No file access")
                         .font(.callout)
@@ -45,6 +46,7 @@ struct AgentPolicyCard: View {
                     Text("\(emailAccountCount) domain\(emailAccountCount == 1 ? "" : "s") visible")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 } else {
                     Text("No email access")
                         .font(.callout)
@@ -85,6 +87,7 @@ struct AgentPolicyCard: View {
             Circle()
                 .fill(isConnected ? agentColor : .gray)
                 .frame(width: 10, height: 10)
+                .animation(.snappy, value: isConnected)
 
             Text(agentName)
                 .font(.title3.weight(.medium))

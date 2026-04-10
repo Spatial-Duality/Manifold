@@ -26,7 +26,7 @@ struct MainView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: commands.isPresented)
+        .animation(.snappy, value: commands.isPresented)
         .onKeyPress(.escape) {
             if commands.isPresented { commands.isPresented = false; return .handled }
             if store.inspectedFilePath != nil { store.inspectedFilePath = nil; return .handled }
@@ -73,6 +73,18 @@ struct MainView: View {
                 connectionIndicators
             }
         }
+        .toolbarBackgroundVisibility(
+            store.policy.activeWorkBlock != nil ? .visible : .automatic,
+            for: .windowToolbar
+        )
+        .toolbarBackground(
+            store.policy.activeWorkBlock?.agent == .codex
+                ? Color.purple.opacity(0.06)
+                : store.policy.activeWorkBlock != nil
+                    ? Color.blue.opacity(0.06)
+                    : Color.clear,
+            for: .windowToolbar
+        )
         .task {
             commands.bind(to: store)
             if !store.hasCompletedOnboarding { showOnboarding = true }
@@ -143,7 +155,7 @@ struct MainView: View {
         .padding(.horizontal, Spacing.edge)
         .padding(.top, Spacing.standard)
         .transition(.move(edge: .top).combined(with: .opacity))
-        .animation(.easeInOut(duration: 0.25), value: store.lastError)
+        .animation(.spring, value: store.lastError)
     }
 }
 
