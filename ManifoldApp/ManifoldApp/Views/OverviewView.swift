@@ -5,6 +5,7 @@ import ManifoldKit
 /// "What can this AI see right now?" Each agent gets a glanceable policy card.
 struct OverviewView: View {
     @Environment(ManifoldStore.self) var store
+    @State private var reviewSheetChange: ReviewAccessChange?
 
     var body: some View {
         ScrollView {
@@ -35,6 +36,12 @@ struct OverviewView: View {
         .navigationTitle("Overview")
         .task {
             await store.loadSummary()
+            await store.policy.loadPolicies()
+        }
+        .sheet(item: $reviewSheetChange) { change in
+            ReviewAccessSheet(pendingChange: change)
+                .environment(store)
+                .frame(minWidth: 560, minHeight: 500)
         }
     }
 
@@ -42,37 +49,61 @@ struct OverviewView: View {
 
     @ViewBuilder
     private var agentCards: some View {
-        // Claude card (always shown when any agent connected)
+        let claudePolicy = store.policy.claudePolicy
+        let codexPolicy = store.policy.codexPolicy
+        let totalSources = store.sources.filter { !$0.isRemoved }.count
+
         AgentPolicyCard(
             agentName: "Claude",
             agentColor: .blue,
-            isConnected: store.connectedAgent?.lowercased().contains("codex") == false && store.isConnected,
-            sourceCount: store.sources.filter(\.isAccessible).count,
-            totalSources: store.sources.filter { !$0.isRemoved }.count,
-            emailAccountCount: store.emailAccounts.accounts.count,
-            isPaused: false, // TODO: Phase 5 — wire to PolicyModel
+            isConnected: store.isConnected && store.connectedAgent?.lowercased().contains("codex") != true,
+            sourceCount: claudePolicy?.allowedSourceIDs.count ?? 0,
+            totalSources: totalSources,
+            emailAccountCount: claudePolicy?.allowedEmailDomains.count ?? 0,
+            isPaused: claudePolicy?.isPaused ?? false,
             onPauseToggle: {
-                // TODO: Phase 5 — toggle pause via PolicyStore
+                Task {
+                    if claudePolicy?.isPaused == true {
+                        await store.policy.resumeAgent(.cowork)
+                    } else {
+                        await store.policy.pauseAgent(.cowork)
+                    }
+                }
             },
             onReviewAccess: {
-                // TODO: Phase 8 — open Review Access sheet
+                reviewSheetChange = ReviewAccessChange(
+                    description: "Review Claude access",
+                    kind: .explicit
+                )
             },
             onViewActivity: {
-                // TODO: Phase 10 — open Activity drawer
+                // TODO: open Activity drawer
             }
         )
 
-        // Codex card (if codex has been seen)
         AgentPolicyCard(
             agentName: "Codex",
             agentColor: .purple,
             isConnected: store.connectedAgent?.lowercased().contains("codex") == true,
-            sourceCount: 0,
-            totalSources: store.sources.filter { !$0.isRemoved }.count,
-            emailAccountCount: store.emailAccounts.accounts.count,
-            isPaused: false,
-            onPauseToggle: {},
-            onReviewAccess: {},
+            sourceCount: codexPolicy?.allowedSourceIDs.count ?? 0,
+            totalSources: totalSources,
+            emailAccountCount: codexPolicy?.allowedEmailDomains.count ?? 0,
+            isPaused: codexPolicy?.isPaused ?? false,
+            onPauseToggle: {
+                Task {
+                    if codexPolicy?.isPaused == true {
+                        await store.policy.resumeAgent(.codex)
+                    } else {
+                        await store.policy.pauseAgent(.codex)
+                    }
+                }
+            },
+            onReviewAccess: {
+                reviewSheetChange = ReviewAccessChange(
+                    description: "Review Codex access",
+                    kind: .explicit
+                )
+            },
             onViewActivity: {}
         )
     }

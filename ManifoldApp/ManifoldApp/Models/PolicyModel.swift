@@ -88,13 +88,31 @@ final class PolicyModel {
 
     // MARK: - Work Block Actions
 
+    /// Marks the work block as reviewing. The caller should then present
+    /// the Review Changes sheet with PromoteEngine.dryRun() results.
+    /// Call `completeWorkBlock()` after the user confirms promotion.
     func finishWorkBlock() async {
+        guard let store = workBlockStore, let block = activeWorkBlock else { return }
+        do {
+            try await store.markReviewing(id: block.id)
+            await loadActiveWorkBlock()
+            // TODO: Present ReviewChangesSheet with dryRun results
+            // For now, complete immediately until the sheet is wired
+            try await store.endBlock(id: block.id, status: .promoted)
+            activeWorkBlock = nil
+        } catch {
+            logger.error("Failed to finish work block: \(error.localizedDescription)")
+        }
+    }
+
+    /// Complete a reviewed work block after user confirms promotion.
+    func completeWorkBlock() async {
         guard let store = workBlockStore, let block = activeWorkBlock else { return }
         do {
             try await store.endBlock(id: block.id, status: .promoted)
             activeWorkBlock = nil
         } catch {
-            logger.error("Failed to finish work block: \(error.localizedDescription)")
+            logger.error("Failed to complete work block: \(error.localizedDescription)")
         }
     }
 

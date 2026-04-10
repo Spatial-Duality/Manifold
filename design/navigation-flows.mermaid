@@ -1,0 +1,175 @@
+%% Manifold App — Navigation & State Flow Diagram v2
+%% Updated to reflect LAYOUT-SPEC v2: scope review, independent checkboxes,
+%% temporary email exceptions, enhanced history detail, collapsed right sidebar
+
+graph TB
+    subgraph TopBar["Top Bar (always visible)"]
+        AppIcon["M Manifold"]
+        SegNav["Segmented Nav: Home | Files | Emails | History"]
+        SearchBar["Search ⌘K"]
+        ConnStatus["Connection Status: ● Claude ● Codex (both if concurrent)"]
+    end
+
+    subgraph HomeTab["HOME Tab"]
+        direction TB
+        HS["Left Sidebar"]
+        HC["Main Content"]
+
+        HS --> HS_Session["Session Controls"]
+        HS_Session --> StartSession["▶ Start Session → opens Scope Review"]
+        HS --> HS_Sources["Sources List (status dots: green=active, gray=idle)"]
+        HS_Sources --> AddFolder["+ Add Folder..."]
+        HS --> HS_Quick["Quick Actions"]
+        HS_Quick --> StorageInfo["Storage Stats"]
+        HS_Quick --> MCPStatus["MCP Status"]
+
+        HC --> ScopeReview["Session Scope Review (expansion panel)"]
+        ScopeReview --> SR_Agent["Agent Picker: Claude | Codex (exclusive)"]
+        ScopeReview --> SR_Sources["Source Checklist (pre-populated from defaults)"]
+        ScopeReview --> SR_Email["Email: Sensitivity + visible/hidden counts"]
+        ScopeReview --> SR_Options["Options: Note mode, Timeout, Preset"]
+        ScopeReview --> SR_Footer["Footer: exact scope summary + Cancel / Save as Defaults / Start →"]
+
+        HC --> SessionCard["Session Card (empty/ready/active/recap)"]
+        HC --> StatPills["Stat Pills (Sources, Files, Emails, Sessions, Storage)"]
+        HC --> ActivityFeed["Recent Activity Feed (5 items)"]
+        HC --> LastRecap["Last Session Recap + session notes"]
+    end
+
+    subgraph FilesTab["FILES Tab"]
+        direction TB
+        FS["Left Sidebar"]
+        FC["Main Content"]
+        FR["Right Sidebar (COLLAPSED by default, opens on file click)"]
+
+        FS --> FS_All["All Files"]
+        FS --> FS_Sources["Source Folders (expandable tree)"]
+        FS --> FS_Defaults["Default access for new sessions"]
+        FS_Defaults --> FS_Checks["Per-source independent checkboxes: ☑Claude ☑Codex"]
+        FS --> FS_Versions["Version Filters"]
+        FS_Versions --> RecentMod["Recently Modified"]
+        FS_Versions --> Conflicts["Conflicts"]
+        FS_Versions --> AITouched["AI-Touched Files"]
+        FS --> FS_AddFolder["+ Add Folder..."]
+
+        FC --> FileToolbar["Toolbar: Source filter, Sort, Search, Count"]
+        FC --> FileTable["File Table: Icon, Name, Source, Size, Modified, Versions, AI"]
+        FC --> ContentSearch["Content Search (search inside files)"]
+
+        FR --> FileDetail["File Metadata (size, type)"]
+        FR --> VersionHistory["Version History Timeline"]
+        FR --> DiffPreview["Diff Preview"]
+        FR --> FileActions["Actions: Restore, Reveal, Quick Look"]
+    end
+
+    subgraph EmailsTab["EMAILS Tab"]
+        direction TB
+        ES["Left Sidebar"]
+        EL["Message List Pane (360pt)"]
+        EP["Reading Pane"]
+
+        ES --> ES_All["All Mail"]
+        ES --> ES_Accounts["Account Trees (expandable mailboxes)"]
+        ES --> ES_Smart["Smart Mailboxes + rule editor"]
+        ES --> ES_SessionAccess["Session Email Access"]
+        ES_SessionAccess --> ES_Sensitivity["Sensitivity: Strict / Moderate / Open"]
+        ES_SessionAccess --> ES_Counts["visible / auto-hidden / exceptions counts"]
+        ES --> ES_AddAccount["+ Add Account..."]
+
+        EL --> EL_Search["Search Emails"]
+        EL --> EL_Filters["Filter Chips: All, Attachments, Flagged, This Week, Session Exceptions"]
+        EL --> EL_List["Email List (sender, subject, preview, date)"]
+        EL --> EL_Hidden["Auto-hidden emails: reason badges (🚫Banking, 🚫2FA, 🚫Health)"]
+
+        EP --> EP_Header["Subject + From/To/Date"]
+        EP --> EP_Status["Status: 'visible this session' or 'auto-hidden' + reason"]
+        EP --> EP_AddBtn["'Add to this session' button (for hidden emails only)"]
+        EP --> EP_Body["Email Body (read-only)"]
+        EP --> EP_Attachments["Attachment List"]
+    end
+
+    subgraph HistoryTab["HISTORY Tab"]
+        direction TB
+        HiS["Left Sidebar"]
+        HiL["Session/Event List (360pt)"]
+        HiD["Detail Pane (enhanced)"]
+
+        HiS --> HiS_Views["View Modes: Sessions, Timeline, By File"]
+        HiS --> HiS_Filters["Action Filters: All, Reads, Writes, Tools, Connections, Restores"]
+        HiS --> HiS_Agents["Agent Filter: Cowork, Codex"]
+        HiS --> HiS_Export["Export: Copy Summary, Export Markdown"]
+
+        HiL --> SessionList["Session List with agent badges + stats"]
+        HiL --> TimelineList["Flat Event Timeline"]
+        HiL --> FileList["File-centric Version List"]
+
+        HiD --> HiD_Scope["Scope: sources, email sensitivity, note mode, timeout"]
+        HiD --> SessionStats["Stats Cards (Reads, Writes, Searches)"]
+        HiD --> SessionNotes["Session Notes (start/checkpoint/end cards)"]
+        HiD --> RuntimeMeta["Runtime: agent, connection time, duration, MCP ID"]
+        HiD --> EventLog["Chronological Event Log"]
+        HiD --> TempExceptions["Temporary Email Exceptions log"]
+        HiD --> PromotionResults["Promotion Results (applied/conflicts/skipped/new/deleted)"]
+    end
+
+    subgraph ProfileSettings["Profile / Settings (bottom-left sidebar footer)"]
+        Avatar["User Avatar + Name"]
+        SettingsGear["⚙ Settings"]
+        SettingsGear --> S_General["General: Launch at Login, Notifications"]
+        SettingsGear --> S_Connection["Connection: MCP Install, Agent Config"]
+        SettingsGear --> S_Email["Email Backup: Accounts, Sync, Storage"]
+        SettingsGear --> S_Storage["Storage: Size, Maintenance, Cleanup"]
+        SettingsGear --> S_About["About: Version, Bundle ID"]
+    end
+
+    subgraph Overlays["Overlays & Modals"]
+        CmdPalette["Command Palette ⌘K"]
+        Onboarding["Onboarding Wizard (6 steps)"]
+        EmailSetup["Email Account Setup (6 steps)"]
+        SmartMailboxEditor["Smart Mailbox Rule Editor"]
+        ConfirmDialogs["Confirmation Dialogs (remove source, end session)"]
+    end
+
+    %% Navigation connections
+    SegNav --> HomeTab
+    SegNav --> FilesTab
+    SegNav --> EmailsTab
+    SegNav --> HistoryTab
+
+    %% Home → other tabs
+    StartSession --> ScopeReview
+    StatPills -.->|"click Sources"| FilesTab
+    StatPills -.->|"click Emails"| EmailsTab
+    StatPills -.->|"click Sessions"| HistoryTab
+    ActivityFeed -.->|"See all"| HistoryTab
+    ActivityFeed -.->|"click file event"| FR
+
+    %% Files → right sidebar
+    FileTable -.->|"click file row"| FR
+
+    %% Email exception flow
+    EP_AddBtn -.->|"temporary exception"| ES_Counts
+    EP_AddBtn -.->|"logged in"| TempExceptions
+
+    %% Scope review → grant lifecycle
+    ScopeReview -.->|"Start →"| SessionCard
+
+    %% Search → overlay
+    SearchBar --> CmdPalette
+
+    %% Smart mailbox editor
+    ES_Smart -.->|"+"| SmartMailboxEditor
+
+    classDef tab fill:#e8f0fe,stroke:#0066cc
+    classDef sidebar fill:#f0f0f0,stroke:#999
+    classDef content fill:#fff,stroke:#ddd
+    classDef action fill:#e6f4ea,stroke:#34a853
+    classDef overlay fill:#fff3cd,stroke:#ffc107
+    classDef trust fill:#fce8e6,stroke:#ea4335
+
+    class HomeTab,FilesTab,EmailsTab,HistoryTab tab
+    class HS,FS,ES,HiS sidebar
+    class HC,FC,FR,EL,EP,HiL,HiD content
+    class StartSession,AddFolder,FS_AddFolder,ES_AddAccount action
+    class CmdPalette,Onboarding,EmailSetup,SmartMailboxEditor,ConfirmDialogs overlay
+    class ScopeReview,FS_Defaults,ES_SessionAccess trust

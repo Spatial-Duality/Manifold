@@ -10,7 +10,9 @@ struct SourcesTableView: View {
     @State private var selectedSourceIDs: Set<String> = []
     @State private var searchText = ""
     @State private var undoSource: (SourceRecord, AgentFocus)?
+    @State private var undoAgent: TargetApp?
     @State private var showUndoToast = false
+    @State private var broadenSource: (SourceRecord, TargetApp)?
 
     private var visibleSources: [SourceRecord] {
         let sources = store.sources.filter { !$0.isRemoved }
@@ -50,6 +52,31 @@ struct SourcesTableView: View {
             }
         }
         .animation(.spring(duration: 0.2), value: showUndoToast)
+        .sheet(item: broadenBinding) { change in
+            ReviewAccessSheet(pendingChange: change)
+                .environment(store)
+                .frame(minWidth: 560, minHeight: 500)
+        }
+        .onChange(of: broadenSource?.0.sourceID) { _, _ in
+            // Handled by sheet binding
+        }
+    }
+
+    /// Convert broadenSource state into a ReviewAccessChange for sheet presentation.
+    private var broadenBinding: Binding<ReviewAccessChange?> {
+        Binding(
+            get: {
+                guard let (source, agent) = broadenSource else { return nil }
+                let agentName = agent == .codex ? "Codex" : "Claude"
+                return ReviewAccessChange(
+                    description: "Adding \(source.displayName) to \(agentName)",
+                    kind: .addSource(sourceID: source.sourceID, sourceName: source.displayName)
+                )
+            },
+            set: { newValue in
+                if newValue == nil { broadenSource = nil }
+            }
+        )
     }
 
     // MARK: - Source Table
@@ -114,21 +141,23 @@ struct SourcesTableView: View {
         }
     }
 
-    // MARK: - Access Checkbox
+    // MARK: - Access Checkbox (per-agent via PolicyStore)
 
     @ViewBuilder
     private func accessCheckbox(source: SourceRecord, agent: AgentFocus) -> some View {
-        let isGranted = source.isAccessible // TODO: Phase 6 — wire to PolicyStore per-agent
+        let targetApp: TargetApp = agent == .codex ? .codex : .cowork
+        let policy = store.policy.policy(for: targetApp)
+        let isGranted = policy?.allowedSourceIDs.contains(source.sourceID) ?? false
 
         Toggle(isOn: Binding(
             get: { isGranted },
             set: { newValue in
                 if newValue {
                     // Broadening: open Review & Update Access sheet
-                    // TODO: Phase 8 — trigger ReviewAccessSheet
+                    broadenSource = (source, targetApp)
                 } else {
                     // Narrowing: immediate + undo toast
-                    handleNarrow(source: source, agent: agent)
+                    handleNarrow(source: source, agent: targetApp)
                 }
             }
         )) {
@@ -139,14 +168,15 @@ struct SourcesTableView: View {
         .accessibilityLabel("\(source.displayName) access for \(agent == .codex ? "Codex" : "Claude")")
     }
 
-    // MARK: - Narrowing (inline + undo)
+    // MARK: - Narrowing (inline, immediate + undo toast)
 
-    private func handleNarrow(source: SourceRecord, agent: AgentFocus) {
-        // Immediate narrowing
-        Task { await store.pauseSource(sourceID: source.sourceID) }
+    private func handleNarrow(source: SourceRecord, agent: TargetApp) {
+        // Immediate narrowing via PolicyStore
+        Task { await store.policy.removeSource(source.sourceID, from: agent) }
 
         // Show undo toast
-        undoSource = (source, agent)
+        undoSource = (source, store.agentFocus)
+        undoAgent = agent
         showUndoToast = true
 
         // Auto-dismiss after 5 seconds
@@ -159,11 +189,14 @@ struct SourcesTableView: View {
     // MARK: - Undo Toast
 
     private func undoToastView(source: SourceRecord) -> some View {
-        HStack(spacing: Spacing.standard) {
-            Text("Removed access to \(source.displayName)")
+        let agentName = undoAgent == .codex ? "Codex" : "Claude"
+        return HStack(spacing: Spacing.standard) {
+            Text("Removed \(agentName) access to \(source.displayName)")
                 .font(.callout)
             Button("Undo") {
-                Task { await store.resumeSource(sourceID: source.sourceID) }
+                if let agent = undoAgent {
+                    Task { await store.policy.addSource(source.sourceID, to: agent) }
+                }
                 showUndoToast = false
             }
             .font(.callout.weight(.medium))

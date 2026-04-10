@@ -1,0 +1,182 @@
+%% Manifold Access Grant — All Interaction Paths
+%% Every way a user can grant, revoke, or modify access to folders, files, and emails
+%% Organized by: what (folders/files/emails), how (individual/bulk), scope (time/agent/global)
+
+graph TB
+    subgraph UserIntent["USER INTENT: Control what AI can see"]
+        direction TB
+        WhatDecision{"What to share?"}
+        WhatDecision --> Files["📁 FILES & FOLDERS"]
+        WhatDecision --> Emails["📧 EMAILS"]
+    end
+
+    %% ═══════════════════════════════════════════════════
+    %% FILES & FOLDERS
+    %% ═══════════════════════════════════════════════════
+    subgraph FileAccess["FILES & FOLDERS ACCESS"]
+        direction TB
+
+        Files --> FileWhen{"When?"}
+
+        FileWhen --> FileBefore["BEFORE session"]
+        FileWhen --> FileStart["AT session start"]
+        FileWhen --> FileDuring["DURING session"]
+
+        %% --- Before Session (Persistent Defaults) ---
+        subgraph PersistentDefaults["Layer 1: Persistent Defaults"]
+            direction TB
+            FileBefore --> FD_Where["Files tab → Left sidebar"]
+            FD_Where --> FD_Checkboxes["Per-source checkboxes"]
+            FD_Checkboxes --> FD_Claude["☑ Claude checkbox (blue)"]
+            FD_Checkboxes --> FD_Codex["☑ Codex checkbox (purple)"]
+
+            FD_Claude --> FD_Scope["SCOPE: Permanent, cross-session\nPre-populates Scope Review\nDoes NOT grant access directly"]
+            FD_Codex --> FD_Scope
+
+            FD_Granularity["GRANULARITY: Source folder level\n(all files in folder, or none)"]
+            FD_Agent["AGENT: Independent per-agent\n(Claude and Codex configured separately)"]
+        end
+
+        %% --- At Session Start (Scope Review) ---
+        subgraph ScopeReviewFiles["Layer 2: Session Scope Review — Files Tab"]
+            direction TB
+            FileStart --> SR_Open["Home tab → Start Session → Scope Review"]
+            SR_Open --> SR_Agent["Agent picker: Claude | Codex"]
+            SR_Agent --> SR_FileTab["Files tab (inner tab)"]
+
+            SR_FileTab --> SR_Individual["INDIVIDUAL: Toggle source row on/off"]
+            SR_FileTab --> SR_Bulk["BULK: Include All / Exclude All buttons"]
+
+            SR_Individual --> SR_Visual["Visual feedback:\n🟢 Green row + left border = included\n⚪ Dimmed row = excluded\nToggle switch animates"]
+            SR_Bulk --> SR_Visual
+
+            SR_Visual --> SR_Commit["Start Session → creates grant\nMaterializes workspace"]
+
+            SR_FileScope["SCOPE: This session only\nDies when session ends/times out"]
+            SR_SaveDefaults["OPTION: Save as Defaults\n(writes back to Layer 1)"]
+        end
+
+        %% --- During Session ---
+        subgraph DuringSessionFiles["Layer 3: During-Session File Changes"]
+            direction TB
+            FileDuring --> DS_Bar["Home tab → During-Session access bar"]
+            DS_Bar --> DS_Add["Add source: click 'Add to session'\non excluded source row"]
+            DS_Bar --> DS_Revoke["Revoke source: click 'Revoke'\non included source row"]
+            DS_Bar --> DS_Modify["'Modify scope' → reopens\nScope Review with current state"]
+
+            DS_Add --> DS_Effect["Takes effect immediately\nNo session restart needed\nAmends existing grant"]
+            DS_Revoke --> DS_Effect
+            DS_Modify --> DS_Effect
+
+            DS_FileScope["SCOPE: This session only\nAmends, doesn't replace"]
+        end
+    end
+
+    %% ═══════════════════════════════════════════════════
+    %% EMAILS
+    %% ═══════════════════════════════════════════════════
+    subgraph EmailAccess["EMAIL ACCESS"]
+        direction TB
+
+        Emails --> EmailWhen{"When?"}
+
+        EmailWhen --> EmailStart["AT session start"]
+        EmailWhen --> EmailDuring["DURING session"]
+
+        %% --- At Session Start (Scope Review) ---
+        subgraph ScopeReviewEmails["Layer 2: Session Scope Review — Emails Tab"]
+            direction TB
+            EmailStart --> EM_Open["Scope Review → Emails tab"]
+
+            EM_Open --> EM_Sensitivity["SENSITIVITY FLOOR (bulk):\nStrict | Moderate | Open\nAuto-hides categories: banking, health, 2FA"]
+            EM_Open --> EM_Domain["DOMAIN SELECTION (bulk):\nCheck/uncheck entire domains\n@company.com, @github.com, etc."]
+            EM_Open --> EM_Category["CATEGORY FILTER (view only):\nWork | Automated | Personal | Auto-hidden\nFilters the domain list display"]
+
+            EM_Sensitivity --> EM_AutoHidden["Auto-hidden domains:\nVisible but DISABLED (grayed checkbox)\nReason badges: 🚫 banking, 🚫 2FA, 🚫 health\nCannot be checked — enforced by sensitivity floor"]
+
+            EM_Domain --> EM_DomainBulk["BULK: Category-level thinking\nCheck all Work domains at once\nUncheck all Personal at once"]
+            EM_Domain --> EM_DomainIndiv["INDIVIDUAL: Per-domain toggle\nCheck/uncheck specific domain"]
+
+            EM_DomainBulk --> EM_Commit["Start Session → creates grant\nwith email scope included"]
+            EM_DomainIndiv --> EM_Commit
+            EM_Sensitivity --> EM_Commit
+
+            EM_EmailScope["SCOPE: This session only\nSensitivity + domain selections\ndie when session ends"]
+            EM_NoPersist["NOTE: No persistent email defaults in v1\n(unlike file defaults)\nEmail content is too dynamic"]
+        end
+
+        %% --- During Session ---
+        subgraph DuringSessionEmails["Layer 3: During-Session Email Exceptions"]
+            direction TB
+            EmailDuring --> EX_ReadingPane["Email reading pane:\nBrowse to auto-hidden email\nSee why it's hidden\nClick 'Add to this session'"]
+            EmailDuring --> EX_Modify["During-Session bar:\n'Modify scope' → reopens\nScope Review Emails tab"]
+            EmailDuring --> EX_Remove["During-Session bar:\nExceptions log → 'Remove'\nRevokes individual exception"]
+
+            EX_ReadingPane --> EX_Effect["TEMPORARY EXCEPTION:\nAdds single email to session\nAuto-expires when session ends\nLogged in History with timestamp"]
+            EX_Modify --> EX_Modify_Effect["Amends domain selections\nand sensitivity for this session"]
+            EX_Remove --> EX_Remove_Effect["Revokes the exception\nEmail returns to hidden state"]
+
+            EX_ExceptionScope["SCOPE: This session only\nNo permanent per-email overrides in v1\nApple 'Allow Once' pattern"]
+        end
+    end
+
+    %% ═══════════════════════════════════════════════════
+    %% TIME DIMENSION
+    %% ═══════════════════════════════════════════════════
+    subgraph TimeDimension["ACCESS BY TIME"]
+        direction LR
+
+        T_Permanent["⏳ PERMANENT\n(cross-session)"]
+        T_Session["⏱ SESSION LIFETIME\n(start → end/timeout)"]
+        T_Exception["⚡ SESSION EXCEPTION\n(mid-session → end)"]
+
+        T_Permanent --> T_PWhat["File folder defaults only\n(Layer 1 checkboxes)\nNo persistent email defaults"]
+        T_Session --> T_SWhat["All grants from Scope Review:\nFile sources + Email domains\n+ Sensitivity level\nKilled by: End Session, Timeout, Crash"]
+        T_Exception --> T_EWhat["Individual email exceptions\nfrom reading pane\nAuto-expires, no renewal"]
+
+        T_Timeout["TIMEOUT OPTIONS:\n30 min | 1 hour | 2 hours | 4 hours | None\nSet in Scope Review Options tab\nAuto-ends entire session"]
+    end
+
+    %% ═══════════════════════════════════════════════════
+    %% AGENT DIMENSION
+    %% ═══════════════════════════════════════════════════
+    subgraph AgentDimension["ACCESS BY AGENT"]
+        direction LR
+
+        A_PerAgent["🤖 PER-AGENT\n(everything is per-agent)"]
+        A_PerAgent --> A_Detail["Each agent gets:\n• Own persistent defaults\n• Own Scope Review session\n• Own materialized workspace\n• Own email domain selections\n• Own sensitivity level\n• Own temporary exceptions"]
+
+        A_Concurrent["⚡ CONCURRENT SESSIONS\nClaude + Codex can run simultaneously\nSame source folder in both = separate copies\nConflicts resolved by PromoteEngine at session end"]
+
+        A_NoGlobal["🚫 NO 'SHARE WITH ALL AIs' TOGGLE\nDeliberate design choice:\nDifferent agents = different trust levels\nEach session configured independently"]
+    end
+
+    %% ═══════════════════════════════════════════════════
+    %% WHAT CANNOT BE DONE
+    %% ═══════════════════════════════════════════════════
+    subgraph NotSupported["NOT SUPPORTED IN v1"]
+        direction TB
+        NS1["🚫 Individual file-level access control\n(all-or-nothing at folder level)"]
+        NS2["🚫 Persistent email domain defaults\n(email selections are per-session only)"]
+        NS3["🚫 Permanent per-email overrides\n(only temporary session exceptions)"]
+        NS4["🚫 Cross-agent shared scope\n(no 'same config for both agents')"]
+        NS5["🚫 Sub-domain or sender-level email selection\n(domain level only: @company.com)"]
+        NS6["🚫 Glob patterns or .manifoldignore for files\n(folder level only)"]
+    end
+
+    %% Styling
+    classDef intent fill:#e8f0fe,stroke:#0066cc,stroke-width:2px
+    classDef layer1 fill:#f3e8ff,stroke:#9334e9
+    classDef layer2 fill:#e6f4ea,stroke:#34a853
+    classDef layer3 fill:#fef7e0,stroke:#ea8600
+    classDef time fill:#fce8e6,stroke:#ea4335
+    classDef agent fill:#e8f0fe,stroke:#0066cc
+    classDef blocked fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+
+    class UserIntent intent
+    class PersistentDefaults layer1
+    class ScopeReviewFiles,ScopeReviewEmails layer2
+    class DuringSessionFiles,DuringSessionEmails layer3
+    class TimeDimension time
+    class AgentDimension agent
+    class NotSupported blocked

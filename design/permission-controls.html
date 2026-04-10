@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manifold — AI Access Control Patterns v2</title>
+<style>
+  :root {
+    --bg: #f5f5f5;
+    --surface: #ffffff;
+    --surface-hover: #f8f8f8;
+    --border: #e0e0e0;
+    --border-light: #ebebeb;
+    --text: #1a1a1a;
+    --text-secondary: #666;
+    --text-tertiary: #999;
+    --accent: #0066cc;
+    --accent-bg: #e8f0fe;
+    --green: #34a853;
+    --green-bg: #e6f4ea;
+    --orange: #ea8600;
+    --orange-bg: #fef7e0;
+    --red: #ea4335;
+    --red-bg: #fce8e6;
+    --purple: #9334e9;
+    --purple-bg: #f3e8ff;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    padding: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 32px 0 8px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 20px 0 8px; color: var(--text-secondary); }
+  .subtitle { font-size: 15px; color: var(--text-secondary); margin-bottom: 32px; line-height: 1.5; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .card-title { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
+  .card-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+  .tag.approved { background: var(--green-bg); color: var(--green); }
+  .tag.considered { background: var(--orange-bg); color: var(--orange); }
+  .tag.rejected { background: var(--red-bg); color: var(--red); }
+  .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; font-size: 13px; }
+  .pros { color: var(--green); }
+  .cons { color: var(--red); }
+  .pros li, .cons li { margin-bottom: 4px; }
+  .ref { font-size: 12px; color: var(--text-tertiary); margin-top: 12px; font-style: italic; }
+  hr { border: none; border-top: 1px solid var(--border-light); margin: 32px 0; }
+  .btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-secondary { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+
+  /* ─── NAVIGATION TABS ─── */
+  .nav-tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 3px;
+    margin-bottom: 24px;
+  }
+  .nav-tab {
+    padding: 8px 20px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .nav-tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  /* ─── PATTERN A: macOS System Settings ─── */
+  .pattern-a-source {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .pattern-a-source:last-child { border-bottom: none; }
+  .pa-icon { font-size: 20px; margin-right: 12px; flex-shrink: 0; }
+  .pa-info { flex: 1; }
+  .pa-name { font-weight: 500; font-size: 14px; }
+  .pa-path { font-size: 12px; color: var(--text-tertiary); }
+  .pa-disclosure {
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text-tertiary);
+    margin-right: 8px;
+    transition: transform 0.15s;
+    font-size: 12px;
+  }
+  .pa-disclosure.open { transform: rotate(90deg); }
+  .pa-toggle {
+    width: 44px; height: 24px;
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .pa-toggle.on { background: var(--green); }
+  .pa-toggle.off { background: #ccc; }
+  .pa-toggle::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    background: white;
+    border-radius: 50%;
+    top: 2px;
+    transition: left 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .pa-toggle.on::after { left: 22px; }
+  .pa-toggle.off::after { left: 2px; }
+  .pa-sub-perms {
+    padding: 8px 12px 8px 52px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border-light);
+  }
+  .pa-sub-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+  .pa-agent-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pa-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+  .pa-dot.claude { background: var(--accent); }
+  .pa-dot.codex { background: var(--purple); }
+
+  /* ─── PATTERN B: Finder Get Info ─── */
+  .pattern-b-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .pattern-b-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .pattern-b-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-light);
+    font-size: 13px;
+  }
+  .pb-dropdown {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 12px;
+    background: var(--surface);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .pb-dropdown.full { color: var(--green); border-color: var(--green-bg); background: var(--green-bg); }
+  .pb-dropdown.read { color: var(--accent); border-color: var(--accent-bg); background: var(--accent-bg); }
+  .pb-dropdown.none { color: var(--red); border-color: var(--red-bg); background: var(--red-bg); }
+
+  /* ─── PATTERN C: Independent checkboxes (APPROVED) ─── */
+  .pattern-c-row {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid var(--border-light);
+    gap: 12px;
+  }
+  .pattern-c-row:last-child { border-bottom: none; }
+  .pc-source-info { flex: 1; }
+  .pc-name { font-weight: 500; font-size: 14px; }
+  .pc-path { font-size: 12px; color: var(--text-tertiary); }
+  .pc-checks {
+    display: flex;
+    gap: 16px;
+  }
+  .pc-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .pc-checkbox {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  .pc-checkbox.checked-claude {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .pc-checkbox.checked-codex {
+    background: var(--purple);
+    border-color: var(--purple);
+    color: white;
+  }
+  .pc-checkbox.unchecked {
+    background: var(--surface);
+    color: transparent;
+  }
+
+  /* ─── PATTERN D: Session-scoped grant ─── */
+  .pattern-d-grant {
+    background: var(--bg);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .pd-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-light);
+  }
+  .pd-agent-picker {
+    display: flex;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .pd-agent-opt {
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    color: var(--text-secondary);
+    transition: all 0.15s;
+  }
+  .pd-agent-opt:last-child { border-right: none; }
+  .pd-agent-opt.selected-claude { background: var(--accent-bg); color: var(--accent); }
+  .pd-agent-opt.selected-codex { background: var(--purple-bg); color: var(--purple); }
+  .pd-source-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-light);
+    gap: 10px;
+    font-size: 13px;
+  }
+  .pd-checkbox {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .pd-checkbox.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .pd-checkbox.unchecked { background: var(--surface); }
+  .pd-source-name { font-weight: 500; }
+  .pd-file-count { margin-left: auto; color: var(--text-tertiary); font-size: 12px; }
+
+  /* ─── SESSION SCOPE REVIEW (APPROVED) ─── */
+  .scope-review {
+    border: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .scope-review-header {
+    background: var(--accent-bg);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .scope-review-title { font-weight: 600; font-size: 15px; color: var(--accent); }
+  .scope-review-body { padding: 16px 20px; }
+  .scope-section { margin-bottom: 16px; }
+  .scope-section:last-child { margin-bottom: 0; }
+  .scope-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-tertiary); margin-bottom: 6px; }
+  .scope-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+  .scope-item .icon { font-size: 16px; }
+  .scope-count { margin-left: auto; font-size: 12px; color: var(--text-secondary); }
+  .scope-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg);
+  }
+  .scope-summary { font-size: 13px; color: var(--text-secondary); }
+
+  /* ─── EMAIL PATTERNS ─── */
+  .email-perm-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-light);
+    gap: 10px;
+    font-size: 13px;
+  }
+  .email-perm-row:last-child { border-bottom: none; }
+  .ep-sender { font-weight: 500; flex: 1; }
+  .ep-subject { color: var(--text-secondary); flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ep-status {
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .ep-status.visible { background: var(--green-bg); color: var(--green); }
+  .ep-status.auto-hidden { background: var(--red-bg); color: var(--red); }
+  .ep-status.exception { background: var(--orange-bg); color: var(--orange); }
+  .ep-add-btn {
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--accent);
+    background: var(--surface);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .ep-add-btn:hover { background: var(--accent-bg); }
+
+  /* ─── DECISION BANNER ─── */
+  .decision-banner {
+    background: var(--green-bg);
+    border: 1px solid var(--green);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--green);
+    font-weight: 500;
+    margin-bottom: 16px;
+  }
+  .rejection-banner {
+    background: var(--red-bg);
+    border: 1px solid #f5c6cb;
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--red);
+    margin-top: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h1>AI Access Control — Design Patterns v2</h1>
+<p class="subtitle">
+  Manifold's core promise is <strong>controlled, inspectable AI access</strong>. The permission model is the trust boundary —
+  it must be instantly legible, impossible to misread, and feel as natural as macOS's own privacy controls.<br><br>
+  This document shows the patterns explored, with the <strong>approved design decision</strong> clearly marked.
+  The approved model is a hybrid: <strong>Pattern C</strong> (independent checkboxes) for persistent defaults +
+  <strong>mandatory Session Scope Review</strong> before any grant is created.<br><br>
+  <em>Sources: Apple HIG, About Face (Cooper), Don't Make Me Think (Krug), NN/g guidelines, Designing Interfaces (Tidwell)</em>
+</p>
+
+<div class="nav-tabs">
+  <button class="nav-tab active" onclick="showSection('files')">File Access Patterns</button>
+  <button class="nav-tab" onclick="showSection('emails')">Email Access Patterns</button>
+  <button class="nav-tab" onclick="showSection('session')">Session Scope Review</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- FILE ACCESS PATTERNS                                -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="section-files">
+
+<h2>The Core Problem</h2>
+<p class="card-desc" style="max-width:800px">
+  Users have N source folders. Two agents exist (Claude via Cowork, and Codex). For each folder, the user needs to decide:
+  which agent(s) can see it? The original wireframe used a tri-state pill (Claude | Codex | Off) which was ambiguous —
+  it looked like a segmented control (exclusive selection) but needed to support additive selection (both agents ON).
+  <br><br>
+  <strong>Key constraint:</strong> With only two agents, each source has just two independent binary questions
+  ("Include for Claude?" and "Include for Codex?"). The UI must not hide the answer behind progressive disclosure
+  when the answer is only two checkboxes deep.
+  <br><br>
+  <strong>Important:</strong> Claude and Codex can each have their own active session simultaneously, with separate
+  materialized workspaces. The same source can appear in both sessions. If both agents modify the same file,
+  each has its own copy — PromoteEngine handles conflict resolution at session end.
+</p>
+
+<div class="decision-banner">
+  Approved: Pattern C (Independent Checkboxes) for persistent defaults + mandatory Session Scope Review before grant creation
+</div>
+
+<div class="compare-grid">
+
+<!-- ═══ PATTERN A: macOS System Settings (REJECTED) ═══ -->
+<div class="card">
+  <div class="card-title">Pattern A: macOS Privacy Settings <span class="tag rejected">Rejected</span></div>
+  <div class="card-desc">
+    Per-source toggle with expandable disclosure showing per-agent binary toggles.
+    Mirrors macOS System Settings → Privacy → Files & Folders.
+  </div>
+
+  <div style="background:var(--bg);border-radius:var(--radius);overflow:hidden">
+    <div class="pattern-a-source">
+      <div class="pa-disclosure open" onclick="this.classList.toggle('open');this.closest('.pattern-a-source').nextElementSibling.style.display=this.classList.contains('open')?'':'none'">▶</div>
+      <div class="pa-icon">📁</div>
+      <div class="pa-info">
+        <div class="pa-name">web-app</div>
+        <div class="pa-path">~/Projects/web-app · 182 files</div>
+      </div>
+      <div class="pa-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')"></div>
+    </div>
+    <div class="pa-sub-perms">
+      <div class="pa-sub-row">
+        <div class="pa-agent-label">
+          <div class="pa-dot claude"></div>
+          <span>Claude (Cowork)</span>
+        </div>
+        <div class="pa-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="transform:scale(0.8)"></div>
+      </div>
+      <div class="pa-sub-row">
+        <div class="pa-agent-label">
+          <div class="pa-dot codex"></div>
+          <span>Codex</span>
+        </div>
+        <div class="pa-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="transform:scale(0.8)"></div>
+      </div>
+    </div>
+
+    <div class="pattern-a-source">
+      <div class="pa-disclosure" onclick="this.classList.toggle('open');this.closest('.pattern-a-source').nextElementSibling.style.display=this.classList.contains('open')?'':'none'">▶</div>
+      <div class="pa-icon">📁</div>
+      <div class="pa-info">
+        <div class="pa-name">specs</div>
+        <div class="pa-path">~/Documents/specs · 43 files</div>
+      </div>
+      <div class="pa-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')"></div>
+    </div>
+    <div class="pa-sub-perms" style="display:none">
+      <div class="pa-sub-row">
+        <div class="pa-agent-label">
+          <div class="pa-dot claude"></div>
+          <span>Claude (Cowork)</span>
+        </div>
+        <div class="pa-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="transform:scale(0.8)"></div>
+      </div>
+      <div class="pa-sub-row">
+        <div class="pa-agent-label">
+          <div class="pa-dot codex"></div>
+          <span>Codex</span>
+        </div>
+        <div class="pa-toggle off" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="transform:scale(0.8)"></div>
+      </div>
+    </div>
+
+    <div class="pattern-a-source">
+      <div class="pa-disclosure" onclick="this.classList.toggle('open');this.closest('.pattern-a-source').nextElementSibling.style.display=this.classList.contains('open')?'':'none'">▶</div>
+      <div class="pa-icon">📁</div>
+      <div class="pa-info">
+        <div class="pa-name">assets</div>
+        <div class="pa-path">~/Desktop/assets · 22 files</div>
+      </div>
+      <div class="pa-toggle off" onclick="this.classList.toggle('on');this.classList.toggle('off')"></div>
+    </div>
+    <div class="pa-sub-perms" style="display:none">
+      <div class="pa-sub-row">
+        <div class="pa-agent-label">
+          <div class="pa-dot claude"></div>
+          <span>Claude (Cowork)</span>
+        </div>
+        <div class="pa-toggle off" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="transform:scale(0.8)"></div>
+      </div>
+      <div class="pa-sub-row">
+        <div class="pa-agent-label">
+          <div class="pa-dot codex"></div>
+          <span>Codex</span>
+        </div>
+        <div class="pa-toggle off" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="transform:scale(0.8)"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rejection-banner">
+    <strong>Why rejected:</strong> With only 2 agents, disclosure hides the important answer. The expanded sub-permissions
+    are just two checkboxes — not enough complexity to justify progressive disclosure. The collapsed state
+    provides no information about which agents have access, which defeats the purpose of a trust UI.
+  </div>
+
+  <div class="pros-cons">
+    <div>
+      <div class="pros"><strong>✓ Strengths</strong></div>
+      <ul class="pros">
+        <li>Users know this pattern from macOS</li>
+        <li>Binary toggles = zero ambiguity</li>
+        <li>Parent toggle is the "kill switch"</li>
+        <li>Would scale well to 5+ agents</li>
+      </ul>
+    </div>
+    <div>
+      <div class="cons"><strong>✗ Weaknesses</strong></div>
+      <ul class="cons">
+        <li>Collapsed state hides which agents have access</li>
+        <li>Two clicks to see per-agent state</li>
+        <li>Progressive disclosure overhead for only 2 items</li>
+        <li>Doesn't show at-a-glance summary</li>
+      </ul>
+    </div>
+  </div>
+  <div class="ref">Sources: Apple HIG Privacy patterns, NN/g Toggle Guidelines. Rejected per design review: "with 2 agents, disclosure hides the answer."</div>
+</div>
+
+<!-- ═══ PATTERN B: Finder Get Info (CONSIDERED) ═══ -->
+<div class="card">
+  <div class="card-title">Pattern B: Finder Get Info Table <span class="tag considered">Considered</span></div>
+  <div class="card-desc">
+    Table with source rows and per-agent dropdown columns. Like Finder's Sharing & Permissions.
+    Future-proof (supports Read/Write/None granularity) but overengineered for current needs.
+  </div>
+
+  <table class="pattern-b-table">
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Files</th>
+        <th style="text-align:center">
+          <span style="display:inline-flex;align-items:center;gap:4px">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--accent)"></span>
+            Claude
+          </span>
+        </th>
+        <th style="text-align:center">
+          <span style="display:inline-flex;align-items:center;gap:4px">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--purple)"></span>
+            Codex
+          </span>
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>📁 web-app</strong><br><span style="font-size:11px;color:var(--text-tertiary)">~/Projects/web-app</span></td>
+        <td>182</td>
+        <td style="text-align:center">
+          <select class="pb-dropdown full">
+            <option selected>Read & Write</option>
+            <option>Read Only</option>
+            <option>No Access</option>
+          </select>
+        </td>
+        <td style="text-align:center">
+          <select class="pb-dropdown read">
+            <option selected>Read Only</option>
+            <option>Read & Write</option>
+            <option>No Access</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td><strong>📁 specs</strong><br><span style="font-size:11px;color:var(--text-tertiary)">~/Documents/specs</span></td>
+        <td>43</td>
+        <td style="text-align:center">
+          <select class="pb-dropdown read">
+            <option selected>Read Only</option>
+            <option>Read & Write</option>
+            <option>No Access</option>
+          </select>
+        </td>
+        <td style="text-align:center">
+          <select class="pb-dropdown none">
+            <option selected>No Access</option>
+            <option>Read Only</option>
+            <option>Read & Write</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td><strong>📁 assets</strong><br><span style="font-size:11px;color:var(--text-tertiary)">~/Desktop/assets</span></td>
+        <td>22</td>
+        <td style="text-align:center">
+          <select class="pb-dropdown none">
+            <option selected>No Access</option>
+            <option>Read Only</option>
+            <option>Read & Write</option>
+          </select>
+        </td>
+        <td style="text-align:center">
+          <select class="pb-dropdown none">
+            <option selected>No Access</option>
+            <option>Read Only</option>
+            <option>Read & Write</option>
+          </select>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="pros-cons">
+    <div>
+      <div class="pros"><strong>✓ Strengths</strong></div>
+      <ul class="pros">
+        <li>Everything visible at once</li>
+        <li>Color-coded dropdowns show state at a glance</li>
+        <li>Future-proof with Read/Write granularity</li>
+        <li>Familiar from Finder permissions</li>
+      </ul>
+    </div>
+    <div>
+      <div class="cons"><strong>✗ Weaknesses</strong></div>
+      <ul class="cons">
+        <li>Dropdowns don't take immediate effect (NN/g)</li>
+        <li>3 permission levels when only 2 are needed now</li>
+        <li>Too wide for a sidebar</li>
+        <li>Overengineered for current model</li>
+      </ul>
+    </div>
+  </div>
+  <div class="ref">Sources: Finder → Get Info → Sharing & Permissions. Not chosen: sidebar space constraints and complexity overkill for binary access.</div>
+</div>
+
+</div><!-- end compare-grid -->
+
+<div class="compare-grid" style="margin-top:16px">
+
+<!-- ═══ PATTERN C: Independent Checkboxes (APPROVED) ═══ -->
+<div class="card" style="border: 2px solid var(--green)">
+  <div class="card-title">Pattern C: Independent Checkboxes <span class="tag approved">Approved</span></div>
+  <div class="card-desc">
+    Two independent checkboxes per source — one for Claude (blue), one for Codex (purple).
+    These are <strong>persistent defaults</strong>, not live permissions. They pre-populate the Session Scope Review.
+    <br><br>
+    <strong>Label: "Default access for new sessions"</strong> — makes the scope explicit.
+  </div>
+
+  <div style="background:var(--bg);border-radius:var(--radius);overflow:hidden">
+    <div style="display:grid;grid-template-columns:1fr 60px 60px;padding:8px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-tertiary);text-align:center;border-bottom:1px solid var(--border-light)">
+      <span style="text-align:left">Source</span>
+      <span style="color:var(--accent)">Claude</span>
+      <span style="color:var(--purple)">Codex</span>
+    </div>
+    <div class="pattern-c-row" style="display:grid;grid-template-columns:1fr 60px 60px;gap:0;padding:10px 12px">
+      <div class="pc-source-info">
+        <div class="pc-name">📁 web-app</div>
+        <div class="pc-path">182 files · 1.1 GB</div>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <input type="checkbox" checked style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div style="display:flex;justify-content:center">
+        <input type="checkbox" checked style="width:18px;height:18px;accent-color:var(--purple);cursor:pointer">
+      </div>
+    </div>
+    <div class="pattern-c-row" style="display:grid;grid-template-columns:1fr 60px 60px;gap:0;padding:10px 12px">
+      <div class="pc-source-info">
+        <div class="pc-name">📁 specs</div>
+        <div class="pc-path">43 files · 89 MB</div>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <input type="checkbox" checked style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div style="display:flex;justify-content:center">
+        <input type="checkbox" style="width:18px;height:18px;accent-color:var(--purple);cursor:pointer">
+      </div>
+    </div>
+    <div class="pattern-c-row" style="display:grid;grid-template-columns:1fr 60px 60px;gap:0;padding:10px 12px;border-bottom:none">
+      <div class="pc-source-info">
+        <div class="pc-name">📁 assets</div>
+        <div class="pc-path">22 files · 156 MB</div>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <input type="checkbox" style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div style="display:flex;justify-content:center">
+        <input type="checkbox" style="width:18px;height:18px;accent-color:var(--purple);cursor:pointer">
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:12px;padding:10px;background:var(--green-bg);border-radius:6px;font-size:12px;color:#1a7a3a;line-height:1.5">
+    <strong>Why this wins:</strong><br>
+    • <strong>NN/g:</strong> Checkboxes are for independent, non-exclusive selections. Each agent's access is an independent binary question.<br>
+    • <strong>Krug:</strong> Meaning is obvious at a glance — blue checked = Claude gets this, purple checked = Codex gets this. Both unchecked IS off.<br>
+    • <strong>Apple HIG:</strong> No third "Off" control needed. Don't add a control for a state already represented by absence of selection.<br>
+    • <strong>Cooper:</strong> Matches mental model — users think "I usually share web-app with Claude" and the checkbox says exactly that.<br>
+    • <strong>Sidebar-friendly:</strong> Compact grid fits in 240pt sidebar without scrolling.
+  </div>
+
+  <div class="pros-cons">
+    <div>
+      <div class="pros"><strong>✓ Strengths</strong></div>
+      <ul class="pros">
+        <li>Completely unambiguous</li>
+        <li>Compact — fits in sidebar</li>
+        <li>Instant visual scan</li>
+        <li>Color-coded per agent</li>
+        <li>Both unchecked = off (no extra control)</li>
+      </ul>
+    </div>
+    <div>
+      <div class="cons"><strong>✗ Manageable weaknesses</strong></div>
+      <ul class="cons">
+        <li>No progressive disclosure (acceptable: only 2 items)</li>
+        <li>Two checkboxes per row (manageable with grid layout)</li>
+        <li>Novel pattern (not macOS-native, but immediately learnable)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="ref">Sources: NN/g Checkbox Guidelines, About Face mental model matching, Don't Make Me Think "obvious at a glance"</div>
+</div>
+
+<!-- ═══ PATTERN D: Session-scoped (feeds into Scope Review) ═══ -->
+<div class="card">
+  <div class="card-title">Pattern D: Session-Scoped Grant <span class="tag approved">Approved (as Scope Review)</span></div>
+  <div class="card-desc">
+    Agent picker → source checklist → Start. This is the mandatory Session Scope Review that opens before
+    any grant is created. Pre-populated from Pattern C defaults, but fully editable.
+    <strong>Editing does NOT mutate persistent defaults</strong> unless the user explicitly clicks "Save as Defaults."
+  </div>
+
+  <div class="pattern-d-grant">
+    <div class="pd-header">
+      <span>Review Session Scope</span>
+      <div class="pd-agent-picker">
+        <div class="pd-agent-opt selected-claude">Claude</div>
+        <div class="pd-agent-opt">Codex</div>
+      </div>
+    </div>
+    <div class="pd-source-item">
+      <div class="pd-checkbox checked">✓</div>
+      <span>📁</span>
+      <span class="pd-source-name">web-app</span>
+      <span class="pd-file-count">182 files · 1.1 GB</span>
+    </div>
+    <div class="pd-source-item">
+      <div class="pd-checkbox checked">✓</div>
+      <span>📁</span>
+      <span class="pd-source-name">specs</span>
+      <span class="pd-file-count">43 files · 89 MB</span>
+    </div>
+    <div class="pd-source-item">
+      <div class="pd-checkbox unchecked"></div>
+      <span>📁</span>
+      <span class="pd-source-name">assets</span>
+      <span class="pd-file-count">22 files · 156 MB</span>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:13px;color:var(--text-secondary)">225 files (1.2 GB) + 1,089 emails accessible</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-secondary">Save as Defaults</button>
+        <button class="btn btn-primary">Start →</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pros-cons">
+    <div>
+      <div class="pros"><strong>✓ Strengths</strong></div>
+      <ul class="pros">
+        <li>Matches backend (1 grant = 1 agent)</li>
+        <li>Creates mandatory "review before start" moment</li>
+        <li>Pre-populated from defaults (fast path)</li>
+        <li>"Save as Defaults" keeps persistent prefs in sync</li>
+      </ul>
+    </div>
+    <div>
+      <div class="cons"><strong>✗ Trade-offs</strong></div>
+      <ul class="cons">
+        <li>Extra step before starting (justified: high-consequence action)</li>
+        <li>Must configure separately for each agent</li>
+      </ul>
+    </div>
+  </div>
+  <div class="ref">Sources: Cooper's "commensurate effort", Apple's "Selected Photos" scope pattern, backend GrantStore architecture</div>
+</div>
+
+</div><!-- end compare-grid -->
+
+<hr>
+<h2>Approved Design: Pattern C + Mandatory Session Scope Review</h2>
+<div class="card" style="border-left:3px solid var(--green)">
+  <div class="card-title">Three-layer trust model</div>
+  <div class="card-desc" style="max-width:800px;line-height:1.7">
+    <strong>Layer 1 — Persistent defaults (Files sidebar, Pattern C):</strong> Independent checkboxes per source, per agent.
+    Label: "Default access for new sessions." Changes affect only future sessions, never active grants. Both unchecked = off.<br><br>
+
+    <strong>Layer 2 — Session Scope Review (Home tab, Pattern D-derived):</strong> Mandatory before any grant is created.
+    Pre-populated from Layer 1 defaults for the selected agent. User can edit without mutating defaults.
+    Includes email sensitivity, session notes mode, timeout, and preset. Footer shows exact scope summary.
+    "Save as Defaults" is an explicit, separate action.<br><br>
+
+    <strong>Layer 3 — Temporary session exceptions (Emails only, v1):</strong> Sensitivity-blocked emails can be
+    added to the current session via "Add to this session" button. Exceptions expire when the session ends.
+    No permanent per-email overrides in v1.<br><br>
+
+    This mirrors Apple's privacy pattern: app-level defaults (Settings → Privacy), scoped permission prompts
+    (Selected Photos / Allow Once), and temporary access that expires.
+  </div>
+</div>
+
+</div><!-- end section-files -->
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- EMAIL ACCESS PATTERNS                               -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="section-emails" style="display:none">
+
+<h2>Email Sharing Model (Approved v1)</h2>
+<p class="card-desc" style="max-width:800px">
+  Emails have a different trust profile than files. The sensitivity filter (strict/moderate/open) acts as
+  an automatic bulk filter — hiding banking, health, and 2FA emails. On top of that, individual emails
+  can be added as <strong>temporary session exceptions</strong> — never permanently overridden in v1.
+  <br><br>
+  <strong>Key terminology:</strong> "visible this session" (not "shared"), "auto-hidden" (not "blocked"),
+  "Add to this session" (not "Share"). All language scopes to the current session.
+</p>
+
+<div class="decision-banner">
+  Approved: Sensitivity as hard floor + temporary session-only exceptions via "Add to this session"
+</div>
+
+<div class="card">
+  <div class="card-title">Sensitivity Floor + Temporary Exceptions</div>
+  <div class="card-desc">
+    The sensitivity level sets default visibility. Auto-hidden emails show <strong>why</strong> they were hidden
+    (domain category badge). Users can add specific hidden emails to the current session only.
+    Exceptions expire when the session ends — Apple's "Allow Once" pattern.
+  </div>
+
+  <div style="background:var(--bg);border-radius:var(--radius);overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-weight:600;font-size:14px">Session Email Access</div>
+        <div style="font-size:12px;color:var(--text-secondary)">Controls which emails the agent can access this session</div>
+      </div>
+      <select style="font-size:13px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
+        <option>Strict — only explicitly added</option>
+        <option selected>Moderate — hide banking, health, 2FA</option>
+        <option>Open — hide only 2FA</option>
+      </select>
+    </div>
+
+    <div style="padding:8px 16px;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border-light)">
+      Message list (session view)
+    </div>
+
+    <div class="email-perm-row">
+      <span class="ep-sender">Alex Chen</span>
+      <span class="ep-subject">Re: API design review — feedback on auth endpoints</span>
+      <span class="ep-status visible">visible this session</span>
+    </div>
+    <div class="email-perm-row">
+      <span class="ep-sender">Sarah Kim</span>
+      <span class="ep-subject">Q2 product roadmap — updated priorities</span>
+      <span class="ep-status visible">visible this session</span>
+    </div>
+    <div class="email-perm-row" style="opacity:0.7">
+      <span class="ep-sender">Bank of America</span>
+      <span class="ep-subject">Your monthly statement is ready</span>
+      <span class="ep-status auto-hidden">🚫 Banking</span>
+      <button class="ep-add-btn">Add to this session</button>
+    </div>
+    <div class="email-perm-row" style="opacity:0.7">
+      <span class="ep-sender">GitHub</span>
+      <span class="ep-subject">Your 2FA recovery codes have changed</span>
+      <span class="ep-status auto-hidden">🚫 2FA</span>
+      <button class="ep-add-btn">Add to this session</button>
+    </div>
+    <div class="email-perm-row">
+      <span class="ep-sender">Maya Patel</span>
+      <span class="ep-subject">Design assets for new dashboard</span>
+      <span class="ep-status visible">visible this session</span>
+    </div>
+    <div class="email-perm-row" style="opacity:0.7">
+      <span class="ep-sender">CVS Health</span>
+      <span class="ep-subject">Your prescription is ready for pickup</span>
+      <span class="ep-status auto-hidden">🚫 Health</span>
+      <button class="ep-add-btn">Add to this session</button>
+    </div>
+
+    <div style="padding:10px 16px;border-top:1px solid var(--border-light);font-size:12px;color:var(--text-secondary);background:var(--surface)">
+      <strong>Moderate filter active:</strong> 1,089 visible · 158 auto-hidden (42 banking, 89 2FA, 27 health) · 0 temporary exceptions
+    </div>
+  </div>
+
+  <div style="margin-top:16px;padding:12px;background:var(--green-bg);border-radius:6px;font-size:12px;color:#1a7a3a;line-height:1.5">
+    <strong>Why temporary-only (v1):</strong><br>
+    • <strong>Apple's "Allow Once":</strong> Scoped, explicit, self-cleaning. No accumulating list of forgotten decisions.<br>
+    • <strong>Trust model stays explainable:</strong> "Moderate hides banking/health/2FA. You can add specific emails for this session only."<br>
+    • <strong>Reason badges build trust:</strong> Users see WHY an email is hidden, not just that it is.<br>
+    • <strong>Session History records everything:</strong> Which exceptions were granted, when, by whom — full audit trail.
+  </div>
+
+  <div class="ref" style="margin-top:12px">
+    The key UX insight: show the <em>reason</em> why an email is auto-hidden (banking, 2FA, health) —
+    not just "hidden." This builds trust because the user understands the filter logic.
+    Permanent per-email overrides are deferred to v2 if needed.
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- SESSION SCOPE REVIEW (APPROVED)                     -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="section-session" style="display:none">
+
+<h2>Session Scope Review (Mandatory Pre-Start)</h2>
+<p class="card-desc" style="max-width:800px">
+  This is the trust boundary. Opens when user clicks "Start Session" on the Home tab.
+  Must be completed before any grant is created. Addresses the P1 finding:
+  "the start session surface still summarizes access instead of letting the user inspect the exact grant boundary."
+  <br><br>
+  <strong>Key behaviors:</strong> Pre-populated from persistent defaults. Editing does NOT mutate defaults.
+  "Save as Defaults" is explicit and separate. Footer shows exact scope summary with file count, total size, and email count.
+</p>
+
+<div class="decision-banner">
+  Approved: Mandatory scope review before every session start. No "quick start" bypass.
+</div>
+
+<div class="scope-review">
+  <div class="scope-review-header">
+    <div>
+      <div class="scope-review-title">Review Session Scope</div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-top:2px">Confirm what the agent can access before starting</div>
+    </div>
+    <div class="pd-agent-picker">
+      <div class="pd-agent-opt selected-claude">Claude</div>
+      <div class="pd-agent-opt">Codex</div>
+    </div>
+  </div>
+
+  <div class="scope-review-body">
+    <!-- Files Section -->
+    <div class="scope-section">
+      <div class="scope-label">Files & Folders</div>
+      <div class="scope-item">
+        <input type="checkbox" checked style="accent-color:var(--accent)">
+        <span class="icon">📁</span>
+        <strong>web-app</strong>
+        <span class="scope-count">182 files · 1.1 GB</span>
+      </div>
+      <div class="scope-item">
+        <input type="checkbox" checked style="accent-color:var(--accent)">
+        <span class="icon">📁</span>
+        <strong>specs</strong>
+        <span class="scope-count">43 files · 89 MB</span>
+      </div>
+      <div class="scope-item">
+        <input type="checkbox" style="accent-color:var(--accent)">
+        <span class="icon" style="opacity:0.4">📁</span>
+        <span style="opacity:0.4">assets</span>
+        <span class="scope-count" style="opacity:0.4">22 files · 156 MB</span>
+      </div>
+    </div>
+
+    <!-- Email Section -->
+    <div class="scope-section">
+      <div class="scope-label">Email Access</div>
+      <div class="scope-item">
+        <span class="icon">📧</span>
+        <span>Sensitivity level:</span>
+        <select style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit">
+          <option>Strict</option>
+          <option selected>Moderate</option>
+          <option>Open</option>
+        </select>
+      </div>
+      <div style="padding:6px 0 6px 24px;font-size:12px;color:var(--text-secondary)">
+        1,089 emails visible · 158 auto-hidden (banking, health, 2FA) · 0 temporary exceptions
+      </div>
+    </div>
+
+    <!-- Session Options -->
+    <div class="scope-section">
+      <div class="scope-label">Session Options</div>
+      <div class="scope-item">
+        <span class="icon">📝</span>
+        <span>Session notes:</span>
+        <select style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit">
+          <option>Off</option>
+          <option selected>Basic</option>
+          <option>Verbose</option>
+        </select>
+      </div>
+      <div class="scope-item">
+        <span class="icon">⏱</span>
+        <span>Inactivity timeout:</span>
+        <select style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit">
+          <option>30 minutes</option>
+          <option selected>1 hour</option>
+          <option>2 hours</option>
+          <option>4 hours</option>
+          <option>No timeout</option>
+        </select>
+      </div>
+      <div class="scope-item">
+        <span class="icon">🏷</span>
+        <span>Preset:</span>
+        <select style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit">
+          <option selected>General</option>
+          <option>Legal Review</option>
+          <option>Design Brief</option>
+          <option>Marketing</option>
+          <option>Finance</option>
+          <option>Research</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="scope-footer">
+    <div class="scope-summary">
+      <strong>225 files</strong> (1.2 GB) + <strong>1,089 emails</strong> accessible to Claude
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-secondary">Save as Defaults</button>
+      <button class="btn btn-primary">Start →</button>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:20px;border-left:3px solid var(--green)">
+  <div class="card-title">Why mandatory</div>
+  <div class="card-desc" style="line-height:1.7">
+    <strong>About Face (Cooper) — "commensurate effort":</strong> The effort to confirm should match the
+    consequence of the action. Starting a session that gives an AI agent access to your files and emails is a
+    high-consequence action. A single "Start Session" button with a summary line is not commensurate.
+    A full scope review with checkboxes IS.<br><br>
+
+    <strong>Apple's permission pattern:</strong> When an app requests access to your Photos, Camera, or Location,
+    macOS shows exactly what's being requested and lets you choose the scope (e.g., "Selected Photos" vs "All Photos").
+    Manifold does the same — "Selected Sources" vs "All Sources."<br><br>
+
+    <strong>Three important behaviors:</strong><br>
+    1. Editing the scope review does NOT change persistent defaults — only the session being created.<br>
+    2. "Save as Defaults" is explicit and separate — users must intentionally click it to persist changes.<br>
+    3. The footer shows the exact grant boundary: file count, total size, email count. No summaries, no hand-waving.
+  </div>
+</div>
+
+</div><!-- end section-session -->
+
+<script>
+function showSection(id) {
+  document.querySelectorAll('[id^="section-"]').forEach(s => s.style.display = 'none');
+  document.getElementById('section-' + id).style.display = '';
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>

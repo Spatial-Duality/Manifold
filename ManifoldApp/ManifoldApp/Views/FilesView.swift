@@ -91,9 +91,9 @@ struct FilesView: View {
                 ContentUnavailableView(
                     "No Files",
                     systemImage: "doc",
-                    description: Text(store.hasActiveSession
-                        ? "No files match your filters."
-                        : "Start a session to browse the managed workspace.")
+                    description: Text(allFiles.isEmpty
+                        ? "Add a source folder from the Files sidebar to browse files."
+                        : "No files match your filters.")
                 )
             } else {
                 List(filteredFiles) { file in
@@ -142,9 +142,7 @@ struct FilesView: View {
             }
         }
         .navigationTitle("Files")
-        .navigationSubtitle(store.hasActiveSession
-            ? "\(allFiles.count) files across \(store.activeGrantSources.count) sources"
-            : "No active session")
+        .navigationSubtitle("\(allFiles.count) files across \(store.sources.filter { !$0.isRemoved }.count) sources")
         .task { reloadFiles() }
         .onChange(of: store.sources.count) { _, _ in Task { @MainActor in reloadFiles() } }
         .onChange(of: store.hasActiveSession) { _, _ in Task { @MainActor in reloadFiles() } }
@@ -187,7 +185,17 @@ struct FilesView: View {
     // MARK: - Data
 
     private func reloadFiles() {
-        allFiles = store.enumerateAllFiles()
+        // Standing access: enumerate from original source paths
+        // Grant-based: enumerate from materialized workspace
+        if store.hasActiveSession {
+            allFiles = store.enumerateAllFiles()
+        } else {
+            Task {
+                allFiles = await store.enumerateSourceFiles()
+                applyFilters()
+            }
+            return
+        }
         applyFilters()
     }
 

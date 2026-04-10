@@ -197,35 +197,63 @@ private struct FilesTab: View {
 
 // MARK: - Emails Tab (sidebar + content)
 
-/// Emails tab with per-tab sidebar. Sidebar = account navigation.
-/// When "All Mail" or top-level → Domains overview (access controls).
-/// When specific account/mailbox → Messages (existing EmailView).
+/// Emails tab with sidebar-driven navigation.
+/// When "All Mail" or no selection → Domains overview (access controls).
+/// When specific account/mailbox selected → Messages (existing EmailView).
 private struct EmailsTab: View {
-    @State private var showDomains = true
+    @State private var selectedMailbox: String?
 
     var body: some View {
-        if showDomains {
-            // Domains overview mode — wraps the domains table with a toggle
-            DomainsTableView()
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button("View Messages") {
-                            showDomains = false
-                        }
-                        .controlSize(.small)
-                    }
-                }
-        } else {
-            // Messages mode — existing EmailView with its own NavigationSplitView
-            EmailView()
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button("← Domains") {
-                            showDomains = true
-                        }
-                        .controlSize(.small)
-                    }
-                }
+        NavigationSplitView {
+            EmailsSidebar(selectedMailbox: $selectedMailbox)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
+        } detail: {
+            if selectedMailbox == nil || selectedMailbox == "all-mail" {
+                DomainsTableView()
+            } else {
+                EmailView()
+            }
         }
+    }
+}
+
+/// Emails tab sidebar: accounts tree, smart mailboxes, activity link.
+/// Pure navigation — no sensitivity controls (those are in toolbar).
+private struct EmailsSidebar: View {
+    @Environment(ManifoldStore.self) var store
+    @Binding var selectedMailbox: String?
+
+    var body: some View {
+        List(selection: $selectedMailbox) {
+            Section("Mail") {
+                Label("All Mail", systemImage: "tray.full")
+                    .tag("all-mail")
+            }
+
+            Section("Accounts") {
+                ForEach(store.emailAccounts.accounts) { account in
+                    Label(account.displayName, systemImage: "envelope")
+                        .tag("account-\(account.accountID)")
+                }
+
+                if store.emailAccounts.accounts.isEmpty {
+                    Text("No accounts configured")
+                        .foregroundStyle(.tertiary)
+                        .font(.callout)
+                }
+            }
+
+            Section {
+                Button {
+                    // TODO: open Activity drawer
+                } label: {
+                    Label("View Activity", systemImage: "list.bullet.rectangle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationTitle("Emails")
     }
 }

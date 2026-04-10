@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manifold Access Grant — LoveFrom Review + Interaction Map</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --surface-warm: #fefcfa;
+    --border: #e8e6e3;
+    --border-light: #f0eeeb;
+    --text: #1a1a1a;
+    --text-secondary: #6b6560;
+    --text-tertiary: #9e9892;
+    --accent: #1a1a1a;
+    --green: #2d8a4e;
+    --green-bg: #edf7f0;
+    --orange: #c47500;
+    --orange-bg: #fdf5e6;
+    --red: #c4392d;
+    --red-bg: #fcf0ee;
+    --blue: #2563eb;
+    --blue-bg: #eff4ff;
+    --purple: #7c3aed;
+    --purple-bg: #f3eeff;
+    --radius: 6px;
+    --radius-lg: 10px;
+    --font: -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ═══ LAYOUT ═══ */
+  .page { max-width: 1100px; margin: 0 auto; padding: 48px 32px; }
+  .header { margin-bottom: 56px; }
+  .header h1 {
+    font-size: 32px; font-weight: 700; letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+  .header .sub {
+    font-size: 15px; color: var(--text-secondary); max-width: 720px;
+  }
+
+  /* ═══ NAV ═══ */
+  .nav {
+    display: flex; gap: 1px; background: var(--border);
+    border-radius: 8px; overflow: hidden;
+    margin-bottom: 48px; position: sticky; top: 16px; z-index: 10;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+  .nav button {
+    flex: 1; padding: 12px 16px; border: none;
+    font-size: 13px; font-weight: 500; font-family: var(--font);
+    cursor: pointer; background: var(--surface); color: var(--text-secondary);
+    transition: all 0.15s;
+  }
+  .nav button:hover { background: var(--surface-warm); }
+  .nav button.active { background: var(--accent); color: white; font-weight: 600; }
+
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ═══ CARDS ═══ */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 28px 32px;
+    margin-bottom: 24px;
+  }
+  .card-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; margin-bottom: 12px;
+  }
+  .card-label.problem { color: var(--red); }
+  .card-label.principle { color: var(--text-tertiary); }
+  .card-label.insight { color: var(--green); }
+  .card-label.question { color: var(--orange); }
+  .card-label.verdict { color: var(--blue); }
+
+  .card h3 {
+    font-size: 18px; font-weight: 600; margin-bottom: 8px;
+    letter-spacing: -0.2px;
+  }
+  .card p, .card li {
+    font-size: 14px; color: var(--text-secondary); line-height: 1.7;
+  }
+  .card p + p { margin-top: 12px; }
+  .card blockquote {
+    border-left: 2px solid var(--border);
+    padding-left: 16px; margin: 16px 0;
+    font-style: italic; font-size: 14px;
+    color: var(--text-tertiary);
+  }
+
+  .verdict-box {
+    background: var(--red-bg);
+    border: 1px solid #e8c4c0;
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-top: 16px;
+    font-size: 13px;
+    color: #7a2520;
+    line-height: 1.7;
+  }
+  .verdict-box.green {
+    background: var(--green-bg);
+    border-color: #b8dcc4;
+    color: #1a5c2a;
+  }
+  .verdict-box.orange {
+    background: var(--orange-bg);
+    border-color: #e0cca0;
+    color: #7a5100;
+  }
+  .verdict-box.blue {
+    background: var(--blue-bg);
+    border-color: #b8cce8;
+    color: #1a3a6b;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--border-light);
+    margin: 48px 0;
+  }
+
+  /* ═══ INTERACTION MAP ═══ */
+  .map-container {
+    overflow-x: auto;
+    padding: 8px 0;
+  }
+  .map-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr 1fr 1fr;
+    gap: 2px;
+    min-width: 800px;
+    font-size: 12px;
+  }
+  .map-header {
+    background: var(--accent);
+    color: white;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .map-row-label {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    padding: 12px 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .map-cell {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    padding: 10px 14px;
+    line-height: 1.5;
+    position: relative;
+  }
+  .map-cell.empty { background: var(--bg); opacity: 0.5; }
+  .map-cell .method {
+    font-weight: 600; color: var(--text);
+    display: block; margin-bottom: 4px;
+  }
+  .map-cell .detail { color: var(--text-tertiary); font-size: 11px; }
+  .map-cell .scope-tag {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 1px 6px; border-radius: 3px; margin-top: 4px;
+  }
+  .scope-tag.permanent { background: var(--purple-bg); color: var(--purple); }
+  .scope-tag.session { background: var(--blue-bg); color: var(--blue); }
+  .scope-tag.exception { background: var(--orange-bg); color: var(--orange); }
+  .scope-tag.per-agent { background: #f0f0f0; color: #666; }
+
+  .map-section-label {
+    grid-column: 1 / -1;
+    background: var(--bg);
+    padding: 16px 14px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-tertiary);
+  }
+
+  /* ═══ FLOW DIAGRAM ═══ */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 700px;
+    margin: 24px auto;
+  }
+  .flow-step {
+    display: flex;
+    align-items: stretch;
+    min-height: 64px;
+  }
+  .flow-line {
+    width: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .flow-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-top: 18px;
+    position: relative;
+    z-index: 1;
+  }
+  .flow-dot.green { background: var(--green); }
+  .flow-dot.blue { background: var(--blue); }
+  .flow-dot.orange { background: var(--orange); }
+  .flow-dot.red { background: var(--red); }
+  .flow-dot.purple { background: var(--purple); }
+  .flow-connector {
+    width: 2px; flex: 1;
+    background: var(--border);
+  }
+  .flow-content {
+    flex: 1;
+    padding: 10px 0 10px 16px;
+  }
+  .flow-content h4 {
+    font-size: 14px; font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .flow-content p {
+    font-size: 12px; color: var(--text-secondary);
+  }
+  .flow-branch {
+    margin-left: 56px;
+    padding: 8px 0 8px 20px;
+    border-left: 2px dashed var(--border);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .flow-branch .branch-item {
+    padding: 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .flow-branch .branch-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+
+  /* ═══ COMPARISON TABLE ═══ */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .comparison .col h4 {
+    font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    margin-bottom: 12px; padding-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+  }
+  .comparison .col h4.red { border-color: var(--red); color: var(--red); }
+  .comparison .col h4.green { border-color: var(--green); color: var(--green); }
+
+  /* ═══ RESPONSIVE ═══ */
+  @media (max-width: 800px) {
+    .page { padding: 24px 16px; }
+    .comparison { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<div class="header">
+  <h1>Manifold Access Grant</h1>
+  <p class="sub">
+    A critical design review through the lens of LoveFrom's philosophy —
+    simplicity as clarity, care as signal, honesty in what the product communicates —
+    plus a complete interaction map of every way a user grants, revokes, or scopes access.
+  </p>
+</div>
+
+<div class="nav" id="mainNav">
+  <button class="active" data-section="critique">LoveFrom Critique</button>
+  <button data-section="map">Interaction Map</button>
+  <button data-section="flow">User Flows</button>
+  <button data-section="gaps">Gaps & Problems</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- SECTION 1: LOVEFROM CRITIQUE                                -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="section active" id="section-critique">
+
+<div class="card">
+  <div class="card-label principle">LoveFrom Lens</div>
+  <h3>"Simplicity is not the absence of clutter — it is essentially describing the purpose and place of an object."</h3>
+  <p>Jony Ive's core belief, inherited from Dieter Rams: a product should communicate what it is and what it can do through its form alone. Not by labeling, not by onboarding, not by documentation. The object itself speaks.</p>
+  <p>Applied to Manifold: when a user opens the app, can they immediately understand that this is a tool for controlling AI access to their data? And more importantly — can they feel, without reading anything, where the trust boundary lives?</p>
+</div>
+
+<div class="card">
+  <div class="card-label insight">Corrected — Files & Emails tabs are essential</div>
+  <h3>Visibility IS the product. The tabs serve ownership.</h3>
+  <p>Earlier analysis suggested the Files and Emails tabs dilute the product's identity as a "trust boundary controller." That was wrong. Manifold's purpose isn't to hide complexity behind magic — it's to give users <strong>clear visibility and control over THEIR data</strong>. The Files and Emails tabs are where users SEE what they own, EXPLORE what exists, and SELECT what to share.</p>
+
+  <blockquote>"Good design makes a product understandable." — Dieter Rams, Principle 4. But understandable means the user can SEE the data they're making decisions about. You can't control what you can't see.</blockquote>
+
+  <p>The Files tab lets you browse your folders, see versions, see what AI has touched. The Emails tab lets you browse your archive, see what's hidden and why. These aren't "file manager" features — they're <strong>ownership features</strong>. Without them, the user is granting access to an abstraction. With them, they're granting access to things they can see, touch, and verify.</p>
+
+  <div class="verdict-box green">
+    <strong>The LoveFrom-aligned principle here is care:</strong> Ive's philosophy is that users should feel the product was made with care for them. Showing users their data — clearly, browsably, with full context — IS the care. The alternative (a minimal scope review with folder names and counts) would feel like a consent dialog, not a product. The tabs transform "click to allow" into "browse, understand, then decide." That's ownership.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Problem 1 — Revised</div>
+  <h3>History tab is less essential than Files and Emails</h3>
+  <p>If the product's core loop is "see your data → decide what to share → monitor what happened," then History is the least essential tab. Files and Emails serve the first two steps. History serves an audit need that's real but secondary. If screen real estate or cognitive load needs trimming, History is where to look — not Files or Emails.</p>
+
+  <div class="verdict-box orange">
+    <strong>Reframed priority:</strong> Files tab > Emails tab > Home tab (access control surface) > History tab. History could potentially be a detail pane within other tabs or a secondary view, rather than a top-level tab competing for attention alongside the core ownership surfaces.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Problem 2 — Fundamental</div>
+  <h3>Is "sessions" even the right model? Neither Claude nor Codex work this way.</h3>
+  <p>The current design is built around a <strong>session lifecycle</strong>: Start Session → Scope Review → Active → End Session → Promote. But neither target agent actually uses sessions as an access boundary:</p>
+
+  <p><strong>Claude/Cowork:</strong> You select a folder. Claude gets access to it. No ceremony, no scope review, no session start button. The access is a standing permission scoped to the folder. It persists while the app is open. There's no "session end" — you just close the conversation or remove the folder.</p>
+
+  <p><strong>Codex:</strong> You run <code>codex</code> in a working directory. Codex can see that directory. The sandbox mode (read-only / workspace-write / full-access) controls what it can DO, not what it can SEE. You can add directories with <code>--add-dir</code>. "Sessions" exist for conversation resumption (<code>codex resume</code>), but access scope is tied to the working directory — not to a session lifecycle.</p>
+
+  <div class="verdict-box">
+    <strong>The session model is Manifold's invention, not a reflection of how these agents work.</strong> This creates a mismatch: Claude/Cowork sees whatever folder you pointed it at, continuously. Manifold wraps this in start/end ceremony that the agent itself doesn't enforce. The PromoteEngine (applying changes at session end) is a Manifold concept the agents know nothing about.
+    <br><br>
+    <strong>Three alternative models to consider:</strong>
+    <br><br>
+    <strong>A) Standing Access (matches how agents actually work):</strong> User selects folders and email domains. Access is continuous until revoked. No start/end. Manifold acts as a persistent access control layer. Version history captures what happened, when. The "trust boundary" is always live, always visible, always adjustable.
+    <br><br>
+    <strong>B) Task-Based (matches Codex's actual pattern):</strong> User says "do this task" → Manifold scopes access for that task → task completes → access reverts. Lighter than sessions, maps to how Codex actually operates (one command = one task).
+    <br><br>
+    <strong>C) Hybrid (keep sessions, make them optional):</strong> Standing access is the default. Sessions are an opt-in "heightened attention" mode for when you want to do something sensitive — a focused work block where Manifold snapshots beforehand, tracks changes, and offers rollback at the end. Most of the time, access just works. Sessions are for when you want the safety net.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label question">The real question</div>
+  <h3>What value does the session ceremony add?</h3>
+  <p>If we remove sessions, what do we lose?</p>
+
+  <p><strong>We lose:</strong> Pre-session snapshots (rollback safety net), the PromoteEngine's conflict resolution, session-scoped email exceptions that auto-expire, the audit trail grouped by session, and the "scope review" as a deliberate trust boundary moment.</p>
+
+  <p><strong>We keep (with standing access):</strong> Full version history of every change, per-agent access controls, email sensitivity filtering, the ability to revoke access anytime, and the Files/Emails tabs for visibility.</p>
+
+  <div class="verdict-box blue">
+    <strong>Honest assessment:</strong> The snapshot + rollback + promote workflow is genuinely valuable — it's insurance. But it might work better as a feature you opt into ("Start a tracked work block") rather than the mandatory frame around all AI access. Most of the time, Claude is reading files and helping you think. You don't need a ceremony for that. Sometimes Claude is making significant changes across many files. THAT's when you want the snapshot, the scope lock, and the rollback option.
+    <br><br>
+    <strong>Show me the incentive:</strong> If every interaction requires session start → scope review → session end, users will either (a) leave sessions running indefinitely to avoid the ceremony, defeating the scoping purpose, or (b) avoid using Manifold for quick tasks. Neither outcome is good.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Problem 3 — Still Valid</div>
+  <h3>Three layers of abstraction for one concept</h3>
+  <p>The three-layer trust model (persistent defaults → session scope review → temporary exceptions) is logically elegant. It's also three mental models the user must hold simultaneously to understand what's happening.</p>
+
+  <p>Ive would ask: does the user need to understand layers at all? Or do they just need to answer one question: <strong>"Right now, what can Claude see?"</strong></p>
+
+  <p>The current design requires users to understand the difference between "default access" (what's pre-populated for future sessions), "session access" (what's actually granted right now), and "temporary exceptions" (what was added mid-session and will disappear). These are implementation details wearing a UI costume.</p>
+
+  <div class="verdict-box orange">
+    <strong>Rams Principle 5 — "Good design is unobtrusive":</strong> The layer model is obtrusive. It forces the user to think about the system's internal state rather than their own intent. A user doesn't think "I want to set a persistent default for future sessions" — they think "Claude should always have access to my web-app folder." The distinction between "default" and "session" is the system's concern, not the user's.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Problem 3</div>
+  <h3>The scope review is complex but the actual decision is simple</h3>
+  <p>The v3 Scope Review has: an agent switcher, three inner tabs (Files/Emails/Options), toggle rows with visual states, category chips, sensitivity picker, domain checkboxes, a live footer with three counters, and three action buttons (Cancel/Save as Defaults/Start). That's approximately 15+ interactive elements for what is fundamentally a binary decision per item: in or out.</p>
+
+  <blockquote>"Good design is as little design as possible. Less, but better — because it concentrates on the essential aspects, and the products are not burdened with non-essentials." — Dieter Rams, Principle 10</blockquote>
+
+  <p>The sensitivity picker, the Options tab (notes mode, timeout, presets), and "Save as Defaults" are all important settings — but they don't belong in the same surface as the core access decision. They dilute the moment. The user came here to decide what AI can see, and they're looking at timeout dropdowns.</p>
+
+  <div class="verdict-box green">
+    <strong>What v3 gets right:</strong> Domain-level email selection is a genuine improvement. Seeing what's auto-hidden with reason badges is honest — the product tells you what it's doing and why. The live footer counts are good feedback. The visual toggle states (green=in, dim=out) communicate through color, not labels. These are LoveFrom-aligned choices.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Problem 4</div>
+  <h3>"Save as Defaults" introduces a dangerous fork</h3>
+  <p>There's a button in the Scope Review that saves your current selections as persistent defaults. This creates a forking mental model: "Am I configuring this session, or am I configuring all future sessions?" The user must understand the difference while making access decisions. That's cognitive overhead at the worst possible moment — the trust boundary.</p>
+
+  <p>Show me the incentive: if "Save as Defaults" is right there next to "Start Session," some users will click it reflexively. Now their persistent defaults reflect one session's ad-hoc choices. Others will never click it and will reconfigure from scratch every time, growing frustrated. Neither outcome is what you want.</p>
+
+  <div class="verdict-box">
+    <strong>LoveFrom answer:</strong> Remove "Save as Defaults" from the Scope Review entirely. Persistent defaults live in Settings or in the Files sidebar — a calm place for calm decisions. The Scope Review is for the moment of commitment. Don't pollute the moment with a side action that changes future behavior.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Problem 5</div>
+  <h3>Email and file access have fundamentally different rhythms but share the same surface</h3>
+  <p>File access is structural: source folders change rarely. You add a project folder, it stays. Email access is temporal: new domains appear, email volume fluctuates, what's relevant changes weekly. Forcing both into the same tabbed interface with the same interaction patterns (toggle on/off) papiers over this difference.</p>
+
+  <p>A file toggle says "include this stable thing." An email domain checkbox says "include this stream of constantly-changing content" — a much more complex commitment that the UI treats identically.</p>
+
+  <div class="verdict-box orange">
+    <strong>Honesty test (Rams Principle 6):</strong> The current design is honest about files (you see folder name, file count, size) but dishonest about emails. Checking "@company.com (247 emails)" implies you're sharing 247 emails, but you're actually sharing a live stream — every future email from that domain during the session will also be visible. The count is a snapshot presented as if it were a boundary. That's misleading.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label insight">What LoveFrom Would Do Differently — Revised</div>
+  <h3>Redesigned around ownership, visibility, and standing access</h3>
+
+  <p><strong>1. Files and Emails tabs are the product.</strong> They're where users exercise ownership. You browse YOUR files, YOU see the versions, YOU see what AI touched. You browse YOUR emails, YOU see what's hidden and why. This isn't a file manager — it's a transparency tool. The tabs stay, and they're the primary surfaces. But access controls should be woven INTO these tabs, not separated into a different surface.</p>
+
+  <p><strong>2. Access control lives where the data lives.</strong> Instead of a separate Scope Review surface, the access toggles should be integrated directly into the Files and Emails tabs. When you're looking at your folders in the Files tab, the per-agent access controls are RIGHT THERE on each folder row. When you're browsing email domains in the Emails tab, the domain checkboxes are RIGHT THERE. You don't leave the data view to configure access — access IS the data view.</p>
+
+  <p><strong>3. Standing access, not sessions.</strong> Drop the session ceremony for everyday use. Access is continuous: Claude can see these folders and these email domains, period. You change it when you want to change it, instantly. The app remembers your choices. No start/end, no scope review gate. For sensitive work, offer an optional "tracked work block" that adds snapshots, change tracking, and rollback — but this is opt-in safety, not mandatory ceremony.</p>
+
+  <p><strong>4. One clear answer to "what can AI see?"</strong> The Home tab (or a persistent sidebar element) should show a live, always-visible summary: which folders are accessible to which agent, which email domains are visible, what's hidden and why. Not as a scope review you must open — as the default state of the app. You glance at Manifold and you KNOW.</p>
+
+  <p><strong>5. Settings stay in Settings.</strong> Timeout, note mode, presets, sensitivity floor — preferences, not decisions. Not in the access control flow.</p>
+
+  <div class="verdict-box blue">
+    <strong>The shift:</strong> v2/v3 treated the Scope Review as the product moment. The corrected view: the Files and Emails tabs ARE the product. Access control is embedded in them. The "grant moment" isn't a separate surface — it's the natural result of browsing your own data and deciding what to share. That's ownership. That's what Ive would call "care."
+  </div>
+</div>
+
+</div><!-- end critique -->
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- SECTION 2: INTERACTION MAP                                  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="section" id="section-map">
+
+<div class="card" style="padding:16px">
+  <p style="font-size:13px;color:var(--text-secondary);margin-bottom:4px">
+    Every way a user can grant, modify, or revoke access in Manifold v3.
+    Rows = what they're controlling. Columns = when they're doing it.
+    Tags show scope duration and agent specificity.
+  </p>
+  <p style="font-size:13px;color:var(--orange);font-weight:500;margin-bottom:0">
+    ⚠ Note: This map reflects the current session-based model. If Manifold moves to standing access, the "Before Session" and "At Session Start" columns merge into a single "Standing Access" column, and "During Session" becomes just "Anytime."
+  </p>
+</div>
+
+<div class="map-container">
+<div class="map-grid">
+
+  <!-- Headers -->
+  <div class="map-header">What</div>
+  <div class="map-header">Before Session (Layer 1)</div>
+  <div class="map-header">At Session Start (Layer 2)</div>
+  <div class="map-header">During Session (Layer 3)</div>
+
+  <!-- FILES SECTION -->
+  <div class="map-section-label">📁 Files & Folders</div>
+
+  <div class="map-row-label">📁 Source folder<br>(all-or-nothing)</div>
+  <div class="map-cell">
+    <span class="method">Sidebar checkboxes</span>
+    <span class="detail">Files tab → left sidebar → per-source ☑Claude ☑Codex independent checkboxes</span>
+    <span class="scope-tag permanent">permanent</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Toggle row on/off</span>
+    <span class="detail">Scope Review → Files tab → click source row or toggle switch. Green=in, dim=out.</span>
+    <span class="scope-tag session">session</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Add / Revoke / Modify</span>
+    <span class="detail">During-Session bar → "Add to session" or "Revoke" per source. Or "Modify scope" → reopens Scope Review.</span>
+    <span class="scope-tag session">session</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+
+  <div class="map-row-label">📁 All folders<br>(bulk)</div>
+  <div class="map-cell empty">
+    <span class="detail">No bulk default toggle. Each source is independent.</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Include All / Exclude All</span>
+    <span class="detail">Scope Review → Files tab → bulk action buttons above source list</span>
+    <span class="scope-tag session">session</span>
+  </div>
+  <div class="map-cell empty">
+    <span class="detail">No bulk action during session. Must use "Modify scope" → Scope Review.</span>
+  </div>
+
+  <div class="map-row-label">📄 Individual file</div>
+  <div class="map-cell empty"><span class="detail">Not supported v1. Folder-level only.</span></div>
+  <div class="map-cell empty"><span class="detail">Not supported v1. No per-file toggle.</span></div>
+  <div class="map-cell empty"><span class="detail">Not supported v1. No .manifoldignore.</span></div>
+
+  <!-- EMAILS SECTION -->
+  <div class="map-section-label">📧 Emails</div>
+
+  <div class="map-row-label">🛡 Sensitivity<br>(category floor)</div>
+  <div class="map-cell empty">
+    <span class="detail">No persistent sensitivity default in v1. Reset each session.</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Sensitivity picker</span>
+    <span class="detail">Scope Review → Emails tab → Strict / Moderate / Open segmented control. Determines which domains are auto-hidden.</span>
+    <span class="scope-tag session">session</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Modify scope</span>
+    <span class="detail">During-Session bar → "Modify scope" → can change sensitivity mid-session.</span>
+    <span class="scope-tag session">session</span>
+  </div>
+
+  <div class="map-row-label">🌐 Email domain<br>(bulk by domain)</div>
+  <div class="map-cell empty">
+    <span class="detail">No persistent domain defaults in v1. Email is too dynamic for permanent selections.</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Domain checkboxes</span>
+    <span class="detail">Scope Review → Emails tab → check/uncheck @company.com, @github.com etc. Category chips (Work/Auto/Personal/Hidden) filter the list.</span>
+    <span class="scope-tag session">session</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Modify scope</span>
+    <span class="detail">During-Session bar → "Modify scope" → amend domain selections live.</span>
+    <span class="scope-tag session">session</span>
+  </div>
+
+  <div class="map-row-label">📧 Individual email<br>(single message)</div>
+  <div class="map-cell empty"><span class="detail">No persistent per-email settings.</span></div>
+  <div class="map-cell empty"><span class="detail">No per-email selection at session start. Domain-level only.</span></div>
+  <div class="map-cell">
+    <span class="method">Temporary exception</span>
+    <span class="detail">Emails tab → reading pane → "Add to this session" on auto-hidden email. Also: During-Session bar → exceptions log → "Remove" to revoke.</span>
+    <span class="scope-tag exception">exception</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+
+  <div class="map-row-label">📧 Email category<br>(Work/Auto/Personal)</div>
+  <div class="map-cell empty"><span class="detail">Categories are display filters, not access controls.</span></div>
+  <div class="map-cell">
+    <span class="method">Category chips (view only)</span>
+    <span class="detail">Scope Review → Emails tab → filter domain list by category. Does NOT toggle access — just shows/hides rows in the picker.</span>
+    <span class="scope-tag session">view filter</span>
+  </div>
+  <div class="map-cell empty"><span class="detail">No category-level access toggle.</span></div>
+
+  <!-- SCOPE DIMENSIONS -->
+  <div class="map-section-label">⏱ Time & Agent Scoping</div>
+
+  <div class="map-row-label">⏳ Duration</div>
+  <div class="map-cell">
+    <span class="method">Permanent</span>
+    <span class="detail">File folder defaults only. Survives across all sessions. Changed manually in Files sidebar.</span>
+    <span class="scope-tag permanent">permanent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Session lifetime</span>
+    <span class="detail">Everything from Scope Review: files, emails, sensitivity. Destroyed on session end or timeout.</span>
+    <span class="scope-tag session">session</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Exception lifetime</span>
+    <span class="detail">Individual email exceptions only. Auto-expires on session end. No renewal.</span>
+    <span class="scope-tag exception">exception</span>
+  </div>
+
+  <div class="map-row-label">⏱ Timeout</div>
+  <div class="map-cell empty"><span class="detail">No persistent timeout default.</span></div>
+  <div class="map-cell">
+    <span class="method">Timeout picker</span>
+    <span class="detail">Scope Review → Options tab → 30m / 1h / 2h / 4h / None. Auto-ends entire session.</span>
+    <span class="scope-tag session">session</span>
+  </div>
+  <div class="map-cell empty"><span class="detail">Cannot change timeout mid-session.</span></div>
+
+  <div class="map-row-label">🤖 Agent scope</div>
+  <div class="map-cell">
+    <span class="method">Independent checkboxes</span>
+    <span class="detail">Each source has separate Claude + Codex checkboxes. Fully independent.</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Agent picker</span>
+    <span class="detail">Scope Review top → Claude | Codex switcher. One review = one agent. Must configure separately.</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+  <div class="map-cell">
+    <span class="method">Per-session agent</span>
+    <span class="detail">All mid-session changes apply to the session's agent only. No cross-agent effects.</span>
+    <span class="scope-tag per-agent">per-agent</span>
+  </div>
+
+  <div class="map-row-label">🌍 Global toggle<br>("all AIs")</div>
+  <div class="map-cell empty"><span class="detail">Does not exist. By design.</span></div>
+  <div class="map-cell empty"><span class="detail">Does not exist. Each agent configured independently.</span></div>
+  <div class="map-cell empty"><span class="detail">Does not exist. Different agents = different trust levels.</span></div>
+
+</div>
+</div>
+
+<div class="card" style="margin-top:24px;border:2px solid var(--orange)">
+  <div class="card-label question">Alternative: Standing Access Model</div>
+  <h3>How the map simplifies if sessions become optional</h3>
+  <p>If Manifold uses standing access (matching how Claude/Cowork and Codex actually work), the three temporal columns collapse:</p>
+
+  <div style="display:grid;grid-template-columns:160px 1fr 1fr;gap:2px;font-size:12px;margin:16px 0">
+    <div class="map-header">What</div>
+    <div class="map-header">Standing Access (always)</div>
+    <div class="map-header">Tracked Work Block (opt-in)</div>
+
+    <div class="map-row-label">📁 Source folder</div>
+    <div class="map-cell">
+      <span class="method">Inline toggle in Files tab</span>
+      <span class="detail">Each folder row has per-agent toggles (☑ Claude ☑ Codex). Toggle anytime. Takes effect immediately. Persists until changed.</span>
+      <span class="scope-tag permanent">persistent</span>
+      <span class="scope-tag per-agent">per-agent</span>
+    </div>
+    <div class="map-cell">
+      <span class="method">Scope locked at block start</span>
+      <span class="detail">Snapshot taken. Changes tracked. Can add/revoke mid-block. Rollback available at block end.</span>
+      <span class="scope-tag session">block-scoped</span>
+    </div>
+
+    <div class="map-row-label">🌐 Email domain</div>
+    <div class="map-cell">
+      <span class="method">Inline checkboxes in Emails tab</span>
+      <span class="detail">Domain list with checkboxes, integrated into the email browsing view. Check/uncheck anytime. Persists.</span>
+      <span class="scope-tag permanent">persistent</span>
+      <span class="scope-tag per-agent">per-agent</span>
+    </div>
+    <div class="map-cell">
+      <span class="method">Same, but changes logged</span>
+      <span class="detail">Mid-block domain changes are tracked in the audit trail.</span>
+      <span class="scope-tag session">block-scoped</span>
+    </div>
+
+    <div class="map-row-label">📧 Individual email</div>
+    <div class="map-cell">
+      <span class="method">"Make visible" on hidden email</span>
+      <span class="detail">Override sensitivity for a specific email. Persists (not temporary). User chose to reveal it — that's their decision to own.</span>
+      <span class="scope-tag permanent">persistent override</span>
+    </div>
+    <div class="map-cell">
+      <span class="method">Same, logged in block audit</span>
+      <span class="detail">Exception tracked. Optionally auto-reverts at block end.</span>
+      <span class="scope-tag session">block-scoped option</span>
+    </div>
+
+    <div class="map-row-label">🛡 Sensitivity</div>
+    <div class="map-cell">
+      <span class="method">Setting (persists)</span>
+      <span class="detail">Sensitivity level is a persistent preference per agent. Lives in Emails tab or Settings. Not re-chosen each time.</span>
+      <span class="scope-tag permanent">persistent</span>
+    </div>
+    <div class="map-cell">
+      <span class="method">Can tighten for block</span>
+      <span class="detail">Optionally use stricter sensitivity during a tracked work block.</span>
+      <span class="scope-tag session">block override</span>
+    </div>
+  </div>
+
+  <div class="verdict-box green">
+    <strong>Result:</strong> 5 interaction paths instead of 12+. No temporal layers to understand. No "defaults vs. session vs. exception" distinction. Access is just... access. You change it when you want. The tracked work block adds safety when you need it, without imposing ceremony when you don't.
+  </div>
+</div>
+
+<div class="card" style="margin-top:24px">
+  <div class="card-label insight">Reading the Map</div>
+  <h3>What the empty cells tell you</h3>
+  <p>The gray "empty" cells are the most interesting part. They reveal where the design intentionally does not provide a path — and where that might be a gap vs. a deliberate boundary.</p>
+  <p><strong>Deliberate boundaries:</strong> No individual file access (folder-level simplicity). No global "all AIs" toggle (trust is per-agent). No permanent email overrides (Apple "Allow Once" pattern).</p>
+  <p><strong>Possible gaps:</strong> No persistent sensitivity default (users must re-pick every session). No persistent email domain defaults (reconfigure from scratch). No bulk file action during session (must go through "Modify scope"). No way to change timeout mid-session. Category chips are view-only filters that look like access controls but aren't (honesty problem).</p>
+</div>
+
+</div><!-- end map -->
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- SECTION 3: USER FLOWS                                       -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="section" id="section-flow">
+
+<div class="card">
+  <div class="card-label principle">Flow A</div>
+  <h3>Grant access to files for a new session</h3>
+</div>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>User opens Manifold</h4>
+      <p>Lands on Home tab. Sees session card in "Ready to start" state.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot blue"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Clicks "Start Session"</h4>
+      <p>Scope Review opens. Pre-populated from Layer 1 persistent defaults for the selected agent.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot green"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Toggles source folders on/off</h4>
+      <p>Each toggle: row turns green (included) or dims (excluded). Footer file count updates live.</p>
+    </div>
+  </div>
+  <div class="flow-branch">
+    <div class="branch-item"><div class="branch-dot"></div> Individual: click a row to toggle its state</div>
+    <div class="branch-item"><div class="branch-dot"></div> Bulk: "Include all" / "Exclude all" buttons</div>
+    <div class="branch-item"><div class="branch-dot"></div> Agent-specific: agent picker at top changes which agent's config you're editing</div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot green"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Clicks "Start Session →"</h4>
+      <p>Grant created. Workspace materialized. Session is now active. Trust boundary is locked.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot"></div></div>
+    <div class="flow-content">
+      <h4>Session runs</h4>
+      <p>Agent reads/writes files in materialized workspace. User sees activity in Home tab.</p>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<div class="card">
+  <div class="card-label principle">Flow B</div>
+  <h3>Grant email access at session start (v3 bulk selection)</h3>
+</div>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot blue"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Scope Review → Emails tab</h4>
+      <p>Switches to inner Emails tab. Sees sensitivity picker, category chips, domain list.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot orange"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Sets sensitivity floor</h4>
+      <p>Picks Strict / Moderate / Open. This auto-hides domains matching blocked categories (banking, health, 2FA). Auto-hidden domains become visible in the list but with disabled checkboxes and 🚫 badges.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot green"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Checks/unchecks domains</h4>
+      <p>Bulk by domain: @company.com ☑, @gmail.com ☐. Footer "emails visible" count updates live.</p>
+    </div>
+  </div>
+  <div class="flow-branch">
+    <div class="branch-item"><div class="branch-dot"></div> Category chips filter the view (Work only, Auto only, etc.) but don't toggle access</div>
+    <div class="branch-item"><div class="branch-dot"></div> Auto-hidden domains (banking, health, 2FA) have disabled checkboxes — can't be checked here</div>
+    <div class="branch-item"><div class="branch-dot"></div> To grant access to an auto-hidden email: must use Layer 3 temporary exception during session</div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot green"></div></div>
+    <div class="flow-content">
+      <h4>"Start Session →"</h4>
+      <p>Email scope locked alongside file scope in the grant.</p>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<div class="card">
+  <div class="card-label principle">Flow C</div>
+  <h3>Add a hidden email mid-session (temporary exception)</h3>
+</div>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Session is active. User switches to Emails tab.</h4>
+      <p>Browsing email archive. Sees auto-hidden email with 🚫 badge in message list.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot orange"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Clicks the hidden email</h4>
+      <p>Reading pane shows: why it's hidden (domain category), email preview, "Add to this session" button.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot red"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Clicks "Add to this session"</h4>
+      <p>Single email added as temporary exception. Logged with timestamp. Auto-expires on session end.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot"></div></div>
+    <div class="flow-content">
+      <h4>Exception visible in During-Session bar</h4>
+      <p>Home tab → access bar → exceptions log shows the email with "Remove" button.</p>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<div class="card">
+  <div class="card-label principle">Flow D</div>
+  <h3>Modify scope mid-session without restart</h3>
+</div>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Session is active. User realizes they need another folder.</h4>
+      <p>Home tab → During-Session access bar visible.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot blue"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Clicks "Modify scope"</h4>
+      <p>Scope Review reopens with current session state. All current toggles preserved.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot green"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Adds the folder, changes email domains, adjusts sensitivity</h4>
+      <p>Any changes here amend the active grant. No session restart needed.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot green"></div></div>
+    <div class="flow-content">
+      <h4>Clicks "Apply changes"</h4>
+      <p>Grant updated live. Workspace re-materialized if needed. Session continues.</p>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<div class="card">
+  <div class="card-label principle">Flow E</div>
+  <h3>Set persistent defaults (affects all future sessions)</h3>
+</div>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot purple"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Files tab → Left sidebar → "Default access for new sessions"</h4>
+      <p>Grid of checkboxes: each source × each agent. Independent toggles.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot purple"></div><div class="flow-connector"></div></div>
+    <div class="flow-content">
+      <h4>Check/uncheck boxes</h4>
+      <p>☑ Claude means this source is pre-included when starting a Claude session. ☑ Codex same for Codex. Both unchecked = excluded by default.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-line"><div class="flow-dot"></div></div>
+    <div class="flow-content">
+      <h4>Effect: pre-populates Scope Review</h4>
+      <p>Next time user starts a session, the Scope Review toggles are pre-set from these defaults. User can still override per-session.</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- end flow -->
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- SECTION 4: GAPS & SECOND-ORDER PROBLEMS                     -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="section" id="section-gaps">
+
+<div class="card">
+  <div class="card-label problem">Gap 1 — Critical</div>
+  <h3>No persistent email defaults means reconfiguring from scratch every session</h3>
+  <p>File defaults persist (Layer 1 checkboxes). Email domain selections don't. Every time you start a new session, you must re-select which email domains Claude can see. For a user who starts 3-5 sessions per day, this is a 24-domain checklist they repeat constantly.</p>
+
+  <div class="verdict-box">
+    <strong>Second-order effect:</strong> Users will either (a) stop using email access entirely because the setup cost isn't worth it per session, or (b) set sensitivity to "Open" to skip the configuration, which defeats the trust model. Either outcome kills the email feature.
+    <br><br>
+    <strong>Proposed fix:</strong> Persistent email domain defaults, at minimum per-agent. "Last time you started a Claude session, these domains were checked. Start with the same?" Even better: domain selections become part of presets.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Gap 2 — Critical</div>
+  <h3>No persistent sensitivity default means repeating the same safety choice</h3>
+  <p>Sensitivity (Strict/Moderate/Open) has no persistent default. If a user always uses "Moderate," they still must confirm it at every session start. This is worse than file defaults — at least file defaults exist.</p>
+
+  <div class="verdict-box">
+    <strong>Incentive:</strong> A security setting that resets every session teaches users that the security setting doesn't matter enough to remember. The system is communicating "this is ephemeral" about something that should feel foundational. Users will stop paying attention to it.
+    <br><br>
+    <strong>Proposed fix:</strong> Sensitivity should have a persistent default (probably in Settings → Email) that pre-populates the Scope Review. Can be overridden per-session, but the default carries forward.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Gap 3 — Honesty Problem</div>
+  <h3>Category chips look like access controls but are just view filters</h3>
+  <p>In the Emails tab of Scope Review, category chips (Work, Automated, Personal, Auto-hidden) filter which domains appear in the list. They don't toggle access. But they look identical to interactive controls. A user who clicks "Work" and sees only work domains might think they've just granted access to all work domains.</p>
+
+  <div class="verdict-box orange">
+    <strong>Rams Principle 6 — "Good design is honest":</strong> A control that looks like it does something but actually does something else is dishonest. The chips should either (a) be visually distinct from access controls (maybe just text labels, not clickable chips), or (b) actually be access controls ("check all Work domains").
+    <br><br>
+    <strong>Proposed fix:</strong> Make category chips actual bulk actions. Clicking "Work" selects all work domain checkboxes. Clicking again deselects. Now the chip does what it looks like it does. Alternatively, move the filter to a dropdown so it doesn't look like a toggle.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Gap 4 — Asymmetry</div>
+  <h3>Files have three time scopes. Emails only have two.</h3>
+  <p>Files: permanent defaults + session scope + mid-session add/revoke. Emails: session scope + mid-session exceptions. There are no permanent email defaults.</p>
+  <p>This asymmetry means the mental model for files doesn't transfer to emails. Users who understand "I set defaults for files and they carry forward" will expect the same for emails and be confused when it doesn't work that way.</p>
+
+  <div class="verdict-box orange">
+    <strong>The justification ("email is too dynamic") is weak.</strong> Source folders also change — files are added, removed, modified constantly. The folder itself is stable, and so are email domains. @company.com is just as stable as ~/Projects/web-app. The argument for no email persistence doesn't hold up under scrutiny.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Gap 5 — Concurrency Edge Case</div>
+  <h3>What happens when you modify scope on a session while the other agent is also active?</h3>
+  <p>User has Claude session + Codex session running concurrently. They click "Modify scope" on the Claude session. The Scope Review opens with Claude's state. But does the agent picker still show? Could they accidentally switch to Codex's config and modify the wrong session?</p>
+
+  <div class="verdict-box">
+    <strong>Proposed fix:</strong> When modifying an active session's scope, the agent picker should be locked/hidden. You're modifying THIS session, not choosing which agent to configure. The header should say "Modify Claude session scope" not "New Session."
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Gap 6 — Missing Path</div>
+  <h3>No way to revoke all access immediately (panic button)</h3>
+  <p>If a user realizes an AI agent is accessing something it shouldn't, the current path is: go to During-Session bar → click "Revoke" on each source → or click "End Session." But "End Session" triggers the PromoteEngine (applying changes), which may not be what you want if the agent has been modifying files you didn't intend to share.</p>
+
+  <div class="verdict-box">
+    <strong>Missing: "Kill Session" vs. "End Session".</strong> End = graceful, applies changes. Kill = immediate, discards all changes, rolls back workspace. This is a trust model critical path — the emergency exit should be the most visible, most accessible control. Currently it doesn't exist.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label problem">Gap 7 — UX Copy Conflict</div>
+  <h3>"Add to this session" vs. "Modify scope" — two paths to the same outcome</h3>
+  <p>During a session, there are two ways to change what the AI can see: (1) "Add to this session" buttons on individual items, and (2) "Modify scope" which reopens the full Scope Review. These look like different features but produce the same result — changing the active grant.</p>
+
+  <div class="verdict-box orange">
+    <strong>The user must decide which path to take, which means they must understand the distinction.</strong> "Add to this session" is for individual items (one email). "Modify scope" is for bulk changes. But nothing in the UI explains when to use which. A confused user will try one, not get the result they expected, try the other.
+    <br><br>
+    <strong>Proposed fix:</strong> Make the distinction spatial, not conceptual. "Add to this session" only appears on items that are currently hidden (exception path). "Modify scope" only appears in the access bar (bulk path). They never compete for attention in the same context.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-label question">Open Question — The Big One</div>
+  <h3>Sessions or standing access? This changes everything.</h3>
+  <p>If Manifold moves to a standing access model (matching how Claude and Codex actually work), the entire design shifts:</p>
+
+  <p><strong>What changes:</strong> No Scope Review as a mandatory gate. Access controls are inline in the Files and Emails tabs. The Home tab becomes a dashboard/status view, not a session launcher. "Start Session" becomes "Start Tracked Work Block" (opt-in). PromoteEngine becomes an opt-in feature for tracked blocks, not a mandatory step.</p>
+
+  <p><strong>What stays:</strong> Files tab with per-agent access toggles on each folder. Emails tab with domain-level selection and sensitivity. Version history on every file. The three-number summary (files visible, emails visible, emails hidden). Per-agent independent access.</p>
+
+  <p><strong>What gets better:</strong> No reconfiguration every time you want Claude to look at something. No friction for quick tasks. The app feels like a control panel that's always on, not a gate you pass through. Users who want full safety can opt into tracked work blocks for important changes.</p>
+
+  <div class="verdict-box blue">
+    <strong>The product identity becomes clearer:</strong> Manifold is where you SEE your data, CONTROL who (which AI) can access it, and TRACK what they did with it. The Files and Emails tabs are the core — they're your data, your control, your ownership. The access controls live right there. History is the audit trail. The Home tab is the live status board. This is a product built around transparency and control, not around ceremonies.
+  </div>
+</div>
+
+</div><!-- end gaps -->
+
+</div><!-- end page -->
+
+<script>
+// Nav switching
+document.querySelectorAll('.nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.getElementById('section-' + btn.dataset.section).classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

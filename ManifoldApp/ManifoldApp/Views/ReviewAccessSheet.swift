@@ -224,7 +224,7 @@ struct ReviewAccessSheet: View {
                 .keyboardShortcut(.defaultAction)
             } else {
                 Button(primaryButtonLabel) {
-                    // TODO: Commit policy changes via PolicyStore
+                    commitPolicyChange()
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -245,6 +245,26 @@ struct ReviewAccessSheet: View {
             }
         }
         return "Update Access"
+    }
+
+    /// Commit the pending policy change via PolicyModel.
+    private func commitPolicyChange() {
+        guard let change = pendingChange else { return }
+        Task {
+            switch change.kind {
+            case .addSource(let sourceID, _):
+                await store.policy.addSource(sourceID, to: selectedAgent)
+            case .addDomain(let domain, _):
+                // TODO: Wire domain policy
+                _ = domain
+            case .bulkSources(let sourceIDs):
+                for id in sourceIDs {
+                    await store.policy.addSource(id, to: selectedAgent)
+                }
+            case .loosenSensitivity, .explicit, .startWorkBlock:
+                break
+            }
+        }
     }
 
     private func isNewAddition(_ source: SourceRecord) -> Bool {
