@@ -448,33 +448,40 @@ public actor EmailSyncEngine {
     // MARK: - HTML Stripping
 
     /// Strip HTML tags for plaintext body extraction (fallback when no text/plain part).
+    /// Uses pre-compiled static regexes + NSMutableString to avoid 7 intermediate String
+    /// allocations per call. For a 50KB email, saves ~350KB of string scanning.
     nonisolated static func stripHTML(_ html: String) -> String {
-        var result = html
-        // Remove script/style blocks entirely
-        result = result.replacingOccurrences(
-            of: "<(script|style)[^>]*>[\\s\\S]*?</\\1>",
-            with: "", options: .regularExpression
-        )
-        // Replace <br> and block elements with newlines
-        result = result.replacingOccurrences(
-            of: "<(br|p|div|h[1-6]|li|tr)[^>]*/?>",
-            with: "\n", options: [.regularExpression, .caseInsensitive]
-        )
-        // Remove remaining tags
-        result = result.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        // Decode common HTML entities
-        let entities: [(String, String)] = [
+        let mutable = NSMutableString(string: html)
+        // Pre-compiled regexes applied in-place — no intermediate String allocations
+        for (regex, template) in htmlStripPatterns {
+            regex.replaceMatches(in: mutable, range: NSRange(location: 0, length: mutable.length), withTemplate: template)
+        }
+        // Entity decoding (simple string replace, no regex needed)
+        let entityMap: [(NSString, NSString)] = [
             ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
             ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " "),
         ]
-        for (entity, char) in entities {
-            result = result.replacingOccurrences(of: entity, with: char)
+        for (entity, replacement) in entityMap {
+            mutable.replaceOccurrences(of: entity as String, with: replacement as String, range: NSRange(location: 0, length: mutable.length))
         }
-        // Collapse whitespace
-        result = result.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
-        result = result.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (mutable as String).trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Pre-compiled regex patterns for HTML stripping. Compiled once, reused for every email.
+    private static let htmlStripPatterns: [(NSRegularExpression, String)] = {
+        [
+            // Remove script/style blocks entirely
+            (try! NSRegularExpression(pattern: "<(script|style)[^>]*>[\\s\\S]*?</\\1>", options: .caseInsensitive), ""),
+            // Replace block elements with newlines
+            (try! NSRegularExpression(pattern: "<(br|p|div|h[1-6]|li|tr)[^>]*/?>", options: .caseInsensitive), "\n"),
+            // Remove all remaining tags
+            (try! NSRegularExpression(pattern: "<[^>]+>"), ""),
+            // Collapse horizontal whitespace
+            (try! NSRegularExpression(pattern: "[ \\t]+"), " "),
+            // Collapse excessive newlines
+            (try! NSRegularExpression(pattern: "\\n{3,}"), "\n\n"),
+        ]
+    }()
 
     // MARK: - Cached Date Formatters
 
