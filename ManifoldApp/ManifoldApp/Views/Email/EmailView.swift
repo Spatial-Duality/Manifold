@@ -1,7 +1,8 @@
 import SwiftUI
 import ManifoldKit
 
-// MARK: - Main Email View (3-pane layout)
+// MARK: - Email Messages View (Synology Active Backup–style governance browser)
+// NOT a mail client. Two-pane: sidebar + full-width table with inline preview.
 
 struct EmailView: View {
     @Environment(ManifoldStore.self) var store
@@ -11,16 +12,14 @@ struct EmailView: View {
     @State private var showAddAccount = false
     @State private var showAccountDetail: EmailAccountRecord?
     @State private var loadTask: Task<Void, Never>?
+    @State private var sidebarFilter: MessagesSidebarFilter = .allMail
 
     var body: some View {
         mainContent
             .sheet(isPresented: $showAddAccount) { EmailAccountSetupView() }
             .sheet(item: $showAccountDetail) { account in EmailAccountDetailSheet(account: account) }
+            .onChange(of: sidebarFilter) { _, _ in reloadMessages() }
             .onChange(of: selection.selectedAccountID) { _, _ in reloadMessages() }
-            .onChange(of: selection.selectedMailbox) { _, _ in reloadMessages() }
-            .onChange(of: selection.activeFilter) { _, _ in reloadMessages() }
-            .onChange(of: selection.showingSharedEmails) { _, _ in reloadMessages() }
-            .onChange(of: selection.selectedSmartMailboxID) { _, _ in reloadMessages() }
             .onChange(of: search.freeText) { _, _ in reloadMessages() }
     }
 
@@ -35,25 +34,22 @@ struct EmailView: View {
             EmailEmptyState(showAddAccount: $showAddAccount)
                 .task { await store.emailAccounts.loadAccounts() }
         } else {
-            // 4.7: NavigationSplitView with proper column constraints
+            // Two-pane: sidebar + full-width table (NO reading pane column)
             NavigationSplitView {
                 EmailSidebar(
                     selection: selection,
+                    sidebarFilter: $sidebarFilter,
                     showAddAccount: $showAddAccount,
                     showAccountDetail: $showAccountDetail
                 )
-                // 4.1: Increase sidebar minimum width
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
-            } content: {
+            } detail: {
+                // Full-width governance table with inline preview
                 EmailMessageList(
                     selection: selection,
                     search: search,
                     messages: messages
                 )
-                .searchable(text: $search.freeText, prompt: "Search emails")
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 450)
-            } detail: {
-                EmailReadingPane(selection: selection)
             }
             .navigationSplitViewStyle(.balanced)
             .task { await initialLoad() }
@@ -67,44 +63,34 @@ struct EmailView: View {
         if selection.selectedAccountID == nil, let first = store.emailAccounts.accounts.first {
             selection.selectedAccountID = first.accountID
         }
+        await loadMessages()
     }
 
     private func loadMessages() async {
-        if selection.showingSharedEmails {
+        // Filter based on sidebar selection
+        switch sidebarFilter {
+        case .sharedWithClaude, .sharedWithCodex:
             messages = await store.emailAccounts.sharedEmails()
-            return
-        }
-
-        // Smart mailbox query
-        if let rulesJSON = selection.selectedSmartMailboxRulesJSON {
-            messages = await store.emailAccounts.smartMailboxMessages(
-                rulesJSON: rulesJSON,
-                sortKey: selection.sortKey
-            )
-            return
-        }
-
-        // Use search if active
-        if search.isActive || selection.activeFilter != nil {
-            messages = await store.emailAccounts.searchMessages(
-                tokens: search.tokens,
-                freeText: search.freeText,
-                accountID: selection.selectedAccountID,
-                mailbox: selection.selectedMailbox,
-                filter: selection.activeFilter,
-                sortKey: selection.sortKey
-            )
-            return
-        }
-
-        guard let accountID = selection.selectedAccountID else {
-            messages = await store.emailAccounts.allMessages()
-            return
-        }
-        if let mailbox = selection.selectedMailbox {
-            messages = await store.emailAccounts.messagesInMailbox(accountID: accountID, mailbox: mailbox)
-        } else {
-            messages = await store.emailAccounts.messages(accountID: accountID)
+        case .notShared:
+            let allMsgs = await store.emailAccounts.allMessages()
+            let sharedIDs = await store.emailAccounts.sharedEmailIDs()
+            messages = allMsgs.filter { !sharedIDs.contains($0.emailID) }
+        case .inbox:
+            if let accountID = selection.selectedAccountID {
+                messages = await store.emailAccounts.messagesInMailbox(accountID: accountID, mailbox: "INBOX")
+            } else {
+                messages = await store.emailAccounts.allMessages()
+            }
+        case .folder(let folder):
+            if let accountID = selection.selectedAccountID {
+                messages = await store.emailAccounts.messagesInMailbox(accountID: accountID, mailbox: folder)
+            }
+        case .allMail:
+            if let accountID = selection.selectedAccountID {
+                messages = await store.emailAccounts.messages(accountID: accountID)
+            } else {
+                messages = await store.emailAccounts.allMessages()
+            }
         }
     }
 }
@@ -121,15 +107,11 @@ private struct EmailAccountDetailSheet: View {
         store.emailAccounts.accounts.first(where: { $0.accountID == account.accountID }) ?? account
     }
 
-    private var currentSyncStates: [SyncStateRecord] {
-        store.emailAccounts.syncStates[currentAccount.accountID] ?? []
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: currentAccount.provider.systemImage)
-                    .font(.title2).foregroundStyle(providerColor)
+                    .font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(currentAccount.displayName).font(.headline)
                     Text(currentAccount.username ?? "").font(.caption).foregroundStyle(.secondary)
@@ -144,60 +126,17 @@ private struct EmailAccountDetailSheet: View {
 
             Form {
                 Section("Connection") {
-                    LabeledContent("Server") { Text(currentAccount.server ?? "Unknown").font(.caption.monospaced()) }
-                    LabeledContent("Port") { Text("\(currentAccount.port ?? 993)").font(.caption.monospaced()) }
-                    LabeledContent("Auth") { Text(currentAccount.authType).font(.caption) }
-                    LabeledContent("Sync Interval") { Text("\(currentAccount.syncIntervalSeconds / 60) min") }
-                }
-
-                Section("Mailboxes") {
-                    if currentSyncStates.isEmpty {
-                        Text("No mailboxes synced yet")
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        ForEach(currentSyncStates) { state in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(state.mailboxName)
-                                        .font(.callout.weight(.medium))
-                                    HStack(spacing: Spacing.standard) {
-                                        Text("\(state.messageCount) messages")
-                                        if let lastSync = state.lastSyncAt {
-                                            Text("\u{2022}").foregroundStyle(.quaternary)
-                                            Text("Last sync: \(lastSync)")
-                                        }
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                syncStatusBadge(state.syncStatus)
-                            }
-                        }
-                    }
-                }
-
-                Section("Sync") {
-                    Toggle("Sync Enabled", isOn: Binding(
-                        get: { currentAccount.syncEnabled },
-                        set: { enabled in
-                            Task { await store.emailAccounts.toggleSync(accountID: currentAccount.accountID, enabled: enabled) }
-                        }
-                    ))
-                    Button("Sync Now") {
-                        Task { await store.emailAccounts.syncNow(accountID: currentAccount.accountID) }
-                    }
+                    LabeledContent("Server") { Text(currentAccount.server ?? "Unknown").font(Typ.mono) }
+                    LabeledContent("Port") { Text("\(currentAccount.port ?? 993)").font(Typ.mono) }
                 }
 
                 Section {
-                    Button("Remove Account", role: .destructive) {
-                        confirmDelete = true
-                    }
+                    Button("Remove Account", role: .destructive) { confirmDelete = true }
                 }
             }
             .formStyle(.grouped)
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 480, height: 400)
         .alert("Remove Account?", isPresented: $confirmDelete) {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
@@ -207,38 +146,7 @@ private struct EmailAccountDetailSheet: View {
                 }
             }
         } message: {
-            Text("This will remove \(currentAccount.displayName) and stop syncing. Backed up .eml files on disk will not be deleted.")
-        }
-    }
-
-    @ViewBuilder
-    private func syncStatusBadge(_ status: SyncStatus) -> some View {
-        switch status {
-        case .syncing:
-            HStack(spacing: 4) {
-                ProgressView().controlSize(.mini)
-                Text("Syncing").font(.caption).foregroundStyle(.secondary)
-            }
-        case .error:
-            Label("Error", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption).foregroundStyle(.orange)
-        case .idle:
-            Label("OK", systemImage: "checkmark.circle.fill")
-                .font(.caption).foregroundStyle(.green)
-        case .pausedNoDrive:
-            Label("Paused", systemImage: "pause.circle")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private var providerColor: Color {
-        switch currentAccount.provider {
-        case .gmail:    .red
-        case .outlook:  .blue
-        case .icloud:   .cyan
-        case .yahoo:    .purple
-        case .fastmail: .indigo
-        case .other:    .secondary
+            Text("This will remove \(currentAccount.displayName) and stop syncing.")
         }
     }
 }
@@ -249,32 +157,15 @@ private struct EmailEmptyState: View {
     @Binding var showAddAccount: Bool
 
     var body: some View {
-        VStack(spacing: Spacing.large) {
-            Spacer()
-            Image(systemName: "envelope.badge.shield.half.filled")
-                .font(.system(size: 48)).foregroundStyle(.tertiary)
-
-            VStack(spacing: Spacing.standard) {
-                Text("Email Backup")
-                    .font(.title2.weight(.semibold))
-                Text("Back up all your emails as .eml files on your disk.\nConnect an account to get started.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button {
+        ContentUnavailableView {
+            Label("Email Backup", systemImage: "envelope.badge.shield.half.filled")
+        } description: {
+            Text("Back up and govern your emails. Connect an account to get started.")
+        } actions: {
+            Button("Add Email Account", systemImage: "person.badge.plus") {
                 showAddAccount = true
-            } label: {
-                Label("Add Email Account", systemImage: "person.badge.plus")
-                    .frame(maxWidth: 220)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-            Text("Supports Gmail, Outlook, iCloud, Yahoo, Fastmail, and any IMAP server.")
-                .font(.caption).foregroundStyle(.tertiary)
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

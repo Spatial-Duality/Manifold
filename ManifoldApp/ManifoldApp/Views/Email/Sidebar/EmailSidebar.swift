@@ -1,110 +1,110 @@
 import SwiftUI
 import ManifoldKit
 
+/// Synology Active Backup–style sidebar for the Messages view.
+/// Agent Access smart filters are the PRIMARY navigation (not IMAP folders).
+enum MessagesSidebarFilter: Hashable {
+    case allMail
+    case inbox
+    case sharedWithClaude
+    case sharedWithCodex
+    case notShared
+    case folder(String)
+}
+
 struct EmailSidebar: View {
     @Environment(ManifoldStore.self) var store
     @Bindable var selection: EmailSelectionModel
+    @Binding var sidebarFilter: MessagesSidebarFilter
     @Binding var showAddAccount: Bool
     @Binding var showAccountDetail: EmailAccountRecord?
     @State private var showSmartMailboxEditor = false
 
+    @State private var favoritesExpanded = true
+    @State private var agentAccessExpanded = true
+    @State private var accountExpanded = true
+
     var body: some View {
         List {
-            UnifiedInboxRow(selection: selection)
-
-            // 4.5: Collapsible sections with header prominence
-            Section {
-                QuickFilterSection(selection: selection)
-            } header: {
-                Text("Filters")
-            }
-            .headerProminence(.increased)
-
-            SmartMailboxSection(
-                selection: selection,
-                onNewMailbox: { showSmartMailboxEditor = true }
-            )
-
-            SharedEmailsRow(selection: selection)
-
-            ForEach(store.emailAccounts.accounts) { account in
-                AccountTreeSection(
-                    account: account,
-                    syncStates: store.emailAccounts.syncStates[account.accountID] ?? [],
-                    selection: selection,
-                    onDetail: { showAccountDetail = account }
-                )
+            // Favorites
+            DisclosureGroup(isExpanded: $favoritesExpanded) {
+                sidebarRow(icon: "envelope", label: "All Mail", filter: .allMail)
+                sidebarRow(icon: "tray", label: "INBOX", filter: .inbox)
+            } label: {
+                Text("Favorites")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
             }
 
-            Section {
-                AddAccountButton(showAddAccount: $showAddAccount)
+            // Agent Access — THE PRIMARY NAVIGATION
+            DisclosureGroup(isExpanded: $agentAccessExpanded) {
+                agentFilterRow(dot: .claudeBlue, label: "Shared with Claude", filter: .sharedWithClaude)
+                agentFilterRow(dot: .codexPurple, label: "Shared with Codex", filter: .sharedWithCodex)
+                agentFilterRow(dot: Color.gray, label: "Not Shared", filter: .notShared)
+            } label: {
+                Text("Agent Access")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+            }
+
+            // Account folders
+            if let account = store.emailAccounts.accounts.first {
+                DisclosureGroup(isExpanded: $accountExpanded) {
+                    sidebarRow(icon: "paperplane", label: "Sent", filter: .folder("Sent"))
+                    sidebarRow(icon: "doc", label: "Drafts", filter: .folder("Drafts"))
+                    sidebarRow(icon: "trash", label: "Trash", filter: .folder("Trash"))
+                    sidebarRow(icon: "archivebox", label: "Archive", filter: .folder("Archive"))
+                } label: {
+                    Text(account.username ?? account.displayName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                        .lineLimit(1)
+                }
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Email Backup")
-        .sheet(isPresented: $showSmartMailboxEditor) {
-            SmartMailboxEditor()
+        .navigationTitle("Messages")
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Button("Add Email Account", systemImage: "plus") {
+                    showAddAccount = true
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help("Add Email Account\u{2026}")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
     }
-}
 
-// MARK: - Smart Mailbox Sidebar Section
-
-private struct SmartMailboxSection: View {
-    @Environment(ManifoldStore.self) var store
-    @Bindable var selection: EmailSelectionModel
-    let onNewMailbox: () -> Void
-
-    @State private var smartMailboxes: [SmartMailboxRecord] = []
-    @State private var counts: [String: Int] = [:]
-
-    var body: some View {
-        Section {
-            if smartMailboxes.isEmpty {
-                ContentUnavailableView {
-                    Label("No Smart Mailboxes", systemImage: "tray.2")
-                        .font(.caption)
-                } description: {
-                    Text("Create rules to automatically filter your backed-up emails.")
-                        .font(.caption)
-                }
-            } else {
-                ForEach(smartMailboxes) { mailbox in
-                    Button {
-                        selection.selectSmartMailbox(mailbox)
-                    } label: {
-                        HStack {
-                            Label(mailbox.displayName, systemImage: mailbox.iconName)
-                            Spacer()
-                            Text("\(counts[mailbox.mailboxID] ?? 0)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .fontWeight(selection.selectedSmartMailboxID == mailbox.mailboxID ? .medium : .regular)
-                }
-            }
-
-            Button(action: onNewMailbox) {
-                Label("New Smart Mailbox", systemImage: "plus.circle")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        } header: {
-            Text("Smart Mailboxes")
+    private func sidebarRow(icon: String, label: String, filter: MessagesSidebarFilter) -> some View {
+        Button {
+            sidebarFilter = filter
+        } label: {
+            Label(label, systemImage: icon)
         }
-        .task { await loadSmartMailboxes() }
+        .buttonStyle(.plain)
+        .fontWeight(sidebarFilter == filter ? .medium : .regular)
     }
 
-    private func loadSmartMailboxes() async {
-        do {
-            smartMailboxes = try await store.emailAccounts.allSmartMailboxes()
-            for mb in smartMailboxes {
-                counts[mb.mailboxID] = await store.emailAccounts.smartMailboxCount(rulesJSON: mb.rulesJSON)
+    private func agentFilterRow(dot: Color, label: String, filter: MessagesSidebarFilter) -> some View {
+        Button {
+            sidebarFilter = filter
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(dot)
+                    .frame(width: 8, height: 8)
+                Text(label)
             }
-        } catch {
-            smartMailboxes = []
         }
+        .buttonStyle(.plain)
+        .fontWeight(sidebarFilter == filter ? .medium : .regular)
     }
 }
