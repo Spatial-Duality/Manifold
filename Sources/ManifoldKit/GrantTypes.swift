@@ -45,7 +45,7 @@ public enum GrantStatus: String, Sendable {
     case timedOut = "timed_out"
 }
 
-public enum TargetApp: String, Sendable, CaseIterable {
+public enum TargetApp: String, Sendable, CaseIterable, Codable {
     case cowork
     case codex
 }

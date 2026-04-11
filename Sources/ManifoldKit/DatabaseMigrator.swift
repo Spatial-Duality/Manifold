@@ -650,5 +650,22 @@ public struct DatabaseMigrator {
 
             logger.info("Migration 14: standing access policies, temporary reveals, work block records")
         },
+
+        // v15: Access request queue — agent-initiated access requests displayed in menu bar.
+        Migration(version: 15, name: "access_request_queue") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS access_requests (
+                    request_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    resource_path TEXT NOT NULL,
+                    resource_name TEXT NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_requests_agent ON access_requests(agent)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON access_requests(status)")
+            logger.info("Migration 15: access request queue")
+        },
     ]
 }

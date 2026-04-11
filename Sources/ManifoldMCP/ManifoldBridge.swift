@@ -408,16 +408,16 @@ public actor ManifoldBridge {
 
     // MARK: - Tool Audit
 
+    /// Fire-and-forget audit for tool calls — does not block the tool execution.
+    /// File modification audits remain synchronous (in writeFile) for safety.
     private func logToolCall(tool: String, arguments: [String: Any] = [:]) async {
         let argsJSON = arguments.isEmpty ? "{}" : (arguments.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))
-        try? await auditStore.log(
-            action: .toolCall,
-            agent: agentName,
-            metadata: mergedMetadata([
-                "tool": tool,
-                "arguments": argsJSON,
-            ])
-        )
+        let metadata = mergedMetadata(["tool": tool, "arguments": argsJSON])
+        let agent = agentName
+        let store = auditStore
+        Task.detached(priority: .utility) {
+            try? await store.log(action: .toolCall, agent: agent, metadata: metadata)
+        }
         ManifoldNotification.post(ManifoldNotification.dataChanged)
     }
 
