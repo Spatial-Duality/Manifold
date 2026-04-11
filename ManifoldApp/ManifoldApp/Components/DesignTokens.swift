@@ -4,16 +4,17 @@ import ManifoldKit
 // MARK: - DS-1: Semantic Colors
 
 extension Color {
-    static let claudeBlue = Color("ClaudeBlue")
-    static let codexPurple = Color("CodexPurple")
-    static let statusActive = Color("StatusActive")
-    static let statusPaused = Color("StatusPaused")
-    static let statusWarning = Color("StatusWarning")
-    static let statusDanger = Color("StatusDanger")
+    /// Agent identity colors — system semantic tokens per DESIGN.md
+    static let claudeBlue: Color = .blue
+    static let codexPurple: Color = .purple
+    static let statusActive: Color = .green
+    static let statusPaused: Color = .orange
+    static let statusWarning: Color = .yellow
+    static let statusDanger: Color = .red
 
     /// Agent color by type
     static func agent(_ agent: ManifoldKit.TargetApp) -> Color {
-        agent == .codex ? .codexPurple : .claudeBlue
+        agent == .codex ? .purple : .blue
     }
 }
 

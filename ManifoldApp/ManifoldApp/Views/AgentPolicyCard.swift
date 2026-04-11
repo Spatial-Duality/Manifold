@@ -59,12 +59,6 @@ struct AgentPolicyCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(agentColor.opacity(Opacity.rowTint))
         }
-        .overlay(alignment: .leading) {
-            // 4pt left border in agent color
-            RoundedRectangle(cornerRadius: 12)
-                .fill(agentColor)
-                .frame(width: 4)
-        }
         .overlay {
             if isPaused {
                 RoundedRectangle(cornerRadius: 12)
