@@ -156,16 +156,21 @@ struct ReviewAccessSheet: View {
     // MARK: - Files Content
 
     private var filesContent: some View {
-        VStack(alignment: .leading, spacing: Spacing.standard) {
+        let policy = store.policy.policy(for: selectedAgent)
+        let allowedIDs = policy?.allowedSourceIDs ?? []
+
+        return VStack(alignment: .leading, spacing: Spacing.standard) {
             ForEach(store.sources.filter { !$0.isRemoved }) { source in
+                let isInPolicy = allowedIDs.contains(source.sourceID)
+
                 HStack(spacing: Spacing.standard) {
-                    Toggle(isOn: .constant(source.isAccessible)) { EmptyView() }
+                    Toggle(isOn: .constant(isInPolicy || isNewAddition(source))) { EmptyView() }
                         .toggleStyle(.checkbox)
                         .labelsHidden()
-                        .disabled(true) // Changes happen via confirm button
+                        .disabled(true)
 
                     Image(systemName: "folder.fill")
-                        .foregroundStyle(source.isAccessible ? .blue : .secondary)
+                        .foregroundStyle(isInPolicy ? .blue : .secondary)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(source.displayName)
@@ -178,10 +183,10 @@ struct ReviewAccessSheet: View {
                     Spacer()
 
                     if isNewAddition(source) {
-                        Text("new ✦")
+                        Text("new \u{2726}")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.green)
-                    } else if source.isAccessible {
+                    } else if isInPolicy {
                         Text("current")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -211,8 +216,11 @@ struct ReviewAccessSheet: View {
 
     private var sheetFooter: some View {
         HStack {
-            let sourceCount = store.sources.filter { $0.isAccessible && !$0.isRemoved }.count
-            Text("\(sourceCount) sources accessible")
+            let agentName = selectedAgent == .codex ? "Codex" : "Claude"
+            let policy = store.policy.policy(for: selectedAgent)
+            let sourceCount = policy?.allowedSourceIDs.count ?? 0
+            let domainCount = policy?.allowedEmailDomains.count ?? 0
+            Text("\(agentName): \(sourceCount) sources \u{00B7} \(domainCount) domains")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
