@@ -47,8 +47,13 @@ struct AgentPolicyCard: View {
                 .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isPaused ? .orange.opacity(0.3) : .separator, lineWidth: isPaused ? 1 : 0.5)
+            if isPaused {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(.separator, lineWidth: 0.5)
+            }
         }
         .opacity(isPaused ? 0.75 : 1.0)
         .accessibilityElement(children: .contain)

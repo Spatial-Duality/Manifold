@@ -76,6 +76,12 @@ final class PolicyModel {
         }
     }
 
+    /// Pause all agents at once — the panic control.
+    func pauseAllAgents() async {
+        if claudePolicy?.isPaused != true { await pauseAgent(.cowork) }
+        if codexPolicy?.isPaused != true { await pauseAgent(.codex) }
+    }
+
     func removeSource(_ sourceID: String, from agent: TargetApp) async {
         guard let store = policyStore else { return }
         do {
