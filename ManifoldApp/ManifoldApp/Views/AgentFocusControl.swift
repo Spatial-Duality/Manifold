@@ -13,7 +13,8 @@ struct AgentFocusControl: View {
             Text("Compare").tag(AgentFocus.compare)
         }
         .pickerStyle(.segmented)
-        .frame(width: 220)
+        .frame(width: 200)
+        .controlSize(.small)
         .accessibilityLabel("Agent focus")
         .accessibilityHint("Shows \(focus.displayName) access columns in the table")
     }

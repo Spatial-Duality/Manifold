@@ -170,16 +170,17 @@ struct AgentPolicyCard: View {
     // MARK: - Actions
 
     private var actionsRow: some View {
-        HStack(spacing: Spacing.section) {
+        HStack(spacing: Spacing.standard) {
             Button("Update Access\u{2026}", action: onReviewAccess)
-                .controlSize(.regular)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
             Button(action: onViewActivity) {
                 Label("Activity", systemImage: "waveform.path")
-                    .font(Typ.body)
-                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .font(Typ.caption)
+            .foregroundStyle(.secondary)
         }
     }
 }

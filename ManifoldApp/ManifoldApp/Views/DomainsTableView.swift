@@ -44,30 +44,27 @@ struct DomainsTableView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .top) {
             // Local controls — in content area, not window toolbar
-            HStack(spacing: Spacing.section) {
+            HStack(spacing: Spacing.standard) {
                 AgentFocusControl(focus: $store.agentFocus)
 
                 // Sensitivity — always visible per v4.1 spec Q3
-                HStack(spacing: Spacing.tight) {
-                    Text("Sensitivity:")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Picker("Sensitivity", selection: sensitivityBinding) {
-                        Text("Strict").tag(EmailSensitivityLevel.strict)
-                        Text("Moderate").tag(EmailSensitivityLevel.moderate)
-                        Text("Open").tag(EmailSensitivityLevel.open)
-                    }
-                    .frame(width: 110)
+                Picker("Sensitivity", selection: sensitivityBinding) {
+                    Text("Strict").tag(EmailSensitivityLevel.strict)
+                    Text("Moderate").tag(EmailSensitivityLevel.moderate)
+                    Text("Open").tag(EmailSensitivityLevel.open)
                 }
+                .pickerStyle(.menu)
+                .frame(width: 130)
+                .controlSize(.small)
 
                 TextField("Search domains", text: $searchText)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 160)
+                    .frame(minWidth: 120, maxWidth: 200)
 
                 Spacer()
             }
-            .padding(.horizontal, Spacing.edge)
-            .padding(.vertical, Spacing.standard)
+            .padding(.horizontal, Spacing.section)
+            .padding(.vertical, 6)
             .background(.bar)
         }
         .overlay(alignment: .bottom) {
@@ -278,17 +275,18 @@ struct DomainsTableView: View {
     private func undoToastView(domain: String) -> some View {
         HStack(spacing: Spacing.standard) {
             Text("Removed \(focusedAgentName) access to @\(domain)")
-                .font(.callout)
+                .font(Typ.caption)
             Button("Undo") {
                 Task { await store.policy.addEmailDomain(domain, to: focusedAgent) }
                 showUndoToast = false
             }
-            .font(.callout.weight(.medium))
-            .foregroundStyle(.blue)
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
         }
-        .padding(.horizontal, Spacing.edge)
-        .padding(.vertical, Spacing.standard)
+        .padding(.horizontal, Spacing.section)
+        .padding(.vertical, 6)
         .background(.regularMaterial, in: Capsule())
+        .toastElevation()
         .padding(.bottom, Spacing.edge)
     }
 

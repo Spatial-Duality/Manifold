@@ -249,18 +249,19 @@ struct ReviewAccessSheet: View {
     // MARK: - Footer
 
     private var sheetFooter: some View {
-        HStack {
+        HStack(spacing: Spacing.standard) {
             let agentName = selectedAgent == .codex ? "Codex" : "Claude"
             let policy = store.policy.policy(for: selectedAgent)
             let sourceCount = policy?.allowedSourceIDs.count ?? 0
             let domainCount = policy?.allowedEmailDomains.count ?? 0
             Text("\(agentName): \(sourceCount) sources \u{00B7} \(domainCount) domains")
-                .font(.callout)
+                .font(Typ.caption)
                 .foregroundStyle(.secondary)
 
             Spacer()
 
             Button("Cancel") { dismiss() }
+                .buttonStyle(.bordered)
                 .keyboardShortcut(.cancelAction)
 
             if startWorkBlock {

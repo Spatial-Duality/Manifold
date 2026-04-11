@@ -36,20 +36,23 @@ struct SourcesTableView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .top) {
-            // Local controls — below the global title bar, inside the content area
-            HStack(spacing: Spacing.section) {
+            HStack(spacing: Spacing.standard) {
                 AgentFocusControl(focus: $store.agentFocus)
+
                 TextField("Search sources", text: $searchText)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 160)
+                    .frame(minWidth: 120, maxWidth: 200)
+
                 Spacer()
+
                 Button("Add Folder\u{2026}", systemImage: "folder.badge.plus") {
                     store.addSourceFromPicker()
                 }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
             }
-            .padding(.horizontal, Spacing.edge)
-            .padding(.vertical, Spacing.standard)
+            .padding(.horizontal, Spacing.section)
+            .padding(.vertical, 6)
             .background(.bar)
         }
         .overlay(alignment: .bottom) {
@@ -221,19 +224,20 @@ struct SourcesTableView: View {
         let agentName = undoAgent == .codex ? "Codex" : "Claude"
         return HStack(spacing: Spacing.standard) {
             Text("Removed \(agentName) access to \(source.displayName)")
-                .font(.callout)
+                .font(Typ.caption)
             Button("Undo") {
                 if let agent = undoAgent {
                     Task { await store.policy.addSource(source.sourceID, to: agent) }
                 }
                 showUndoToast = false
             }
-            .font(.callout.weight(.medium))
-            .foregroundStyle(.blue)
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
         }
-        .padding(.horizontal, Spacing.edge)
-        .padding(.vertical, Spacing.standard)
+        .padding(.horizontal, Spacing.section)
+        .padding(.vertical, 6)
         .background(.regularMaterial, in: Capsule())
+        .toastElevation()
         .padding(.bottom, Spacing.edge)
     }
 
