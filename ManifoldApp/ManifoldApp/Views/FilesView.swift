@@ -301,15 +301,23 @@ struct FilesView: View {
 
     private func iconFor(_ ext: String) -> String {
         switch ext {
-        case "swift", "py", "js", "ts", "rb", "go", "rs", "c", "cpp", "h": "doc.text"
-        case "html", "css", "xml", "json", "yaml", "yml", "toml": "doc.text"
+        case "swift": "swift"
+        case "py": "doc.text"
+        case "js", "ts", "jsx", "tsx": "curlybraces"
+        case "rb", "go", "rs", "c", "cpp", "h", "m", "mm": "chevron.left.forwardslash.chevron.right"
+        case "html", "css": "globe"
+        case "xml", "json", "yaml", "yml", "toml", "plist": "curlybraces.square"
         case "md", "txt", "rtf": "doc.plaintext"
-        case "png", "jpg", "jpeg", "gif", "webp", "svg": "photo"
+        case "png", "jpg", "jpeg", "gif", "webp", "svg", "ico": "photo"
         case "pdf": "doc.richtext"
-        case "zip", "tar", "gz": "doc.zipper"
-        case "mp4", "mov": "film"
-        case "mp3", "wav": "music.note"
+        case "zip", "tar", "gz", "bz2", "7z": "doc.zipper"
+        case "mp4", "mov", "avi", "mkv": "film"
+        case "mp3", "wav", "aac", "flac": "music.note"
         case "ttf", "otf", "woff", "woff2": "textformat"
+        case "sh", "zsh", "bash": "terminal"
+        case "sql", "db", "sqlite": "cylinder"
+        case "xcodeproj", "xcworkspace": "hammer"
+        case "log": "text.alignleft"
         default: "doc"
         }
     }

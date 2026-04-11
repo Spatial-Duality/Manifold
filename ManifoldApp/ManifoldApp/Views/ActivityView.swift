@@ -83,6 +83,12 @@ struct ActivityView: View {
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button("Export\u{2026}", systemImage: "square.and.arrow.up") {
+                    exportAuditLog()
+                }
+                .controlSize(.small)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Toggle("Group by Session", isOn: $store.showSessionGrouping)
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -117,6 +123,27 @@ struct ActivityView: View {
             "\(store.sessions.count) sessions"
         } else {
             "\(filteredEntries.count) events"
+        }
+    }
+
+    private func exportAuditLog() {
+        let entries = store.activityEntries
+        guard !entries.isEmpty else { return }
+
+        let csv = "Timestamp,Action,Agent,File,Details\n" + entries.map { entry in
+            let ts = entry.timestamp
+            let action = entry.action
+            let agent = entry.agent ?? ""
+            let file = entry.filePath ?? ""
+            let details = entry.metadata ?? ""
+            return "\"\(ts)\",\"\(action)\",\"\(agent)\",\"\(file)\",\"\(details)\""
+        }.joined(separator: "\n")
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "manifold-activity-\(ISO8601DateFormatter.shared.string(from: Date()).prefix(10)).csv"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? csv.write(to: url, atomically: true, encoding: .utf8)
         }
     }
 }

@@ -123,13 +123,15 @@ class ManifoldStore {
         do {
             let storeURL = Self.storeURL
             try FileManager.default.createDirectory(at: storeURL, withIntermediateDirectories: true)
-            let contentStore = try ContentStore(rootURL: storeURL)
-            self.contentStore = contentStore
             let connection = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
             self.db = connection
 
             let migrator = try DatabaseMigrator(db: connection)
             try migrator.migrate()
+
+            // ContentStore shares the DB connection (avoids duplicate handles)
+            let contentStore = try ContentStore(rootURL: storeURL, db: connection)
+            self.contentStore = contentStore
 
             let auditStore = try AuditStore(db: connection)
             let snapshotStore = try SnapshotStore(db: connection, contentStore: contentStore)

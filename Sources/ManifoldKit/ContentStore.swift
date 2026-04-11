@@ -9,6 +9,16 @@ public actor ContentStore {
     private let blobsURL: URL
     private let db: DatabaseConnection
 
+    /// Initialize with a shared DatabaseConnection (avoids duplicate DB handles).
+    public init(rootURL: URL, db: DatabaseConnection) throws {
+        self.rootURL = rootURL
+        self.blobsURL = rootURL.appendingPathComponent("blobs")
+        try FileManager.default.createDirectory(at: blobsURL, withIntermediateDirectories: true)
+        self.db = db
+        try Self.ensureTables(db: db)
+    }
+
+    /// Legacy: opens its own DB connection (kept for backward compatibility in tests).
     public init(rootURL: URL) throws {
         self.rootURL = rootURL
         self.blobsURL = rootURL.appendingPathComponent("blobs")
@@ -16,20 +26,7 @@ public actor ContentStore {
 
         let dbURL = rootURL.appendingPathComponent("manifold.db")
         self.db = try DatabaseConnection(url: dbURL)
-        try db.execute("""
-            CREATE TABLE IF NOT EXISTS manifold_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        """)
-        try db.execute("""
-            CREATE TABLE IF NOT EXISTS content_meta (
-                hash TEXT PRIMARY KEY,
-                size_bytes INTEGER NOT NULL,
-                ingested_at TEXT NOT NULL,
-                ref_count INTEGER DEFAULT 0
-            )
-        """)
+        try Self.ensureTables(db: db)
 
         // Set schema version if not present
         let version = try db.queryScalar("SELECT value FROM manifold_meta WHERE key = 'schema_version'")
@@ -157,6 +154,25 @@ public actor ContentStore {
     public func blobCount() throws -> Int {
         let result = try db.queryScalar("SELECT COUNT(*) FROM content_meta")
         return Int(result ?? "0") ?? 0
+    }
+
+    // MARK: - Table Setup
+
+    private static func ensureTables(db: DatabaseConnection) throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS manifold_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS content_meta (
+                hash TEXT PRIMARY KEY,
+                size_bytes INTEGER NOT NULL,
+                ingested_at TEXT NOT NULL,
+                ref_count INTEGER DEFAULT 0
+            )
+        """)
     }
 
     // MARK: - Private
