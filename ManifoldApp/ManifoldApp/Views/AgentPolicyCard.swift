@@ -1,9 +1,9 @@
 import SwiftUI
 import ManifoldKit
 
-/// Dashboard-style agent card for the Overview tab.
-/// Shows: agent identity (color border + tint), connection state, file/email summaries,
-/// recent activity, and per-agent controls. Fills viewport with real data.
+/// Dashboard-style agent card matching the interactive prototype.
+/// Left border in agent color, tinted background, sources/domains/activity inline,
+/// per-agent pause/resume control.
 struct AgentPolicyCard: View {
     let agentName: String
     let agentColor: Color
@@ -11,7 +11,8 @@ struct AgentPolicyCard: View {
     let policy: AgentAccessPolicy?
     let totalSources: Int
     let recentActivity: [AuditEntry]
-    let sourceNames: [String]
+    let sourceNames: [(name: String, count: Int, hasAccess: Bool)]
+    let domainNames: [(name: String, count: Int)]
     let isPaused: Bool
     let onPauseToggle: () -> Void
     let onReviewAccess: () -> Void
@@ -19,54 +20,30 @@ struct AgentPolicyCard: View {
 
     @State private var isHovered = false
 
-    private var sourceCount: Int { policy?.allowedSourceIDs.count ?? 0 }
-    private var domainCount: Int { policy?.allowedEmailDomains.count ?? 0 }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            headerRow
-                .padding(.bottom, Spacing.standard)
+        HStack(spacing: 0) {
+            // Left border accent (prototype Fix 1.2)
+            RoundedRectangle(cornerRadius: 10)
+                .fill(agentColor)
+                .frame(width: 4)
 
-            Divider()
-                .padding(.vertical, Spacing.standard)
-
-            // Source names with access dots
-            sourceSummary
-                .padding(.bottom, Spacing.standard)
-
-            // Email summary
-            emailSummary
-                .padding(.bottom, Spacing.standard)
-
-            Divider()
-                .padding(.vertical, Spacing.standard)
-
-            // Recent activity (up to 3 events)
-            if !recentActivity.isEmpty {
-                recentActivitySection
-                    .padding(.bottom, Spacing.standard)
+            VStack(alignment: .leading, spacing: 14) {
+                headerRow
+                sourcesSection
+                domainsSection
 
                 Divider()
-                    .padding(.vertical, Spacing.standard)
-            }
 
-            // Actions
-            actionsRow
-        }
-        .padding(Spacing.edge)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(agentColor.opacity(Opacity.rowTint))
-        }
-        .overlay {
-            if isPaused {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.statusPaused.opacity(0.3), lineWidth: 0.5)
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(.separator, lineWidth: 0.5)
+                activitySection
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(agentColor.opacity(Opacity.rowTint))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.separator, lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(isHovered ? 0.12 : 0.08), radius: isHovered ? 5 : 3, y: isHovered ? 2 : 1)
         .onHover { isHovered = $0 }
@@ -79,149 +56,128 @@ struct AgentPolicyCard: View {
     // MARK: - Header
 
     private var headerRow: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(isConnected ? agentColor : .gray)
-                .frame(width: 10, height: 10)
-                .animation(Anim.stateChange, value: isConnected)
-
-            Text(agentName)
-                .font(Typ.heading)
-
-            Text(isPaused ? "Paused" : "Active")
-                .font(Typ.caption.weight(.medium))
-                .foregroundStyle(isPaused ? Color.statusPaused : agentColor)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(
-                    (isPaused ? Color.statusPaused : agentColor).opacity(Opacity.badgeFill),
-                    in: Capsule()
+        HStack {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(agentColor)
+                    .frame(width: 10, height: 10)
+                Text(agentName)
+                    .font(.system(size: 15, weight: .semibold))
+                StatusBadge(
+                    text: isPaused ? "Paused" : "Active",
+                    color: isPaused ? .statusPaused : .statusActive
                 )
-
-            if !isConnected && !isPaused {
-                Label("Not Connected", systemImage: "exclamationmark.circle")
-                    .font(Typ.caption.weight(.medium))
-                    .foregroundStyle(Color.statusWarning)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.statusWarning.opacity(Opacity.badgeFill), in: Capsule())
             }
-
             Spacer()
-
             Button(isPaused ? "Resume Access" : "Pause Access", action: onPauseToggle)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .tint(isPaused ? .statusActive : .statusDanger)
-                .accessibilityLabel(isPaused ? "Resume access for \(agentName)" : "Pause access for \(agentName)")
         }
     }
 
-    // MARK: - Source Summary
+    // MARK: - Sources
 
-    private var sourceSummary: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
-            HStack(spacing: Spacing.tight) {
-                Image(systemName: "folder.fill")
-                    .foregroundStyle(.secondary)
-                    .imageScale(.small)
-                if sourceCount > 0 {
-                    Text("\(sourceCount)")
-                        .font(.callout.weight(.medium))
-                        .contentTransition(.numericText())
-                    Text("of \(totalSources) sources")
-                        .font(Typ.body)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("No file access")
-                        .font(Typ.body)
-                        .foregroundStyle(.tertiary)
-                }
-            }
+    private var sourcesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("SOURCES")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .tracking(0.5)
 
-            // Show source folder names with access dots
-            if !sourceNames.isEmpty {
-                ForEach(sourceNames.prefix(5), id: \.self) { name in
-                    HStack(spacing: Spacing.tight) {
-                        Circle()
-                            .fill(agentColor)
-                            .frame(width: 5, height: 5)
-                        Text(name)
-                            .font(Typ.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            ForEach(sourceNames.prefix(5), id: \.name) { source in
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text(source.name)
+                            .font(Typ.body)
                     }
-                    .padding(.leading, 20)
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Text("^[\(source.count) file](inflect: true)")
+                            .font(Typ.numericCaption)
+                            .foregroundStyle(.tertiary)
+                        Circle()
+                            .fill(source.hasAccess ? Color.statusActive : Color.gray)
+                            .frame(width: 6, height: 6)
+                    }
                 }
-                if sourceNames.count > 5 {
-                    Text("+\(sourceNames.count - 5) more")
-                        .font(Typ.caption)
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 20)
-                }
+            }
+
+            if sourceNames.count > 5 {
+                Text("+\(sourceNames.count - 5) more")
+                    .font(Typ.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
     }
 
-    // MARK: - Email Summary
+    // MARK: - Domains
 
-    private var emailSummary: some View {
-        HStack(spacing: Spacing.tight) {
-            Image(systemName: "envelope.fill")
-                .foregroundStyle(.secondary)
-                .imageScale(.small)
-            if domainCount > 0 {
-                Text("\(domainCount)")
-                    .font(.callout.weight(.medium))
-                    .contentTransition(.numericText())
-                Text("^[\(domainCount) domain](inflect: true) visible")
-                    .font(Typ.body)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No email access")
+    private var domainsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("EMAIL DOMAINS")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .tracking(0.5)
+
+            ForEach(domainNames.prefix(4), id: \.name) { domain in
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text("@\(domain.name)")
+                            .font(Typ.body)
+                    }
+                    Spacer()
+                    Text("\(domain.count)")
+                        .font(Typ.numericCaption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            if domainNames.isEmpty {
+                Text("No email domains")
                     .font(Typ.body)
                     .foregroundStyle(.tertiary)
             }
         }
     }
 
-    // MARK: - Recent Activity
+    // MARK: - Activity
 
-    private var recentActivitySection: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
-            Text("Recent")
-                .font(Typ.caption.weight(.medium))
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("RECENT ACTIVITY")
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
+                .tracking(0.5)
 
-            ForEach(recentActivity.prefix(3)) { entry in
-                HStack(spacing: Spacing.standard) {
-                    Image(systemName: ActionFormatting.icon(for: entry.action))
-                        .foregroundStyle(ActionFormatting.color(for: entry.action))
-                        .imageScale(.small)
-                        .frame(width: 14)
-                    Text(ActionFormatting.description(for: entry))
-                        .font(Typ.caption)
-                        .lineLimit(1)
-                    Spacer()
-                    TimeLabel(iso8601: entry.timestamp)
+            if recentActivity.isEmpty {
+                Text("No recent activity")
+                    .font(Typ.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(recentActivity.prefix(3)) { entry in
+                    HStack {
+                        HStack(spacing: 4) {
+                            Text(ActionFormatting.shortAction(for: entry.action))
+                                .font(Typ.caption)
+                                .fontWeight(.medium)
+                            if let path = entry.filePath {
+                                Text(URL(fileURLWithPath: path).lastPathComponent)
+                                    .font(Typ.mono)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        TimeLabel(iso8601: entry.timestamp)
+                    }
                 }
             }
-        }
-    }
-
-    // MARK: - Actions
-
-    private var actionsRow: some View {
-        HStack(spacing: Spacing.standard) {
-            Button("Update Access\u{2026}", action: onReviewAccess)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-            Button("Activity", systemImage: "waveform.path", action: onViewActivity)
-                .labelStyle(.titleAndIcon)
-                .buttonStyle(.plain)
-                .font(Typ.caption)
-                .foregroundStyle(.secondary)
         }
     }
 }

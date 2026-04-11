@@ -244,18 +244,19 @@ private struct OverviewTab: View {
 /// When source selected → file browser.
 private struct FilesTab: View {
     @Environment(ManifoldStore.self) var store
-    @State private var selection: FilesSidebarSelection?
+    @State private var selection: FilesSidebarSelection? = .dashboard
 
     var body: some View {
         NavigationSplitView {
             FilesSidebar(selection: $selection)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         } detail: {
-            if selection == nil {
-                // No source selected → Sources overview with agent access controls
+            switch selection {
+            case .dashboard, .none:
+                FilesDashboardView()
+            case .allSources:
                 SourcesTableView()
-            } else {
-                // Sidebar selection → file browser
+            case .allFiles, .source, .recentlyModified, .aiTouched:
                 FilesView(sidebarSelection: selection)
             }
         }
@@ -285,30 +286,20 @@ private struct FilesTab: View {
 /// EmailSelectionModel lives here so it survives tab switches.
 private struct EmailsTab: View {
     @Environment(ManifoldStore.self) var store
-    @State private var emailMode: EmailMode = .domains
+    @State private var emailMode: EmailMode = .rules
     @State private var emailSelection = EmailSelectionModel()
-    @State private var domainCategoryFilter: DomainCategory?
-    @State private var categoryCounts: [DomainCategory: Int] = [:]
 
     enum EmailMode: Hashable {
-        case domains
+        case rules
         case messages
     }
 
     var body: some View {
         NavigationSplitView {
             List {
-                // 3.5: Domain categories in sidebar
                 Section {
-                    sidebarRow("All Domains", systemImage: "tray.full", isSelected: emailMode == .domains && domainCategoryFilter == nil) {
-                        emailMode = .domains
-                        domainCategoryFilter = nil
-                    }
-                    ForEach([DomainCategory.work, .automated, .personal], id: \.self) { category in
-                        sidebarRow(category.rawValue, systemImage: categoryIcon(category), count: categoryCounts[category], isSelected: emailMode == .domains && domainCategoryFilter == category) {
-                            emailMode = .domains
-                            domainCategoryFilter = category
-                        }
+                    sidebarRow("Rules", systemImage: "shield", isSelected: emailMode == .rules) {
+                        emailMode = .rules
                     }
                     sidebarRow("Messages", systemImage: "envelope", isSelected: emailMode == .messages && emailSelection.selectedAccountID == nil) {
                         emailMode = .messages
@@ -335,25 +326,14 @@ private struct EmailsTab: View {
                     Text("Accounts")
                 }
                 .headerProminence(.increased)
-
-                Section {
-                    Button {
-                        store.showActivityDrawer = true
-                    } label: {
-                        Label("View Activity", systemImage: "list.bullet.rectangle")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
             .navigationTitle("Emails")
-            .task(id: store.emailAccounts.accounts.count) { await loadCategoryCounts() }
         } detail: {
             switch emailMode {
-            case .domains:
-                DomainsTableView(categoryFilter: domainCategoryFilter)
+            case .rules:
+                EmailRulesView()
             case .messages:
                 EmailView(selection: emailSelection)
             }
@@ -376,22 +356,4 @@ private struct EmailsTab: View {
         .fontWeight(isSelected ? .medium : .regular)
     }
 
-    private func categoryIcon(_ category: DomainCategory) -> String {
-        switch category {
-        case .work: "building.2"
-        case .automated: "gearshape"
-        case .personal: "person"
-        case .hidden: "eye.slash"
-        }
-    }
-
-    private func loadCategoryCounts() async {
-        let counts = await store.emailAccounts.domainCounts()
-        var result: [DomainCategory: Int] = [:]
-        for (domain, _) in counts {
-            let category = DomainCategorizer.categorize(domain: domain)
-            result[category, default: 0] += 1
-        }
-        categoryCounts = result
-    }
 }

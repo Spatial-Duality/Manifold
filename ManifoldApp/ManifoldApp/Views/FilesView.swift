@@ -39,10 +39,16 @@ struct FilesView: View {
         return false
     }
 
+    private var isAllFilesSelection: Bool {
+        if case .allFiles? = sidebarSelection { return true }
+        return false
+    }
+
     private var navigationTitleText: String {
         if let selectedSourceName { return selectedSourceName }
         if isRecentlyModifiedSelection { return "Recently Modified" }
         if isAITouchedSelection { return "AI-Touched Files" }
+        if isAllFilesSelection { return "All Files" }
         return "Files"
     }
 

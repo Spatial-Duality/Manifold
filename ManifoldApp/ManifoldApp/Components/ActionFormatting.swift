@@ -53,4 +53,22 @@ enum ActionFormatting {
         default: name
         }
     }
+
+    /// Short action verb for compact displays (agent cards, activity rows).
+    static func shortAction(for action: String) -> String {
+        switch action {
+        case "file_read": "Read"
+        case "file_modified": "Write"
+        case "file_created": "Created"
+        case "file_deleted": "Deleted"
+        case "mcp_connection": "Connected"
+        case "run_start": "Started"
+        case "run_end": "Ended"
+        case "restore": "Restored"
+        case "source_added": "Added"
+        case "source_removed": "Removed"
+        case "tool_call": "Tool"
+        default: action.replacing("_", with: " ").capitalized
+        }
+    }
 }

@@ -36,6 +36,15 @@ struct ReadingPaneToolbar: View {
 
             if let path = message.emlPath {
                 Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                } label: {
+                    Label("Open", systemImage: "envelope")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Open in default mail app")
+
+                Button {
                     NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
                 } label: {
                     Image(systemName: "folder")

@@ -2,24 +2,64 @@ import SwiftUI
 import ManifoldKit
 
 enum FilesSidebarSelection: Hashable {
+    case dashboard
+    case allFiles
+    case allSources
     case source(String)
     case recentlyModified
     case aiTouched
 }
 
-/// Files tab sidebar: source navigation with agent-colored dots,
-/// version filters, and activity link. Pure navigation — no settings.
+/// Files tab sidebar matching the prototype layout:
+/// Overview (Dashboard), Browse (All Files, All Sources), Sources, Versions.
 struct FilesSidebar: View {
     @Environment(ManifoldStore.self) var store
     @Binding var selection: FilesSidebarSelection?
 
     var body: some View {
         List(selection: $selection) {
-            // 2.4: Section headers with prominence
+            // Overview
+            Section {
+                Label("Dashboard", systemImage: "chart.bar")
+                    .tag(FilesSidebarSelection.dashboard)
+            } header: {
+                Text("Overview")
+            }
+            .headerProminence(.increased)
+
+            // Browse
+            Section {
+                Label {
+                    HStack {
+                        Text("All Files")
+                        Spacer()
+                        Text("\(store.sources.filter { !$0.isRemoved }.count)")
+                            .font(Typ.numericCaption)
+                            .foregroundStyle(.tertiary)
+                    }
+                } icon: {
+                    Image(systemName: "doc.text")
+                }
+                .tag(FilesSidebarSelection.allFiles)
+
+                Label("All Sources", systemImage: "folder")
+                    .tag(FilesSidebarSelection.allSources)
+            } header: {
+                Text("Browse")
+            }
+            .headerProminence(.increased)
+
+            // Sources
             Section {
                 ForEach(visibleSources) { source in
                     Label {
-                        Text(source.displayName)
+                        HStack {
+                            Text(source.displayName)
+                            Spacer()
+                            Text("\(store.sources.count)")
+                                .font(Typ.numericCaption)
+                                .foregroundStyle(.tertiary)
+                        }
                     } icon: {
                         Image(systemName: "folder.fill")
                             .foregroundStyle(source.isAccessible ? .blue : .gray)
@@ -31,7 +71,7 @@ struct FilesSidebar: View {
                     store.addSourceFromPicker()
                 } label: {
                     Label("Add Folder\u{2026}", systemImage: "plus")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
             } header: {
@@ -39,10 +79,11 @@ struct FilesSidebar: View {
             }
             .headerProminence(.increased)
 
+            // Versions
             Section {
                 Label("Recently Modified", systemImage: "clock")
                     .tag(FilesSidebarSelection.recentlyModified)
-                Label("AI-Touched Files", systemImage: "sparkles")
+                Label("AI-Touched Files", systemImage: "eye")
                     .tag(FilesSidebarSelection.aiTouched)
             } header: {
                 Text("Versions")
