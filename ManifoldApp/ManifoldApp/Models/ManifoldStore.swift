@@ -78,6 +78,7 @@ final class ManifoldStore {
 
     let runtime = AppRuntimeClient()
     private var connectionMonitorTask: Task<Void, Never>?
+    private var didAttemptAgentRestart = false
 
     var menuBarIcon: String { isRuntimeConnected ? "checkmark.shield.fill" : "shield.slash" }
 
@@ -125,13 +126,13 @@ final class ManifoldStore {
             return
         }
 
-        // XPC version check: auto-restart agent on mismatch
+        // XPC version check: auto-restart agent on mismatch (once per app launch)
         let appVersion = Bundle.main.shortVersionString
-        if let agentVersion = pingResult.agentVersion, agentVersion != appVersion {
+        if let agentVersion = pingResult.agentVersion, agentVersion != appVersion, !didAttemptAgentRestart {
+            didAttemptAgentRestart = true
             logger.notice("Agent version \(agentVersion) != app version \(appVersion). Restarting agent.")
             unregisterAgent()
             registerAgent()
-            // Give agent time to start, then retry
             try? await Task.sleep(for: .seconds(1))
             let retry = await runtime.ping()
             isRuntimeConnected = retry.ok
