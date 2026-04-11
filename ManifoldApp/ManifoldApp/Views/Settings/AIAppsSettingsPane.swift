@@ -48,22 +48,34 @@ private struct AgentHealthCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Header with headline state chip
             HStack {
-                Circle().fill(agentColor).frame(width: 8, height: 8)
-                Text(agentName).font(.headline)
+                Circle().fill(agentColor).frame(width: 10, height: 10)
+                Text(agentName).font(.title3.weight(.medium))
                 Spacer()
-                OverallStatusBadge(status: state.overallStatus)
+                // Headline chip — the state the user sees first
+                Text(state.overallStatus.displayLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(chipForeground)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(chipBackground, in: Capsule())
             }
 
-            switch state.id {
-            case .cowork:
-                CheckRow("App installed", status: state.appInstalled)
-                CheckRow("MCP configured", status: state.mcpConfigured)
-                CheckRow("Connection verified", status: state.connectionVerified)
-            case .codex:
-                CheckRow("CLI installed", status: state.cliInstalled)
-                CheckRow("Manifold added", status: state.mcpAdded)
+            // Check rows — compact, secondary to the headline
+            VStack(alignment: .leading, spacing: 6) {
+                switch state.id {
+                case .cowork:
+                    CheckRow("App installed", status: state.appInstalled)
+                    CheckRow("MCP configured", status: state.mcpConfigured)
+                    CheckRow("Connection verified", status: state.connectionVerified)
+                case .codex:
+                    CheckRow("CLI installed", status: state.cliInstalled)
+                    CheckRow("Manifold added", status: state.mcpAdded)
+                }
             }
+            .font(.callout)
+            .foregroundStyle(.secondary)
 
             if let error = state.errorDetail {
                 Text(error)
@@ -73,10 +85,23 @@ private struct AgentHealthCard: View {
 
             if let onSetup {
                 Button(setupLabel) { onSetup() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(state.overallStatus == .notInstalled ? .borderedProminent : .bordered)
                     .controlSize(.small)
             }
         }
+    }
+
+    private var chipForeground: Color {
+        switch state.overallStatus {
+        case .connected: .green
+        case .error: .orange
+        case .notInstalled: .secondary
+        default: .blue
+        }
+    }
+
+    private var chipBackground: Color {
+        chipForeground.opacity(0.12)
     }
 
     private var setupLabel: String {
