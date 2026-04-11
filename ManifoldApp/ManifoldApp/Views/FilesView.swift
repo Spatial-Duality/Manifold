@@ -18,7 +18,7 @@ struct FilesView: View {
     // Filters
     @State private var filterSource = "All"
     @State private var filterType = "All"
-    @State private var sortBy: SortOption = .name
+    @SceneStorage("filesSortBy") private var sortBy: SortOption = .name
 
     private enum SortOption: String, CaseIterable {
         case name = "Name"

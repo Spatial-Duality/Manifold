@@ -14,7 +14,7 @@ struct SharedEmailsRow: View {
                 } label: {
                     Label {
                         HStack {
-                            Text("Shared with Cowork")
+                            Text("Shared with Claude")
                             Spacer()
                             Text("\(sharedCount)")
                                 .font(.caption.weight(.medium))

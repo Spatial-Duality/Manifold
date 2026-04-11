@@ -16,6 +16,7 @@ struct AgentPolicyCard: View {
     let onViewActivity: () -> Void
 
     @Environment(ManifoldStore.self) var store
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,8 +45,10 @@ struct AgentPolicyCard: View {
         .background {
             RoundedRectangle(cornerRadius: 12)
                 .fill(.background)
-                .cardElevation()
+                .shadow(color: .black.opacity(isHovered ? 0.12 : 0.08), radius: isHovered ? 5 : 3, y: isHovered ? 2 : 1)
         }
+        .onHover { isHovered = $0 }
+        .animation(Anim.micro, value: isHovered)
         .overlay {
             if isPaused {
                 RoundedRectangle(cornerRadius: 12)

@@ -11,20 +11,41 @@ struct SetupAssistantView: View {
 
     enum SetupScreen: Int, CaseIterable {
         case welcome = 0, connectApps = 1, addData = 2, reviewFinish = 3
+
+        var label: String {
+            switch self {
+            case .welcome: "Welcome"
+            case .connectApps: "Connect"
+            case .addData: "Data"
+            case .reviewFinish: "Done"
+            }
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Progress dots
-            HStack(spacing: 8) {
+            // Step indicator with labels
+            HStack(spacing: 4) {
                 ForEach(SetupScreen.allCases, id: \.rawValue) { s in
-                    Circle()
-                        .fill(s.rawValue <= screen.rawValue ? Color.accentColor : Color.gray.opacity(0.3))
-                        .frame(width: 8, height: 8)
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(s.rawValue <= screen.rawValue ? Color.accentColor : Color.gray.opacity(0.3))
+                            .frame(width: 8, height: 8)
+                        if s == screen {
+                            Text(s.label)
+                                .font(Typ.caption.weight(.medium))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    if s.rawValue < SetupScreen.allCases.count - 1 {
+                        Rectangle()
+                            .fill(s.rawValue < screen.rawValue ? Color.accentColor : Color.gray.opacity(0.2))
+                            .frame(width: 20, height: 1)
+                    }
                 }
             }
             .padding(.top, 20)
-            .accessibilityLabel("Step \(screen.rawValue + 1) of \(SetupScreen.allCases.count)")
+            .accessibilityLabel("Step \(screen.rawValue + 1) of \(SetupScreen.allCases.count): \(screen.label)")
 
             Spacer()
 

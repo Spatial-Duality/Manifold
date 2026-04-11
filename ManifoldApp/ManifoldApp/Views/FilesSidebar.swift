@@ -57,6 +57,17 @@ struct FilesSidebar: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Files")
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.hasDirectoryPath else { return }
+                    DispatchQueue.main.async {
+                        store.addSource(path: url.path)
+                    }
+                }
+            }
+            return true
+        }
     }
 
     private var visibleSources: [SourceRecord] {
