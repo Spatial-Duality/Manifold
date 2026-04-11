@@ -204,7 +204,7 @@ private struct FilesTab: View {
     var body: some View {
         NavigationSplitView {
             FilesSidebar(selection: $selection)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         } detail: {
             if selection == nil {
                 // No source selected → Sources overview with agent access controls
@@ -282,7 +282,7 @@ private struct EmailsTab: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
             .navigationTitle("Emails")
         } detail: {
             // Content switches based on sidebar selection
