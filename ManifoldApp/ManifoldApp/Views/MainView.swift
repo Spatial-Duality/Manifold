@@ -5,7 +5,6 @@ struct MainView: View {
     @Environment(ManifoldStore.self) var store
     @Environment(CommandCenter.self) var commands
     @State private var showOnboarding = false
-    @State private var reviewSheetChange: ReviewAccessChange?
     @SceneStorage("selectedTab") private var restoredTab: String = "overview"
 
     var body: some View {
@@ -19,6 +18,8 @@ struct MainView: View {
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                     .onTapGesture { commands.isPresented = false }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Dismiss command palette")
 
                 VStack {
                     CommandPaletteView()
@@ -41,11 +42,6 @@ struct MainView: View {
         .sheet(isPresented: $showOnboarding) {
             SetupAssistantView()
                 .environment(store)
-        }
-        .sheet(item: $reviewSheetChange) { change in
-            ReviewAccessSheet(pendingChange: change)
-                .environment(store)
-                .frame(minWidth: 560, minHeight: 500)
         }
         .sheet(item: $store.reviewSheetTrigger) { change in
             ReviewAccessSheet(pendingChange: change)
@@ -113,6 +109,10 @@ struct MainView: View {
         }
         .onChange(of: store.selectedTab) { _, newTab in
             restoredTab = newTab.rawValue
+            // Clear file inspector when leaving Files tab
+            if newTab != .files {
+                store.inspectedFilePath = nil
+            }
         }
     }
 
@@ -145,25 +145,24 @@ struct MainView: View {
     @ViewBuilder
     private var connectionIndicators: some View {
         HStack(spacing: 12) {
-            Button {
+            Button("Command Palette", systemImage: "magnifyingglass") {
                 commands.isPresented.toggle()
-            } label: {
-                Image(systemName: "magnifyingglass")
             }
+            .labelStyle(.iconOnly)
             .keyboardShortcut("k", modifiers: .command)
             .help("Command Palette (⌘K)")
 
-            if store.isConnected, let agent = store.connectedAgent {
+            ForEach(store.connectedAgents, id: \.self) { agent in
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(agent.lowercased().contains("codex") ? Color.purple : Color.blue)
+                        .fill(Color.agent(TargetApp(rawValue: agent) ?? .cowork))
                         .frame(width: 8, height: 8)
-                    Text(agent.capitalized)
+                    Text(agent == TargetApp.cowork.rawValue ? "Claude" : "Codex")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(agent) connected")
+                .accessibilityLabel("\(agent == TargetApp.cowork.rawValue ? "Claude" : "Codex") connected")
             }
         }
     }
@@ -191,13 +190,12 @@ struct MainView: View {
                 Button("Retry") { Task { await store.refresh() } }
                     .controlSize(.small)
             }
-            Button {
+            Button("Dismiss", systemImage: "xmark") {
                 store.lastError = nil
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
+            .labelStyle(.iconOnly)
+            .font(.caption)
+            .foregroundStyle(.tertiary)
             .buttonStyle(.plain)
         }
         .padding(Spacing.section)
@@ -265,9 +263,12 @@ private struct FilesTab: View {
 /// "All Domains" → DomainsTableView (governance surface).
 /// Account/mailbox → EmailView (browsing surface with its own NavigationSplitView).
 /// Uses if/else to avoid nesting NavigationSplitViews which crashes on macOS.
+///
+/// EmailSelectionModel lives here so it survives tab switches.
 private struct EmailsTab: View {
     @Environment(ManifoldStore.self) var store
     @State private var emailMode: EmailMode = .domains
+    @State private var emailSelection = EmailSelectionModel()
 
     enum EmailMode: Hashable {
         case domains
@@ -277,20 +278,22 @@ private struct EmailsTab: View {
     var body: some View {
         NavigationSplitView {
             // Sidebar — always present
-            List(selection: $emailMode) {
+            List {
                 Section("Mail") {
-                    Label("All Domains", systemImage: "tray.full")
-                        .tag(EmailMode.domains)
-                    Label("Messages", systemImage: "envelope")
-                        .tag(EmailMode.messages)
+                    sidebarRow("All Domains", systemImage: "tray.full", isSelected: emailMode == .domains) {
+                        emailMode = .domains
+                    }
+                    sidebarRow("Messages", systemImage: "envelope", isSelected: emailMode == .messages && emailSelection.selectedAccountID == nil) {
+                        emailMode = .messages
+                        emailSelection.navigate(accountID: store.emailAccounts.accounts.first?.accountID)
+                    }
                 }
 
                 Section("Accounts") {
                     ForEach(store.emailAccounts.accounts) { account in
-                        Button {
+                        sidebarRow(account.displayName, systemImage: account.provider.systemImage, isSelected: emailMode == .messages && emailSelection.selectedAccountID == account.accountID) {
                             emailMode = .messages
-                        } label: {
-                            Label(account.displayName, systemImage: "envelope")
+                            emailSelection.navigate(accountID: account.accountID)
                         }
                     }
                     if store.emailAccounts.accounts.isEmpty {
@@ -314,15 +317,20 @@ private struct EmailsTab: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
             .navigationTitle("Emails")
         } detail: {
-            // Content switches based on sidebar selection
             switch emailMode {
             case .domains:
                 DomainsTableView()
             case .messages:
-                // EmailView has its own NavigationSplitView internally
-                // This is safe because it's the sole detail content, not nested
-                EmailView()
+                EmailView(selection: emailSelection)
             }
         }
+    }
+
+    private func sidebarRow(_ title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
+        .fontWeight(isSelected ? .medium : .regular)
     }
 }

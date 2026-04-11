@@ -5,11 +5,21 @@ struct VersionsView: View {
     @Environment(ManifoldStore.self) var store
     @State private var searchText = ""
     @State private var filteredFiles: [String] = []
+    @State private var filterTask: Task<Void, Never>?
 
     private func refilter() {
         filteredFiles = searchText.isEmpty
             ? store.allTrackedFiles
             : store.allTrackedFiles.filter { $0.localizedStandardContains(searchText) }
+    }
+
+    private func scheduleRefilter() {
+        filterTask?.cancel()
+        filterTask = Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            refilter()
+        }
     }
 
     var body: some View {
@@ -49,6 +59,6 @@ struct VersionsView: View {
         .navigationSubtitle(store.storageUsed > 0 ? ByteCountFormatter.string(fromByteCount: store.storageUsed, countStyle: .file) : "")
         .task { await store.loadTrackedFiles(); await store.loadStorageStats(); refilter() }
         .onChange(of: store.allTrackedFiles.count) { _, _ in Task { @MainActor in refilter() } }
-        .onChange(of: searchText) { _, _ in Task { @MainActor in refilter() } }
+        .onChange(of: searchText) { _, _ in scheduleRefilter() }
     }
 }

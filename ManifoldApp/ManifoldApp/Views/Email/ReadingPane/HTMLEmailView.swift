@@ -32,13 +32,13 @@ struct HTMLEmailView: NSViewRepresentable {
             // Strip angle brackets from Content-ID
             let cid = contentID
                 .trimmingCharacters(in: .whitespaces)
-                .replacingOccurrences(of: "<", with: "")
-                .replacingOccurrences(of: ">", with: "")
+                .replacing("<", with: "")
+                .replacing(">", with: "")
             guard !cid.isEmpty else { continue }
 
             let base64 = attachment.data.base64EncodedString()
             let dataURI = "data:\(attachment.mimeType);base64,\(base64)"
-            result = result.replacingOccurrences(of: "cid:\(cid)", with: dataURI)
+            result = result.replacing("cid:\(cid)", with: dataURI)
         }
         return result
     }

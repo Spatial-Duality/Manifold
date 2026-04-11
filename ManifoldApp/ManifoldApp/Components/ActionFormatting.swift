@@ -44,7 +44,7 @@ enum ActionFormatting {
             return "tool call"
         }
         guard let path = entry.filePath else {
-            return entry.agent ?? entry.action.replacingOccurrences(of: "_", with: " ")
+            return entry.agent ?? entry.action.replacing("_", with: " ")
         }
         let name = URL(fileURLWithPath: path).lastPathComponent
         return switch entry.action {

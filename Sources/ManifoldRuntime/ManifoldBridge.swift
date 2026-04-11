@@ -19,7 +19,7 @@ public actor ManifoldBridge {
     private let workBlockStore: WorkBlockStore?
     private let approvalQueue: ApprovalQueue?
     private let exposureStore: ExposureStore?
-    private let targetApp: TargetApp
+    nonisolated let targetApp: TargetApp
     private let profileID: String
     private var runtimeContext: AgentRuntimeContext
     private var connectionLogged = false
@@ -64,7 +64,7 @@ public actor ManifoldBridge {
         )
     }
 
-    private var agentName: String { targetApp.rawValue }
+    public nonisolated var agentName: String { targetApp.rawValue }
 
     private func mergedMetadata(_ metadata: [String: String] = [:]) -> [String: String] {
         runtimeContext.eventContextMetadata.merging(metadata) { _, new in new }

@@ -15,9 +15,12 @@ do {
     agentLogger.info("ManifoldAgent ready on \(ManifoldXPCClient.serviceName, privacy: .public)")
 
     Task {
-        _ = try? await runtime.snapshotStore.pruneByAge(days: 30)
-        _ = try? await runtime.contentStore.garbageCollect()
-        _ = try? await runtime.approvalQueue.expire(olderThan: 30 * 60)
+        do { _ = try await runtime.snapshotStore.pruneByAge(days: 30) }
+        catch { agentLogger.warning("Snapshot pruning failed: \(error.localizedDescription, privacy: .public)") }
+        do { _ = try await runtime.contentStore.garbageCollect() }
+        catch { agentLogger.warning("Garbage collection failed: \(error.localizedDescription, privacy: .public)") }
+        do { _ = try await runtime.approvalQueue.expire(olderThan: 30 * 60) }
+        catch { agentLogger.warning("Approval queue cleanup failed: \(error.localizedDescription, privacy: .public)") }
     }
 
     RunLoop.main.run()

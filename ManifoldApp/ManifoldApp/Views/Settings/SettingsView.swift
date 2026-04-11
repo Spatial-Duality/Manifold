@@ -6,14 +6,18 @@ import ManifoldKit
 struct SettingsView: View {
     var body: some View {
         TabView {
-            GeneralSettingsPane()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            AIAppsSettingsPane()
-                .tabItem { Label("AI Apps", systemImage: "cpu") }
-            MailSettingsPane()
-                .tabItem { Label("Mail", systemImage: "envelope") }
-            StorageSettingsPane()
-                .tabItem { Label("Storage", systemImage: "externaldrive") }
+            Tab("General", systemImage: "gearshape") {
+                GeneralSettingsPane()
+            }
+            Tab("AI Apps", systemImage: "cpu") {
+                AIAppsSettingsPane()
+            }
+            Tab("Mail", systemImage: "envelope") {
+                MailSettingsPane()
+            }
+            Tab("Storage", systemImage: "externaldrive") {
+                StorageSettingsPane()
+            }
         }
         .frame(minWidth: 580, minHeight: 500)
     }

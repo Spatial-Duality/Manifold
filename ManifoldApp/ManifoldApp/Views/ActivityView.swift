@@ -7,18 +7,36 @@ struct ActivityView: View {
     @State private var searchText = ""
     @State private var filteredEntries: [AuditEntry] = []
     @State private var copiedSummary = false
-    @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var filterDebounceTask: Task<Void, Never>?
 
-    private func refilter() {
-        var entries = store.activityEntries
-        if actionFilter != "all" { entries = entries.filter { $0.action == actionFilter } }
-        if !searchText.isEmpty {
-            entries = entries.filter {
-                ($0.filePath ?? "").localizedStandardContains(searchText) ||
-                $0.action.localizedStandardContains(searchText)
+    private func refilter() async {
+        let entries = store.activityEntries
+        let filter = actionFilter
+        let query = searchText
+
+        let result = await Task.detached(priority: .userInitiated) {
+            var items = entries
+            if filter != "all" { items = items.filter { $0.action == filter } }
+            if !query.isEmpty {
+                items = items.filter {
+                    ($0.filePath ?? "").localizedStandardContains(query) ||
+                    $0.action.localizedStandardContains(query)
+                }
             }
+            return items
+        }.value
+
+        guard !Task.isCancelled else { return }
+        filteredEntries = result
+    }
+
+    private func scheduleRefilter() {
+        filterDebounceTask?.cancel()
+        filterDebounceTask = Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            await refilter()
         }
-        filteredEntries = entries
     }
 
     var body: some View {
@@ -94,17 +112,10 @@ struct ActivityView: View {
                     .controlSize(.small)
             }
         }
-        .task { refilter(); await store.loadSessions() }
-        .onChange(of: store.activityEntries.count) { _, _ in Task { @MainActor in refilter(); await store.loadSessions() } }
-        .onChange(of: actionFilter) { _, _ in Task { @MainActor in refilter() } }
-        .onChange(of: searchText) { _, _ in
-            searchDebounceTask?.cancel()
-            searchDebounceTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled else { return }
-                refilter()
-            }
-        }
+        .task { await refilter(); await store.loadSessions() }
+        .onChange(of: store.activityEntries.count) { _, _ in Task { await refilter(); await store.loadSessions() } }
+        .onChange(of: actionFilter) { _, _ in scheduleRefilter() }
+        .onChange(of: searchText) { _, _ in scheduleRefilter() }
     }
 
     private var filterLabel: String {
@@ -130,19 +141,15 @@ struct ActivityView: View {
         let entries = store.activityEntries
         guard !entries.isEmpty else { return }
 
-        let csv = "Timestamp,Action,Agent,File,Details\n" + entries.map { entry in
-            let ts = entry.timestamp
-            let action = entry.action
-            let agent = entry.agent ?? ""
-            let file = entry.filePath ?? ""
-            let details = entry.metadata ?? ""
-            return "\"\(ts)\",\"\(action)\",\"\(agent)\",\"\(file)\",\"\(details)\""
-        }.joined(separator: "\n")
-
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "manifold-activity-\(ISO8601DateFormatter.shared.string(from: Date()).prefix(10)).csv"
-        if panel.runModal() == .OK, let url = panel.url {
+        panel.nameFieldStringValue = "manifold-activity-\(ISO8601DateFormatter.shared.string(from: .now).prefix(10)).csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        Task.detached(priority: .userInitiated) {
+            let csv = "Timestamp,Action,Agent,File,Details\n" + entries.map { entry in
+                "\"\(entry.timestamp)\",\"\(entry.action)\",\"\(entry.agent ?? "")\",\"\(entry.filePath ?? "")\",\"\(entry.metadata ?? "")\""
+            }.joined(separator: "\n")
             try? csv.write(to: url, atomically: true, encoding: .utf8)
         }
     }
@@ -349,8 +356,8 @@ struct SessionEventRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(event.filePath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? event.action)
                         .font(.callout).lineLimit(1)
-                    Text(event.action.replacingOccurrences(of: "_", with: " "))
-                        .font(.caption2)
+                    Text(event.action.replacing("_", with: " "))
+                        .font(.caption)
                         .foregroundStyle(ActionFormatting.color(for: event.action))
                 }
 

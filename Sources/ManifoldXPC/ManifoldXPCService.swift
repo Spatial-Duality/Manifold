@@ -61,7 +61,9 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             let connectionID = UUID().uuidString
             let targetApp = TargetApp(rawValue: agent) ?? .cowork
             let bridge = await runtime.bridge(for: connectionID, targetApp: targetApp, version: clientVersion)
-            let params = (try? XPCJSON.dictionary(from: initializeParams)) ?? [:]
+            let params: [String: Any]
+            do { params = try XPCJSON.dictionary(from: initializeParams) }
+            catch { params = [:]; xpcLogger.warning("Malformed initializeParams: \(error.localizedDescription, privacy: .public)") }
             await bridge.registerClientContext(initializeParams: params)
             await registry.insert(connectionID: connectionID, bridge: bridge)
             replyBox.reply(connectionID, nil)
@@ -91,7 +93,9 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 return
             }
 
-            let args = (try? XPCJSON.dictionary(from: arguments)) ?? [:]
+            let args: [String: Any]
+            do { args = try XPCJSON.dictionary(from: arguments) }
+            catch { args = [:]; xpcLogger.warning("Malformed tool arguments for \(toolName): \(error.localizedDescription, privacy: .public)") }
             let result = await Self.handleTool(name: toolName, arguments: args, bridge: bridge)
             let isError = result["isError"] as? Bool ?? false
             replyBox.reply((try? XPCJSON.data(from: result)) ?? Data(), isError)
@@ -106,7 +110,9 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         let replyBox = CommandReplyBox(reply: reply)
         Task {
             do {
-                let commandPayload = (try? XPCJSON.dictionary(from: payload)) ?? [:]
+                let commandPayload: [String: Any]
+                do { commandPayload = try XPCJSON.dictionary(from: payload) }
+                catch { commandPayload = [:]; xpcLogger.warning("Malformed command payload for \(name): \(error.localizedDescription, privacy: .public)") }
                 let result = try await handleCommand(name: name, payload: commandPayload)
                 replyBox.reply(try XPCJSON.data(from: result), nil)
             } catch {
@@ -126,9 +132,11 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             let codexPolicy = try await runtime.policyStore.policy(for: .codex)
             let activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
             let pendingApprovals = try await runtime.approvalQueue.pending()
+            let connectedAgents = await runtime.connectedAgents
             return [
                 "runtimeConnected": true,
                 "activeBridgeCount": await runtime.activeBridgeCount,
+                "connectedAgents": connectedAgents,
                 "sources": sources.map(Self.sourceJSON),
                 "claudePolicy": Self.policyJSON(claudePolicy),
                 "codexPolicy": Self.policyJSON(codexPolicy),

@@ -5,7 +5,7 @@ import ManifoldKit
 
 struct EmailView: View {
     @Environment(ManifoldStore.self) var store
-    @State private var selection = EmailSelectionModel()
+    @Bindable var selection: EmailSelectionModel
     @State private var search = EmailSearchModel()
     @State private var messages: [EmailMessageRecord] = []
     @State private var showAddAccount = false
@@ -213,17 +213,17 @@ private struct EmailAccountDetailSheet: View {
         case .syncing:
             HStack(spacing: 4) {
                 ProgressView().controlSize(.mini)
-                Text("Syncing").font(.caption2).foregroundStyle(.secondary)
+                Text("Syncing").font(.caption).foregroundStyle(.secondary)
             }
         case .error:
             Label("Error", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption2).foregroundStyle(.orange)
+                .font(.caption).foregroundStyle(.orange)
         case .idle:
             Label("OK", systemImage: "checkmark.circle.fill")
-                .font(.caption2).foregroundStyle(.green)
+                .font(.caption).foregroundStyle(.green)
         case .pausedNoDrive:
             Label("Paused", systemImage: "pause.circle")
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 

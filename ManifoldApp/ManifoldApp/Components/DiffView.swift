@@ -56,7 +56,7 @@ private struct DiffLineRow: View {
         HStack(spacing: 0) {
             // Line number
             Text("\(lineNumber)")
-                .font(.caption2.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.quaternary)
                 .frame(width: 24, alignment: .trailing)
                 .padding(.trailing, Spacing.standard)

@@ -93,6 +93,11 @@ public actor ManifoldRuntime {
         bridges.count
     }
 
+    /// Returns the set of agent names that currently have active XPC bridge connections.
+    public var connectedAgents: [String] {
+        Array(Set(bridges.values.map(\.agentName))).sorted()
+    }
+
     public nonisolated static var defaultStoreURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Manifold")

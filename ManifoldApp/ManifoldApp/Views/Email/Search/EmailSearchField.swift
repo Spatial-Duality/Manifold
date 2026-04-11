@@ -128,7 +128,7 @@ private struct SearchTokenChip: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("\(token.type.rawValue.capitalized):")
-                .font(.caption2.weight(.medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(token.value)
                 .font(.caption)
@@ -136,7 +136,7 @@ private struct SearchTokenChip: View {
                 onRemove()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

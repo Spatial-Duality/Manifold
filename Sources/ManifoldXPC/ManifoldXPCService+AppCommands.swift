@@ -419,7 +419,7 @@ extension ManifoldXPCService {
         let preferredAgent = (payload["targetApp"] as? String).flatMap(TargetApp.init(rawValue:)) ?? .cowork
         let state = try await activeGrantState(preferredAgent: preferredAgent)
         return [
-            "activeGrant": state.grant.map { try! XPCJSON.object(from: $0) } ?? NSNull(),
+            "activeGrant": try state.grant.map { try XPCJSON.object(from: $0) } ?? NSNull(),
             "activeGrantSources": try XPCJSON.object(from: state.sources),
             "targetApp": state.targetApp?.rawValue as Any,
         ]

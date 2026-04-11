@@ -5,6 +5,7 @@ import ManifoldXPC
 struct DashboardState: Codable, Sendable {
     let runtimeConnected: Bool
     let activeBridgeCount: Int
+    let connectedAgents: [String]
     let sources: [SourceRecord]
     let claudePolicy: AgentAccessPolicy
     let codexPolicy: AgentAccessPolicy

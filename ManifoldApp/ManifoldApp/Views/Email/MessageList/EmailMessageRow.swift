@@ -16,21 +16,21 @@ struct EmailMessageRow: View {
                     Spacer()
                     if message.isFlagged {
                         Image(systemName: "flag.fill")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if message.attachmentCount > 0 {
                         Image(systemName: "paperclip")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     if isShared {
                         Image(systemName: "person.2.fill")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.purple)
                     }
                     Text(formattedDate)
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                         .monospacedDigit()
                 }
@@ -38,7 +38,7 @@ struct EmailMessageRow: View {
                 // Deleted-on-server badge
                 if message.isDeletedOnServer {
                     Text("Server deleted")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.red)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -71,28 +71,46 @@ struct EmailMessageRow: View {
         return s
     }
 
-    private var formattedDate: String {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = iso.date(from: message.receivedAt) ?? {
-            let iso2 = ISO8601DateFormatter()
-            iso2.formatOptions = [.withInternetDateTime]
-            return iso2.date(from: message.receivedAt)
-        }()
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoFallbackFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+    private static let monthDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+    private static let fullDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, y"
+        return f
+    }()
 
+    private var formattedDate: String {
+        let date = Self.isoFormatter.date(from: message.receivedAt)
+            ?? Self.isoFallbackFormatter.date(from: message.receivedAt)
         guard let d = date else { return message.receivedAt }
 
-        let display = DateFormatter()
         let cal = Calendar.current
         if cal.isDateInToday(d) {
-            display.dateFormat = "h:mm a"
+            return Self.timeFormatter.string(from: d)
         } else if cal.isDateInYesterday(d) {
             return "Yesterday"
-        } else if cal.isDate(d, equalTo: Date(), toGranularity: .year) {
-            display.dateFormat = "MMM d"
+        } else if cal.isDate(d, equalTo: .now, toGranularity: .year) {
+            return Self.monthDayFormatter.string(from: d)
         } else {
-            display.dateFormat = "MMM d, yyyy"
+            return Self.fullDateFormatter.string(from: d)
         }
-        return display.string(from: d)
     }
 }

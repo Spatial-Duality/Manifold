@@ -197,7 +197,7 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist",
-				"$(BUILT_PRODUCTS_DIR)/ManifoldAgent",
+				"$(SRCROOT)/Sources/ManifoldAgent/main.swift",
 			);
 			name = "Bundle Launch Agent";
 			outputPaths = (
@@ -206,7 +206,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${BUILT_PRODUCTS_DIR}/ManifoldAgent\" \"$launch_services_dir/ManifoldAgent\"\nchmod +x \"$launch_services_dir/ManifoldAgent\"\n";
+			shellScript = "set -euo pipefail\ncd \"${SRCROOT}\"\nswift build --product ManifoldAgent -c debug 2>&1\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nhelper_path=\"$launch_services_dir/ManifoldAgent\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${SRCROOT}/.build/debug/ManifoldAgent\" \"$helper_path\"\nchmod +x \"$helper_path\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none --generate-entitlement-der \"$helper_path\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -448,7 +448,6 @@
 			packageProductDependencies = (
 				59CA05998C5293BB2C2FB2E7 /* ManifoldKit */,
 				AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */,
-				AA1E6D77C2B34D2EA0F7A106 /* ManifoldAgent */,
 			);
 			productName = Manifold;
 			productReference = 564B55046AEBA3B1643FE2FE /* Manifold.app */;
@@ -787,10 +786,6 @@
 		59CA05998C5293BB2C2FB2E7 /* ManifoldKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ManifoldKit;
-		};
-		AA1E6D77C2B34D2EA0F7A106 /* ManifoldAgent */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ManifoldAgent;
 		};
 		AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */ = {
 			isa = XCSwiftPackageProductDependency;

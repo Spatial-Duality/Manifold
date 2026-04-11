@@ -15,9 +15,10 @@ struct WorkBlockBannerView: View {
         block.agent == .codex ? .purple : .blue
     }
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     private func elapsedText(at now: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let start = formatter.date(from: block.startedAt) else { return "" }
+        guard let start = Self.isoFormatter.date(from: block.startedAt) else { return "" }
         let elapsed = now.timeIntervalSince(start)
         let hours = Int(elapsed) / 3600
         let minutes = (Int(elapsed) % 3600) / 60

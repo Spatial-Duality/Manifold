@@ -65,7 +65,7 @@ struct OverviewView: View {
         AgentPolicyCard(
             agentName: "Claude",
             agentColor: .blue,
-            isConnected: store.isConnected && store.connectedAgent?.lowercased().contains("codex") != true,
+            isConnected: store.isClaudeConnected,
             sourceCount: claudePolicy?.allowedSourceIDs.count ?? 0,
             totalSources: totalSources,
             emailAccountCount: claudePolicy?.allowedEmailDomains.count ?? 0,
@@ -93,7 +93,7 @@ struct OverviewView: View {
         AgentPolicyCard(
             agentName: "Codex",
             agentColor: .purple,
-            isConnected: store.connectedAgent?.lowercased().contains("codex") == true,
+            isConnected: store.isCodexConnected,
             sourceCount: codexPolicy?.allowedSourceIDs.count ?? 0,
             totalSources: totalSources,
             emailAccountCount: codexPolicy?.allowedEmailDomains.count ?? 0,

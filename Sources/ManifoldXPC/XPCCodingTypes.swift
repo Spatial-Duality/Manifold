@@ -77,7 +77,17 @@ public enum XPCJSON {
     }
 
     public static func decode<T: Decodable>(_ type: T.Type, from object: Any) throws -> T {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let data: Data
+        if JSONSerialization.isValidJSONObject(object) {
+            data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        } else {
+            // Scalar value (Bool, Int, String) — not a valid top-level JSON object.
+            // Wrap in array so JSONSerialization can handle it, then decode the first element.
+            let wrapped = try JSONSerialization.data(withJSONObject: [object])
+            let array = try JSONDecoder().decode([T].self, from: wrapped)
+            guard let first = array.first else { throw ManifoldXPCError.malformedReply }
+            return first
+        }
         return try JSONDecoder().decode(T.self, from: data)
     }
 }

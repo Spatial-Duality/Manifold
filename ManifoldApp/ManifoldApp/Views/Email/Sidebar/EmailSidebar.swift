@@ -61,7 +61,7 @@ private struct SmartMailboxSection: View {
                         .font(.caption)
                 } description: {
                     Text("Create rules to automatically filter your backed-up emails.")
-                        .font(.caption2)
+                        .font(.caption)
                 }
             } else {
                 ForEach(smartMailboxes) { mailbox in

@@ -51,6 +51,12 @@ final class ManifoldStore {
     var isConnected = false
     var isRuntimeConnected = false
     var connectedAgent: String?
+    var connectedAgents: [String] = []
+
+    /// Whether Claude (cowork) has an active MCP bridge connection to the runtime.
+    var isClaudeConnected: Bool { connectedAgents.contains(TargetApp.cowork.rawValue) }
+    /// Whether Codex has an active MCP bridge connection to the runtime.
+    var isCodexConnected: Bool { connectedAgents.contains(TargetApp.codex.rawValue) }
 
     var sources: [SourceRecord] = []
     var approvedSources: [String] { sources.filter(\.isAccessible).map(\.originalRootPath) }
@@ -68,7 +74,7 @@ final class ManifoldStore {
     let runtime = AppRuntimeClient()
     private var connectionMonitorTask: Task<Void, Never>?
 
-    var menuBarIcon: String { isRuntimeConnected ? "shield.checkered.fill" : "shield.checkered" }
+    var menuBarIcon: String { isRuntimeConnected ? "checkmark.shield.fill" : "shield.slash" }
 
     init() {
         session = SessionModel()
@@ -107,6 +113,7 @@ final class ManifoldStore {
 
         guard connected else {
             connectedAgent = nil
+            connectedAgents = []
             if force {
                 lastError = "Unable to connect to the Manifold runtime."
             }
@@ -119,6 +126,9 @@ final class ManifoldStore {
             policy.claudePolicy = dashboard.claudePolicy
             policy.codexPolicy = dashboard.codexPolicy
             policy.activeWorkBlock = dashboard.activeWorkBlock
+            connectedAgents = dashboard.connectedAgents
+            // Derive connectedAgent from actual runtime data, not heuristics
+            connectedAgent = dashboard.connectedAgents.first
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -133,14 +143,6 @@ final class ManifoldStore {
         await storage.loadStorageStats()
         await storage.loadTrackedFiles()
         await emailAccounts.loadAccounts()
-
-        if let recentConnection = history.activityEntries.first(where: { $0.action == "mcp_connection" })?.agent {
-            connectedAgent = recentConnection
-        } else if policy.activeWorkBlock?.agent == .codex {
-            connectedAgent = "codex"
-        } else if isConnected {
-            connectedAgent = agentFocus == .codex ? "codex" : "claude"
-        }
     }
 
     private func startConnectionMonitor() {
@@ -155,6 +157,7 @@ final class ManifoldStore {
                     self.isConnected = connected
                     if !connected {
                         self.connectedAgent = nil
+                        self.connectedAgents = []
                     }
                 }
 
@@ -196,12 +199,16 @@ final class ManifoldStore {
     func addSource(path: String) {
         let folderName = URL(fileURLWithPath: path).lastPathComponent
         Task {
+            guard isRuntimeConnected else {
+                lastError = "Cannot add \"\(folderName)\" — runtime is not connected. Check that ManifoldAgent is running."
+                return
+            }
             do {
                 _ = try await runtime.addSource(path: path, displayName: folderName)
                 await loadSources()
             } catch {
                 logger.error("Failed to add source \(folderName): \(error.localizedDescription)")
-                lastError = "Failed to add \(folderName)"
+                lastError = "Failed to add \"\(folderName)\": \(error.localizedDescription)"
             }
         }
     }
@@ -275,6 +282,7 @@ final class ManifoldStore {
         var result: [SourceFile] = []
 
         for source in sources {
+            guard !Task.isCancelled else { return result }
             let root = URL(fileURLWithPath: source.originalRootPath)
             guard let enumerator = fm.enumerator(
                 at: root,
@@ -284,6 +292,7 @@ final class ManifoldStore {
 
             let basePath = root.path + "/"
             while let url = enumerator.nextObject() as? URL {
+                guard !Task.isCancelled else { return result }
                 guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
                       values.isRegularFile == true else { continue }
                 let path = url.path
@@ -321,6 +330,7 @@ final class ManifoldStore {
             var result: [SourceFile] = []
 
             for mount in mounts {
+                guard !Task.isCancelled else { return result }
                 let root = URL(fileURLWithPath: mount.mountPath)
                 guard let enumerator = fm.enumerator(
                     at: root,
@@ -329,6 +339,7 @@ final class ManifoldStore {
                 ) else { continue }
 
                 while let url = enumerator.nextObject() as? URL {
+                    guard !Task.isCancelled else { return result }
                     guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
                           values.isRegularFile == true else { continue }
                     let relativePath = await session.canonicalPath(for: url, base: root, mountName: mount.mountName)
@@ -351,47 +362,51 @@ final class ManifoldStore {
         }.value
     }
 
-    func searchFileContents(query: String, includeArchived: Bool = false) -> [SearchResult] {
-        let fm = FileManager.default
-        var results: [SearchResult] = []
+    func searchFileContents(query: String, includeArchived: Bool = false) async -> [SearchResult] {
         let mounts = session.currentGrantMounts()
+        let capturedSession = session
+        return await Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            var results: [SearchResult] = []
 
-        for mount in mounts {
-            let root = URL(fileURLWithPath: mount.mountPath)
-            guard let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+            for mount in mounts {
+                let root = URL(fileURLWithPath: mount.mountPath)
+                guard let enumerator = fm.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                ) else { continue }
 
-            while let url = enumerator.nextObject() as? URL {
-                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-                      values.isRegularFile == true,
-                      let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                let relativePath = session.canonicalPath(for: url, base: root, mountName: mount.mountName)
-                guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
+                while let url = enumerator.nextObject() as? URL {
+                    guard !Task.isCancelled else { return results }
+                    guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                          values.isRegularFile == true,
+                          let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                    let relativePath = await capturedSession.canonicalPath(for: url, base: root, mountName: mount.mountName)
+                    guard !relativePath.hasPrefix("\(mount.mountName)/.manifold-") else { continue }
 
-                let lines = content.components(separatedBy: "\n")
-                let matches = Array(lines.enumerated().lazy
-                    .filter { $0.element.localizedCaseInsensitiveContains(query) }
-                    .prefix(5)
-                    .map { SearchMatch(lineNumber: $0.offset + 1, lineText: String($0.element.prefix(200))) })
+                    let lines = content.components(separatedBy: "\n")
+                    let matches = Array(lines.enumerated().lazy
+                        .filter { $0.element.localizedCaseInsensitiveContains(query) }
+                        .prefix(5)
+                        .map { SearchMatch(lineNumber: $0.offset + 1, lineText: String($0.element.prefix(200))) })
 
-                if !matches.isEmpty {
-                    results.append(SearchResult(
-                        fileName: url.lastPathComponent,
-                        filePath: url.path,
-                        sourceName: mount.mountName,
-                        isGranted: true,
-                        canonicalPath: relativePath,
-                        matches: Array(matches)
-                    ))
+                    if !matches.isEmpty {
+                        results.append(SearchResult(
+                            fileName: url.lastPathComponent,
+                            filePath: url.path,
+                            sourceName: mount.mountName,
+                            isGranted: true,
+                            canonicalPath: relativePath,
+                            matches: Array(matches)
+                        ))
+                    }
+                    if results.count >= 100 { return results }
                 }
-                if results.count >= 100 { return results }
             }
-        }
 
-        return results
+            return results
+        }.value
     }
 
     func startSession(targetApp: TargetApp = .cowork) async {
@@ -531,11 +546,48 @@ final class ManifoldStore {
     }
 
     func registerAgent() {
+        // Try SMAppService first (works when app is properly installed in /Applications)
         do {
             let service = SMAppService.agent(plistName: Self.agentPlistName)
             try service.register()
+            logger.info("LaunchAgent registered via SMAppService")
+            return
         } catch {
-            logger.notice("LaunchAgent registration skipped: \(error.localizedDescription)")
+            logger.notice("SMAppService registration failed: \(error.localizedDescription, privacy: .public)")
+        }
+
+        // Fallback: register via launchd plist directly (for dev builds from Xcode)
+        let bundledAgent = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Library/LaunchServices/ManifoldAgent")
+        guard FileManager.default.isExecutableFile(atPath: bundledAgent.path) else {
+            logger.warning("ManifoldAgent not found at \(bundledAgent.path, privacy: .public)")
+            return
+        }
+        let plistURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.spatialduality.manifold.runtime.plist")
+        let plist: [String: Any] = [
+            "Label": "com.spatialduality.manifold.runtime",
+            "ProgramArguments": [bundledAgent.path],
+            "MachServices": ["com.spatialduality.manifold.runtime": true],
+            "KeepAlive": ["SuccessfulExit": false],
+            "ProcessType": "Interactive",
+        ]
+        do {
+            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            try data.write(to: plistURL, options: .atomic)
+            let load = Process()
+            load.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            load.arguments = ["bootout", "gui/\(getuid())/com.spatialduality.manifold.runtime"]
+            try? load.run()
+            load.waitUntilExit()
+            let bootstrap = Process()
+            bootstrap.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            bootstrap.arguments = ["bootstrap", "gui/\(getuid())", plistURL.path]
+            try bootstrap.run()
+            bootstrap.waitUntilExit()
+            logger.info("ManifoldAgent registered via launchd fallback")
+        } catch {
+            logger.error("Failed to register ManifoldAgent via launchd: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -544,7 +596,12 @@ final class ManifoldStore {
             let service = SMAppService.agent(plistName: Self.agentPlistName)
             try service.unregister()
         } catch {
-            logger.notice("LaunchAgent unregister skipped: \(error.localizedDescription)")
+            // Fallback: bootout via launchctl
+            let bootout = Process()
+            bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            bootout.arguments = ["bootout", "gui/\(getuid())/com.spatialduality.manifold.runtime"]
+            try? bootout.run()
+            bootout.waitUntilExit()
         }
     }
 

@@ -14,8 +14,8 @@ struct ActivityRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(ActionFormatting.description(for: entry))
                     .font(.callout).lineLimit(1)
-                Text(entry.action.replacingOccurrences(of: "_", with: " "))
-                    .font(.caption2)
+                Text(entry.action.replacing("_", with: " "))
+                    .font(.caption)
                     .foregroundStyle(ActionFormatting.color(for: entry.action))
             }
 

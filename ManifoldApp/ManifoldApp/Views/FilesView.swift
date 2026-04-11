@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import ManifoldKit
 
 struct FilesView: View {
@@ -12,12 +11,13 @@ struct FilesView: View {
     @State private var contentSearchText = ""
     @State private var contentSearchResults: [SearchResult] = []
     @State private var isSearchingContent = false
-    @State private var nameFilterTask: Task<Void, Never>?
+    @State private var filterTask: Task<Void, Never>?
     @State private var reloadTask: Task<Void, Never>?
-
-    // Filters
+    @State private var contentSearchTask: Task<Void, Never>?
     @State private var filterSource = "All"
     @State private var filterType = "All"
+    @State private var cachedSourceNames: [String] = ["All"]
+    @State private var cachedFileTypes: [String] = ["All"]
     @SceneStorage("filesSortBy") private var sortBy: SortOption = .name
 
     private enum SortOption: String, CaseIterable {
@@ -25,14 +25,6 @@ struct FilesView: View {
         case size = "Size"
         case modified = "Modified"
         case type = "Type"
-    }
-
-    private var sourceNames: [String] {
-        ["All"] + Array(Set(allFiles.map(\.sourceName))).sorted()
-    }
-
-    private var fileTypes: [String] {
-        ["All"] + Array(Set(allFiles.map(\.fileExtension).filter { !$0.isEmpty })).sorted()
     }
 
     private var selectedSourceID: String? {
@@ -72,7 +64,7 @@ struct FilesView: View {
             // Filter bar
             HStack(spacing: Spacing.section) {
                 Picker("Source", selection: $filterSource) {
-                    ForEach(sourceNames, id: \.self) { Text($0) }
+                    ForEach(cachedSourceNames, id: \.self) { Text($0) }
                 }
                 .frame(maxWidth: 160)
                 .disabled(selectedSourceID != nil)
@@ -185,17 +177,10 @@ struct FilesView: View {
         .onChange(of: store.sources.count) { _, _ in scheduleReload() }
         .onChange(of: store.hasActiveSession) { _, _ in scheduleReload() }
         .onChange(of: store.activeGrantSources.count) { _, _ in scheduleReload() }
-        .onChange(of: searchText) { _, _ in
-            nameFilterTask?.cancel()
-            nameFilterTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled else { return }
-                applyFilters()
-            }
-        }
-        .onChange(of: filterSource) { _, _ in applyFilters() }
-        .onChange(of: filterType) { _, _ in applyFilters() }
-        .onChange(of: sortBy) { _, _ in applyFilters() }
+        .onChange(of: searchText) { _, _ in scheduleFilter() }
+        .onChange(of: filterSource) { _, _ in scheduleFilter() }
+        .onChange(of: filterType) { _, _ in scheduleFilter() }
+        .onChange(of: sortBy) { _, _ in scheduleFilter() }
     }
 
     // MARK: - Context Menu
@@ -233,42 +218,76 @@ struct FilesView: View {
         }
     }
 
-    private func reloadFiles() {
-        Task {
-            if store.hasActiveSession {
-                allFiles = await store.enumerateAllFiles()
-            } else {
-                allFiles = await store.enumerateSourceFiles()
-            }
-            applyFilters()
+    /// Debounced filter — 100ms delay to coalesce rapid changes (typing, rapid clicks).
+    private func scheduleFilter() {
+        filterTask?.cancel()
+        filterTask = Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            await applyFilters()
         }
     }
 
-    private func applyFilters() {
-        var result = allFiles
+    private func reloadFiles() {
+        reloadTask?.cancel()
+        reloadTask = Task {
+            let files: [SourceFile]
+            if store.hasActiveSession {
+                files = await store.enumerateAllFiles()
+            } else {
+                files = await store.enumerateSourceFiles()
+            }
+            guard !Task.isCancelled else { return }
+            allFiles = files
+            rebuildPickerCaches()
+            await applyFilters()
+        }
+    }
 
-        if let selectedSourceID {
-            result = result.filter { $0.sourceID == selectedSourceID }
-        } else if filterSource != "All" {
-            result = result.filter { $0.sourceName == filterSource }
-        }
-        if filterType != "All" {
-            result = result.filter { $0.fileExtension == filterType }
-        }
-        if isAITouchedSelection {
-            result = result.filter(\.hasAIActivity)
-        }
-        if !searchText.isEmpty {
-            result = result.filter { $0.name.localizedStandardContains(searchText) || $0.relativePath.localizedStandardContains(searchText) }
-        }
+    private func rebuildPickerCaches() {
+        cachedSourceNames = ["All"] + Array(Set(allFiles.map(\.sourceName))).sorted()
+        cachedFileTypes = ["All"] + Array(Set(allFiles.map(\.fileExtension).filter { !$0.isEmpty })).sorted()
+    }
 
-        switch sortBy {
-        case .name: result.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        case .size: result.sort { $0.sizeBytes > $1.sizeBytes }
-        case .modified: result.sort { $0.modifiedDate > $1.modifiedDate }
-        case .type: result.sort { $0.fileExtension < $1.fileExtension }
-        }
+    /// Runs filtering and sorting off the main thread, then assigns results back.
+    private func applyFilters() async {
+        let snapshot = allFiles
+        let source = selectedSourceID
+        let sourceName = filterSource
+        let fileType = filterType
+        let aiTouched = isAITouchedSelection
+        let query = searchText
+        let sort = sortBy
 
+        let result = await Task.detached(priority: .userInitiated) {
+            var items = snapshot
+
+            if let source {
+                items = items.filter { $0.sourceID == source }
+            } else if sourceName != "All" {
+                items = items.filter { $0.sourceName == sourceName }
+            }
+            if fileType != "All" {
+                items = items.filter { $0.fileExtension == fileType }
+            }
+            if aiTouched {
+                items = items.filter(\.hasAIActivity)
+            }
+            if !query.isEmpty {
+                items = items.filter { $0.name.localizedStandardContains(query) || $0.relativePath.localizedStandardContains(query) }
+            }
+
+            switch sort {
+            case .name: items.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            case .size: items.sort { $0.sizeBytes > $1.sizeBytes }
+            case .modified: items.sort { $0.modifiedDate > $1.modifiedDate }
+            case .type: items.sort { $0.fileExtension < $1.fileExtension }
+            }
+
+            return items
+        }.value
+
+        guard !Task.isCancelled else { return }
         filteredFiles = result
     }
 
@@ -290,10 +309,12 @@ struct FilesView: View {
             contentSearchResults = []
             return
         }
+        contentSearchTask?.cancel()
         isSearchingContent = true
         let query = contentSearchText
-        Task {
-            let results = store.searchFileContents(query: query)
+        contentSearchTask = Task {
+            let results = await store.searchFileContents(query: query)
+            guard !Task.isCancelled else { return }
             contentSearchResults = results
             isSearchingContent = false
         }

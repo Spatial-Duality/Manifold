@@ -24,14 +24,14 @@ struct MenuBarPanelView: View {
                 MenuBarAgentCard(
                     agent: .cowork,
                     policy: claude,
-                    isConnected: store.isConnected && store.connectedAgent?.lowercased().contains("codex") != true
+                    isConnected: store.isClaudeConnected
                 )
             }
             if let codex = store.policy.codexPolicy {
                 MenuBarAgentCard(
                     agent: .codex,
                     policy: codex,
-                    isConnected: store.connectedAgent?.lowercased().contains("codex") == true
+                    isConnected: store.isCodexConnected
                 )
             }
 
@@ -115,6 +115,8 @@ struct MenuBarWorkBlockStrip: View {
     let block: WorkBlockRecord
     @Environment(ManifoldStore.self) var store
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     var body: some View {
         HStack(spacing: 8) {
             Circle()
@@ -128,8 +130,7 @@ struct MenuBarWorkBlockStrip: View {
                 .foregroundStyle(.tertiary)
 
             TimelineView(.periodic(from: .now, by: 60)) { context in
-                let formatter = ISO8601DateFormatter.shared
-                let elapsed = formatter.date(from: block.startedAt).map {
+                let elapsed = Self.isoFormatter.date(from: block.startedAt).map {
                     context.date.timeIntervalSince($0)
                 } ?? 0
                 let min = Int(elapsed) / 60

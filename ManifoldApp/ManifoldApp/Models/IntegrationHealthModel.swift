@@ -67,8 +67,7 @@ final class IntegrationHealthModel {
         }
 
         // 3. Live connection?
-        if let store, store.isConnected,
-           store.connectedAgent?.lowercased().contains("codex") != true {
+        if let store, store.isClaudeConnected {
             claude.connectionVerified = .connected
         } else if claude.mcpConfigured == .installed {
             claude.connectionVerified = .configured

@@ -60,7 +60,7 @@ private struct AttachmentCard: View {
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
                     Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }

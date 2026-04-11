@@ -163,7 +163,7 @@ struct DomainsTableView: View {
             // Hidden reason badge
             if let reason = domain.hiddenReason {
                 Text(reason)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
