@@ -6,7 +6,7 @@ private let keychainLogger = Logger(subsystem: "com.spatialduality.manifold", ca
 
 // MARK: - EmailProvider
 
-public enum EmailProvider: String, Sendable, CaseIterable {
+public enum EmailProvider: String, Sendable, CaseIterable, Codable {
     case gmail, outlook, icloud, yahoo, fastmail, other
 
     public var displayName: String {
@@ -35,7 +35,7 @@ public enum EmailProvider: String, Sendable, CaseIterable {
 // MARK: - EmailAccountRecord
 
 /// Persistent record for a configured email account.
-public struct EmailAccountRecord: Sendable, Identifiable {
+public struct EmailAccountRecord: Sendable, Identifiable, Codable {
     public var id: String { accountID }
     public let accountID: String
     public let displayName: String

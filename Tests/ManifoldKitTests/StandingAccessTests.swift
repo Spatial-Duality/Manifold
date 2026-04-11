@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 @testable import ManifoldKit
-@testable import ManifoldMCP
+@testable import ManifoldRuntime
 
 /// Integration tests for standing access via PolicyStore + ManifoldBridge.
 /// Validates that the bridge resolves access through policies (not grants)
@@ -18,8 +18,11 @@ struct StandingAccessTests {
         let artifactIndex: ArtifactIndex
         let policyStore: PolicyStore
         let workBlockStore: WorkBlockStore
+        let approvalQueue: ApprovalQueue
+        let exposureStore: ExposureStore
         let bridge: ManifoldBridge
         let tempDir: URL
+        let connectionID: String
     }
 
     func makeHarness() throws -> Harness {
@@ -38,6 +41,9 @@ struct StandingAccessTests {
         let artifactIndex = try ArtifactIndex(db: db)
         let policyStore = PolicyStore(db: db)
         let workBlockStore = WorkBlockStore(db: db)
+        let approvalQueue = ApprovalQueue(db: db)
+        let exposureStore = ExposureStore(db: db)
+        let connectionID = "standing-test-\(UUID().uuidString)"
 
         let bridge = ManifoldBridge(
             db: db,
@@ -48,14 +54,19 @@ struct StandingAccessTests {
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
             policyStore: policyStore,
-            workBlockStore: workBlockStore
+            workBlockStore: workBlockStore,
+            approvalQueue: approvalQueue,
+            exposureStore: exposureStore,
+            connectionID: connectionID
         )
 
         return Harness(
             db: db, contentStore: contentStore, snapshotStore: snapshotStore,
             auditStore: auditStore, grantStore: grantStore, emailStore: emailStore,
             artifactIndex: artifactIndex, policyStore: policyStore,
-            workBlockStore: workBlockStore, bridge: bridge, tempDir: tempDir
+            workBlockStore: workBlockStore, approvalQueue: approvalQueue,
+            exposureStore: exposureStore, bridge: bridge, tempDir: tempDir,
+            connectionID: connectionID
         )
     }
 
@@ -145,5 +156,54 @@ struct StandingAccessTests {
 
         let status = await h.bridge.getStatus()
         #expect(status.active)
+    }
+
+    @Test("Standing access write escalates and queues approval")
+    func standingWriteEscalates() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+
+        let result = try await h.bridge.writeFile(path: "myapp/README.md", content: "updated")
+        switch result {
+        case .escalationRequired(let message, let path):
+            #expect(message.contains("read-only"))
+            #expect(path == "myapp/README.md")
+        case .written:
+            Issue.record("Standing access should not write files directly")
+        }
+
+        let pending = try await h.approvalQueue.pending()
+        #expect(pending.count == 1)
+        #expect(pending[0].path == "myapp/README.md")
+        #expect(pending[0].action == "write")
+    }
+
+    @Test("Read file records access decision and exposure")
+    func readFileRecordsDecisionAndExposure() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+
+        let content = try await h.bridge.readFile(path: "myapp/README.md")
+        #expect(content == "hello world")
+
+        let decisions = try await h.exposureStore.decisions(connectionID: h.connectionID, limit: 10)
+        #expect(decisions.contains {
+            $0.toolName == "read_file" &&
+            $0.allowed &&
+            $0.reason == "standing_access"
+        })
+
+        let exposures = try await h.exposureStore.exposures(connectionID: h.connectionID, limit: 10)
+        #expect(exposures.contains {
+            $0.toolName == "read_file" &&
+            $0.exposureType == "full_file" &&
+            $0.byteCount == "hello world".utf8.count
+        })
     }
 }

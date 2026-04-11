@@ -24,13 +24,14 @@ struct AgentRuntimeContext: Sendable {
     var capabilityKeys: [String]
 
     init(
+        connectionID: String? = nil,
         targetApp: TargetApp,
         profileID: String,
         serverName: String,
         serverVersion: String,
         transport: String = "stdio"
     ) {
-        self.connectionID = "conn-\(UUID().uuidString.prefix(12).lowercased())"
+        self.connectionID = connectionID ?? "conn-\(UUID().uuidString.prefix(12).lowercased())"
         self.targetApp = targetApp
         self.profileID = profileID
         self.serverName = serverName

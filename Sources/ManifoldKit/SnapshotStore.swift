@@ -342,7 +342,7 @@ public struct SnapshotWriteResult: Sendable, Hashable {
 
 // MARK: - SnapshotRecord
 
-public struct SnapshotRecord: Sendable, Hashable, Identifiable {
+public struct SnapshotRecord: Sendable, Hashable, Identifiable, Codable {
     public let id: Int
     public let runID: String
     public let workspaceID: String

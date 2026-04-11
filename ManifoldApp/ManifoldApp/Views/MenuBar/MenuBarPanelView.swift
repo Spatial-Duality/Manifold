@@ -270,7 +270,7 @@ struct MenuBarQuickActions: View {
                 .padding(.vertical, 2)
 
             Button("Quit Manifold") {
-                NSApplication.shared.terminate(nil)
+                store.quitManifold()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)

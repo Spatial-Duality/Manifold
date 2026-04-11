@@ -91,6 +91,13 @@ struct ManifoldApp: App {
                     store.addSourceFromPicker()
                 }
             }
+
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit Manifold") {
+                    store.quitManifold()
+                }
+                .keyboardShortcut("q")
+            }
         }
 
         MenuBarExtra("Manifold", systemImage: store.menuBarIcon) {

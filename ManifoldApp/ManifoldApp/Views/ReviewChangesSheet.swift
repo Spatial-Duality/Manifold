@@ -1,6 +1,5 @@
 import SwiftUI
 import ManifoldKit
-import CryptoKit
 import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "review-changes")
@@ -175,71 +174,12 @@ struct ReviewChangesSheet: View {
     // MARK: - Data
 
     private func loadDryRun() async {
-        guard let grantStore = store.policy.grantStoreRef else {
-            isLoading = false
-            return
-        }
-
         do {
-            let grantSources = try await grantStore.grantSources(grantID: block.grantID)
-            guard let grant = try await grantStore.grant(id: block.grantID) else {
-                isLoading = false
-                return
-            }
-
-            var totalSkipped = 0
-
-            // Use dryRun for counts — it's safe (reads only, no writes)
-            for gs in grantSources {
-                guard let source = try await grantStore.source(id: gs.sourceID) else { continue }
-                let mountURL = URL(fileURLWithPath: grant.materializationRoot)
-                    .appendingPathComponent(gs.mountName)
-                let originalURL = URL(fileURLWithPath: source.originalRootPath)
-
-                guard FileManager.default.fileExists(atPath: mountURL.path) else { continue }
-
-                let (dryApplied, dryConflicts, drySkipped, dryNew) = try PromoteEngine.dryRun(
-                    mountURL: mountURL,
-                    originalURL: originalURL
-                )
-
-                // dryRun returns counts. For file names, compare the manifest
-                // against originals to identify which files changed.
-                let manifest = try MaterializationEngine.computeManifest(mountURL: mountURL)
-                for (relativePath, currentHash) in manifest {
-                    let originalFile = originalURL.appendingPathComponent(relativePath)
-                    let prefixed = "\(gs.mountName)/\(relativePath)"
-                    if !FileManager.default.fileExists(atPath: originalFile.path) {
-                        newFiles.append(prefixed)
-                    } else {
-                        let originalData = try Data(contentsOf: originalFile)
-                        let originalDigest = CryptoKit.SHA256.hash(data: originalData)
-                        let originalHash = originalDigest.map { String(format: "%02x", $0) }.joined()
-                        let baselineURL = mountURL.appendingPathComponent(".manifold-baseline.json")
-                        let baselineHash: String?
-                        if let baselineData = try? Data(contentsOf: baselineURL),
-                           let baselineJSON = try? JSONSerialization.jsonObject(with: baselineData) as? [String: String] {
-                            baselineHash = baselineJSON[relativePath]
-                        } else {
-                            baselineHash = nil
-                        }
-
-                        if currentHash != baselineHash {
-                            // File was modified in workspace
-                            if originalHash != baselineHash {
-                                // Original also changed → conflict
-                                conflicts.append(prefixed)
-                            } else {
-                                // Original unchanged → safe to apply
-                                applied.append(prefixed)
-                            }
-                        }
-                    }
-                }
-                totalSkipped += drySkipped
-            }
-
-            skipped = totalSkipped
+            let preview = try await store.runtime.promotionPreview(grantID: block.grantID)
+            applied = preview.applied
+            conflicts = preview.conflicts
+            newFiles = preview.newFiles
+            skipped = preview.skipped
         } catch {
             logger.error("Failed to load dry run: \(error.localizedDescription)")
         }

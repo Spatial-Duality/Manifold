@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import ManifoldKit
 
-// ManifoldBridge is in ManifoldMCP target, but its core logic depends on ManifoldKit.
+// ManifoldBridge lives in ManifoldRuntime, while these tests exercise the underlying ManifoldKit behavior directly.
 // We test the path validation and store interaction patterns here using ManifoldKit directly.
 
 @Suite("MCP Bridge Logic")

@@ -23,6 +23,8 @@ final class EmailSelectionModel {
     var selectedSmartMailboxID: String?
     /// Selected smart mailbox rules for query.
     var selectedSmartMailboxRules: SmartMailboxRules?
+    /// Selected smart mailbox rules JSON for XPC-backed queries.
+    var selectedSmartMailboxRulesJSON: String?
 
     /// The single focused message for the reading pane.
     /// When multi-selecting, this is the last-clicked message.
@@ -54,6 +56,7 @@ final class EmailSelectionModel {
         showingSharedEmails = false
         selectedSmartMailboxID = nil
         selectedSmartMailboxRules = nil
+        selectedSmartMailboxRulesJSON = nil
     }
 
     /// Activate a quick filter (clears account/mailbox scope).
@@ -63,6 +66,7 @@ final class EmailSelectionModel {
         showingSharedEmails = false
         selectedSmartMailboxID = nil
         selectedSmartMailboxRules = nil
+        selectedSmartMailboxRulesJSON = nil
         clearMessageSelection()
     }
 
@@ -73,6 +77,7 @@ final class EmailSelectionModel {
         activeFilter = nil
         selectedSmartMailboxID = nil
         selectedSmartMailboxRules = nil
+        selectedSmartMailboxRulesJSON = nil
         clearMessageSelection()
     }
 
@@ -80,6 +85,7 @@ final class EmailSelectionModel {
     func selectSmartMailbox(_ mailbox: SmartMailboxRecord) {
         selectedSmartMailboxID = mailbox.mailboxID
         selectedSmartMailboxRules = mailbox.rules
+        selectedSmartMailboxRulesJSON = mailbox.rulesJSON
         selectedMailbox = nil
         activeFilter = nil
         showingSharedEmails = false

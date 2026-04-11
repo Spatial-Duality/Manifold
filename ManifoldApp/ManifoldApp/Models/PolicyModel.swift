@@ -1,11 +1,9 @@
 import Foundation
-import os
 import ManifoldKit
+import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "policy-model")
 
-/// @Observable model for managing AgentAccessPolicy per agent.
-/// Wraps PolicyStore actor with @MainActor-safe observable properties.
 @Observable
 @MainActor
 final class PolicyModel {
@@ -13,45 +11,34 @@ final class PolicyModel {
     var codexPolicy: AgentAccessPolicy?
     var activeWorkBlock: WorkBlockRecord?
 
-    private var policyStore: PolicyStore?
-    private var workBlockStore: WorkBlockStore?
-    private(set) var grantStoreRef: GrantStore?
+    private var client: AppRuntimeClient?
 
     init() {}
 
-    func configure(policyStore: PolicyStore, workBlockStore: WorkBlockStore, grantStore: GrantStore? = nil) {
-        self.policyStore = policyStore
-        self.workBlockStore = workBlockStore
-        self.grantStoreRef = grantStore
+    func configure(client: AppRuntimeClient) {
+        self.client = client
     }
 
-    // MARK: - Loading
-
     func loadPolicies() async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            claudePolicy = try await store.policy(for: .cowork)
-            codexPolicy = try await store.policy(for: .codex)
+            let state = try await client.policies()
+            claudePolicy = state.claudePolicy
+            codexPolicy = state.codexPolicy
+            activeWorkBlock = state.activeWorkBlock
         } catch {
             logger.error("Failed to load policies: \(error.localizedDescription)")
         }
     }
 
     func loadActiveWorkBlock() async {
-        guard let store = workBlockStore else { return }
-        do {
-            activeWorkBlock = try await store.anyActiveBlock()
-        } catch {
-            logger.error("Failed to load work block: \(error.localizedDescription)")
-        }
+        await loadPolicies()
     }
 
-    // MARK: - Policy Actions
-
     func pauseAgent(_ agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.pauseAgent(agent)
+            try await client.pauseAgent(agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to pause \(agent.rawValue): \(error.localizedDescription)")
@@ -59,9 +46,9 @@ final class PolicyModel {
     }
 
     func resumeAgent(_ agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.resumeAgent(agent)
+            try await client.resumeAgent(agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to resume \(agent.rawValue): \(error.localizedDescription)")
@@ -69,37 +56,34 @@ final class PolicyModel {
     }
 
     func addSource(_ sourceID: String, to agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.addSource(sourceID, to: agent)
+            try await client.addSource(sourceID, to: agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to add source: \(error.localizedDescription)")
         }
     }
 
-    /// Pause all agents at once — the panic control.
     func pauseAllAgents() async {
         if claudePolicy?.isPaused != true { await pauseAgent(.cowork) }
         if codexPolicy?.isPaused != true { await pauseAgent(.codex) }
     }
 
     func removeSource(_ sourceID: String, from agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.removeSource(sourceID, from: agent)
+            try await client.removeSource(sourceID, from: agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to remove source: \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Email Domain Actions
-
     func addEmailDomain(_ domain: String, to agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.addEmailDomain(domain, to: agent)
+            try await client.addEmailDomain(domain, to: agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to add domain: \(error.localizedDescription)")
@@ -107,9 +91,9 @@ final class PolicyModel {
     }
 
     func removeEmailDomain(_ domain: String, from agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.removeEmailDomain(domain, from: agent)
+            try await client.removeEmailDomain(domain, from: agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to remove domain: \(error.localizedDescription)")
@@ -117,98 +101,52 @@ final class PolicyModel {
     }
 
     func updateSensitivity(_ level: EmailSensitivityLevel, for agent: TargetApp) async {
-        guard let store = policyStore else { return }
+        guard let client else { return }
         do {
-            try await store.updateSensitivity(level, for: agent)
+            try await client.updateSensitivity(level, for: agent)
             await loadPolicies()
         } catch {
             logger.error("Failed to update sensitivity: \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Work Block Actions
-
-    /// Marks the work block as reviewing. The caller should then present
-    /// the Review Changes sheet with PromoteEngine.dryRun() results.
-    /// Call `completeWorkBlock()` after the user confirms promotion.
     func finishWorkBlock() async {
-        guard let store = workBlockStore, let block = activeWorkBlock else { return }
+        guard let client, let block = activeWorkBlock else { return }
         do {
-            try await store.markReviewing(id: block.id)
+            try await client.markWorkBlockReviewing(id: block.id)
             await loadActiveWorkBlock()
-            // ReviewChangesSheet is presented by the caller (MainView)
-            // based on activeWorkBlock?.status == .reviewing
         } catch {
             logger.error("Failed to finish work block: \(error.localizedDescription)")
         }
     }
 
-    /// Cancel review — revert work block from .reviewing back to .active.
-    /// Called when the user dismisses the ReviewChangesSheet without confirming.
     func cancelReview() async {
-        guard let store = workBlockStore, let block = activeWorkBlock,
-              block.status == .reviewing else { return }
+        guard let client, let block = activeWorkBlock, block.status == .reviewing else { return }
         do {
-            try await store.resumeBlock(id: block.id)
+            try await client.cancelWorkBlockReview(id: block.id)
             await loadActiveWorkBlock()
         } catch {
             logger.error("Failed to cancel review: \(error.localizedDescription)")
         }
     }
 
-    /// Complete a reviewed work block after user confirms promotion.
-    /// Runs PromoteEngine to write materialized changes back to originals.
     func completeWorkBlock() async {
-        guard let wbStore = workBlockStore, let block = activeWorkBlock else { return }
+        guard let client, let block = activeWorkBlock else { return }
         do {
-            // Run the actual promotion pipeline
-            if let grantStore = grantStoreRef {
-                let grantSources = try await grantStore.grantSources(grantID: block.grantID)
-                if let grant = try await grantStore.grant(id: block.grantID) {
-                    for gs in grantSources {
-                        if let source = try await grantStore.source(id: gs.sourceID) {
-                            let mountURL = URL(fileURLWithPath: grant.materializationRoot)
-                                .appendingPathComponent(gs.mountName)
-                            let originalURL = URL(fileURLWithPath: source.originalRootPath)
-                            let summary = try PromoteEngine.promote(
-                                sourceID: gs.sourceID,
-                                mountName: gs.mountName,
-                                mountURL: mountURL,
-                                originalURL: originalURL
-                            )
-                            // Record promotions
-                            for file in summary.applied + summary.conflicts + summary.newFiles {
-                                try await grantStore.recordPromotion(
-                                    grantID: block.grantID,
-                                    sourceID: gs.sourceID,
-                                    relativePath: file.relativePath,
-                                    result: file.result,
-                                    originalBeforeHash: file.originalBeforeHash,
-                                    promotedHash: file.promotedHash,
-                                    conflictReason: file.conflictReason
-                                )
-                            }
-                            logger.info("Promoted \(summary.applied.count) files, \(summary.conflicts.count) conflicts for \(gs.mountName)")
-                        }
-                    }
-                }
-            }
-
-            try await wbStore.endBlock(id: block.id, status: .promoted)
-            activeWorkBlock = nil
+            _ = try await client.applyTrackedRun(grantID: block.grantID)
+            await loadActiveWorkBlock()
         } catch {
             logger.error("Failed to complete work block: \(error.localizedDescription)")
         }
     }
 
-
     func pauseWorkBlock() async {
-        guard let store = workBlockStore, let block = activeWorkBlock else { return }
+        guard let client, let block = activeWorkBlock else { return }
         do {
             if block.isPaused {
-                try await store.resumeBlock(id: block.id)
+                try await client.resumeTrackedRun(id: block.id)
             } else {
-                try await store.pauseBlock(id: block.id)
+                try await client.pauseTrackedRun(id: block.id)
             }
             await loadActiveWorkBlock()
         } catch {
@@ -217,16 +155,14 @@ final class PolicyModel {
     }
 
     func stopWorkBlock() async {
-        guard let store = workBlockStore, let block = activeWorkBlock else { return }
+        guard let client, let block = activeWorkBlock else { return }
         do {
-            try await store.endBlock(id: block.id, status: .discarded)
-            activeWorkBlock = nil
+            try await client.discardTrackedRun(id: block.id, grantID: block.grantID)
+            await loadActiveWorkBlock()
         } catch {
             logger.error("Failed to stop work block: \(error.localizedDescription)")
         }
     }
-
-    // MARK: - Helpers
 
     func policy(for agent: TargetApp) -> AgentAccessPolicy? {
         agent == .codex ? codexPolicy : claudePolicy

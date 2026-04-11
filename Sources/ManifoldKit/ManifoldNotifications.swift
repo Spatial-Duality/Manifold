@@ -1,7 +1,7 @@
 import Foundation
 
-/// Shared notification names for IPC between the MCP server process and the Manifold app.
-/// Uses DistributedNotificationCenter, which works across processes on the same machine.
+/// Legacy notification names retained only for compatibility.
+/// The app now refreshes state through XPC instead of cross-process notifications.
 public enum ManifoldNotification {
     /// Posted by MCP server when an agent connects.
     /// userInfo: ["agent": String]
@@ -23,26 +23,15 @@ public enum ManifoldNotification {
     /// App should refresh its activity feed.
     public static let dataChanged = Notification.Name("com.spatialduality.manifold.dataChanged")
 
-    /// Post a notification to the distributed center (cross-process).
+    /// Legacy no-op shim.
     public static func post(_ name: Notification.Name, userInfo: [String: String] = [:]) {
-        DistributedNotificationCenter.default().postNotificationName(
-            name,
-            object: "manifold-mcp",
-            userInfo: userInfo as [AnyHashable: Any],
-            deliverImmediately: true
-        )
+        _ = (name, userInfo)
     }
 
-    /// Observe a notification from the distributed center.
+    /// Legacy no-op shim.
     @discardableResult
     public static func observe(_ name: Notification.Name, handler: @escaping @Sendable ([String: String]) -> Void) -> NSObjectProtocol {
-        DistributedNotificationCenter.default().addObserver(
-            forName: name,
-            object: "manifold-mcp",
-            queue: .main
-        ) { notification in
-            let info = notification.userInfo as? [String: String] ?? [:]
-            handler(info)
-        }
+        _ = (name, handler)
+        return NSObject()
     }
 }

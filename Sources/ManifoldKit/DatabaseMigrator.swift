@@ -667,5 +667,62 @@ public struct DatabaseMigrator {
             try db.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON access_requests(status)")
             logger.info("Migration 15: access request queue")
         },
+
+        // v16: Approval queue for tracked-write escalation from standing access.
+        Migration(version: 16, name: "approval_requests") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    id TEXT PRIMARY KEY,
+                    connection_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    requested_at REAL NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    resolved_at REAL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status)")
+            logger.info("Migration 16: approval request queue")
+        },
+
+        // v17: Access decisions and exposure tracking for provenance.
+        Migration(version: 17, name: "access_decisions_and_exposures") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS access_decisions (
+                    id TEXT PRIMARY KEY,
+                    connection_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    resource_path TEXT,
+                    action TEXT NOT NULL,
+                    allowed INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    access_mode TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    policy_snapshot TEXT
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_ad_connection ON access_decisions(connection_id)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_ad_path ON access_decisions(resource_path)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS exposure_records (
+                    id TEXT PRIMARY KEY,
+                    connection_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    resource_path TEXT,
+                    byte_count INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    exposure_type TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    access_decision_id TEXT NOT NULL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_er_connection ON exposure_records(connection_id)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_er_decision ON exposure_records(access_decision_id)")
+            logger.info("Migration 17: access decisions and exposure records")
+        },
     ]
 }

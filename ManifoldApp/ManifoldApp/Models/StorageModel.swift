@@ -1,6 +1,6 @@
 import Foundation
-import os
 import ManifoldKit
+import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "storage")
 
@@ -11,21 +11,18 @@ final class StorageModel {
     var storageUsed: Int64 = 0
     var blobCount: Int = 0
 
-    private var snapshotStore: SnapshotStore?
-    private var contentStore: ContentStore?
-    private var db: DatabaseConnection?
+    private var client: AppRuntimeClient?
 
     init() {}
 
-    func configure(snapshotStore: SnapshotStore, contentStore: ContentStore, db: DatabaseConnection) {
-        self.snapshotStore = snapshotStore
-        self.contentStore = contentStore
-        self.db = db
+    func configure(client: AppRuntimeClient) {
+        self.client = client
     }
 
     func loadTrackedFiles() async {
+        guard let client else { return }
         do {
-            allTrackedFiles = try await snapshotStore?.allTrackedFiles() ?? []
+            allTrackedFiles = try await client.trackedFiles()
         } catch {
             logger.error("Failed to load tracked files: \(error.localizedDescription)")
             allTrackedFiles = []
@@ -33,29 +30,40 @@ final class StorageModel {
     }
 
     func loadStorageStats() async {
-        do { storageUsed = try await contentStore?.totalSize() ?? 0 }
-        catch { logger.warning("Failed to load storage size: \(error.localizedDescription)"); storageUsed = 0 }
-        do { blobCount = try await contentStore?.blobCount() ?? 0 }
-        catch { logger.warning("Failed to load blob count: \(error.localizedDescription)"); blobCount = 0 }
+        guard let client else { return }
+        do {
+            let stats = try await client.storageStats()
+            storageUsed = stats.storageUsed
+            blobCount = stats.blobCount
+        } catch {
+            logger.warning("Failed to load storage stats: \(error.localizedDescription)")
+            storageUsed = 0
+            blobCount = 0
+        }
     }
 
     func fileHistory(filePath: String) async -> [SnapshotRecord] {
-        (try? await snapshotStore?.fileHistory(filePath: filePath)) ?? []
+        guard let client else { return [] }
+        return (try? await client.fileHistory(filePath: filePath)) ?? []
     }
 
     func snapshotData(hash: String) async -> Data? {
-        try? await contentStore?.retrieve(hash: hash)
+        guard let client else { return nil }
+        return try? await client.snapshotData(hash: hash)
     }
 
     func runGarbageCollection() async -> Int {
-        (try? await contentStore?.garbageCollect()) ?? 0
+        guard let client else { return 0 }
+        return (try? await client.runGarbageCollection()) ?? 0
     }
 
     func pruneOldRuns() async -> Int {
-        (try? await snapshotStore?.pruneOldRuns(keepLast: 10)) ?? 0
+        guard let client else { return 0 }
+        return (try? await client.pruneOldRuns()) ?? 0
     }
 
     func runIntegrityCheck() async -> Bool {
-        (try? db?.integrityCheck()) ?? false
+        guard let client else { return false }
+        return (try? await client.runIntegrityCheck()) ?? false
     }
 }

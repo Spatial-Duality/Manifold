@@ -1,8 +1,21 @@
 import Foundation
 import os
 import ManifoldKit
+import ManifoldXPC
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "mcp")
+
+private actor MCPConnectionState {
+    private var connectionID: String?
+
+    func set(_ connectionID: String) {
+        self.connectionID = connectionID
+    }
+
+    func get() -> String? {
+        connectionID
+    }
+}
 
 @main
 struct ManifoldMCPServer {
@@ -26,55 +39,36 @@ struct ManifoldMCPServer {
             return
         }
 
-        // Initialize ManifoldKit stores (same database as the SwiftUI app)
-        let storeURL = manifoldStoreURL()
-        try FileManager.default.createDirectory(at: storeURL, withIntermediateDirectories: true)
-
-        let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
-
-        // Run pending schema migrations before initializing stores
-        let migrator = try DatabaseMigrator(db: db)
-        let migrated = try migrator.migrate()
-        if migrated > 0 {
-            logger.info("Applied \(migrated) database migration(s)")
-        }
-
-        let contentStore = try ContentStore(rootURL: storeURL)
-        let auditStore = try AuditStore(db: db)
-        let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
-        let grantStore = GrantStore(db: db)
-        let emailStore = EmailStore(db: db)
-        let artifactIndex = try ArtifactIndex(db: db)
-        let policyStore = PolicyStore(db: db)
-        let workBlockStore = WorkBlockStore(db: db)
-
-        // Create bridge (dual-path: standing access + work block grants)
-        let bridge = ManifoldBridge(
-            db: db,
-            auditStore: auditStore,
-            contentStore: contentStore,
-            grantStore: grantStore,
-            emailStore: emailStore,
-            snapshotStore: snapshotStore,
-            artifactIndex: artifactIndex,
-            policyStore: policyStore,
-            workBlockStore: workBlockStore,
-            targetApp: targetApp,
-            serverName: "manifold",
-            serverVersion: version
-        )
+        let xpc = ManifoldXPCClient()
+        let connectionState = MCPConnectionState()
 
         // Create MCP server
         let server = MCPServer(name: "manifold", version: version)
         await server.registerInitializeHandler { params in
-            await bridge.registerClientContext(initializeParams: params.value)
-            ManifoldNotification.post(ManifoldNotification.agentConnected, userInfo: ["agent": targetApp.rawValue])
+            do {
+                let connectionID = try await xpc.connectAgent(
+                    agent: targetApp.rawValue,
+                    clientName: "manifold-mcp",
+                    clientVersion: version,
+                    initializeParams: params.value
+                )
+                await connectionState.set(connectionID)
+            } catch {
+                logger.error("Failed to connect MCP client to runtime: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         // Register tools
-        await server.registerTools(ToolHandlers.allTools()) { name, arguments in
-            let result = await ToolHandlers.handle(name: name, arguments: arguments.value, bridge: bridge)
-            return JSONDict(result)
+        await server.registerTools(ToolDefinitions.allTools()) { name, arguments in
+            guard let connectionID = await connectionState.get() else {
+                return JSONDict(["content": [["type": "text", "text": "Runtime connection not initialized"]], "isError": true])
+            }
+            do {
+                let result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments.value)
+                return JSONDict(result)
+            } catch {
+                return JSONDict(["content": [["type": "text", "text": error.localizedDescription]], "isError": true])
+            }
         }
 
         // Register resources
@@ -84,20 +78,26 @@ struct ManifoldMCPServer {
             MCPResource(name: "Shared Emails", uri: "manifold://emails", description: "Emails available to agent"),
             MCPResource(name: "Session History", uri: "manifold://sessions", description: "Past session summaries"),
         ]) { uri in
+            guard let connectionID = await connectionState.get() else {
+                return "Runtime connection not initialized."
+            }
+            func toolText(_ name: String, arguments: [String: Any] = [:]) async -> String {
+                do {
+                    let result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments)
+                    return textContent(from: result)
+                } catch {
+                    return error.localizedDescription
+                }
+            }
             switch uri {
             case "manifold://status":
-                let status = await bridge.getStatus()
-                return status.message
+                return await toolText("get_status")
             case "manifold://files":
-                let files = (try? await bridge.listFiles()) ?? []
-                return files.map { "[\($0.sourceName)] \($0.path)" }.joined(separator: "\n")
+                return await toolText("list_files")
             case "manifold://emails":
-                let emails = (try? await bridge.listEmails()) ?? []
-                return emails.map { "[\($0.id)] \($0.from) — \($0.subject)" }.joined(separator: "\n")
+                return await toolText("list_emails")
             case "manifold://sessions":
-                let sessions = (try? await bridge.listSessions(limit: 10)) ?? []
-                if sessions.isEmpty { return "No past sessions." }
-                return sessions.map { "[\($0.grantID.prefix(12))...] \($0.targetApp) \($0.startedAt.prefix(10)) → \($0.endedAt.prefix(10))" }.joined(separator: "\n")
+                return await toolText("list_sessions", arguments: ["limit": "10"])
             default:
                 return ""
             }
@@ -107,17 +107,14 @@ struct ManifoldMCPServer {
         do {
             try await server.start()
         } catch {
-            await bridge.recordDisconnection()
-            ManifoldNotification.post(ManifoldNotification.agentDisconnected, userInfo: ["agent": targetApp.rawValue])
+            if let connectionID = await connectionState.get() {
+                xpc.disconnectAgent(connectionID: connectionID)
+            }
             throw error
         }
-        await bridge.recordDisconnection()
-        ManifoldNotification.post(ManifoldNotification.agentDisconnected, userInfo: ["agent": targetApp.rawValue])
-    }
-
-    static func manifoldStoreURL() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("Manifold/store")
+        if let connectionID = await connectionState.get() {
+            xpc.disconnectAgent(connectionID: connectionID)
+        }
     }
 
     static func parsedTargetApp(from arguments: [String]) -> TargetApp {
@@ -125,5 +122,10 @@ struct ManifoldMCPServer {
             return .cowork
         }
         return TargetApp(rawValue: arguments[flagIndex + 1]) ?? .cowork
+    }
+
+    static func textContent(from result: [String: Any]) -> String {
+        guard let content = result["content"] as? [[String: Any]] else { return "" }
+        return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
     }
 }

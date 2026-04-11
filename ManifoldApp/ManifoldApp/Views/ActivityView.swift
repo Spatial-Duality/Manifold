@@ -414,8 +414,8 @@ struct SessionEventRow: View {
             return
         }
 
-        guard let beforeData = try? await store.contentStore?.retrieve(hash: beforeHash),
-              let afterData = try? await store.contentStore?.retrieve(hash: afterHash) else {
+        guard let beforeData = await store.snapshotData(hash: beforeHash),
+              let afterData = await store.snapshotData(hash: afterHash) else {
             diffUnavailable = true
             return
         }

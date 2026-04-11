@@ -1,5 +1,6 @@
 import Foundation
 import ManifoldKit
+import ManifoldXPC
 
 @main
 struct ManifoldCLI {
@@ -13,10 +14,14 @@ struct ManifoldCLI {
         switch command {
         case "status":
             try await handleStatus()
-        case "log":
+        case "log", "activity":
             try await handleLog(Array(args.dropFirst()))
         case "sources":
             try await handleSources()
+        case "pause":
+            try await handlePause(Array(args.dropFirst()))
+        case "resume":
+            try await handleResume(Array(args.dropFirst()))
         case "install":
             try handleInstall()
         default:
@@ -32,57 +37,67 @@ struct ManifoldCLI {
         Commands:
           status     Show connection status and stats
           log        Show recent MCP activity
+          activity   Alias for log
           sources    List approved sources
+          pause      Pause an agent (default: cowork)
+          resume     Resume an agent (default: cowork)
           install    Install MCP server into Claude Desktop and Codex configs
         """)
     }
 
     static func handleStatus() async throws {
-        let storeURL = manifoldStoreURL()
-        let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
-        let auditStore = try AuditStore(db: db)
+        let xpc = ManifoldXPCClient()
+        let result = try await xpc.command(name: "getStatus")
+        let sources = result["sources"] as? [[String: Any]] ?? []
+        let activeBridgeCount = result["activeBridgeCount"] as? Int ?? 0
+        let pendingApprovalCount = result["pendingApprovalCount"] as? Int ?? 0
 
-        let recent = try await auditStore.recentEntries(limit: 1)
-        let connected = recent.first(where: { $0.action == "mcp_connection" })
-
-        if let conn = connected {
-            print("Status: Connected (last seen: \(conn.timestamp))")
-        } else {
-            print("Status: No recent MCP connections")
-        }
-
-        let entries = try await auditStore.recentEntries(limit: 50)
-        let reads = entries.filter { $0.action == "file_read" }.count
-        let writes = entries.filter { $0.action == "file_modified" || $0.action == "file_created" }.count
-        print("Recent activity: \(reads) reads, \(writes) writes")
+        print("Runtime: Connected")
+        print("Active connections: \(activeBridgeCount)")
+        print("Configured sources: \(sources.count)")
+        print("Pending approvals: \(pendingApprovalCount)")
     }
 
     static func handleLog(_ args: [String]) async throws {
         let limit = Int(args.first ?? "20") ?? 20
-        let storeURL = manifoldStoreURL()
-        let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
-        let auditStore = try AuditStore(db: db)
-
-        let entries = try await auditStore.recentEntries(limit: limit)
+        let xpc = ManifoldXPCClient()
+        let result = try await xpc.command(name: "recentActivity", payload: ["limit": limit])
+        let entries = result["entries"] as? [[String: Any]] ?? []
         for entry in entries.reversed() {
-            let path = entry.filePath ?? ""
-            print("[\(entry.timestamp)] \(entry.action) \(path)")
+            let timestamp = entry["timestamp"] as? String ?? ""
+            let action = entry["action"] as? String ?? ""
+            let path = entry["filePath"] as? String ?? ""
+            print("[\(timestamp)] \(action) \(path)")
         }
     }
 
     static func handleSources() async throws {
-        let storeURL = manifoldStoreURL()
-        let db = try DatabaseConnection(url: storeURL.appendingPathComponent("manifold.db"))
-        let grantStore = GrantStore(db: db)
-        let sources = try await grantStore.allSources()
+        let xpc = ManifoldXPCClient()
+        let result = try await xpc.command(name: "listSources")
+        let sources = result["sources"] as? [[String: Any]] ?? []
         if sources.isEmpty {
             print("No approved sources. Use the Manifold app to add sources.")
         } else {
             for source in sources {
-                let status = source.isAccessible ? "active" : source.isPaused ? "paused" : source.status
-                print("\(source.originalRootPath) [\(status)]")
+                let path = source["originalRootPath"] as? String ?? "(unknown)"
+                let status = source["status"] as? String ?? "unknown"
+                print("\(path) [\(status)]")
             }
         }
+    }
+
+    static func handlePause(_ args: [String]) async throws {
+        let agent = args.first ?? "cowork"
+        let xpc = ManifoldXPCClient()
+        _ = try await xpc.command(name: "pauseAgent", payload: ["agent": agent])
+        print("Paused \(agent).")
+    }
+
+    static func handleResume(_ args: [String]) async throws {
+        let agent = args.first ?? "cowork"
+        let xpc = ManifoldXPCClient()
+        _ = try await xpc.command(name: "resumeAgent", payload: ["agent": agent])
+        print("Resumed \(agent).")
     }
 
     static func handleInstall() throws {
@@ -91,10 +106,5 @@ struct ManifoldCLI {
         let writer = ConfigWriter(binaryPath: binaryPath)
         try writer.installAll()
         print("MCP server installed. Restart Claude Desktop to connect.")
-    }
-
-    static func manifoldStoreURL() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("Manifold/store")
     }
 }

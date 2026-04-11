@@ -250,7 +250,7 @@ public actor AuditStore {
 
 // MARK: - Types
 
-public enum AuditAction: String, Sendable {
+public enum AuditAction: String, Sendable, Codable {
     case sourceAdded = "source_added"
     case sourceRemoved = "source_removed"
     case profileChanged = "profile_changed"
@@ -267,7 +267,7 @@ public enum AuditAction: String, Sendable {
     case toolCall = "tool_call"
 }
 
-public struct AuditEntry: Sendable, Identifiable {
+public struct AuditEntry: Sendable, Identifiable, Codable {
     public let id: Int
     public let timestamp: String
     public let runID: String?
@@ -304,7 +304,7 @@ public struct AuditEntry: Sendable, Identifiable {
 
 // MARK: - Session Types
 
-public struct Session: Sendable, Identifiable, Hashable {
+public struct Session: Sendable, Identifiable, Hashable, Codable {
     public let id: String
     public let agent: String
     public let startTime: String
@@ -332,7 +332,7 @@ public struct Session: Sendable, Identifiable, Hashable {
     }
 }
 
-public struct SessionEvent: Sendable, Identifiable {
+public struct SessionEvent: Sendable, Identifiable, Codable {
     public let id: Int
     public let timestamp: String
     public let action: String

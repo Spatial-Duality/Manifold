@@ -3,7 +3,7 @@ import Foundation
 // MARK: - SyncStateRecord
 
 /// Per-mailbox sync state tracking for incremental backup.
-public struct SyncStateRecord: Sendable, Identifiable {
+public struct SyncStateRecord: Sendable, Identifiable, Codable {
     public var id: String { "\(accountID)/\(mailboxName)" }
     public let accountID: String
     public let mailboxName: String
@@ -50,7 +50,7 @@ public struct SyncStateRecord: Sendable, Identifiable {
 
 // MARK: - SyncStatus
 
-public enum SyncStatus: String, Sendable {
+public enum SyncStatus: String, Sendable, Codable {
     case idle = "idle"
     case syncing = "syncing"
     case error = "error"
@@ -60,7 +60,7 @@ public enum SyncStatus: String, Sendable {
 // MARK: - SyncResult
 
 /// Result of a single sync cycle for one account.
-public struct SyncResult: Sendable {
+public struct SyncResult: Sendable, Codable {
     public let accountID: String
     public let newMessages: Int
     public let updatedMessages: Int
@@ -88,7 +88,7 @@ public struct SyncResult: Sendable {
 }
 
 /// Result of syncing a single mailbox.
-public struct MailboxSyncResult: Sendable {
+public struct MailboxSyncResult: Sendable, Codable {
     public let mailboxName: String
     public let newMessages: Int
     public let lastUID: UInt32

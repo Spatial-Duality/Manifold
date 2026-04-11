@@ -96,9 +96,7 @@ private struct SmartMailboxSection: View {
         do {
             smartMailboxes = try await store.emailAccounts.allSmartMailboxes()
             for mb in smartMailboxes {
-                if let rules = mb.rules, let emailStore = store.emailStore {
-                    counts[mb.mailboxID] = (try? await emailStore.smartMailboxCount(rules: rules)) ?? 0
-                }
+                counts[mb.mailboxID] = await store.emailAccounts.smartMailboxCount(rulesJSON: mb.rulesJSON)
             }
         } catch {
             smartMailboxes = []

@@ -1,6 +1,6 @@
 import Foundation
-import os
 import ManifoldKit
+import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "history")
 
@@ -13,28 +13,18 @@ final class HistoryModel {
     var sessionEvents: [SessionEvent] = []
     var showSessionGrouping = true
 
-    private var auditStore: AuditStore?
-    private var snapshotStore: SnapshotStore?
-    private var contentStore: ContentStore?
-    private var artifactIndex: ArtifactIndex?
+    private var client: AppRuntimeClient?
 
     init() {}
 
-    func configure(
-        auditStore: AuditStore,
-        snapshotStore: SnapshotStore,
-        contentStore: ContentStore,
-        artifactIndex: ArtifactIndex
-    ) {
-        self.auditStore = auditStore
-        self.snapshotStore = snapshotStore
-        self.contentStore = contentStore
-        self.artifactIndex = artifactIndex
+    func configure(client: AppRuntimeClient) {
+        self.client = client
     }
 
     func loadActivity() async {
+        guard let client else { return }
         do {
-            activityEntries = try await auditStore?.recentEntries(limit: 100) ?? []
+            activityEntries = try await client.recentActivity(limit: 100)
         } catch {
             logger.error("Failed to load activity: \(error.localizedDescription)")
             activityEntries = []
@@ -42,8 +32,9 @@ final class HistoryModel {
     }
 
     func loadSessions() async {
+        guard let client else { return }
         do {
-            sessions = try await auditStore?.recentSessions(limit: 20) ?? []
+            sessions = try await client.recentSessions(limit: 20)
         } catch {
             logger.error("Failed to load sessions: \(error.localizedDescription)")
             sessions = []
@@ -51,8 +42,9 @@ final class HistoryModel {
     }
 
     func loadSessionEvents(sessionID: String) async {
+        guard let client else { return }
         do {
-            sessionEvents = try await auditStore?.sessionEvents(sessionID: sessionID) ?? []
+            sessionEvents = try await client.sessionEvents(sessionID: sessionID)
         } catch {
             logger.error("Failed to load session events: \(error.localizedDescription)")
             sessionEvents = []
@@ -68,92 +60,26 @@ final class HistoryModel {
         }
     }
 
-    /// Revert a file to the state before a specific write event.
-    func revertFile(event: SessionEvent, activeGrant: GrantRecord?, resolveGrantFilePath: (String) -> ResolvedGrantPath?) async -> RevertResult {
-        guard let grant = activeGrant else { return .error("Start a session before reverting files.") }
-        guard let snapshotStore, let beforeHash = event.beforeHash else { return .blobPruned }
-        guard let filePath = event.filePath, let resolved = resolveGrantFilePath(filePath) else {
-            return .error("No file path")
-        }
-
-        guard let blobData = try? await contentStore?.retrieve(hash: beforeHash) else {
-            return .blobPruned
-        }
-
-        if FileManager.default.fileExists(atPath: resolved.fileURL.path) {
-            if let afterHash = event.afterHash,
-               let currentData = try? Data(contentsOf: resolved.fileURL) {
-                let currentHash = currentData.sha256Hex
-                if currentHash != afterHash {
-                    return .contentDrift
-                }
-            }
-        }
-
+    func revertFile(event: SessionEvent, activeGrant: GrantRecord?) async -> RevertResult {
+        guard let client, let grant = activeGrant else { return .error("Start a session before reverting files.") }
         do {
-            try FileManager.default.createDirectory(
-                at: resolved.fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try blobData.write(to: resolved.fileURL, options: .atomic)
-            try await snapshotStore.recordRestore(
-                runID: grant.grantID,
-                workspaceID: resolved.mount.sourceID,
-                filePath: filePath,
-                restoredData: blobData
-            )
-            try await artifactIndex?.upsertFile(
-                grantID: grant.grantID,
-                mount: ArtifactMount(
-                    sourceID: resolved.mount.sourceID,
-                    mountName: resolved.mount.mountName,
-                    mountPath: resolved.mount.mountPath
-                ),
-                relativePath: resolved.relativePath,
-                fileURL: resolved.fileURL
-            )
-            return .success
+            let result = try await client.revertSessionEvent(event: event, grantID: grant.grantID, force: false)
+            return revertResult(from: result)
         } catch {
             return .error(error.localizedDescription)
         }
     }
 
-    /// Force revert even when content has drifted.
-    func forceRevertFile(event: SessionEvent, activeGrant: GrantRecord?, resolveGrantFilePath: (String) -> ResolvedGrantPath?) async -> RevertResult {
-        guard let grant = activeGrant else { return .error("Start a session before reverting files.") }
-        guard let snapshotStore, let beforeHash = event.beforeHash, let filePath = event.filePath else { return .blobPruned }
-        guard let blobData = try? await contentStore?.retrieve(hash: beforeHash) else { return .blobPruned }
-        guard let resolved = resolveGrantFilePath(filePath) else { return .error("No sources configured") }
-
+    func forceRevertFile(event: SessionEvent, activeGrant: GrantRecord?) async -> RevertResult {
+        guard let client, let grant = activeGrant else { return .error("Start a session before reverting files.") }
         do {
-            try FileManager.default.createDirectory(
-                at: resolved.fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try blobData.write(to: resolved.fileURL, options: .atomic)
-            try await snapshotStore.recordRestore(
-                runID: grant.grantID,
-                workspaceID: resolved.mount.sourceID,
-                filePath: filePath,
-                restoredData: blobData
-            )
-            try await artifactIndex?.upsertFile(
-                grantID: grant.grantID,
-                mount: ArtifactMount(
-                    sourceID: resolved.mount.sourceID,
-                    mountName: resolved.mount.mountName,
-                    mountPath: resolved.mount.mountPath
-                ),
-                relativePath: resolved.relativePath,
-                fileURL: resolved.fileURL
-            )
-            return .success
+            let result = try await client.revertSessionEvent(event: event, grantID: grant.grantID, force: true)
+            return revertResult(from: result)
         } catch {
             return .error(error.localizedDescription)
         }
     }
 
-    /// Generate a Markdown summary of a session.
     func sessionSummary(session: Session, events: [SessionEvent]) -> String {
         let formatter = ISO8601DateFormatter()
         let startDate = formatter.date(from: session.startTime)
@@ -165,9 +91,9 @@ final class HistoryModel {
 
         let startStr = startDate.map { timeFormatter.string(from: $0) } ?? session.startTime
         let duration: String
-        if let s = startDate, let e = endDate {
-            let mins = Int(e.timeIntervalSince(s) / 60)
-            duration = mins < 1 ? "< 1 minute" : "\(mins) minutes"
+        if let startDate, let endDate {
+            let minutes = Int(endDate.timeIntervalSince(startDate) / 60)
+            duration = minutes < 1 ? "< 1 minute" : "\(minutes) minutes"
         } else {
             duration = "unknown"
         }
@@ -179,7 +105,7 @@ final class HistoryModel {
             "# Session: \(session.agent) — \(startStr)",
             "Duration: \(duration) | \(session.readCount) reads, \(session.writeCount) writes, \(session.searchCount) searches",
             "",
-            "## Timeline"
+            "## Timeline",
         ]
 
         for event in events {
@@ -197,5 +123,18 @@ final class HistoryModel {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    private func revertResult(from result: RevertEventResult) -> RevertResult {
+        switch result.status {
+        case "success":
+            return .success
+        case "blobPruned":
+            return .blobPruned
+        case "contentDrift":
+            return .contentDrift
+        default:
+            return .error(result.message ?? "Unknown revert error")
+        }
     }
 }

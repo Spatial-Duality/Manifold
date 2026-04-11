@@ -5,7 +5,7 @@ import Foundation
 /// Persistent standing access policy per agent.
 /// Each agent has one policy that defines what files and emails it can access.
 /// Policies persist across connections and app restarts.
-public struct AgentAccessPolicy: Sendable, Identifiable {
+public struct AgentAccessPolicy: Sendable, Identifiable, Codable {
     public let id: String
     public let agent: TargetApp
     public var allowedSourceIDs: Set<String>
@@ -81,7 +81,7 @@ public struct AgentAccessPolicy: Sendable, Identifiable {
 
 // MARK: - Email Sensitivity Level
 
-public enum EmailSensitivityLevel: String, Sendable, CaseIterable {
+public enum EmailSensitivityLevel: String, Sendable, CaseIterable, Codable {
     case strict
     case moderate
     case open
@@ -105,7 +105,7 @@ public enum EmailSensitivityLevel: String, Sendable, CaseIterable {
 
 /// Single-email temporary visibility override.
 /// Expires when the current run or work block ends.
-public struct TemporaryReveal: Sendable, Identifiable {
+public struct TemporaryReveal: Sendable, Identifiable, Codable {
     public let id: String
     public let agent: TargetApp
     public let emailID: String
@@ -147,7 +147,7 @@ public struct TemporaryReveal: Sendable, Identifiable {
 /// Optional tracked work block with snapshot/promote lifecycle.
 /// Work blocks freeze the access scope at start and use MaterializationEngine
 /// for workspace isolation.
-public struct WorkBlockRecord: Sendable, Identifiable {
+public struct WorkBlockRecord: Sendable, Identifiable, Codable {
     public let id: String
     public let agent: TargetApp
     public let grantID: String
@@ -221,7 +221,7 @@ public struct WorkBlockRecord: Sendable, Identifiable {
 
 // MARK: - Work Block Status
 
-public enum WorkBlockStatus: String, Sendable {
+public enum WorkBlockStatus: String, Sendable, Codable {
     case active
     case paused
     case reviewing

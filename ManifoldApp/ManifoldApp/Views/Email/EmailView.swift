@@ -72,8 +72,11 @@ struct EmailView: View {
         }
 
         // Smart mailbox query
-        if let rules = selection.selectedSmartMailboxRules, let emailStore = store.emailStore {
-            messages = (try? emailStore.smartMailboxMessages(rules: rules, sortKey: selection.sortKey)) ?? []
+        if let rulesJSON = selection.selectedSmartMailboxRulesJSON {
+            messages = await store.emailAccounts.smartMailboxMessages(
+                rulesJSON: rulesJSON,
+                sortKey: selection.sortKey
+            )
             return
         }
 

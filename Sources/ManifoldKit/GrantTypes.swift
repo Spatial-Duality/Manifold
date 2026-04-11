@@ -5,7 +5,7 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 
 // MARK: - Source (persistent pointer to user-approved original folder)
 
-public struct SourceRecord: Sendable, Hashable, Identifiable {
+public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
     public var id: String { sourceID }
     public let sourceID: String
     public let displayName: String
@@ -39,7 +39,7 @@ public struct SourceRecord: Sendable, Hashable, Identifiable {
 
 // MARK: - Grant (time-bounded share session for one agent target)
 
-public enum GrantStatus: String, Sendable {
+public enum GrantStatus: String, Sendable, Codable {
     case active
     case ended
     case timedOut = "timed_out"
@@ -50,7 +50,7 @@ public enum TargetApp: String, Sendable, CaseIterable, Codable {
     case codex
 }
 
-public enum SessionNoteCaptureMode: String, Sendable, CaseIterable {
+public enum SessionNoteCaptureMode: String, Sendable, CaseIterable, Codable {
     case off
     case basic
     case verbose
@@ -71,7 +71,7 @@ public enum SessionNoteCaptureMode: String, Sendable, CaseIterable {
     }
 }
 
-public enum SessionSummaryKind: String, Sendable, CaseIterable {
+public enum SessionSummaryKind: String, Sendable, CaseIterable, Codable {
     case summary
     case startNote = "start_note"
     case checkpointNote = "checkpoint_note"
@@ -91,12 +91,12 @@ public enum SessionSummaryKind: String, Sendable, CaseIterable {
     }
 }
 
-public enum SessionSummaryOrigin: String, Sendable, CaseIterable {
+public enum SessionSummaryOrigin: String, Sendable, CaseIterable, Codable {
     case system
     case agent
 }
 
-public struct GrantRecord: Sendable, Identifiable {
+public struct GrantRecord: Sendable, Identifiable, Codable {
     public var id: String { grantID }
     public let grantID: String
     public let targetApp: String
@@ -145,7 +145,7 @@ public struct GrantRecord: Sendable, Identifiable {
 
 // MARK: - Grant ↔ Source (many-to-many)
 
-public struct GrantSourceRecord: Sendable {
+public struct GrantSourceRecord: Sendable, Codable {
     public let grantID: String
     public let sourceID: String
     public let mountName: String
@@ -165,7 +165,7 @@ public struct GrantSourceRecord: Sendable {
     }
 }
 
-public struct GrantMount: Sendable, Hashable {
+public struct GrantMount: Sendable, Hashable, Codable {
     public let sourceID: String
     public let mountName: String
     public let mountPath: String
@@ -177,7 +177,7 @@ public struct GrantMount: Sendable, Hashable {
     }
 }
 
-public struct FileSelectionScope: Sendable, Hashable, Identifiable {
+public struct FileSelectionScope: Sendable, Hashable, Identifiable, Codable {
     public var id: String { "\(sourceID):\(normalizedRelativePath):\(isDirectory ? "dir" : "file")" }
     public let sourceID: String
     public let relativePath: String
@@ -218,7 +218,7 @@ public struct FileSelectionScope: Sendable, Hashable, Identifiable {
     }
 }
 
-public struct GrantFileScopeRecord: Sendable, Hashable, Identifiable {
+public struct GrantFileScopeRecord: Sendable, Hashable, Identifiable, Codable {
     public var id: String { "\(grantID):\(sourceID):\(relativePath):\(isDirectory ? "dir" : "file")" }
     public let grantID: String
     public let sourceID: String
@@ -238,7 +238,7 @@ public struct GrantFileScopeRecord: Sendable, Hashable, Identifiable {
     }
 }
 
-public struct AccessPresetRecord: Sendable, Hashable, Identifiable {
+public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
     public var id: String { presetID }
     public let presetID: String
     public let name: String
@@ -261,7 +261,7 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable {
 
 // MARK: - Email Message (metadata index for .eml files)
 
-public struct EmailMessageRecord: Sendable, Identifiable, Hashable {
+public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public var id: String { emailID }
     public let emailID: String
     public let accountID: String
@@ -330,7 +330,7 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable {
     public var isDeletedOnServer: Bool { deletedOnServerAt != nil }
 }
 
-public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable {
+public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable, Codable {
     public var id: String { attachmentID }
     public let attachmentID: String
     public let emailID: String
@@ -361,7 +361,7 @@ public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable {
 
 // MARK: - IMAP Mailbox (persisted folder tree from IMAP LIST)
 
-public struct IMAPMailboxRecord: Sendable, Identifiable, Hashable {
+public struct IMAPMailboxRecord: Sendable, Identifiable, Hashable, Codable {
     public var id: String { "\(accountID)/\(mailboxName)" }
     public let accountID: String
     public let mailboxName: String
@@ -411,7 +411,7 @@ public struct IMAPMailboxRecord: Sendable, Identifiable, Hashable {
         return .other
     }
 
-    public enum FolderType: String, Sendable {
+    public enum FolderType: String, Sendable, Codable {
         case inbox, sent, drafts, trash, junk, archive, flagged, other
 
         public var systemImage: String {
@@ -445,7 +445,7 @@ public struct IMAPMailboxRecord: Sendable, Identifiable, Hashable {
 
 // MARK: - Shared Email (persistent sharing, independent of grants)
 
-public struct SharedEmailRecord: Sendable, Identifiable {
+public struct SharedEmailRecord: Sendable, Identifiable, Codable {
     public var id: String { shareID }
     public let shareID: String
     public let emailID: String
@@ -465,7 +465,7 @@ public struct SharedEmailRecord: Sendable, Identifiable {
 
 // MARK: - Smart Mailbox (virtual folder with rule-based filtering)
 
-public struct SmartMailboxRecord: Sendable, Identifiable {
+public struct SmartMailboxRecord: Sendable, Identifiable, Codable {
     public var id: String { mailboxID }
     public let mailboxID: String
     public let displayName: String
@@ -575,7 +575,7 @@ public struct SmartMailboxRules: Codable, Sendable, Hashable {
 
 // MARK: - Search Token (for email search UI)
 
-public enum SearchTokenType: String, Sendable, CaseIterable {
+public enum SearchTokenType: String, Sendable, CaseIterable, Codable {
     case from           // matches sender_email LIKE
     case domain         // matches sender_domain exact or LIKE
     case subject        // matches subject LIKE
@@ -588,7 +588,7 @@ public enum SearchTokenType: String, Sendable, CaseIterable {
     case isDeleted      // matches deleted_on_server_at IS NOT NULL
 }
 
-public struct SearchToken: Sendable, Identifiable, Hashable {
+public struct SearchToken: Sendable, Identifiable, Hashable, Codable {
     public var id: String { "\(type.rawValue):\(value)" }
     public let type: SearchTokenType
     public let value: String
@@ -601,7 +601,7 @@ public struct SearchToken: Sendable, Identifiable, Hashable {
 
 // MARK: - Quick Filter (sidebar filter presets)
 
-public enum QuickFilter: String, Sendable, CaseIterable, Identifiable {
+public enum QuickFilter: String, Sendable, CaseIterable, Identifiable, Codable {
     case unread
     case flagged
     case attachments
@@ -648,7 +648,7 @@ public enum QuickFilter: String, Sendable, CaseIterable, Identifiable {
 
 // MARK: - Sort Key (for message list ordering)
 
-public enum EmailSortKey: String, Sendable, CaseIterable {
+public enum EmailSortKey: String, Sendable, CaseIterable, Codable {
     case date
     case sender
     case subject
@@ -657,14 +657,14 @@ public enum EmailSortKey: String, Sendable, CaseIterable {
 
 // MARK: - Promotion (result of writing grant changes back to originals)
 
-public enum PromotionResult: String, Sendable {
+public enum PromotionResult: String, Sendable, Codable {
     case applied
     case conflict
     case skipped
     case newFile = "new_file"
 }
 
-public struct PromotionRecord: Sendable, Identifiable {
+public struct PromotionRecord: Sendable, Identifiable, Codable {
     public var id: String { promotionID }
     public let promotionID: String
     public let grantID: String
@@ -702,7 +702,7 @@ public struct PromotionRecord: Sendable, Identifiable {
 
 // MARK: - Session Summary (structured history for future agents)
 
-public struct SessionSummaryRecord: Sendable, Identifiable {
+public struct SessionSummaryRecord: Sendable, Identifiable, Codable {
     public var id: String { summaryID }
     public let summaryID: String
     public let grantID: String

@@ -14,6 +14,7 @@
 		17F701EEBA3AA625259D7306 /* TimeLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83794677BF621BEDB36F8287 /* TimeLabel.swift */; };
 		1F0C08BF8B7FA359313182D1 /* EmailHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01E2964F1F242AAC4C3CCF88 /* EmailHeaderView.swift */; };
 		1F4BA2DB9FAB796928BC9A7F /* EmailAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18233197B24B119F64466148 /* EmailAccountModel.swift */; };
+		AA1E6D77C2B34D2EA0F7A101 /* AppRuntimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1E6D77C2B34D2EA0F7A102 /* AppRuntimeClient.swift */; };
 		2037162F5FFA81AE0AD37C84 /* EmailSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BC886845CC4CB988CCA7D70 /* EmailSearchField.swift */; };
 		299780E7A90848E928A18544 /* VersionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F390D9C39C8B2FD13E621218 /* VersionDetailView.swift */; };
 		2D2D8CE031753023740CDCDC /* EmailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90E72D648468DB4AB2935B91 /* EmailView.swift */; };
@@ -26,6 +27,7 @@
 		6264FE703CB49EC3348C20EB /* SnapshotRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15CE9C08174D45990E81D23B /* SnapshotRow.swift */; };
 		69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050CA6EEFB11452C92977C1 /* DiffView.swift */; };
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
+		AA1E6D77C2B34D2EA0F7A103 /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */; };
 		7C8290B0771006D0067B88B7 /* ReadingPaneToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5362DEFA0F55C0F4907B52D /* ReadingPaneToolbar.swift */; };
 		7CE4BAD9EE7A986871DDC8C5 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE22B107DA01C6DC2C67C7 /* Spacing.swift */; };
 		841965F5D9E60BE45FD9A022 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEAA3C58A30F803C5586F7A1 /* SessionModel.swift */; };
@@ -94,6 +96,7 @@
 		11AF6365CF4386C43F2463FD /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
 		15CE9C08174D45990E81D23B /* SnapshotRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotRow.swift; sourceTree = "<group>"; };
 		18233197B24B119F64466148 /* EmailAccountModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailAccountModel.swift; sourceTree = "<group>"; };
+		AA1E6D77C2B34D2EA0F7A102 /* AppRuntimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeClient.swift; sourceTree = "<group>"; };
 		23760AEA487279BB56652F47 /* EmailSelectionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSelectionModel.swift; sourceTree = "<group>"; };
 		3BB77AF6A40A9C029A42CD7C /* vibrant-cori */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "vibrant-cori"; path = .; sourceTree = SOURCE_ROOT; };
 		3E58592192E68BB6C21A7E63 /* MessageListEmpty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListEmpty.swift; sourceTree = "<group>"; };
@@ -180,10 +183,32 @@
 			buildActionMask = 2147483647;
 			files = (
 				6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */,
+				AA1E6D77C2B34D2EA0F7A103 /* ManifoldXPC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AA1E6D77C2B34D2EA0F7A105 /* Bundle Launch Agent */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist",
+				"$(BUILT_PRODUCTS_DIR)/ManifoldAgent",
+			);
+			name = "Bundle Launch Agent";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchServices/ManifoldAgent",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${BUILT_PRODUCTS_DIR}/ManifoldAgent\" \"$launch_services_dir/ManifoldAgent\"\nchmod +x \"$launch_services_dir/ManifoldAgent\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXGroup section */
 		0C0E7D11569D44E56773221A /* Library */ = {
@@ -374,6 +399,7 @@
 				8A3B6369A695CC497AC4BFCA /* CommandCenter.swift */,
 				A20C4114B01F2F0D7E024DD0 /* DomainPreset.swift */,
 				18233197B24B119F64466148 /* EmailAccountModel.swift */,
+				AA1E6D77C2B34D2EA0F7A102 /* AppRuntimeClient.swift */,
 				5DBD8DD896966114B4335863 /* EmailSearchModel.swift */,
 				23760AEA487279BB56652F47 /* EmailSelectionModel.swift */,
 				A43BA689161AF82B93E21E11 /* FileNode.swift */,
@@ -412,6 +438,7 @@
 			buildPhases = (
 				8263F2E00A2E489F2090951C /* Sources */,
 				380E85CDE3445A5CAE94FE21 /* Frameworks */,
+				AA1E6D77C2B34D2EA0F7A105 /* Bundle Launch Agent */,
 			);
 			buildRules = (
 			);
@@ -420,6 +447,8 @@
 			name = Manifold;
 			packageProductDependencies = (
 				59CA05998C5293BB2C2FB2E7 /* ManifoldKit */,
+				AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */,
+				AA1E6D77C2B34D2EA0F7A106 /* ManifoldAgent */,
 			);
 			productName = Manifold;
 			productReference = 564B55046AEBA3B1643FE2FE /* Manifold.app */;
@@ -480,6 +509,7 @@
 				69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */,
 				EEC5E06B942FC7FB102B405E /* DomainPreset.swift in Sources */,
 				1F4BA2DB9FAB796928BC9A7F /* EmailAccountModel.swift in Sources */,
+				AA1E6D77C2B34D2EA0F7A101 /* AppRuntimeClient.swift in Sources */,
 				1F0C08BF8B7FA359313182D1 /* EmailHeaderView.swift in Sources */,
 				89A98676FDACCB0819FE9C75 /* EmailMessageList.swift in Sources */,
 				B184F0F66EE28357C5F7F306 /* EmailMessageRow.swift in Sources */,
@@ -757,6 +787,14 @@
 		59CA05998C5293BB2C2FB2E7 /* ManifoldKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ManifoldKit;
+		};
+		AA1E6D77C2B34D2EA0F7A106 /* ManifoldAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ManifoldAgent;
+		};
+		AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ManifoldXPC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

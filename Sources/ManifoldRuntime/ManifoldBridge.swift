@@ -1,10 +1,13 @@
 import Foundation
+import CryptoKit
 import ManifoldKit
+import os
 
 /// Core logic layer between MCP protocol and ManifoldKit stores.
 /// Dual-path access: standing access via PolicyStore, work block via grant materialization.
 /// Fail-closed: no policy and no grant = no access.
 public actor ManifoldBridge {
+    private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "runtime")
     private let db: DatabaseConnection
     private let auditStore: AuditStore
     private let contentStore: ContentStore
@@ -14,6 +17,8 @@ public actor ManifoldBridge {
     private let artifactIndex: ArtifactIndex
     private let policyStore: PolicyStore?
     private let workBlockStore: WorkBlockStore?
+    private let approvalQueue: ApprovalQueue?
+    private let exposureStore: ExposureStore?
     private let targetApp: TargetApp
     private let profileID: String
     private var runtimeContext: AgentRuntimeContext
@@ -29,10 +34,13 @@ public actor ManifoldBridge {
         artifactIndex: ArtifactIndex,
         policyStore: PolicyStore? = nil,
         workBlockStore: WorkBlockStore? = nil,
+        approvalQueue: ApprovalQueue? = nil,
+        exposureStore: ExposureStore? = nil,
         targetApp: TargetApp = .cowork,
         profileID: String = "default",
         serverName: String = "manifold",
-        serverVersion: String = "0.0.0"
+        serverVersion: String = "0.0.0",
+        connectionID: String? = nil
     ) {
         self.db = db
         self.auditStore = auditStore
@@ -43,9 +51,12 @@ public actor ManifoldBridge {
         self.artifactIndex = artifactIndex
         self.policyStore = policyStore
         self.workBlockStore = workBlockStore
+        self.approvalQueue = approvalQueue
+        self.exposureStore = exposureStore
         self.targetApp = targetApp
         self.profileID = profileID
         self.runtimeContext = AgentRuntimeContext(
+            connectionID: connectionID,
             targetApp: targetApp,
             profileID: profileID,
             serverName: serverName,
@@ -57,6 +68,170 @@ public actor ManifoldBridge {
 
     private func mergedMetadata(_ metadata: [String: String] = [:]) -> [String: String] {
         runtimeContext.eventContextMetadata.merging(metadata) { _, new in new }
+    }
+
+    private struct DecisionContext {
+        let reason: String
+        let accessMode: String
+        let policySnapshot: String?
+    }
+
+    private func policySnapshot(for policy: AgentAccessPolicy) -> String? {
+        let snapshot: [String: Any] = [
+            "allowed_source_ids": policy.allowedSourceIDs.sorted(),
+            "allowed_email_domains": policy.allowedEmailDomains.sorted(),
+            "email_sensitivity": policy.emailSensitivity.rawValue,
+            "is_paused": policy.isPaused,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func decisionContext(for accessContext: AccessContext) -> DecisionContext {
+        switch accessContext {
+        case .standing(let policy, _):
+            return DecisionContext(
+                reason: "standing_access",
+                accessMode: "standing",
+                policySnapshot: policySnapshot(for: policy)
+            )
+        case .workBlock(let grant, _, let block):
+            return DecisionContext(
+                reason: "work_block",
+                accessMode: "tracked_run",
+                policySnapshot: "{\"grant_id\":\"\(grant.grantID)\",\"work_block_id\":\"\(block.id)\"}"
+            )
+        case .legacyGrant(let grant, _):
+            return DecisionContext(
+                reason: "work_block",
+                accessMode: "legacy_grant",
+                policySnapshot: "{\"grant_id\":\"\(grant.grantID)\"}"
+            )
+        }
+    }
+
+    private func deniedDecisionContext(for error: Error) -> DecisionContext {
+        if let mcpError = error as? ManifoldMCPError {
+            switch mcpError {
+            case .accessPaused:
+                return DecisionContext(reason: "paused", accessMode: "paused", policySnapshot: nil)
+            case .noAccessConfigured:
+                return DecisionContext(reason: "policy_denied", accessMode: "standing", policySnapshot: nil)
+            case .noActiveSession:
+                return DecisionContext(reason: "policy_denied", accessMode: "tracked_run", policySnapshot: nil)
+            case .noSources, .fileNotFound, .invalidPath:
+                return DecisionContext(reason: "policy_denied", accessMode: "unknown", policySnapshot: nil)
+            }
+        }
+        return DecisionContext(reason: "policy_denied", accessMode: "unknown", policySnapshot: nil)
+    }
+
+    @discardableResult
+    private func recordAccessDecision(
+        toolName: String,
+        resourcePath: String?,
+        action: String,
+        allowed: Bool,
+        reason: String,
+        accessMode: String,
+        policySnapshot: String? = nil
+    ) async -> String? {
+        guard let exposureStore else { return nil }
+        let decision = AccessDecision(
+            connectionID: runtimeContext.connectionID,
+            agent: agentName,
+            toolName: toolName,
+            resourcePath: resourcePath,
+            action: action,
+            allowed: allowed,
+            reason: reason,
+            accessMode: accessMode,
+            policySnapshot: policySnapshot
+        )
+        do {
+            try await exposureStore.recordDecision(decision)
+            return decision.id
+        } catch {
+            logger.error("Failed to record access decision: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    private func recordExposure(
+        toolName: String,
+        resourcePath: String?,
+        text: String,
+        exposureType: String,
+        decisionID: String?
+    ) async {
+        guard decisionID != nil else { return }
+        await recordExposure(
+            toolName: toolName,
+            resourcePath: resourcePath,
+            data: Data(text.utf8),
+            exposureType: exposureType,
+            decisionID: decisionID
+        )
+    }
+
+    private func recordExposure(
+        toolName: String,
+        resourcePath: String?,
+        data: Data,
+        exposureType: String,
+        decisionID: String?
+    ) async {
+        guard let exposureStore, let decisionID else { return }
+        let hash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+        let exposure = ExposureRecord(
+            connectionID: runtimeContext.connectionID,
+            agent: agentName,
+            toolName: toolName,
+            resourcePath: resourcePath,
+            byteCount: data.count,
+            contentHash: hash,
+            exposureType: exposureType,
+            accessDecisionID: decisionID
+        )
+        do {
+            try await exposureStore.recordExposure(exposure)
+        } catch {
+            logger.error("Failed to record exposure: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func resolveAccessForTool(
+        toolName: String,
+        action: String,
+        resourcePath: String? = nil
+    ) async throws -> (AccessContext, String?) {
+        do {
+            let context = try await resolveAccess()
+            let decision = decisionContext(for: context)
+            let decisionID = await recordAccessDecision(
+                toolName: toolName,
+                resourcePath: resourcePath,
+                action: action,
+                allowed: true,
+                reason: decision.reason,
+                accessMode: decision.accessMode,
+                policySnapshot: decision.policySnapshot
+            )
+            return (context, decisionID)
+        } catch {
+            let decision = deniedDecisionContext(for: error)
+            _ = await recordAccessDecision(
+                toolName: toolName,
+                resourcePath: resourcePath,
+                action: action,
+                allowed: false,
+                reason: decision.reason,
+                accessMode: decision.accessMode
+            )
+            throw error
+        }
     }
 
     private func recordAutomaticSessionNote(
@@ -238,6 +413,37 @@ public actor ManifoldBridge {
         }
     }
 
+    private func requireGrantForTool(
+        toolName: String,
+        action: String,
+        resourcePath: String? = nil
+    ) async throws -> (GrantRecord, [GrantSourceRecord], String?) {
+        do {
+            let (grant, grantSources) = try await requireGrant()
+            let decisionID = await recordAccessDecision(
+                toolName: toolName,
+                resourcePath: resourcePath,
+                action: action,
+                allowed: true,
+                reason: "work_block",
+                accessMode: "tracked_run",
+                policySnapshot: "{\"grant_id\":\"\(grant.grantID)\"}"
+            )
+            return (grant, grantSources, decisionID)
+        } catch {
+            let decision = deniedDecisionContext(for: error)
+            _ = await recordAccessDecision(
+                toolName: toolName,
+                resourcePath: resourcePath,
+                action: action,
+                allowed: false,
+                reason: decision.reason,
+                accessMode: decision.accessMode
+            )
+            throw error
+        }
+    }
+
     /// Build mounts for standing access: each source gets a "mount" that points to the original path.
     private func standingMounts(sources: [SourceRecord]) -> [GrantMount] {
         sources.map { source in
@@ -254,33 +460,45 @@ public actor ManifoldBridge {
         let grantID: String?
         let grant: GrantRecord?
         let isStanding: Bool
+        let decisionID: String?
     }
 
     /// Resolve access and return mounts suitable for file operations.
     /// Handles standing access (original paths) and grant access (materialized paths).
-    private func resolveAccessMounts() async throws -> ResolvedMounts {
-        let context = try await resolveAccess()
+    private func resolveAccessMounts(
+        toolName: String,
+        action: String,
+        resourcePath: String? = nil
+    ) async throws -> ResolvedMounts {
+        let (context, decisionID) = try await resolveAccessForTool(
+            toolName: toolName,
+            action: action,
+            resourcePath: resourcePath
+        )
         switch context {
         case .standing(_, let sources):
             return ResolvedMounts(
                 mounts: standingMounts(sources: sources),
                 grantID: nil,
                 grant: nil,
-                isStanding: true
+                isStanding: true,
+                decisionID: decisionID
             )
         case .workBlock(let grant, let grantSources, _):
             return ResolvedMounts(
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
-                isStanding: false
+                isStanding: false,
+                decisionID: decisionID
             )
         case .legacyGrant(let grant, let grantSources):
             return ResolvedMounts(
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
-                isStanding: false
+                isStanding: false,
+                decisionID: decisionID
             )
         }
     }
@@ -415,7 +633,6 @@ public actor ManifoldBridge {
             agent: agentName,
             metadata: mergedMetadata(["tool": tool, "arguments": argsJSON])
         )
-        ManifoldNotification.post(ManifoldNotification.dataChanged)
     }
 
     // MARK: - Tools
@@ -423,7 +640,7 @@ public actor ManifoldBridge {
     public func getStatus() async -> StatusResult {
         await logToolCall(tool: "get_status")
         do {
-            let context = try await resolveAccess()
+            let (context, decisionID) = try await resolveAccessForTool(toolName: "get_status", action: "read")
             switch context {
             case .standing(let policy, let sources):
                 let sourceNames = sources.map(\.displayName).joined(separator: ", ")
@@ -432,7 +649,7 @@ public actor ManifoldBridge {
                 let totalFiles = (try? listFilesFromOriginals(mounts: mounts).count) ?? 0
                 let emailCount = policy.allowedEmailDomains.count > 0 ? (try? emailStore.emailMessageCount()) ?? 0 : 0
                 let message = "Manifold standing access active. \(sources.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails. Sensitivity: \(policy.emailSensitivity.rawValue)."
-                return StatusResult(
+                let status = StatusResult(
                     active: true,
                     grantID: nil,
                     sources: sources.map(\.displayName),
@@ -443,6 +660,8 @@ public actor ManifoldBridge {
                     noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
                     noteGuidance: nil
                 )
+                await recordExposure(toolName: "get_status", resourcePath: nil, text: message, exposureType: "snippet", decisionID: decisionID)
+                return status
 
             case .workBlock(let grant, let grantSources, let block):
                 let mounts = grantMounts(grant: grant, sources: grantSources)
@@ -454,7 +673,7 @@ public actor ManifoldBridge {
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
                 let blockStatus = block.isPaused ? " (paused)" : ""
                 let message = "Manifold work block active\(blockStatus) (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
-                return StatusResult(
+                let status = StatusResult(
                     active: true,
                     grantID: grant.grantID,
                     sources: mounts.map(\.mountName),
@@ -465,6 +684,8 @@ public actor ManifoldBridge {
                     noteCaptureMode: grant.noteCaptureMode,
                     noteGuidance: noteGuidance
                 )
+                await recordExposure(toolName: "get_status", resourcePath: grant.grantID, text: message, exposureType: "snippet", decisionID: decisionID)
+                return status
 
             case .legacyGrant(let grant, let grantSources):
                 let mounts = grantMounts(grant: grant, sources: grantSources)
@@ -475,7 +696,7 @@ public actor ManifoldBridge {
                 let noteGuidance = noteGuidance(for: grant, summaries: summaries)
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
                 let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
-                return StatusResult(
+                let status = StatusResult(
                     active: true,
                     grantID: grant.grantID,
                     sources: mounts.map(\.mountName),
@@ -486,6 +707,8 @@ public actor ManifoldBridge {
                     noteCaptureMode: grant.noteCaptureMode,
                     noteGuidance: noteGuidance
                 )
+                await recordExposure(toolName: "get_status", resourcePath: grant.grantID, text: message, exposureType: "snippet", decisionID: decisionID)
+                return status
             }
         } catch ManifoldMCPError.accessPaused {
             return StatusResult(
@@ -533,29 +756,33 @@ public actor ManifoldBridge {
 
     public func listFiles() async throws -> [FileInfo] {
         await logToolCall(tool: "list_files")
-        let resolved = try await resolveAccessMounts()
+        let resolved = try await resolveAccessMounts(toolName: "list_files", action: "list")
+        let files: [FileInfo]
 
         // Standing access: enumerate files from original source paths
         if resolved.isStanding {
-            return try listFilesFromOriginals(mounts: resolved.mounts)
+            files = try listFilesFromOriginals(mounts: resolved.mounts)
+        } else {
+            // Grant-based: use artifact index
+            guard let grant = resolved.grant else { throw ManifoldMCPError.noActiveSession }
+            try await ensureIndexed(grant: grant, mounts: resolved.mounts)
+            let artifacts = try await artifactIndex.listFiles(grantID: grant.grantID)
+            files = artifacts.map { handle in
+                let relative = handle.path.hasPrefix(handle.mountName + "/")
+                    ? String(handle.path.dropFirst(handle.mountName.count + 1))
+                    : handle.path
+                return FileInfo(
+                    path: relative,
+                    sourceName: handle.mountName,
+                    sourceAddedAt: grant.startedAt,
+                    sizeBytes: handle.sizeBytes,
+                    lastModified: handle.lastModified
+                )
+            }
         }
-
-        // Grant-based: use artifact index
-        guard let grant = resolved.grant else { throw ManifoldMCPError.noActiveSession }
-        try await ensureIndexed(grant: grant, mounts: resolved.mounts)
-        let artifacts = try await artifactIndex.listFiles(grantID: grant.grantID)
-        return artifacts.map { handle in
-            let relative = handle.path.hasPrefix(handle.mountName + "/")
-                ? String(handle.path.dropFirst(handle.mountName.count + 1))
-                : handle.path
-            return FileInfo(
-                path: relative,
-                sourceName: handle.mountName,
-                sourceAddedAt: grant.startedAt,
-                sizeBytes: handle.sizeBytes,
-                lastModified: handle.lastModified
-            )
-        }
+        let serialized = files.map { "\($0.sourceName)/\($0.path)" }.joined(separator: "\n")
+        await recordExposure(toolName: "list_files", resourcePath: nil, text: serialized, exposureType: "snippet", decisionID: resolved.decisionID)
+        return files
     }
 
     // MARK: - File Enumeration Cache
@@ -629,7 +856,7 @@ public actor ManifoldBridge {
 
     public func readFile(path: String) async throws -> String {
         await logToolCall(tool: "read_file", arguments: ["path": path])
-        let resolved = try await resolveAccessMounts()
+        let resolved = try await resolveAccessMounts(toolName: "read_file", action: "read", resourcePath: path)
         let mounts = resolved.mounts
         let cleaned = cleanPath(path)
 
@@ -642,15 +869,33 @@ public actor ManifoldBridge {
 
         // Try mount-prefixed resolution first (e.g. "MyProject/src/main.swift")
         if let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) {
-            return try await readFromMount(relativePath: relPath, mountPath: mount.mountPath, mountName: mount.mountName, grantID: grantID)
+            return try await readFromMount(
+                relativePath: relPath,
+                mountPath: mount.mountPath,
+                mountName: mount.mountName,
+                grantID: grantID,
+                decisionID: resolved.decisionID
+            )
         }
 
         // Bare path: resolve unambiguously or reject
         let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
-        return try await readFromMount(relativePath: relPath, mountPath: mount.mountPath, mountName: mount.mountName, grantID: grantID)
+        return try await readFromMount(
+            relativePath: relPath,
+            mountPath: mount.mountPath,
+            mountName: mount.mountName,
+            grantID: grantID,
+            decisionID: resolved.decisionID
+        )
     }
 
-    private func readFromMount(relativePath: String, mountPath: String, mountName: String, grantID: String) async throws -> String {
+    private func readFromMount(
+        relativePath: String,
+        mountPath: String,
+        mountName: String,
+        grantID: String,
+        decisionID: String?
+    ) async throws -> String {
         let fileURL = try validatePath(relativePath, rootPath: mountPath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw ManifoldMCPError.fileNotFound(relativePath)
@@ -674,24 +919,90 @@ public actor ManifoldBridge {
             ]),
             grantID: grantID
         )
-        ManifoldNotification.post(ManifoldNotification.fileAccessed, userInfo: [
-            "path": canonicalPath, "action": "read", "agent": agentName
-        ])
+        await recordExposure(toolName: "read_file", resourcePath: canonicalPath, text: read.text, exposureType: "full_file", decisionID: decisionID)
         return read.text
     }
 
     // MARK: - Write File (P1 FIX: record snapshots, use canonical paths, reject ambiguous)
 
-    public func writeFile(path: String, content: String) async throws -> String {
+    public func writeFile(path: String, content: String) async throws -> WriteResult {
         await logToolCall(tool: "write_file", arguments: ["path": path, "content_length": "\(content.count)"])
-        let access = try await resolveAccessMounts()
-        let mounts = access.mounts
         let cleaned = cleanPath(path)
 
         guard !cleaned.hasPrefix("_emails/") else {
             throw ManifoldMCPError.invalidPath("Cannot write to email files (read-only)")
         }
 
+        let accessContext: AccessContext
+        do {
+            accessContext = try await resolveAccess()
+        } catch {
+            let denied = deniedDecisionContext(for: error)
+            _ = await recordAccessDecision(
+                toolName: "write_file",
+                resourcePath: cleaned,
+                action: "write",
+                allowed: false,
+                reason: denied.reason,
+                accessMode: denied.accessMode
+            )
+            throw error
+        }
+
+        if case .standing(let policy, _) = accessContext {
+            _ = try? await approvalQueue?.submit(
+                connectionID: runtimeContext.connectionID,
+                agent: agentName,
+                path: cleaned,
+                action: "write"
+            )
+            _ = await recordAccessDecision(
+                toolName: "write_file",
+                resourcePath: cleaned,
+                action: "write",
+                allowed: false,
+                reason: "standing_access",
+                accessMode: "standing",
+                policySnapshot: policySnapshot(for: policy)
+            )
+            return .escalationRequired(
+                message: "Always-on access is read-only. Start a tracked run to edit files.",
+                path: cleaned
+            )
+        }
+
+        let accessDecisionID = await recordAccessDecision(
+            toolName: "write_file",
+            resourcePath: cleaned,
+            action: "write",
+            allowed: true,
+            reason: "work_block",
+            accessMode: "tracked_run"
+        )
+
+        let access: ResolvedMounts
+        switch accessContext {
+        case .workBlock(let grant, let grantSources, _):
+            access = ResolvedMounts(
+                mounts: grantMounts(grant: grant, sources: grantSources),
+                grantID: grant.grantID,
+                grant: grant,
+                isStanding: false,
+                decisionID: accessDecisionID
+            )
+        case .legacyGrant(let grant, let grantSources):
+            access = ResolvedMounts(
+                mounts: grantMounts(grant: grant, sources: grantSources),
+                grantID: grant.grantID,
+                grant: grant,
+                isStanding: false,
+                decisionID: accessDecisionID
+            )
+        case .standing:
+            throw ManifoldMCPError.noActiveSession
+        }
+
+        let mounts = access.mounts
         let data = content.data(using: .utf8) ?? Data()
         let writeID = access.grantID ?? "standing"
 
@@ -766,34 +1077,45 @@ public actor ManifoldBridge {
                 byteCount: data.count
             )
         }
-        ManifoldNotification.post(ManifoldNotification.dataChanged)
-
-        return "Wrote \(data.count) bytes to \(canonicalPath)"
+        return .written(message: "Wrote \(data.count) bytes to \(canonicalPath)", path: canonicalPath)
     }
 
     public func searchFiles(query: String) async throws -> [(path: String, source: String, matches: [String])] {
         await logToolCall(tool: "search_files", arguments: ["query": query])
-        let resolved = try await resolveAccessMounts()
+        let resolved = try await resolveAccessMounts(toolName: "search_files", action: "search")
+        let results: [(path: String, source: String, matches: [String])]
 
         // Standing access: grep through original source files
         if resolved.isStanding {
-            return try searchFilesInOriginals(query: query, mounts: resolved.mounts)
+            results = try searchFilesInOriginals(query: query, mounts: resolved.mounts)
+        } else {
+            // Grant-based: use artifact index
+            guard let grant = resolved.grant else { throw ManifoldMCPError.noActiveSession }
+            try await ensureIndexed(grant: grant, mounts: resolved.mounts)
+            let hits = try await artifactIndex.search(grantID: grant.grantID, query: query)
+            results = hits.map { hit in
+                let relative = hit.handle.path.hasPrefix(hit.handle.mountName + "/")
+                    ? String(hit.handle.path.dropFirst(hit.handle.mountName.count + 1))
+                    : hit.handle.path
+                return (
+                    path: hit.handle.path,
+                    source: hit.handle.mountName,
+                    matches: hit.preview.isEmpty ? [relative] : hit.preview
+                )
+            }
         }
-
-        // Grant-based: use artifact index
-        guard let grant = resolved.grant else { throw ManifoldMCPError.noActiveSession }
-        try await ensureIndexed(grant: grant, mounts: resolved.mounts)
-        let hits = try await artifactIndex.search(grantID: grant.grantID, query: query)
-        return hits.map { hit in
-            let relative = hit.handle.path.hasPrefix(hit.handle.mountName + "/")
-                ? String(hit.handle.path.dropFirst(hit.handle.mountName.count + 1))
-                : hit.handle.path
-            return (
-                path: hit.handle.path,
-                source: hit.handle.mountName,
-                matches: hit.preview.isEmpty ? [relative] : hit.preview
-            )
+        for result in results {
+            for snippet in result.matches {
+                await recordExposure(
+                    toolName: "search_files",
+                    resourcePath: result.path,
+                    text: snippet,
+                    exposureType: "snippet",
+                    decisionID: resolved.decisionID
+                )
+            }
         }
+        return results
     }
 
     /// Search files directly in original source paths (standing access).
@@ -857,7 +1179,7 @@ public actor ManifoldBridge {
 
     public func fileInfo(path: String) async throws -> FileInfoDetail {
         await logToolCall(tool: "file_info", arguments: ["path": path])
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "file_info", action: "read", resourcePath: path)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -903,7 +1225,7 @@ public actor ManifoldBridge {
             }
         }
 
-        return FileInfoDetail(
+        let detail = FileInfoDetail(
             path: canonicalPath,
             sourceName: mountName,
             sizeBytes: size,
@@ -912,13 +1234,23 @@ public actor ManifoldBridge {
             lastModified: modified,
             archiveContents: archiveContents
         )
+        let detailString = [
+            detail.path,
+            detail.sourceName,
+            String(detail.sizeBytes),
+            detail.fileExtension,
+            detail.isBinary ? "binary" : "text",
+            detail.lastModified,
+        ].joined(separator: "\n")
+        await recordExposure(toolName: "file_info", resourcePath: canonicalPath, text: detailString, exposureType: "snippet", decisionID: access.decisionID)
+        return detail
     }
 
     // MARK: - Archive Listing
 
     public func listArchive(path: String) async throws -> [String] {
         await logToolCall(tool: "list_archive", arguments: ["path": path])
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "list_archive", action: "read", resourcePath: path)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -938,12 +1270,14 @@ public actor ManifoldBridge {
         let grantID = access.grantID ?? "standing"
         let indexedEntries = try await artifactIndex.archiveEntries(grantID: grantID, canonicalPath: canonicalPath)
         if !indexedEntries.isEmpty {
+            await recordExposure(toolName: "list_archive", resourcePath: canonicalPath, text: indexedEntries.joined(separator: "\n"), exposureType: "snippet", decisionID: access.decisionID)
             return indexedEntries
         }
 
         guard let contents = listZipContents(atPath: archiveURL.path) else {
             throw ManifoldMCPError.invalidPath("Not a valid zip archive or archive is empty")
         }
+        await recordExposure(toolName: "list_archive", resourcePath: canonicalPath, text: contents.joined(separator: "\n"), exposureType: "snippet", decisionID: access.decisionID)
         return contents
     }
 
@@ -951,7 +1285,7 @@ public actor ManifoldBridge {
 
     public func extractFile(archivePath: String, filePath: String) async throws -> String {
         await logToolCall(tool: "extract_file", arguments: ["archive": archivePath, "file": filePath])
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "extract_file", action: "read", resourcePath: archivePath)
         let mounts = access.mounts
         let cleaned = cleanPath(archivePath)
 
@@ -978,7 +1312,9 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.fileNotFound("'\(filePath)' not found in archive. Available files:\n\(available)")
         }
 
-        return try extractFromZip(archivePath: archiveURL.path, entryPath: targetEntry)
+        let content = try extractFromZip(archivePath: archiveURL.path, entryPath: targetEntry)
+        await recordExposure(toolName: "extract_file", resourcePath: "\(archivePath)#\(targetEntry)", text: content, exposureType: "full_file", decisionID: access.decisionID)
+        return content
     }
 
     public func readRange(path: String, startLine: Int, endLine: Int) async throws -> String {
@@ -990,7 +1326,7 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.invalidPath("Line range must be positive and end_line must be >= start_line")
         }
 
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "read_range", action: "read", resourcePath: path)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1025,12 +1361,13 @@ public actor ManifoldBridge {
             grantID: grantID
         )
 
+        await recordExposure(toolName: "read_range", resourcePath: canonicalPath, text: read.text, exposureType: "range", decisionID: access.decisionID)
         return read.text
     }
 
     public func diffFile(path: String) async throws -> String {
         await logToolCall(tool: "diff_file", arguments: ["path": path])
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "diff_file", action: "read", resourcePath: path)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1095,12 +1432,13 @@ public actor ManifoldBridge {
             }
         }.joined(separator: "\n")
 
+        await recordExposure(toolName: "diff_file", resourcePath: canonicalPath, text: rendered, exposureType: "diff", decisionID: access.decisionID)
         return rendered
     }
 
     public func searchStructured(query: String, limit: Int = 10) async throws -> String {
         await logToolCall(tool: "search_structured", arguments: ["query": query, "limit": "\(limit)"])
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "search_structured", action: "search")
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1125,17 +1463,29 @@ public actor ManifoldBridge {
         }
 
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "[]"
+        let json = String(data: data, encoding: .utf8) ?? "[]"
+        for hit in hits {
+            for snippet in hit.preview {
+                await recordExposure(
+                    toolName: "search_structured",
+                    resourcePath: hit.handle.path,
+                    text: snippet,
+                    exposureType: "snippet",
+                    decisionID: access.decisionID
+                )
+            }
+        }
+        return json
     }
 
     // MARK: - Changes
 
     public func listChanges() async throws -> [ChangeInfo] {
         await logToolCall(tool: "list_changes")
-        let access = try await resolveAccessMounts()
+        let access = try await resolveAccessMounts(toolName: "list_changes", action: "list")
         let grantID = access.grantID
         let entries = try await auditStore.recentEntries(limit: 50)
-        return entries
+        let changes = entries
             .filter { grantID == nil || $0.grantID == grantID }
             .map { entry in
                 ChangeInfo(
@@ -1145,6 +1495,9 @@ public actor ManifoldBridge {
                     timestamp: entry.timestamp
                 )
             }
+        let rendered = changes.map { "\($0.timestamp) \($0.action) \($0.path ?? "")" }.joined(separator: "\n")
+        await recordExposure(toolName: "list_changes", resourcePath: grantID, text: rendered, exposureType: "snippet", decisionID: access.decisionID)
+        return changes
     }
 
     // MARK: - Zip Helpers
@@ -1222,6 +1575,8 @@ public actor ManifoldBridge {
                 summaryPreview: preview
             ))
         }
+        let rendered = results.map { "\($0.grantID) \($0.summaryPreview)" }.joined(separator: "\n")
+        await recordExposure(toolName: "list_sessions", resourcePath: nil, text: rendered, exposureType: "snippet", decisionID: nil)
         return results
     }
 
@@ -1253,7 +1608,7 @@ public actor ManifoldBridge {
             .filter(\.isConflict)
             .map(\.relativePath)
 
-        return SessionDetail(
+        let detail = SessionDetail(
             grantID: grantID,
             targetApp: grant.targetApp,
             status: grant.status,
@@ -1267,6 +1622,14 @@ public actor ManifoldBridge {
             filesConflicted: conflicts,
             totalPromotions: promotions.count
         )
+        await recordExposure(
+            toolName: "get_session",
+            resourcePath: grantID,
+            text: [detail.summaryMarkdown ?? "", detail.filesApplied.joined(separator: "\n"), detail.filesConflicted.joined(separator: "\n")].joined(separator: "\n"),
+            exposureType: "snippet",
+            decisionID: nil
+        )
+        return detail
     }
 
     public func saveSessionNote(note: String, noteType: SessionSummaryKind = .checkpointNote) async throws -> String {
@@ -1307,16 +1670,26 @@ public actor ManifoldBridge {
 
     public func listEmails() async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
-        let (grant, _) = try await requireGrant()
+        let (grant, _, decisionID) = try await requireGrantForTool(toolName: "list_emails", action: "list")
         let emails = try accessibleEmails(grant: grant, limit: 200)
-        return emails.map {
+        let summaries = emails.map {
             EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
+        for summary in summaries {
+            await recordExposure(
+                toolName: "list_emails",
+                resourcePath: summary.id,
+                text: "\(summary.from)\n\(summary.subject)\n\(summary.date)",
+                exposureType: "email_preview",
+                decisionID: decisionID
+            )
+        }
+        return summaries
     }
 
     public func readEmail(id: String) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
-        let (grant, _) = try await requireGrant()
+        let (grant, _, decisionID) = try await requireGrantForTool(toolName: "read_email", action: "read", resourcePath: id)
 
         guard let email = try emailStore.emailMessage(id: id) else {
             throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
@@ -1342,6 +1715,7 @@ public actor ManifoldBridge {
                 ]),
                 grantID: grant.grantID
             )
+            await recordExposure(toolName: "read_email", resourcePath: id, text: content, exposureType: "email_body", decisionID: decisionID)
             return content
         }
 
@@ -1358,7 +1732,7 @@ public actor ManifoldBridge {
             grantID: grant.grantID
         )
 
-        return """
+        let preview = """
         From: \(email.sender)
         To: \(email.recipients)
         Subject: \(email.subject)
@@ -1366,102 +1740,7 @@ public actor ManifoldBridge {
 
         \(email.preview ?? "(no preview available)")
         """
-    }
-}
-
-// MARK: - Result Types
-
-public struct StatusResult: Sendable {
-    public let active: Bool
-    public let grantID: String?
-    public let sources: [String]
-    public let pausedSources: [String]
-    public let fileCount: Int
-    public let emailCount: Int
-    public let message: String
-    public let noteCaptureMode: String
-    public let noteGuidance: String?
-}
-
-public struct FileInfo: Sendable {
-    public let path: String
-    public let sourceName: String
-    public let sourceAddedAt: String
-    public let sizeBytes: Int
-    public let lastModified: String
-}
-
-public struct ChangeInfo: Sendable {
-    public let action: String
-    public let path: String?
-    public let agent: String?
-    public let timestamp: String
-}
-
-public struct FileInfoDetail: Sendable {
-    public let path: String
-    public let sourceName: String
-    public let sizeBytes: Int
-    public let fileExtension: String
-    public let isBinary: Bool
-    public let lastModified: String
-    public let archiveContents: [String]?
-}
-
-public struct SessionSummary: Sendable {
-    public let grantID: String
-    public let targetApp: String
-    public let startedAt: String
-    public let endedAt: String
-    public let summaryPreview: String
-}
-
-public struct SessionDetail: Sendable {
-    public let grantID: String
-    public let targetApp: String
-    public let status: String
-    public let startedAt: String
-    public let endedAt: String?
-    public let sources: [String]
-    public let summaryMarkdown: String?
-    public let noteCaptureMode: String
-    public let sessionNotes: [SessionNoteDetail]
-    public let filesApplied: [String]
-    public let filesConflicted: [String]
-    public let totalPromotions: Int
-}
-
-public struct SessionNoteDetail: Sendable {
-    public let summaryID: String
-    public let kind: String
-    public let origin: String
-    public let endedAt: String
-    public let markdown: String
-}
-
-public struct EmailSummary: Sendable {
-    public let id: String
-    public let from: String
-    public let subject: String
-    public let date: String
-}
-
-public enum ManifoldMCPError: Error, LocalizedError {
-    case noActiveSession
-    case noSources
-    case fileNotFound(String)
-    case invalidPath(String)
-    case accessPaused
-    case noAccessConfigured
-
-    public var errorDescription: String? {
-        switch self {
-        case .noActiveSession: "No active session"
-        case .noSources: "No sources configured"
-        case .fileNotFound(let path): "File not found: \(path)"
-        case .invalidPath(let msg): "Invalid path: \(msg)"
-        case .accessPaused: "Access is paused for this agent. Resume access in Manifold to continue."
-        case .noAccessConfigured: "No file or email access configured. Use Review & Update Access in Manifold to grant access."
-        }
+        await recordExposure(toolName: "read_email", resourcePath: id, text: preview, exposureType: "email_preview", decisionID: decisionID)
+        return preview
     }
 }

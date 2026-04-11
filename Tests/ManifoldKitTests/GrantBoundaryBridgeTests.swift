@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 @testable import ManifoldKit
-@testable import ManifoldMCP
+@testable import ManifoldRuntime
 
 @Suite("Grant Boundary Bridge")
 struct GrantBoundaryBridgeTests {
@@ -166,8 +166,8 @@ struct GrantBoundaryBridgeTests {
         #expect(source != nil)
         let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
 
-        let message = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated")
-        #expect(message.contains("alpha/notes.md"))
+        let result = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated")
+        #expect(result.message.contains("alpha/notes.md"))
 
         let history = try await harness.snapshotStore.history(runID: grant.grantID, filePath: "alpha/notes.md")
         let mcpSnapshots = history.filter { $0.source == "mcp" }
