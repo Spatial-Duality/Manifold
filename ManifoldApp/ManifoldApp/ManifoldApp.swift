@@ -7,7 +7,7 @@ struct ManifoldApp: App {
     @State private var commands = CommandCenter()
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        Window("Manifold", id: "main") {
             MainView()
                 .environment(store)
                 .environment(commands)
@@ -16,6 +16,15 @@ struct ManifoldApp: App {
         .defaultSize(width: 960, height: 640)
         .windowStyle(.automatic)
         .commands {
+            // File menu
+            CommandGroup(after: .newItem) {
+                Button("Add Folder\u{2026}") {
+                    store.addSourceFromPicker()
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+
+            // View menu
             CommandGroup(after: .toolbar) {
                 Button("Command Palette") {
                     commands.isPresented.toggle()

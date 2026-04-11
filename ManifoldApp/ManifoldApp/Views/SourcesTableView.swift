@@ -154,6 +154,13 @@ struct SourcesTableView: View {
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.selectFile(source.originalRootPath, inFileViewerRootedAtPath: "")
                 }
+                Button("Copy Path") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(source.originalRootPath, forType: .string)
+                }
+                Button("View Activity") {
+                    store.showActivityDrawer = true
+                }
                 Divider()
                 Button("Remove from Manifold", role: .destructive) {
                     store.removeSource(path: source.originalRootPath)
