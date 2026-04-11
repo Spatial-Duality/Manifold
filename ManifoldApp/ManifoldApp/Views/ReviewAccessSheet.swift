@@ -35,6 +35,10 @@ struct ReviewAccessSheet: View {
     @State private var selectedAgent: TargetApp = .cowork
     @State private var hasInitializedAgent = false
 
+    /// Draft policy — editable copy for the explicit review path
+    @State private var draftAllowedSources: Set<String> = []
+    @State private var draftInitialized = false
+
     /// Internal tab: Files or Emails
     @State private var selectedTab: ReviewTab = .files
 
@@ -105,6 +109,16 @@ struct ReviewAccessSheet: View {
             guard !hasInitializedAgent else { return }
             selectedAgent = store.agentFocus == .codex ? .codex : .cowork
             hasInitializedAgent = true
+            // Initialize draft from current policy for explicit reviews
+            if !draftInitialized {
+                draftAllowedSources = store.policy.policy(for: selectedAgent)?.allowedSourceIDs ?? []
+                draftInitialized = true
+            }
+        }
+        .onChange(of: selectedAgent) { _, newAgent in
+            if isExplicitReview {
+                draftAllowedSources = store.policy.policy(for: newAgent)?.allowedSourceIDs ?? []
+            }
         }
     }
 
@@ -155,19 +169,39 @@ struct ReviewAccessSheet: View {
 
     // MARK: - Files Content
 
+    private var isExplicitReview: Bool {
+        pendingChange?.kind.isExplicit == true
+    }
+
     private var filesContent: some View {
-        let policy = store.policy.policy(for: selectedAgent)
-        let allowedIDs = policy?.allowedSourceIDs ?? []
+        let allowedIDs = isExplicitReview ? draftAllowedSources : (store.policy.policy(for: selectedAgent)?.allowedSourceIDs ?? [])
 
         return VStack(alignment: .leading, spacing: Spacing.standard) {
             ForEach(store.sources.filter { !$0.isRemoved }) { source in
                 let isInPolicy = allowedIDs.contains(source.sourceID)
 
                 HStack(spacing: Spacing.standard) {
-                    Toggle(isOn: .constant(isInPolicy || isNewAddition(source))) { EmptyView() }
+                    if isExplicitReview {
+                        // Editable toggles for explicit review
+                        Toggle(isOn: Binding(
+                            get: { draftAllowedSources.contains(source.sourceID) },
+                            set: { enabled in
+                                if enabled {
+                                    draftAllowedSources.insert(source.sourceID)
+                                } else {
+                                    draftAllowedSources.remove(source.sourceID)
+                                }
+                            }
+                        )) { EmptyView() }
                         .toggleStyle(.checkbox)
                         .labelsHidden()
-                        .disabled(true)
+                    } else {
+                        // Read-only for specific-change triggers
+                        Toggle(isOn: .constant(isInPolicy || isNewAddition(source))) { EmptyView() }
+                            .toggleStyle(.checkbox)
+                            .labelsHidden()
+                            .disabled(true)
+                    }
 
                     Image(systemName: "folder.fill")
                         .foregroundStyle(isInPolicy ? .blue : .secondary)
@@ -278,8 +312,18 @@ struct ReviewAccessSheet: View {
                 }
             case .loosenSensitivity(_, let newLevel):
                 await store.policy.updateSensitivity(newLevel, for: selectedAgent)
-            case .explicit, .startWorkBlock:
-                break
+            case .explicit:
+                // Apply the draft policy — add new sources, remove unchecked ones
+                let current = store.policy.policy(for: selectedAgent)?.allowedSourceIDs ?? []
+                let toAdd = draftAllowedSources.subtracting(current)
+                let toRemove = current.subtracting(draftAllowedSources)
+                for id in toAdd { await store.policy.addSource(id, to: selectedAgent) }
+                for id in toRemove { await store.policy.removeSource(id, from: selectedAgent) }
+            case .startWorkBlock:
+                // Apply access changes first, then work block starts from the caller
+                let current = store.policy.policy(for: selectedAgent)?.allowedSourceIDs ?? []
+                let toAdd = draftAllowedSources.subtracting(current)
+                for id in toAdd { await store.policy.addSource(id, to: selectedAgent) }
             }
         }
     }

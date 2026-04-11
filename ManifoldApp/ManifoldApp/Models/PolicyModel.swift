@@ -15,12 +15,14 @@ final class PolicyModel {
 
     private var policyStore: PolicyStore?
     private var workBlockStore: WorkBlockStore?
+    private(set) var grantStoreRef: GrantStore?
 
     init() {}
 
-    func configure(policyStore: PolicyStore, workBlockStore: WorkBlockStore) {
+    func configure(policyStore: PolicyStore, workBlockStore: WorkBlockStore, grantStore: GrantStore? = nil) {
         self.policyStore = policyStore
         self.workBlockStore = workBlockStore
+        self.grantStoreRef = grantStore
     }
 
     // MARK: - Loading
@@ -141,16 +143,64 @@ final class PolicyModel {
         }
     }
 
-    /// Complete a reviewed work block after user confirms promotion.
-    func completeWorkBlock() async {
-        guard let store = workBlockStore, let block = activeWorkBlock else { return }
+    /// Cancel review — revert work block from .reviewing back to .active.
+    /// Called when the user dismisses the ReviewChangesSheet without confirming.
+    func cancelReview() async {
+        guard let store = workBlockStore, let block = activeWorkBlock,
+              block.status == .reviewing else { return }
         do {
-            try await store.endBlock(id: block.id, status: .promoted)
+            try await store.resumeBlock(id: block.id)
+            await loadActiveWorkBlock()
+        } catch {
+            logger.error("Failed to cancel review: \(error.localizedDescription)")
+        }
+    }
+
+    /// Complete a reviewed work block after user confirms promotion.
+    /// Runs PromoteEngine to write materialized changes back to originals.
+    func completeWorkBlock() async {
+        guard let wbStore = workBlockStore, let block = activeWorkBlock else { return }
+        do {
+            // Run the actual promotion pipeline
+            if let grantStore = grantStoreRef {
+                let grantSources = try await grantStore.grantSources(grantID: block.grantID)
+                if let grant = try await grantStore.grant(id: block.grantID) {
+                    for gs in grantSources {
+                        if let source = try await grantStore.source(id: gs.sourceID) {
+                            let mountURL = URL(fileURLWithPath: grant.materializationRoot)
+                                .appendingPathComponent(gs.mountName)
+                            let originalURL = URL(fileURLWithPath: source.originalRootPath)
+                            let summary = try PromoteEngine.promote(
+                                sourceID: gs.sourceID,
+                                mountName: gs.mountName,
+                                mountURL: mountURL,
+                                originalURL: originalURL
+                            )
+                            // Record promotions
+                            for file in summary.applied + summary.conflicts + summary.newFiles {
+                                try await grantStore.recordPromotion(
+                                    grantID: block.grantID,
+                                    sourceID: gs.sourceID,
+                                    relativePath: file.relativePath,
+                                    result: file.result,
+                                    originalBeforeHash: file.originalBeforeHash,
+                                    promotedHash: file.promotedHash,
+                                    conflictReason: file.conflictReason
+                                )
+                            }
+                            logger.info("Promoted \(summary.applied.count) files, \(summary.conflicts.count) conflicts for \(gs.mountName)")
+                        }
+                    }
+                }
+            }
+
+            try await wbStore.endBlock(id: block.id, status: .promoted)
             activeWorkBlock = nil
         } catch {
             logger.error("Failed to complete work block: \(error.localizedDescription)")
         }
     }
+
 
     func pauseWorkBlock() async {
         guard let store = workBlockStore, let block = activeWorkBlock else { return }

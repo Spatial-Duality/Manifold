@@ -148,7 +148,7 @@ class ManifoldStore {
             // Initialize v4.1 standing access stores
             let policyStore = PolicyStore(db: connection)
             let workBlockStore = WorkBlockStore(db: connection)
-            policy.configure(policyStore: policyStore, workBlockStore: workBlockStore)
+            policy.configure(policyStore: policyStore, workBlockStore: workBlockStore, grantStore: grantStore)
 
             // Initialize email sync engine
             let syncEngine = EmailSyncEngine(emailStore: emailStore)

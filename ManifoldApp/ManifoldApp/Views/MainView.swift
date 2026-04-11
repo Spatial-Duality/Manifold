@@ -125,10 +125,12 @@ struct MainView: View {
     }
 
     /// Presents ReviewChangesSheet when a work block enters .reviewing status.
+    /// Dismissing the sheet (Cancel) reverts to .active — does NOT promote.
+    /// Promotion only happens from the sheet's Promote button.
     private var reviewChangesBinding: Binding<Bool> {
         Binding(
             get: { store.policy.activeWorkBlock?.status == .reviewing },
-            set: { if !$0 { Task { await store.policy.completeWorkBlock() } } }
+            set: { if !$0 { Task { await store.policy.cancelReview() } } }
         )
     }
 
