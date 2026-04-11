@@ -173,7 +173,7 @@ struct FilesView: View {
                     }
                     .contextMenu { fileContextMenu(file: file) }
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .listStyle(.inset)
             }
         }
         .navigationTitle(navigationTitleText)

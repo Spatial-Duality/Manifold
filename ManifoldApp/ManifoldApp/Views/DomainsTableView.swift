@@ -127,7 +127,7 @@ struct DomainsTableView: View {
                 .font(.caption)
             }
         }
-        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .listStyle(.inset)
     }
 
     // MARK: - Domain Row

@@ -70,7 +70,7 @@ struct ActivityView: View {
                     FlatActivityContent(filteredEntries: filteredEntries)
                 }
             }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
+            .listStyle(.inset)
 
             // Contextual bottom bar
             if store.showSessionGrouping && store.selectedSession != nil {

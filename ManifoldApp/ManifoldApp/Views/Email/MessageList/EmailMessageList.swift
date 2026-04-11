@@ -27,7 +27,7 @@ struct EmailMessageList: View {
                 )
                 .tag(msg.emailID)
             }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
+            .listStyle(.inset)
             .overlay {
                 if messages.isEmpty {
                     MessageListEmpty(hasAccount: selection.selectedAccountID != nil)

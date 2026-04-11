@@ -42,7 +42,7 @@ struct VersionsView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .listStyle(.inset)
             }
         }
         .navigationTitle("Versions")

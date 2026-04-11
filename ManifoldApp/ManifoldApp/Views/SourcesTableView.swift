@@ -146,7 +146,7 @@ struct SourcesTableView: View {
                 .width(60)
             }
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .tableStyle(.inset)
         .contextMenu(forSelectionType: SourceRecord.ID.self) { ids in
             if let id = ids.first, let source = visibleSources.first(where: { $0.id == id }) {
                 Button("Reveal in Finder") {
