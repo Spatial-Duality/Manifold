@@ -118,7 +118,7 @@ struct MenuBarWorkBlockStrip: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(block.agent == .codex ? Color.purple : Color.blue)
+                .fill(block.agent == .codex ? Color.codexPurple : Color.claudeBlue)
                 .frame(width: 8, height: 8)
 
             Text("Tracked Work Block")
@@ -149,7 +149,7 @@ struct MenuBarWorkBlockStrip: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background((block.agent == .codex ? Color.purple : Color.blue).opacity(0.06))
+        .background((block.agent == .codex ? Color.codexPurple : Color.claudeBlue).opacity(0.06))
     }
 }
 
@@ -165,7 +165,7 @@ struct MenuBarAgentCard: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Circle()
-                    .fill(agent == .codex ? Color.purple : Color.blue)
+                    .fill(agent == .codex ? Color.codexPurple : Color.claudeBlue)
                     .frame(width: 8, height: 8)
                 Text(agent == .codex ? "Codex" : "Claude")
                     .font(.callout.weight(.medium))
@@ -173,10 +173,10 @@ struct MenuBarAgentCard: View {
                 if policy.isPaused {
                     Text("Paused")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.statusPaused)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(.orange.opacity(0.12), in: Capsule())
+                        .background(Color.statusPaused.opacity(Opacity.badgeFill), in: Capsule())
                 } else if !isConnected {
                     Text("Offline")
                         .font(.caption2)
@@ -196,7 +196,7 @@ struct MenuBarAgentCard: View {
                 }
                 .controlSize(.mini)
                 .buttonStyle(.bordered)
-                .tint(policy.isPaused ? .green : .orange)
+                .tint(policy.isPaused ? .statusActive : .statusPaused)
             }
 
             if !policy.isPaused {

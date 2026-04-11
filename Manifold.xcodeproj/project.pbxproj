@@ -84,6 +84,7 @@
 		5F513BA027EE4D8FAAE37259 /* ReviewChangesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EC6A16ACCF48C0BC39AE60 /* ReviewChangesSheet.swift */; };
 		0BE3DA79CDD040A0B63DD21B /* AddMailAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */; };
 		99A490D882414CD0B5672D8C /* MenuBarPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 197B4B7352D14843A932C36A /* MenuBarPanelView.swift */; };
+		8BEBCA068A954167B09C587A /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB171CB3585C4416945094E8 /* DesignTokens.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -166,6 +167,7 @@
 		44EC6A16ACCF48C0BC39AE60 /* ReviewChangesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewChangesSheet.swift; sourceTree = "<group>"; };
 		DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/AddMailAccountSheet.swift; sourceTree = "<group>"; };
 		197B4B7352D14843A932C36A /* MenuBarPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBar/MenuBarPanelView.swift; sourceTree = "<group>"; };
+		FB171CB3585C4416945094E8 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -355,6 +357,7 @@
 				C8FB18E5540B4923A9D0FCE5 /* TrackChangesToolbarContent.swift */,
 				A5E40DFFF87741F4B4153843 /* LiveCheckRow.swift */,
 				2D1FEF18C05C4EB6A4931DAD /* DetailLine.swift */,
+				FB171CB3585C4416945094E8 /* DesignTokens.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -534,6 +537,7 @@
 				5F513BA027EE4D8FAAE37259 /* ReviewChangesSheet.swift in Sources */,
 				0BE3DA79CDD040A0B63DD21B /* AddMailAccountSheet.swift in Sources */,
 				99A490D882414CD0B5672D8C /* MenuBarPanelView.swift in Sources */,
+				8BEBCA068A954167B09C587A /* DesignTokens.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

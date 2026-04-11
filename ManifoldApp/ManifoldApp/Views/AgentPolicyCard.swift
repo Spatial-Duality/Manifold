@@ -44,12 +44,12 @@ struct AgentPolicyCard: View {
         .background {
             RoundedRectangle(cornerRadius: 12)
                 .fill(.background)
-                .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                .cardElevation()
         }
         .overlay {
             if isPaused {
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(Color.statusPaused.opacity(0.3), lineWidth: 1)
             } else {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(.separator, lineWidth: 0.5)
@@ -67,34 +67,34 @@ struct AgentPolicyCard: View {
             Circle()
                 .fill(isConnected ? agentColor : .gray)
                 .frame(width: 10, height: 10)
-                .animation(.snappy, value: isConnected)
+                .animation(Anim.stateChange, value: isConnected)
 
             Text(agentName)
-                .font(.headline)
+                .font(Typ.heading)
 
             // State chip — user always knows current access state
             Text(isPaused ? "Paused" : "Active")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(isPaused ? .orange : .secondary)
+                .font(Typ.caption.weight(.medium))
+                .foregroundStyle(isPaused ? Color.statusPaused : Color.secondary)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
-                    (isPaused ? Color.orange : agentColor).opacity(0.12),
+                    (isPaused ? Color.statusPaused : agentColor).opacity(Opacity.badgeFill),
                     in: Capsule()
                 )
 
             // Connection status — problems are louder than success
             if isConnected {
                 Text("Connected")
-                    .font(.caption)
+                    .font(Typ.caption)
                     .foregroundStyle(.secondary)
             } else {
                 Label("Not Connected", systemImage: "exclamationmark.circle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.orange)
+                    .font(Typ.caption.weight(.medium))
+                    .foregroundStyle(Color.statusWarning)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(.orange.opacity(0.12), in: Capsule())
+                    .background(Color.statusWarning.opacity(Opacity.badgeFill), in: Capsule())
             }
 
             Spacer()
@@ -105,7 +105,7 @@ struct AgentPolicyCard: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .tint(isPaused ? .green : .red)
+            .tint(isPaused ? .statusActive : .statusDanger)
             .accessibilityLabel(isPaused ? "Resume access for \(agentName)" : "Pause access for \(agentName)")
             .accessibilityHint(isPaused ? "Resumes \(agentName) file and email access" : "Immediately suspends all \(agentName) access")
         }
@@ -123,11 +123,11 @@ struct AgentPolicyCard: View {
                     .font(.callout.weight(.medium))
                     .contentTransition(.numericText())
                 Text("of \(totalSources) sources")
-                    .font(.callout)
+                    .font(Typ.body)
                     .foregroundStyle(.secondary)
             } else {
                 Text("No file access")
-                    .font(.callout)
+                    .font(Typ.body)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -143,7 +143,7 @@ struct AgentPolicyCard: View {
                     .font(.callout.weight(.medium))
                     .contentTransition(.numericText())
                 Text("domain\(emailAccountCount == 1 ? "" : "s") visible")
-                    .font(.callout)
+                    .font(Typ.body)
                     .foregroundStyle(.secondary)
             } else {
                 // Actionable — navigate to Emails tab
@@ -152,10 +152,10 @@ struct AgentPolicyCard: View {
                 } label: {
                     HStack(spacing: Spacing.tight) {
                         Text("Set up email access")
-                            .font(.callout)
+                            .font(Typ.body)
                             .foregroundStyle(.secondary)
                         Image(systemName: "chevron.right")
-                            .font(.caption2)
+                            .font(Typ.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -173,7 +173,7 @@ struct AgentPolicyCard: View {
 
             Button(action: onViewActivity) {
                 Label("Activity", systemImage: "waveform.path")
-                    .font(.callout)
+                    .font(Typ.body)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
