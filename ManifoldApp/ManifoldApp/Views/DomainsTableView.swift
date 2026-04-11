@@ -198,6 +198,11 @@ struct DomainsTableView: View {
             }
         }
         .padding(.vertical, 2)
+        .listRowBackground(
+            isGranted
+                ? (focusedAgent == .codex ? Color.purple : Color.blue).opacity(0.04)
+                : Color.clear
+        )
     }
 
     // MARK: - Per-Agent Policy Helpers

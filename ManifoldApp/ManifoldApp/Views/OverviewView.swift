@@ -42,7 +42,7 @@ struct OverviewView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Overview")
+        .navigationTitle("Manifold")
         .task {
             await store.loadSummary()
             await store.policy.loadPolicies()
