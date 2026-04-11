@@ -32,9 +32,17 @@ struct EmailAccountSetupView: View {
         case failed
     }
 
+    @FocusState private var emailFieldFocused: Bool
+    @State private var showPassword = false
+
     var body: some View {
         VStack(spacing: 0) {
             header
+
+            // Step indicator
+            stepIndicator
+                .padding(.vertical, Spacing.standard)
+
             Divider()
 
             Group {
@@ -53,7 +61,45 @@ struct EmailAccountSetupView: View {
             Divider()
             footer
         }
-        .frame(width: 520, height: 520)
+        .frame(width: 520, height: 540)
+        .onAppear { emailFieldFocused = true }
+    }
+
+    // MARK: - Step Indicator
+
+    private var stepIndicator: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(stepLabels.enumerated()), id: \.offset) { index, label in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(stepIndex >= index ? Color.accentColor : Color.gray.opacity(0.3))
+                        .frame(width: 6, height: 6)
+                    if stepIndex == index {
+                        Text(label)
+                            .font(Typ.caption.weight(.medium))
+                    }
+                }
+                if index < stepLabels.count - 1 {
+                    Rectangle()
+                        .fill(stepIndex > index ? Color.accentColor : Color.gray.opacity(0.2))
+                        .frame(width: 16, height: 1)
+                }
+            }
+        }
+        .padding(.horizontal, Spacing.edge)
+        .accessibilityLabel("Step \(stepIndex + 1) of \(stepLabels.count)")
+    }
+
+    private var stepLabels: [String] { ["Email", "Provider", "Credentials", "Connect", "Done"] }
+
+    private var stepIndex: Int {
+        switch step {
+        case .enterEmail: 0
+        case .guide: 1
+        case .credentials, .advancedIMAP: 2
+        case .connecting: 3
+        case .success, .failed: 4
+        }
     }
 
     // MARK: - Header
@@ -138,6 +184,7 @@ struct EmailAccountSetupView: View {
                     .font(.title3)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
+                    .focused($emailFieldFocused)
                     .onSubmit { detectAndContinue() }
 
                 if isDetecting {
