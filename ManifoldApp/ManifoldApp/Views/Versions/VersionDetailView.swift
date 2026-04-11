@@ -13,6 +13,7 @@ struct VersionDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // File header
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90").foregroundStyle(.secondary)
                 Text(filePath).font(.headline.monospaced()).lineLimit(1).truncationMode(.middle)
@@ -20,6 +21,12 @@ struct VersionDetailView: View {
                 Text("\(snapshots.count) versions").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.section)
+
+            // Access explanation — why this file is visible
+            accessExplanation
+                .padding(.horizontal, Spacing.edge)
+                .padding(.bottom, Spacing.standard)
+
             Divider()
 
             if snapshots.isEmpty {
@@ -48,6 +55,44 @@ struct VersionDetailView: View {
         .task { await loadHistory() }
         .onChange(of: selectedSnapshot) { _, newValue in
             if let snap = newValue { Task { await loadDiff(for: snap) } }
+        }
+    }
+
+    // MARK: - Access Explanation
+
+    @ViewBuilder
+    private var accessExplanation: some View {
+        let source = store.sources.first { source in
+            filePath.contains(source.displayName) || filePath.contains(source.originalRootPath)
+        }
+
+        if let source {
+            let claudeHas = store.policy.claudePolicy?.allowedSourceIDs.contains(source.sourceID) ?? false
+            let codexHas = store.policy.codexPolicy?.allowedSourceIDs.contains(source.sourceID) ?? false
+
+            VStack(alignment: .leading, spacing: 4) {
+                if claudeHas {
+                    HStack(spacing: 6) {
+                        Circle().fill(.blue).frame(width: 6, height: 6)
+                        Text("Accessible because \(source.displayName) is shared with Claude")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if codexHas {
+                    HStack(spacing: 6) {
+                        Circle().fill(.purple).frame(width: 6, height: 6)
+                        Text("Accessible because \(source.displayName) is shared with Codex")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if !claudeHas && !codexHas {
+                    Text("Not accessible to any agent")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
     }
 
