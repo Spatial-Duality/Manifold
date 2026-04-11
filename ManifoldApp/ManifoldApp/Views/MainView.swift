@@ -232,34 +232,68 @@ private struct FilesTab: View {
 
 // MARK: - Emails Tab (sidebar + content)
 
-/// Emails tab with mode-driven navigation.
-/// Domains mode → DomainsTableView with its own sidebar.
-/// Messages mode → EmailView (which has its own NavigationSplitView).
+/// Emails tab with sidebar-driven mode switching.
+/// "All Domains" → DomainsTableView (governance surface).
+/// Account/mailbox → EmailView (browsing surface with its own NavigationSplitView).
 /// Uses if/else to avoid nesting NavigationSplitViews which crashes on macOS.
 private struct EmailsTab: View {
-    @State private var showingDomains = true
+    @Environment(ManifoldStore.self) var store
+    @State private var emailMode: EmailMode = .domains
+
+    enum EmailMode: Hashable {
+        case domains
+        case messages
+    }
 
     var body: some View {
-        if showingDomains {
-            DomainsTableView()
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button("View Messages") {
-                            showingDomains = false
+        NavigationSplitView {
+            // Sidebar — always present
+            List(selection: $emailMode) {
+                Section("Mail") {
+                    Label("All Domains", systemImage: "tray.full")
+                        .tag(EmailMode.domains)
+                    Label("Messages", systemImage: "envelope")
+                        .tag(EmailMode.messages)
+                }
+
+                Section("Accounts") {
+                    ForEach(store.emailAccounts.accounts) { account in
+                        Button {
+                            emailMode = .messages
+                        } label: {
+                            Label(account.displayName, systemImage: "envelope")
                         }
-                        .controlSize(.small)
+                    }
+                    if store.emailAccounts.accounts.isEmpty {
+                        Text("No accounts")
+                            .foregroundStyle(.tertiary)
+                            .font(.callout)
                     }
                 }
-        } else {
-            EmailView()
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button("\u{2190} Domains") {
-                            showingDomains = true
-                        }
-                        .controlSize(.small)
+
+                Section {
+                    Button {
+                        store.showActivityDrawer = true
+                    } label: {
+                        Label("View Activity", systemImage: "list.bullet.rectangle")
+                            .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
                 }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+            .navigationTitle("Emails")
+        } detail: {
+            // Content switches based on sidebar selection
+            switch emailMode {
+            case .domains:
+                DomainsTableView()
+            case .messages:
+                // EmailView has its own NavigationSplitView internally
+                // This is safe because it's the sole detail content, not nested
+                EmailView()
+            }
         }
     }
 }
