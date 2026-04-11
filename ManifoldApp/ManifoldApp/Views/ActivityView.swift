@@ -345,7 +345,7 @@ struct SessionEventRow: View {
                 }
             }
             .background(revertSuccess ? Color.green.opacity(0.1) : Color.clear)
-            .animation(.easeOut(duration: 1.0), value: revertSuccess)
+            \.animation(.spring, value: revertSuccess)
 
             // Expandable diff for write events
             if showDiff && event.isWriteEvent {
