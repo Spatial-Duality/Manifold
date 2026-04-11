@@ -98,6 +98,7 @@
 		BBD1000F /* KeywordRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD10010 /* KeywordRulesView.swift */; };
 		BBD10011 /* DefaultPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD10012 /* DefaultPolicyView.swift */; };
 		CCD10001 /* InlineMessagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD10002 /* InlineMessagePreview.swift */; };
+		DDD10001 /* RuleFormComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD10002 /* RuleFormComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -193,6 +194,7 @@
 		BBD10010 /* KeywordRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KeywordRulesView.swift; path = ManifoldApp/ManifoldApp/Views/Email/Rules/KeywordRulesView.swift; sourceTree = SOURCE_ROOT; };
 		BBD10012 /* DefaultPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DefaultPolicyView.swift; path = ManifoldApp/ManifoldApp/Views/Email/Rules/DefaultPolicyView.swift; sourceTree = SOURCE_ROOT; };
 		CCD10002 /* InlineMessagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InlineMessagePreview.swift; path = ManifoldApp/ManifoldApp/Views/Email/MessageList/InlineMessagePreview.swift; sourceTree = SOURCE_ROOT; };
+		DDD10002 /* RuleFormComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RuleFormComponents.swift; path = ManifoldApp/ManifoldApp/Components/RuleFormComponents.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -601,6 +603,7 @@
 				BBD1000F /* KeywordRulesView.swift in Sources */,
 				BBD10011 /* DefaultPolicyView.swift in Sources */,
 				CCD10001 /* InlineMessagePreview.swift in Sources */,
+				DDD10001 /* RuleFormComponents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

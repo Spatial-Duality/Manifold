@@ -136,3 +136,40 @@ enum AgentDefaultPolicy: String, CaseIterable, Sendable {
     case allowUnlessBlocked = "Allow unless blocked"
     case blockUnlessAllowed = "Block unless allowed"
 }
+
+// MARK: - Rule CRUD
+
+extension EmailRulesModel {
+    func addDomainRule(domain: String, action: RuleAction, category: String, agents: [TargetApp]) {
+        domainRules.append(DomainRule(
+            id: UUID(), domain: domain, action: action,
+            category: category, agents: agents,
+            emailCount: 0, shieldOverlap: nil
+        ))
+    }
+
+    func addContactRule(name: String, email: String, action: RuleAction, agents: [TargetApp]) {
+        let emailDomain = email.split(separator: "@").last.map(String.init) ?? ""
+        let existing = domainRules.first { $0.domain == emailDomain }
+        let overrides = existing != nil
+            ? "\(emailDomain) domain (\(existing!.action.rawValue)) \u{2192} \(action.rawValue) for this contact"
+            : "No existing domain or shield override"
+        contactRules.append(ContactRule(
+            id: UUID(), name: name, email: email,
+            action: action, overridesDescription: overrides,
+            agents: agents
+        ))
+    }
+
+    func addKeywordRule(pattern: String, matchLocation: KeywordMatchLocation, action: RuleAction, agents: [TargetApp], isRegex: Bool) {
+        keywordRules.append(KeywordRule(
+            id: UUID(), pattern: pattern,
+            matchLocation: matchLocation, action: action,
+            matchedCount: 0, agents: agents, isRegex: isRegex
+        ))
+    }
+
+    func removeDomainRule(id: UUID) { domainRules.removeAll { $0.id == id } }
+    func removeContactRule(id: UUID) { contactRules.removeAll { $0.id == id } }
+    func removeKeywordRule(id: UUID) { keywordRules.removeAll { $0.id == id } }
+}
