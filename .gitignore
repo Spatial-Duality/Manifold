@@ -5,3 +5,5 @@ DerivedData/
 .DS_Store
 .gstack/
 default.profraw
+.mcp.json
+.xcodebuildmcp/

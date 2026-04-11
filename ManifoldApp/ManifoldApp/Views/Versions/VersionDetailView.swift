@@ -68,15 +68,15 @@ struct VersionDetailView: View {
 
         if let after = afterData, let before = beforeData {
             diffLines = engine.diff(beforeData: before, afterData: after) ?? [
-                DiffLine(type: .context, text: "(Binary file, diff not available)")
+                DiffLine(id: 0, type: .context, text: "(Binary file, diff not available)")
             ]
         } else if let after = afterData {
             if let text = String(data: after, encoding: .utf8) {
                 let lines = text.components(separatedBy: "\n")
-                diffLines = lines.prefix(50).map { DiffLine(type: .addition, text: $0) }
-                if lines.count > 50 { diffLines.append(DiffLine(type: .context, text: "... (\(lines.count - 50) more lines)")) }
+                diffLines = lines.prefix(50).enumerated().map { DiffLine(id: $0.offset, type: .addition, text: $0.element) }
+                if lines.count > 50 { diffLines.append(DiffLine(id: 50, type: .context, text: "... (\(lines.count - 50) more lines)")) }
             } else {
-                diffLines = [DiffLine(type: .context, text: "(Binary file, \(after.count) bytes)")]
+                diffLines = [DiffLine(id: 0, type: .context, text: "(Binary file, \(after.count) bytes)")]
             }
         } else { diffLines = [] }
     }
