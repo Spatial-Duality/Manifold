@@ -236,6 +236,34 @@ class ManifoldStore {
             Task { @MainActor in self?.debouncedRefresh() }
         }
         notificationObservers = [connected, disconnected, denied, dataChanged]
+
+        // App Intent observers
+        NotificationCenter.default.addObserver(forName: .manifoldPauseAllFromIntent, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.policy.pauseAllAgents() }
+        }
+        NotificationCenter.default.addObserver(forName: .manifoldStartWorkBlockFromIntent, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                self?.reviewSheetTrigger = ReviewAccessChange(description: "Start tracking changes", kind: .startWorkBlock)
+            }
+        }
+        NotificationCenter.default.addObserver(forName: .manifoldOpenActivityFromIntent, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.showActivityDrawer = true }
+        }
+
+        // Finder Sync Extension receiver
+        DistributedNotificationCenter.default().addObserver(
+            forName: .init("com.spatialduality.manifold.addSources"),
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let info = notification.userInfo,
+                  let paths = info["paths"] as? String else { return }
+            Task { @MainActor in
+                NSApp.activate(ignoringOtherApps: true)
+                for path in paths.split(separator: "\n") {
+                    self?.addSource(path: String(path))
+                }
+            }
+        }
     }
 
     /// Check and expire stale grants (called from 60s background timer).

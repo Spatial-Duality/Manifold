@@ -85,6 +85,8 @@
 		0BE3DA79CDD040A0B63DD21B /* AddMailAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */; };
 		99A490D882414CD0B5672D8C /* MenuBarPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 197B4B7352D14843A932C36A /* MenuBarPanelView.swift */; };
 		8BEBCA068A954167B09C587A /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB171CB3585C4416945094E8 /* DesignTokens.swift */; };
+		10CCAB5AA38040D1B21205C0 /* ManifoldIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A29E9E47C7E4AF19185BAB9 /* ManifoldIntents.swift */; };
+		41950AE419064BB5B34AC764 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A0D394F070481E911C78D6 /* AboutView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -168,6 +170,8 @@
 		DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/AddMailAccountSheet.swift; sourceTree = "<group>"; };
 		197B4B7352D14843A932C36A /* MenuBarPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBar/MenuBarPanelView.swift; sourceTree = "<group>"; };
 		FB171CB3585C4416945094E8 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		6A29E9E47C7E4AF19185BAB9 /* ManifoldIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Intents/ManifoldIntents.swift; sourceTree = "<group>"; };
+		F5A0D394F070481E911C78D6 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -255,6 +259,8 @@
 				44EC6A16ACCF48C0BC39AE60 /* ReviewChangesSheet.swift */,
 				DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */,
 				197B4B7352D14843A932C36A /* MenuBarPanelView.swift */,
+				6A29E9E47C7E4AF19185BAB9 /* ManifoldIntents.swift */,
+				F5A0D394F070481E911C78D6 /* AboutView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -538,6 +544,8 @@
 				0BE3DA79CDD040A0B63DD21B /* AddMailAccountSheet.swift in Sources */,
 				99A490D882414CD0B5672D8C /* MenuBarPanelView.swift in Sources */,
 				8BEBCA068A954167B09C587A /* DesignTokens.swift in Sources */,
+				10CCAB5AA38040D1B21205C0 /* ManifoldIntents.swift in Sources */,
+				41950AE419064BB5B34AC764 /* AboutView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
