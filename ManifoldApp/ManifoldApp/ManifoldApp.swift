@@ -60,7 +60,7 @@ struct ManifoldApp: App {
 
                 Button(pauseLabel) {
                     Task {
-                        let agent: TargetApp = store.agentFocus == .codex ? .codex : .cowork
+                        let agent: TargetApp = store.agentFocus.targetApp
                         let policy = store.policy.policy(for: agent)
                         if policy?.isPaused == true {
                             await store.policy.resumeAgent(agent)
@@ -113,7 +113,7 @@ struct ManifoldApp: App {
     }
 
     private var pauseLabel: String {
-        let agent: TargetApp = store.agentFocus == .codex ? .codex : .cowork
+        let agent: TargetApp = store.agentFocus.targetApp
         let policy = store.policy.policy(for: agent)
         return policy?.isPaused == true ? "Resume Access" : "Pause Access"
     }

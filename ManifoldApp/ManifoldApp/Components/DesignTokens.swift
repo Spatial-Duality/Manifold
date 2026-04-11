@@ -81,3 +81,13 @@ enum Anim {
         reduceMotion ? .default : animation
     }
 }
+
+// MARK: - Path Utilities
+
+extension String {
+    /// Shorten an absolute path by replacing the home directory with ~.
+    var shortenedPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return hasPrefix(home) ? "~" + dropFirst(home.count) : self
+    }
+}

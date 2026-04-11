@@ -15,7 +15,6 @@
 		1F0C08BF8B7FA359313182D1 /* EmailHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01E2964F1F242AAC4C3CCF88 /* EmailHeaderView.swift */; };
 		1F4BA2DB9FAB796928BC9A7F /* EmailAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18233197B24B119F64466148 /* EmailAccountModel.swift */; };
 		AA1E6D77C2B34D2EA0F7A101 /* AppRuntimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1E6D77C2B34D2EA0F7A102 /* AppRuntimeClient.swift */; };
-		2037162F5FFA81AE0AD37C84 /* EmailSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BC886845CC4CB988CCA7D70 /* EmailSearchField.swift */; };
 		299780E7A90848E928A18544 /* VersionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F390D9C39C8B2FD13E621218 /* VersionDetailView.swift */; };
 		2D2D8CE031753023740CDCDC /* EmailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90E72D648468DB4AB2935B91 /* EmailView.swift */; };
 		44285AF252D046288C4E3ECD /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E9A816D1C0EB330E125C1D /* ActivityView.swift */; };
@@ -112,7 +111,6 @@
 		5DBD8DD896966114B4335863 /* EmailSearchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSearchModel.swift; sourceTree = "<group>"; };
 		637D496B74DA1115C460A54B /* EmailReadingPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailReadingPane.swift; sourceTree = "<group>"; };
 		66874570DB901C86CD1BA477 /* EmailSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSidebar.swift; sourceTree = "<group>"; };
-		6BC886845CC4CB988CCA7D70 /* EmailSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSearchField.swift; sourceTree = "<group>"; };
 		7563B6AC08E7B6763DD54D6B /* AttachmentBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentBar.swift; sourceTree = "<group>"; };
 		759F47B8735C6C62DFE4015A /* EmailMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailMessageList.swift; sourceTree = "<group>"; };
 		76613F3C74A0440934F46E63 /* ManifoldApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldApp.swift; sourceTree = "<group>"; };
@@ -239,7 +237,6 @@
 		6F33E03EE4063733D20230B0 /* Search */ = {
 			isa = PBXGroup;
 			children = (
-				6BC886845CC4CB988CCA7D70 /* EmailSearchField.swift */,
 			);
 			path = Search;
 			sourceTree = "<group>";
@@ -513,7 +510,6 @@
 				89A98676FDACCB0819FE9C75 /* EmailMessageList.swift in Sources */,
 				B184F0F66EE28357C5F7F306 /* EmailMessageRow.swift in Sources */,
 				AADF9BD6E935C4117F68FD4F /* EmailReadingPane.swift in Sources */,
-				2037162F5FFA81AE0AD37C84 /* EmailSearchField.swift in Sources */,
 				5ACC76D796DCE087D8D519B2 /* EmailSearchModel.swift in Sources */,
 				AB73A856DCC2BE53D2783481 /* EmailSelectionModel.swift in Sources */,
 				8B537DC82E97E27C9C9D4328 /* EmailSidebar.swift in Sources */,

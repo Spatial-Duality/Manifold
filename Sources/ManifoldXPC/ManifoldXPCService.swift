@@ -35,10 +35,12 @@ private struct CommandReplyBox: @unchecked Sendable {
 
 public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, ManifoldXPCProtocol, @unchecked Sendable {
     let runtime: ManifoldRuntime
+    let agentVersion: String
     private let registry = XPCConnectionRegistry()
 
-    public init(runtime: ManifoldRuntime) {
+    public init(runtime: ManifoldRuntime, version: String = "0.4.0") {
         self.runtime = runtime
+        self.agentVersion = version
         super.init()
     }
 
@@ -124,7 +126,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
     private func handleCommand(name: String, payload: [String: Any]) async throws -> [String: Any] {
         switch name {
         case "ping":
-            return ["ok": true]
+            return ["ok": true, "agentVersion": agentVersion]
 
         case "getStatus":
             let sources = try await runtime.grantStore.allSources()

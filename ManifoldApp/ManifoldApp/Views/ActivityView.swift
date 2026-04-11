@@ -8,6 +8,7 @@ struct ActivityView: View {
     @State private var filteredEntries: [AuditEntry] = []
     @State private var copiedSummary = false
     @State private var filterDebounceTask: Task<Void, Never>?
+    @State private var exportError: String?
 
     private func refilter() async {
         let entries = store.activityEntries
@@ -97,6 +98,10 @@ struct ActivityView: View {
             }
         }
         .animation(.default, value: store.showSessionGrouping)
+        .alert("Export Failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+        } message: {
+            Text(exportError ?? "")
+        }
         .navigationTitle("Activity")
         .navigationSubtitle(subtitle)
         .toolbar {
@@ -146,11 +151,16 @@ struct ActivityView: View {
         panel.nameFieldStringValue = "manifold-activity-\(ISO8601DateFormatter.shared.string(from: .now).prefix(10)).csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        let destination = url
         Task.detached(priority: .userInitiated) {
             let csv = "Timestamp,Action,Agent,File,Details\n" + entries.map { entry in
                 "\"\(entry.timestamp)\",\"\(entry.action)\",\"\(entry.agent ?? "")\",\"\(entry.filePath ?? "")\",\"\(entry.metadata ?? "")\""
             }.joined(separator: "\n")
-            try? csv.write(to: url, atomically: true, encoding: .utf8)
+            do {
+                try csv.write(to: destination, atomically: true, encoding: .utf8)
+            } catch {
+                await MainActor.run { exportError = error.localizedDescription }
+            }
         }
     }
 }

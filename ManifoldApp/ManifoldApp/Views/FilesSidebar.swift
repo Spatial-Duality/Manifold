@@ -15,8 +15,8 @@ struct FilesSidebar: View {
 
     var body: some View {
         List(selection: $selection) {
-            // Sources section
-            Section("Sources") {
+            // 2.4: Section headers with prominence
+            Section {
                 ForEach(visibleSources) { source in
                     Label {
                         Text(source.displayName)
@@ -30,30 +30,24 @@ struct FilesSidebar: View {
                 Button {
                     store.addSourceFromPicker()
                 } label: {
-                    Label("Add Folder...", systemImage: "plus")
+                    Label("Add Folder\u{2026}", systemImage: "plus")
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+            } header: {
+                Text("Sources (\(visibleSources.count))")
             }
+            .headerProminence(.increased)
 
-            // Versions section
-            Section("Versions") {
+            Section {
                 Label("Recently Modified", systemImage: "clock")
                     .tag(FilesSidebarSelection.recentlyModified)
                 Label("AI-Touched Files", systemImage: "sparkles")
                     .tag(FilesSidebarSelection.aiTouched)
+            } header: {
+                Text("Versions")
             }
-
-            // Activity link
-            Section {
-                Button {
-                    store.showActivityDrawer = true
-                } label: {
-                    Label("View Activity", systemImage: "list.bullet.rectangle")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
+            .headerProminence(.increased)
         }
         .listStyle(.sidebar)
         .navigationTitle("Files")

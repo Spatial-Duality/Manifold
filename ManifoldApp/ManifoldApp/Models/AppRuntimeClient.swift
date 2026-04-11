@@ -57,8 +57,20 @@ struct MailboxCount: Codable, Sendable {
 final class AppRuntimeClient: Sendable {
     let xpc = ManifoldXPCClient()
 
-    func ping() async -> Bool {
-        (try? await command(name: "ping", field: "ok", as: Bool.self)) ?? false
+    struct PingResult: Sendable {
+        let ok: Bool
+        let agentVersion: String?
+    }
+
+    func ping() async -> PingResult {
+        do {
+            let response = try await xpc.command(name: "ping", payload: [:])
+            let ok = response["ok"] as? Bool ?? false
+            let version = response["agentVersion"] as? String
+            return PingResult(ok: ok, agentVersion: version)
+        } catch {
+            return PingResult(ok: false, agentVersion: nil)
+        }
     }
 
     func dashboardState() async throws -> DashboardState {

@@ -1,8 +1,9 @@
 import SwiftUI
 import ManifoldKit
 
-/// Overview tab — full-width, no sidebar. Answers the trust question:
-/// "What can this AI see right now?" Each agent gets a glanceable policy card.
+/// Overview tab — full-width dashboard. Answers the trust question:
+/// "What can this AI see right now?" Each agent gets a rich dashboard card
+/// showing sources, domains, recent activity, and per-agent controls.
 struct OverviewView: View {
     @Environment(ManifoldStore.self) var store
     @State private var reviewSheetChange: ReviewAccessChange?
@@ -10,39 +11,22 @@ struct OverviewView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: Spacing.large) {
-                if !store.isConnected {
+                if !store.isRuntimeConnected {
                     emptyState
                 } else {
                     agentCards
-                }
 
-                // Track Changes — first-class mode CTA with real weight
-                if store.isConnected && !store.sources.isEmpty && store.policy.activeWorkBlock == nil {
-                    VStack(spacing: Spacing.standard) {
-                        Button {
-                            reviewSheetChange = ReviewAccessChange(
-                                description: "Start tracking changes",
-                                kind: .startWorkBlock
-                            )
-                        } label: {
-                            Label("Start Tracked Work Block", systemImage: "timeline.selection")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-
-                        Text("Monitor and review all AI file changes in real time")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, Spacing.section)
+                    // Track Changes footer (spans both cards)
+                    trackChangesFooter
                 }
             }
             .padding(Spacing.xlarge)
-            .frame(maxWidth: 560)
+            .frame(maxWidth: 640)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Manifold")
+        .navigationSubtitle(statusSubtitle)
         .task {
             await store.loadSummary()
             await store.policy.loadPolicies()
@@ -54,21 +38,54 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: - Agent Cards
+    // MARK: - Status Subtitle (1.3)
+
+    private var statusSubtitle: String {
+        if !store.isRuntimeConnected {
+            return "Connecting\u{2026}"
+        }
+        var parts: [String] = []
+        if store.isClaudeConnected {
+            parts.append(store.policy.claudePolicy?.isPaused == true ? "Claude paused" : "Claude active")
+        }
+        if store.isCodexConnected {
+            parts.append(store.policy.codexPolicy?.isPaused == true ? "Codex paused" : "Codex active")
+        }
+        if parts.isEmpty {
+            return "No agents connected"
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    // MARK: - Agent Cards (1.1, 1.2)
 
     @ViewBuilder
     private var agentCards: some View {
         let claudePolicy = store.policy.claudePolicy
         let codexPolicy = store.policy.codexPolicy
-        let totalSources = store.sources.filter { !$0.isRemoved }.count
+        let activeSources = store.sources.filter { !$0.isRemoved }
+        let totalSources = activeSources.count
+
+        let claudeSourceNames = activeSources
+            .filter { claudePolicy?.allowedSourceIDs.contains($0.sourceID) == true }
+            .map(\.displayName)
+        let codexSourceNames = activeSources
+            .filter { codexPolicy?.allowedSourceIDs.contains($0.sourceID) == true }
+            .map(\.displayName)
+
+        let claudeActivity = store.history.activityEntries
+            .filter { $0.agent?.lowercased() == "claude" || $0.agent == TargetApp.cowork.rawValue }
+        let codexActivity = store.history.activityEntries
+            .filter { $0.agent?.lowercased() == "codex" || $0.agent == TargetApp.codex.rawValue }
 
         AgentPolicyCard(
             agentName: "Claude",
-            agentColor: .blue,
+            agentColor: .claudeBlue,
             isConnected: store.isClaudeConnected,
-            sourceCount: claudePolicy?.allowedSourceIDs.count ?? 0,
+            policy: claudePolicy,
             totalSources: totalSources,
-            emailAccountCount: claudePolicy?.allowedEmailDomains.count ?? 0,
+            recentActivity: Array(claudeActivity.prefix(3)),
+            sourceNames: claudeSourceNames,
             isPaused: claudePolicy?.isPaused ?? false,
             onPauseToggle: {
                 Task {
@@ -80,23 +97,19 @@ struct OverviewView: View {
                 }
             },
             onReviewAccess: {
-                reviewSheetChange = ReviewAccessChange(
-                    description: "Review Claude access",
-                    kind: .explicit
-                )
+                reviewSheetChange = ReviewAccessChange(description: "Review Claude access", kind: .explicit)
             },
-            onViewActivity: {
-                store.showActivityDrawer = true
-            }
+            onViewActivity: { store.showActivityDrawer = true }
         )
 
         AgentPolicyCard(
             agentName: "Codex",
-            agentColor: .purple,
+            agentColor: .codexPurple,
             isConnected: store.isCodexConnected,
-            sourceCount: codexPolicy?.allowedSourceIDs.count ?? 0,
+            policy: codexPolicy,
             totalSources: totalSources,
-            emailAccountCount: codexPolicy?.allowedEmailDomains.count ?? 0,
+            recentActivity: Array(codexActivity.prefix(3)),
+            sourceNames: codexSourceNames,
             isPaused: codexPolicy?.isPaused ?? false,
             onPauseToggle: {
                 Task {
@@ -108,40 +121,47 @@ struct OverviewView: View {
                 }
             },
             onReviewAccess: {
-                reviewSheetChange = ReviewAccessChange(
-                    description: "Review Codex access",
-                    kind: .explicit
-                )
+                reviewSheetChange = ReviewAccessChange(description: "Review Codex access", kind: .explicit)
             },
-            onViewActivity: {
-                store.showActivityDrawer = true
-            }
+            onViewActivity: { store.showActivityDrawer = true }
         )
+    }
+
+    // MARK: - Track Changes Footer (1.4)
+
+    @ViewBuilder
+    private var trackChangesFooter: some View {
+        if store.isRuntimeConnected && store.sources.contains(where: { !$0.isRemoved }) && store.policy.activeWorkBlock == nil {
+            HStack {
+                Spacer()
+                Button {
+                    reviewSheetChange = ReviewAccessChange(
+                        description: "Start tracking changes",
+                        kind: .startWorkBlock
+                    )
+                } label: {
+                    Label("Start Tracked Work Block", systemImage: "timeline.selection")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                Spacer()
+            }
+            .padding(.top, Spacing.standard)
+        }
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.section) {
-            Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-
-            Text("No AI agents connected")
-                .font(.title3.weight(.medium))
-
+        ContentUnavailableView {
+            Label("No AI Agents Connected", systemImage: "antenna.radiowaves.left.and.right.slash")
+        } description: {
             Text("Connect Claude or Codex to start managing what AI can access on your Mac.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-
+        } actions: {
             Button("Open Settings\u{2026}") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
-            .controlSize(.regular)
+            .buttonStyle(.borderedProminent)
         }
-        .frame(maxWidth: .infinity)
-        .padding(Spacing.xlarge)
     }
 }

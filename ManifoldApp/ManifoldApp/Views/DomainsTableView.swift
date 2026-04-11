@@ -12,11 +12,26 @@ struct DomainAggregate: Identifiable, Hashable, Sendable {
     var id: String { domain }
 }
 
-enum DomainCategory: String, CaseIterable, Sendable {
+enum DomainCategory: String, CaseIterable, Sendable, Hashable {
     case work = "Work"
     case automated = "Automated"
     case personal = "Personal"
     case hidden = "Hidden by sensitivity"
+}
+
+/// Shared domain categorization logic.
+enum DomainCategorizer {
+    private static let automated = ["github.com", "circleci.com", "gitlab.com", "bitbucket.org",
+                                     "linear.app", "notion.so", "slack.com", "vercel.com"]
+    private static let personal = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
+                                    "protonmail.com", "fastmail.com"]
+
+    static func categorize(domain: String, isHidden: Bool = false) -> DomainCategory {
+        if isHidden { return .hidden }
+        if automated.contains(where: { domain.hasSuffix($0) }) { return .automated }
+        if personal.contains(domain) { return .personal }
+        return .work
+    }
 }
 
 /// Emails tab Domains overview — the primary access management surface for email.
@@ -24,6 +39,7 @@ enum DomainCategory: String, CaseIterable, Sendable {
 /// Sensitivity dropdown in toolbar, scoped to focused agent.
 struct DomainsTableView: View {
     @Environment(ManifoldStore.self) var store
+    var categoryFilter: DomainCategory?
     @State private var searchText = ""
     @State private var domains: [DomainAggregate] = []
     @State private var showUndoToast = false
@@ -47,15 +63,18 @@ struct DomainsTableView: View {
             HStack(spacing: Spacing.standard) {
                 AgentFocusControl(focus: $store.agentFocus)
 
-                // Sensitivity — always visible per v4.1 spec Q3
-                Picker("Sensitivity", selection: sensitivityBinding) {
+                // 3.3: Segmented control for sensitivity
+                Picker(selection: sensitivityBinding) {
                     Text("Strict").tag(EmailSensitivityLevel.strict)
                     Text("Moderate").tag(EmailSensitivityLevel.moderate)
-                    Text("Open").tag(EmailSensitivityLevel.open)
+                    Text("Permissive").tag(EmailSensitivityLevel.open)
+                } label: {
+                    EmptyView()
                 }
-                .pickerStyle(.menu)
-                .frame(width: 130)
+                .pickerStyle(.segmented)
+                .frame(width: 220)
                 .controlSize(.small)
+                .accessibilityLabel("Email sensitivity")
 
                 TextField("Search domains", text: $searchText)
                     .textFieldStyle(.roundedBorder)
@@ -93,6 +112,7 @@ struct DomainsTableView: View {
                 .environment(store)
                 .frame(minWidth: 560, minHeight: 500)
         }
+        .navigationTitle(categoryFilter?.rawValue ?? "Domains")
         .task(id: domainsRefreshKey) {
             await store.policy.loadPolicies()
             await computeDomains()
@@ -135,17 +155,18 @@ struct DomainsTableView: View {
     @ViewBuilder
     private func domainRow(_ domain: DomainAggregate) -> some View {
         let isGranted = !domain.isHiddenBySensitivity && isDomainGranted(domain.domain)
+        let agentColor: Color = focusedAgent == .codex ? .codexPurple : .claudeBlue
 
         HStack(spacing: Spacing.section) {
-            // Domain name + policy text
+            // 3.1: Typography weight scaled by email volume
             VStack(alignment: .leading, spacing: 2) {
                 Text("@\(domain.domain)")
-                    .font(.body)
+                    .font(domainFont(count: domain.emailCount))
                     .foregroundStyle(domain.isHiddenBySensitivity ? .secondary : .primary)
                 HStack(spacing: Spacing.tight) {
-                    Text("\(domain.emailCount) emails")
+                    // 3.4: Proper pluralization
+                    Text("^[\(domain.emailCount) email](inflect: true)")
                         .monospacedDigit()
-                    // Per v4.1 spec: checked → "+ future mail", unchecked → nothing, hidden → "—"
                     if domain.isHiddenBySensitivity {
                         Text("\u{2014}")
                             .foregroundStyle(.quaternary)
@@ -160,7 +181,6 @@ struct DomainsTableView: View {
 
             Spacer()
 
-            // Hidden reason badge
             if let reason = domain.hiddenReason {
                 Text(reason)
                     .font(.caption)
@@ -170,7 +190,7 @@ struct DomainsTableView: View {
                     .background(.secondary.opacity(0.08), in: Capsule())
             }
 
-            // Access checkbox — reads per-agent policy
+            // 3.2: Agent-colored toggle
             if domain.isHiddenBySensitivity {
                 Toggle(isOn: .constant(false)) { EmptyView() }
                     .toggleStyle(.checkbox)
@@ -178,9 +198,9 @@ struct DomainsTableView: View {
                     .disabled(true)
                     .accessibilityLabel("@\(domain.domain) — hidden by sensitivity")
             } else {
-                let isGranted = isDomainGranted(domain.domain)
+                let granted = isDomainGranted(domain.domain)
                 Toggle(isOn: Binding(
-                    get: { isGranted },
+                    get: { granted },
                     set: { newValue in
                         if newValue {
                             broadenDomain = domain.domain
@@ -190,22 +210,22 @@ struct DomainsTableView: View {
                     }
                 )) { EmptyView() }
                 .toggleStyle(.checkbox)
+                .tint(agentColor)
                 .labelsHidden()
                 .accessibilityLabel("@\(domain.domain) access for \(focusedAgentName)")
             }
         }
         .padding(.vertical, 2)
+        // 3.6: Row tinting for granted domains
         .listRowBackground(
-            isGranted
-                ? (focusedAgent == .codex ? Color.purple : Color.blue).opacity(0.04)
-                : Color.clear
+            isGranted ? agentColor.opacity(Opacity.rowTint) : Color.clear
         )
     }
 
     // MARK: - Per-Agent Policy Helpers
 
     private var focusedAgent: TargetApp {
-        store.agentFocus == .codex ? .codex : .cowork
+        store.agentFocus.targetApp
     }
 
     private var focusedAgentName: String {
@@ -321,11 +341,24 @@ struct DomainsTableView: View {
         }
     }
 
+    // 3.1: Typography weight scaled by email volume
+    private func domainFont(count: Int) -> Font {
+        if count >= 100 { return Typ.body }
+        if count >= 10 { return .callout }
+        return .caption
+    }
+
     // MARK: - Computed Properties
 
     private var filteredDomains: [DomainAggregate] {
-        if searchText.isEmpty { return domains }
-        return domains.filter { $0.domain.localizedStandardContains(searchText) }
+        var result = domains
+        if let categoryFilter {
+            result = result.filter { $0.category == categoryFilter }
+        }
+        if !searchText.isEmpty {
+            result = result.filter { $0.domain.localizedStandardContains(searchText) }
+        }
+        return result
     }
 
     /// Compute domain aggregates using SQL GROUP BY instead of loading all messages.
@@ -337,7 +370,7 @@ struct DomainsTableView: View {
         let result = counts.map { domain, count in
             let reason = Self.hiddenReason(for: domain, sensitivity: sensitivity)
             let isHidden = reason != nil
-            let category = Self.categorize(domain: domain, isHidden: isHidden)
+            let category = DomainCategorizer.categorize(domain: domain, isHidden: isHidden)
             return DomainAggregate(
                 domain: domain,
                 emailCount: count,
@@ -348,17 +381,6 @@ struct DomainsTableView: View {
         }
 
         domains = result
-    }
-
-    nonisolated private static func categorize(domain: String, isHidden: Bool) -> DomainCategory {
-        if isHidden { return .hidden }
-        let automated = ["github.com", "circleci.com", "gitlab.com", "bitbucket.org",
-                         "linear.app", "notion.so", "slack.com", "vercel.com"]
-        if automated.contains(where: { domain.hasSuffix($0) }) { return .automated }
-        let personal = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
-                         "protonmail.com", "fastmail.com"]
-        if personal.contains(domain) { return .personal }
-        return .work
     }
 
     nonisolated private static func hiddenReason(for domain: String, sensitivity: EmailSensitivityLevel) -> String? {

@@ -35,12 +35,15 @@ struct EmailView: View {
             EmailEmptyState(showAddAccount: $showAddAccount)
                 .task { await store.emailAccounts.loadAccounts() }
         } else {
+            // 4.7: NavigationSplitView with proper column constraints
             NavigationSplitView {
                 EmailSidebar(
                     selection: selection,
                     showAddAccount: $showAddAccount,
                     showAccountDetail: $showAccountDetail
                 )
+                // 4.1: Increase sidebar minimum width
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
             } content: {
                 EmailMessageList(
                     selection: selection,
@@ -48,6 +51,7 @@ struct EmailView: View {
                     messages: messages
                 )
                 .searchable(text: $search.freeText, prompt: "Search emails")
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 450)
             } detail: {
                 EmailReadingPane(selection: selection)
             }

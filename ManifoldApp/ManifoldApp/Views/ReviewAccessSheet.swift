@@ -107,7 +107,7 @@ struct ReviewAccessSheet: View {
         .frame(minWidth: 520, minHeight: 500)
         .task {
             guard !hasInitializedAgent else { return }
-            selectedAgent = store.agentFocus == .codex ? .codex : .cowork
+            selectedAgent = store.agentFocus.targetApp
             hasInitializedAgent = true
             // Initialize draft from current policy for explicit reviews
             if !draftInitialized {
@@ -209,7 +209,7 @@ struct ReviewAccessSheet: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(source.displayName)
                             .font(Typ.body)
-                        Text(shortenedPath(source.originalRootPath))
+                        Text(source.originalRootPath.shortenedPath)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
@@ -341,8 +341,4 @@ struct ReviewAccessSheet: View {
         }
     }
 
-    private func shortenedPath(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
 }

@@ -18,14 +18,6 @@ struct FilesView: View {
     @State private var filterType = "All"
     @State private var cachedSourceNames: [String] = ["All"]
     @State private var cachedFileTypes: [String] = ["All"]
-    @SceneStorage("filesSortBy") private var sortBy: SortOption = .name
-
-    private enum SortOption: String, CaseIterable {
-        case name = "Name"
-        case size = "Size"
-        case modified = "Modified"
-        case type = "Type"
-    }
 
     private var selectedSourceID: String? {
         guard case let .source(sourceID)? = sidebarSelection else { return nil }
@@ -59,52 +51,13 @@ struct FilesView: View {
         return "\(filteredFiles.count) of \(allFiles.count) files across \(sourceCount) source\(sourceCount == 1 ? "" : "s")"
     }
 
+    @State private var selectedFileIDs: Set<SourceFile.ID> = []
+    @State private var tableSortOrder: [KeyPathComparator<SourceFile>] = [
+        .init(\.name, order: .forward)
+    ]
+
     var body: some View {
         VStack(spacing: 0) {
-            // Filter bar
-            HStack(spacing: Spacing.section) {
-                Picker("Source", selection: $filterSource) {
-                    ForEach(cachedSourceNames, id: \.self) { Text($0) }
-                }
-                .frame(maxWidth: 160)
-                .disabled(selectedSourceID != nil)
-
-                Picker("Sort", selection: $sortBy) {
-                    ForEach(SortOption.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .frame(maxWidth: 120)
-
-                TextField("Filter by name...", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-
-                Text("\(filteredFiles.count) files")
-                    .font(Typ.numericCaption).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
-
-            Divider()
-
-            // Content search bar
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search inside files...", text: $contentSearchText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { searchContent() }
-                if isSearchingContent {
-                    ProgressView().controlSize(.small)
-                }
-                if !contentSearchText.isEmpty {
-                    Button("Search") { searchContent() }
-                        .controlSize(.small)
-                    Button("Clear") { contentSearchText = ""; contentSearchResults = [] }
-                        .controlSize(.small)
-                }
-            }
-            .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
-
-            Divider()
-
             // Content search results
             if !contentSearchResults.isEmpty {
                 ContentSearchResultsSection(
@@ -113,60 +66,106 @@ struct FilesView: View {
                 )
             }
 
-            // File list
+            // File table
             if filteredFiles.isEmpty {
-                ContentUnavailableView(
-                    "No Files",
-                    systemImage: "doc",
-                    description: Text(allFiles.isEmpty
+                ContentUnavailableView {
+                    Label(allFiles.isEmpty ? "No Files" : "No Matches", systemImage: "doc")
+                } description: {
+                    Text(allFiles.isEmpty
                         ? "Add a source folder from the Files sidebar to browse files."
                         : "No files match your filters.")
-                )
-            } else {
-                List(filteredFiles) { file in
-                    HStack(spacing: 8) {
-                        Image(systemName: iconFor(file.fileExtension))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16)
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(file.name).font(.callout).lineLimit(1)
-                            Text(file.relativePath)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1).truncationMode(.middle)
-                        }
-
-                        Spacer()
-
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(file.isGrantedToClaude ? Color.green : Color.gray)
-                                .frame(width: 6, height: 6)
-                                .accessibilityLabel(file.isGrantedToClaude ? "Shared with AI" : "Not shared")
-                            Text(file.sourceName).font(.caption)
-                        }
-                        .frame(width: 100, alignment: .leading)
-
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 60, alignment: .trailing)
-
-                        Text(file.modifiedDate, style: .relative)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 80, alignment: .trailing)
-
-                        Text(file.fileExtension.isEmpty ? "" : ".\(file.fileExtension)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 45, alignment: .trailing)
-                    }
-                    .contextMenu { fileContextMenu(file: file) }
                 }
-                .listStyle(.inset)
+            } else {
+                Table(filteredFiles, selection: $selectedFileIDs, sortOrder: $tableSortOrder) {
+                    TableColumn("Name", value: \.name) { file in
+                        HStack(spacing: 6) {
+                            Image(systemName: iconFor(file.fileExtension))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 14)
+                            Text(file.name)
+                                .lineLimit(1)
+                        }
+                    }
+                    .width(min: 140, ideal: 220)
+
+                    TableColumn("Path") { file in
+                        Text(file.relativePath)
+                            .font(Typ.mono)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .width(min: 120, ideal: 200)
+
+                    TableColumn("Source") { file in
+                        Text(file.sourceName)
+                            .font(.caption)
+                    }
+                    .width(min: 60, ideal: 100)
+
+                    TableColumn("Size", value: \.sizeBytes) { file in
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(60)
+
+                    TableColumn("Modified", value: \.modifiedDate) { file in
+                        Text(file.modifiedDate, style: .relative)
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(min: 70, ideal: 90)
+
+                    TableColumn("Type") { file in
+                        Text(file.fileExtension.isEmpty ? "" : ".\(file.fileExtension)")
+                            .font(Typ.mono)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .width(50)
+                }
+                .tableStyle(.inset)
+                .contextMenu(forSelectionType: SourceFile.ID.self) { ids in
+                    if let id = ids.first, let file = filteredFiles.first(where: { $0.id == id }) {
+                        fileContextMenu(file: file)
+                    }
+                }
+                .onChange(of: tableSortOrder) { _, newOrder in
+                    filteredFiles.sort(using: newOrder)
+                }
             }
+        }
+        .safeAreaInset(edge: .top) {
+            HStack(spacing: Spacing.section) {
+                Picker("Source", selection: $filterSource) {
+                    ForEach(cachedSourceNames, id: \.self) { Text($0) }
+                }
+                .frame(maxWidth: 160)
+                .disabled(selectedSourceID != nil)
+
+                TextField("Filter by name\u{2026}", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(minWidth: 100, maxWidth: 200)
+
+                // Content search
+                TextField("Search inside files\u{2026}", text: $contentSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(minWidth: 100, maxWidth: 200)
+                    .onSubmit { searchContent() }
+
+                if isSearchingContent {
+                    ProgressView().controlSize(.small)
+                }
+
+                Spacer()
+
+                Text("\(filteredFiles.count) files")
+                    .font(Typ.numericCaption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, Spacing.section)
+            .padding(.vertical, 6)
+            .background(.bar)
         }
         .navigationTitle(navigationTitleText)
         .navigationSubtitle(navigationSubtitleText)
@@ -180,7 +179,6 @@ struct FilesView: View {
         .onChange(of: searchText) { _, _ in scheduleFilter() }
         .onChange(of: filterSource) { _, _ in scheduleFilter() }
         .onChange(of: filterType) { _, _ in scheduleFilter() }
-        .onChange(of: sortBy) { _, _ in scheduleFilter() }
     }
 
     // MARK: - Context Menu
@@ -249,7 +247,8 @@ struct FilesView: View {
         cachedFileTypes = ["All"] + Array(Set(allFiles.map(\.fileExtension).filter { !$0.isEmpty })).sorted()
     }
 
-    /// Runs filtering and sorting off the main thread, then assigns results back.
+    /// Runs filtering off the main thread, then assigns results back.
+    /// Sorting is handled by the Table via tableSortOrder.
     private func applyFilters() async {
         let snapshot = allFiles
         let source = selectedSourceID
@@ -257,7 +256,7 @@ struct FilesView: View {
         let fileType = filterType
         let aiTouched = isAITouchedSelection
         let query = searchText
-        let sort = sortBy
+        let sortOrder = tableSortOrder
 
         let result = await Task.detached(priority: .userInitiated) {
             var items = snapshot
@@ -277,13 +276,7 @@ struct FilesView: View {
                 items = items.filter { $0.name.localizedStandardContains(query) || $0.relativePath.localizedStandardContains(query) }
             }
 
-            switch sort {
-            case .name: items.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            case .size: items.sort { $0.sizeBytes > $1.sizeBytes }
-            case .modified: items.sort { $0.modifiedDate > $1.modifiedDate }
-            case .type: items.sort { $0.fileExtension < $1.fileExtension }
-            }
-
+            items.sort(using: sortOrder)
             return items
         }.value
 
@@ -299,7 +292,7 @@ struct FilesView: View {
         }
 
         if isRecentlyModifiedSelection {
-            sortBy = .modified
+            tableSortOrder = [.init(\.modifiedDate, order: .reverse)]
         }
     }
 

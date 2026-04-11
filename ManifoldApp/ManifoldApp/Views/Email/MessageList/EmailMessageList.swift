@@ -8,6 +8,13 @@ struct EmailMessageList: View {
     let messages: [EmailMessageRecord]
     @State private var sharedEmailIDs: Set<String> = []
 
+    /// Per-account sync state, not global. Prevents wrong-mailbox spinner.
+    private var isSyncingSelectedAccount: Bool {
+        guard let accountID = selection.selectedAccountID,
+              let states = store.emailAccounts.syncStates[accountID] else { return false }
+        return states.contains { $0.syncStatus == .syncing }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             MessageFilterBar(selection: selection, search: search)
@@ -30,7 +37,10 @@ struct EmailMessageList: View {
             .listStyle(.inset)
             .overlay {
                 if messages.isEmpty {
-                    MessageListEmpty(hasAccount: selection.selectedAccountID != nil)
+                    MessageListEmpty(
+                        hasAccount: selection.selectedAccountID != nil,
+                        isSyncing: isSyncingSelectedAccount
+                    )
                 }
             }
         }

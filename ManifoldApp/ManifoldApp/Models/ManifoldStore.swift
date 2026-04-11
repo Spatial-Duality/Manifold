@@ -33,6 +33,11 @@ enum AgentFocus: String, Hashable, CaseIterable {
         case .compare: "both agents"
         }
     }
+
+    /// Maps to the XPC/runtime TargetApp. `.compare` defaults to `.cowork`.
+    var targetApp: TargetApp {
+        self == .codex ? .codex : .cowork
+    }
 }
 
 @Observable
@@ -107,17 +112,31 @@ final class ManifoldStore {
     }
 
     func refreshAll(force: Bool = false) async {
-        let connected = await runtime.ping()
-        isRuntimeConnected = connected
-        isConnected = connected
+        let pingResult = await runtime.ping()
+        isRuntimeConnected = pingResult.ok
+        isConnected = pingResult.ok
 
-        guard connected else {
+        guard pingResult.ok else {
             connectedAgent = nil
             connectedAgents = []
             if force {
                 lastError = "Unable to connect to the Manifold runtime."
             }
             return
+        }
+
+        // XPC version check: auto-restart agent on mismatch
+        let appVersion = Bundle.main.shortVersionString
+        if let agentVersion = pingResult.agentVersion, agentVersion != appVersion {
+            logger.notice("Agent version \(agentVersion) != app version \(appVersion). Restarting agent.")
+            unregisterAgent()
+            registerAgent()
+            // Give agent time to start, then retry
+            try? await Task.sleep(for: .seconds(1))
+            let retry = await runtime.ping()
+            isRuntimeConnected = retry.ok
+            isConnected = retry.ok
+            guard retry.ok else { return }
         }
 
         do {
@@ -151,7 +170,8 @@ final class ManifoldStore {
             var ticks = 0
             var previousConnected = false
             while let self, !Task.isCancelled {
-                let connected = await self.runtime.ping()
+                let pingResult = await self.runtime.ping()
+                let connected = pingResult.ok
                 await MainActor.run {
                     self.isRuntimeConnected = connected
                     self.isConnected = connected

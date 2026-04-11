@@ -16,11 +16,12 @@ struct EmailReadingPane: View {
                     description: Text("Use the toolbar to perform actions on selected messages.")
                 )
             } else {
-                ContentUnavailableView(
-                    "No Email Selected",
-                    systemImage: "envelope.open",
-                    description: Text("Select an email to read it.")
-                )
+                // 4.3: Warm empty state with keyboard hints
+                ContentUnavailableView {
+                    Label("Select a Message", systemImage: "envelope")
+                } description: {
+                    Text("Use \u{2191}\u{2193} to navigate the message list, Space to scroll.")
+                }
             }
         }
     }

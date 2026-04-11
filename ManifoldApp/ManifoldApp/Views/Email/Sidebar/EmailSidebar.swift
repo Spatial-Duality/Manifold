@@ -12,9 +12,14 @@ struct EmailSidebar: View {
         List {
             UnifiedInboxRow(selection: selection)
 
-            QuickFilterSection(selection: selection)
+            // 4.5: Collapsible sections with header prominence
+            Section {
+                QuickFilterSection(selection: selection)
+            } header: {
+                Text("Filters")
+            }
+            .headerProminence(.increased)
 
-            // Smart Mailboxes
             SmartMailboxSection(
                 selection: selection,
                 onNewMailbox: { showSmartMailboxEditor = true }

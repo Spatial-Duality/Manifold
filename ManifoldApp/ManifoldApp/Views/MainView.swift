@@ -86,18 +86,7 @@ struct MainView: View {
                 connectionIndicators
             }
         }
-        .toolbarBackgroundVisibility(
-            store.policy.activeWorkBlock != nil ? .visible : .automatic,
-            for: .windowToolbar
-        )
-        .toolbarBackground(
-            store.policy.activeWorkBlock?.agent == .codex
-                ? Color.purple.opacity(0.06)
-                : store.policy.activeWorkBlock != nil
-                    ? Color.blue.opacity(0.06)
-                    : Color.clear,
-            for: .windowToolbar
-        )
+        // WWDC25 356: remove custom toolbar backgrounds. Let Liquid Glass handle it.
         .task {
             // Restore tab from SceneStorage
             if let tab = AppTab(rawValue: restoredTab) { store.selectedTab = tab }
@@ -142,6 +131,8 @@ struct MainView: View {
 
     // MARK: - Connection Indicators
 
+    // MARK: - Toolbar Status (X.4)
+
     @ViewBuilder
     private var connectionIndicators: some View {
         HStack(spacing: 12) {
@@ -152,19 +143,46 @@ struct MainView: View {
             .keyboardShortcut("k", modifiers: .command)
             .help("Command Palette (⌘K)")
 
-            ForEach(store.connectedAgents, id: \.self) { agent in
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.agent(TargetApp(rawValue: agent) ?? .cowork))
-                        .frame(width: 8, height: 8)
-                    Text(agent == TargetApp.cowork.rawValue ? "Claude" : "Codex")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(agent == TargetApp.cowork.rawValue ? "Claude" : "Codex") connected")
+            // Persistent status indicator — always visible on every tab
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(statusDotColor)
+                    .frame(width: 8, height: 8)
+                Text(statusLabel)
+                    .font(Typ.caption)
+                    .foregroundStyle(.secondary)
             }
+            .help(statusDetail)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(statusDetail)
         }
+    }
+
+    private var statusDotColor: Color {
+        if !store.isRuntimeConnected { return .statusDanger }
+        if store.policy.isAnyAgentPaused { return .statusWarning }
+        if store.connectedAgents.isEmpty { return .secondary }
+        return .statusActive
+    }
+
+    private var statusLabel: String {
+        if !store.isRuntimeConnected { return "Disconnected" }
+        if store.connectedAgents.isEmpty { return "No agents" }
+        if store.policy.isAnyAgentPaused { return "Paused" }
+        return "Connected"
+    }
+
+    private var statusDetail: String {
+        if !store.isRuntimeConnected { return "Runtime not connected" }
+        var parts: [String] = []
+        if store.isClaudeConnected {
+            parts.append(store.policy.claudePolicy?.isPaused == true ? "Claude: Paused" : "Claude: Connected")
+        }
+        if store.isCodexConnected {
+            parts.append(store.policy.codexPolicy?.isPaused == true ? "Codex: Paused" : "Codex: Connected")
+        }
+        if parts.isEmpty { return "No agents connected" }
+        return parts.joined(separator: " \u{00B7} ")
     }
 
     // MARK: - Error Banner
@@ -269,6 +287,8 @@ private struct EmailsTab: View {
     @Environment(ManifoldStore.self) var store
     @State private var emailMode: EmailMode = .domains
     @State private var emailSelection = EmailSelectionModel()
+    @State private var domainCategoryFilter: DomainCategory?
+    @State private var categoryCounts: [DomainCategory: Int] = [:]
 
     enum EmailMode: Hashable {
         case domains
@@ -277,19 +297,29 @@ private struct EmailsTab: View {
 
     var body: some View {
         NavigationSplitView {
-            // Sidebar — always present
             List {
-                Section("Mail") {
-                    sidebarRow("All Domains", systemImage: "tray.full", isSelected: emailMode == .domains) {
+                // 3.5: Domain categories in sidebar
+                Section {
+                    sidebarRow("All Domains", systemImage: "tray.full", isSelected: emailMode == .domains && domainCategoryFilter == nil) {
                         emailMode = .domains
+                        domainCategoryFilter = nil
+                    }
+                    ForEach([DomainCategory.work, .automated, .personal], id: \.self) { category in
+                        sidebarRow(category.rawValue, systemImage: categoryIcon(category), count: categoryCounts[category], isSelected: emailMode == .domains && domainCategoryFilter == category) {
+                            emailMode = .domains
+                            domainCategoryFilter = category
+                        }
                     }
                     sidebarRow("Messages", systemImage: "envelope", isSelected: emailMode == .messages && emailSelection.selectedAccountID == nil) {
                         emailMode = .messages
                         emailSelection.navigate(accountID: store.emailAccounts.accounts.first?.accountID)
                     }
+                } header: {
+                    Text("Mail")
                 }
+                .headerProminence(.increased)
 
-                Section("Accounts") {
+                Section {
                     ForEach(store.emailAccounts.accounts) { account in
                         sidebarRow(account.displayName, systemImage: account.provider.systemImage, isSelected: emailMode == .messages && emailSelection.selectedAccountID == account.accountID) {
                             emailMode = .messages
@@ -301,7 +331,10 @@ private struct EmailsTab: View {
                             .foregroundStyle(.tertiary)
                             .font(.callout)
                     }
+                } header: {
+                    Text("Accounts")
                 }
+                .headerProminence(.increased)
 
                 Section {
                     Button {
@@ -316,21 +349,49 @@ private struct EmailsTab: View {
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
             .navigationTitle("Emails")
+            .task(id: store.emailAccounts.accounts.count) { await loadCategoryCounts() }
         } detail: {
             switch emailMode {
             case .domains:
-                DomainsTableView()
+                DomainsTableView(categoryFilter: domainCategoryFilter)
             case .messages:
                 EmailView(selection: emailSelection)
             }
         }
     }
 
-    private func sidebarRow(_ title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func sidebarRow(_ title: String, systemImage: String, count: Int? = nil, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                if let count {
+                    Text("\(count)")
+                        .font(Typ.numericCaption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .buttonStyle(.plain)
         .fontWeight(isSelected ? .medium : .regular)
+    }
+
+    private func categoryIcon(_ category: DomainCategory) -> String {
+        switch category {
+        case .work: "building.2"
+        case .automated: "gearshape"
+        case .personal: "person"
+        case .hidden: "eye.slash"
+        }
+    }
+
+    private func loadCategoryCounts() async {
+        let counts = await store.emailAccounts.domainCounts()
+        var result: [DomainCategory: Int] = [:]
+        for (domain, _) in counts {
+            let category = DomainCategorizer.categorize(domain: domain)
+            result[category, default: 0] += 1
+        }
+        categoryCounts = result
     }
 }

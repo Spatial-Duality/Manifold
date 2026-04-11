@@ -14,6 +14,7 @@ struct SourcesTableView: View {
     @State private var showUndoToast = false
     @State private var undoTimerTask: Task<Void, Never>?
     @State private var broadenSource: (SourceRecord, TargetApp)?
+    @State private var itemCounts: [String: Int] = [:]
 
     private var visibleSources: [SourceRecord] {
         let sources = store.sources.filter { !$0.isRemoved }
@@ -107,68 +108,126 @@ struct SourcesTableView: View {
 
     @ViewBuilder
     private var sourceTable: some View {
-        Table(visibleSources, selection: $selectedSourceIDs) {
-            TableColumn("Name") { source in
-                HStack(spacing: Spacing.standard) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(source.isAccessible ? .blue : .secondary)
-                    Text(source.displayName)
-                        .font(.body)
+        VStack(spacing: 0) {
+            Table(visibleSources, selection: $selectedSourceIDs) {
+                TableColumn("Name") { source in
+                    HStack(spacing: Spacing.standard) {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(source.isAccessible ? .blue : .secondary)
+                        Text(source.displayName)
+                            .font(.body)
+                    }
                 }
-            }
-            .width(min: 120, ideal: 180)
+                .width(min: 120, ideal: 180)
 
-            TableColumn("Path") { source in
-                Text(shortenedPath(source.originalRootPath))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .width(min: 150, ideal: 250)
-
-            TableColumn("Items") { source in
-                Text("—")
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
-            }
-            .width(60)
-
-            // Agent access column(s)
-            if store.agentFocus == .compare {
-                TableColumn("Claude") { source in
-                    accessCheckbox(source: source, agent: .claude)
+                TableColumn("Path") { source in
+                    Text(source.originalRootPath.shortenedPath)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .width(60)
+                .width(min: 150, ideal: 250)
 
-                TableColumn("Codex") { source in
-                    accessCheckbox(source: source, agent: .codex)
+                // 2.2: Lazy item count with placeholder
+                TableColumn("Items") { source in
+                    if let count = itemCounts[source.sourceID] {
+                        Text("\(count)")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                    } else {
+                        Text("\u{2026}")
+                            .foregroundStyle(.quaternary)
+                    }
                 }
                 .width(60)
-            } else {
-                TableColumn("Access") { source in
-                    accessCheckbox(source: source, agent: store.agentFocus)
+
+                // 2.3: Agent-colored access columns
+                if store.agentFocus == .compare {
+                    TableColumn("Claude") { source in
+                        accessCheckbox(source: source, agent: .claude)
+                    }
+                    .width(60)
+
+                    TableColumn("Codex") { source in
+                        accessCheckbox(source: source, agent: .codex)
+                    }
+                    .width(60)
+                } else {
+                    let columnTitle = store.agentFocus == .codex ? "Codex" : "Claude"
+                    TableColumn(columnTitle) { source in
+                        accessCheckbox(source: source, agent: store.agentFocus)
+                    }
+                    .width(60)
                 }
-                .width(60)
+            }
+            .tableStyle(.inset)
+            .contextMenu(forSelectionType: SourceRecord.ID.self) { ids in
+                if let id = ids.first, let source = visibleSources.first(where: { $0.id == id }) {
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.selectFile(source.originalRootPath, inFileViewerRootedAtPath: "")
+                    }
+                    Button("Copy Path") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(source.originalRootPath, forType: .string)
+                    }
+                    Button("View Activity") {
+                        store.showActivityDrawer = true
+                    }
+                    Divider()
+                    Button("Remove from Manifold", role: .destructive) {
+                        store.removeSource(path: source.originalRootPath)
+                    }
+                }
+            }
+
+            // 2.1: Summary footer
+            if !visibleSources.isEmpty {
+                HStack {
+                    let totalItems = itemCounts.values.reduce(0, +)
+                    Text("\(visibleSources.count) ^[\(visibleSources.count) source](inflect: true) \u{00B7} \(totalItems) files")
+                        .font(Typ.numericCaption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button("Add Folder\u{2026}") { store.addSourceFromPicker() }
+                        .buttonStyle(.plain)
+                        .font(Typ.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, Spacing.section)
+                .padding(.vertical, Spacing.standard)
             }
         }
-        .tableStyle(.inset)
-        .contextMenu(forSelectionType: SourceRecord.ID.self) { ids in
-            if let id = ids.first, let source = visibleSources.first(where: { $0.id == id }) {
-                Button("Reveal in Finder") {
-                    NSWorkspace.shared.selectFile(source.originalRootPath, inFileViewerRootedAtPath: "")
-                }
-                Button("Copy Path") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(source.originalRootPath, forType: .string)
-                }
-                Button("View Activity") {
-                    store.showActivityDrawer = true
-                }
-                Divider()
-                Button("Remove from Manifold", role: .destructive) {
-                    store.removeSource(path: source.originalRootPath)
-                }
+        .navigationTitle("Sources")
+        .task(id: visibleSources.map(\.sourceID).joined(separator: ",")) {
+            // Invalidate counts for removed sources
+            let currentIDs = Set(visibleSources.map(\.sourceID))
+            for key in itemCounts.keys where !currentIDs.contains(key) {
+                itemCounts.removeValue(forKey: key)
             }
+            await countItems()
+        }
+    }
+
+    private func countItems() async {
+        for source in visibleSources where itemCounts[source.sourceID] == nil {
+            let count = await Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                let root = URL(fileURLWithPath: source.originalRootPath)
+                guard let enumerator = fm.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                ) else { return 0 }
+                var n = 0
+                while let url = enumerator.nextObject() as? URL {
+                    guard !Task.isCancelled else { return n }
+                    if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true { n += 1 }
+                }
+                return n
+            }.value
+            guard !Task.isCancelled else { return }
+            itemCounts[source.sourceID] = count
         }
     }
 
@@ -176,7 +235,7 @@ struct SourcesTableView: View {
 
     @ViewBuilder
     private func accessCheckbox(source: SourceRecord, agent: AgentFocus) -> some View {
-        let targetApp: TargetApp = agent == .codex ? .codex : .cowork
+        let targetApp = agent.targetApp
         let policy = store.policy.policy(for: targetApp)
         let isGranted = policy?.allowedSourceIDs.contains(source.sourceID) ?? false
 
@@ -258,8 +317,4 @@ struct SourcesTableView: View {
 
     // MARK: - Helpers
 
-    private func shortenedPath(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
 }

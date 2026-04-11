@@ -13,6 +13,11 @@ final class EmailAccountModel {
     var selectedAccountID: String?
     var totalMessageCount: Int = 0
 
+    /// Whether any account is currently syncing.
+    var isSyncing: Bool {
+        syncStates.values.contains { states in states.contains { $0.syncStatus == .syncing } }
+    }
+
     private var client: AppRuntimeClient?
     private var backupInfo: EmailBackupInfo?
 
