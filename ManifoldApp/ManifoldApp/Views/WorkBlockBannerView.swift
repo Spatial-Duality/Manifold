@@ -37,20 +37,20 @@ struct WorkBlockBannerView: View {
                         .frame(width: 8, height: 8)
 
                     Text("Tracking Changes")
-                        .font(.callout.weight(.medium))
+                        .font(Typ.body.weight(.medium))
 
                     Text("—")
                         .foregroundStyle(.tertiary)
 
                     Text(block.agent == .codex ? "Codex" : "Claude")
-                        .font(.callout)
+                        .font(Typ.body)
                         .foregroundStyle(.secondary)
 
                     Text("·")
                         .foregroundStyle(.tertiary)
 
                     Text(elapsedText(at: context.date))
-                        .font(.callout.monospacedDigit())
+                        .font(Typ.numericBody)
                         .foregroundStyle(.secondary)
 
                     if block.modifiedFileCount > 0 || block.newFileCount > 0 {
@@ -59,19 +59,19 @@ struct WorkBlockBannerView: View {
 
                         if block.modifiedFileCount > 0 {
                             Text("\(block.modifiedFileCount) modified")
-                                .font(.callout)
+                                .font(Typ.body)
                                 .foregroundStyle(.secondary)
                         }
                         if block.newFileCount > 0 {
                             Text("\(block.newFileCount) new")
-                                .font(.callout)
+                                .font(Typ.body)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
                     if block.isPaused {
                         Text("· Paused")
-                            .font(.callout.weight(.medium))
+                            .font(Typ.body.weight(.medium))
                             .foregroundStyle(.orange)
                     }
                 }

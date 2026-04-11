@@ -51,11 +51,11 @@ private struct AgentHealthCard: View {
             // Header with headline state chip
             HStack {
                 Circle().fill(agentColor).frame(width: 10, height: 10)
-                Text(agentName).font(.title3.weight(.medium))
+                Text(agentName).font(Typ.sectionTitle)
                 Spacer()
                 // Headline chip — the state the user sees first
                 Text(state.overallStatus.displayLabel)
-                    .font(.caption.weight(.medium))
+                    .font(Typ.caption.weight(.medium))
                     .foregroundStyle(chipForeground)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -74,7 +74,7 @@ private struct AgentHealthCard: View {
                     CheckRow("Manifold added", status: state.mcpAdded)
                 }
             }
-            .font(.callout)
+            .font(Typ.body)
             .foregroundStyle(.secondary)
 
             if let error = state.errorDetail {
@@ -159,7 +159,7 @@ struct CheckRow: View {
     var body: some View {
         HStack(spacing: 8) {
             statusIcon.frame(width: 16)
-            Text(label).font(.callout)
+            Text(label).font(Typ.body)
             Spacer()
             Text(status.displayLabel)
                 .font(.caption)

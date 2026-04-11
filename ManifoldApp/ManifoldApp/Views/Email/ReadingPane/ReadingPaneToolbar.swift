@@ -32,7 +32,7 @@ struct ReadingPaneToolbar: View {
                     .foregroundStyle(.purple)
             }
             .buttonStyle(.borderless)
-            .help("Share with Cowork")
+            .help("Share with Claude")
 
             if let path = message.emlPath {
                 Button {

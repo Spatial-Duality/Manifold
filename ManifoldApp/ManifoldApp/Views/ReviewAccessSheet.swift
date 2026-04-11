@@ -128,7 +128,7 @@ struct ReviewAccessSheet: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Review & Update Access")
-                    .font(.title2.weight(.semibold))
+                    .font(Typ.sectionTitle)
                 Text("Review what \(selectedAgent == .codex ? "Codex" : "Claude") can access")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -160,7 +160,7 @@ struct ReviewAccessSheet: View {
             Image(systemName: "plus.circle.fill")
                 .foregroundStyle(.green)
             Text(change.description)
-                .font(.callout.weight(.medium))
+                .font(Typ.body.weight(.medium))
             Spacer()
         }
         .padding(Spacing.section)
@@ -208,7 +208,7 @@ struct ReviewAccessSheet: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(source.displayName)
-                            .font(.body)
+                            .font(Typ.body)
                         Text(shortenedPath(source.originalRootPath))
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -218,7 +218,7 @@ struct ReviewAccessSheet: View {
 
                     if isNewAddition(source) {
                         Text("new \u{2726}")
-                            .font(.caption.weight(.medium))
+                            .font(Typ.caption.weight(.medium))
                             .foregroundStyle(.green)
                     } else if isInPolicy {
                         Text("current")

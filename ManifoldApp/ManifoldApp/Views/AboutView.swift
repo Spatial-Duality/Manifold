@@ -9,7 +9,7 @@ struct AboutView: View {
                 .foregroundStyle(.blue)
 
             Text("Manifold")
-                .font(.title2.weight(.semibold))
+                .font(Typ.sectionTitle)
 
             Text("Version \(Bundle.main.shortVersionString)")
                 .font(Typ.caption)

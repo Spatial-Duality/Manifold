@@ -87,7 +87,7 @@ struct FilesView: View {
                     .controlSize(.small)
 
                 Text("\(filteredFiles.count) files")
-                    .font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                    .font(Typ.numericCaption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.standard)
 

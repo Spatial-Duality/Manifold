@@ -68,7 +68,7 @@ struct EmailMessageList: View {
     }
 
     private var listTitle: String {
-        if selection.showingSharedEmails { return "Shared with Cowork" }
+        if selection.showingSharedEmails { return "Shared with Claude" }
         if selection.selectedSmartMailboxID != nil { return "Smart Mailbox" }
         if let filter = selection.activeFilter { return filter.displayName }
         if let mb = selection.selectedMailbox { return mb }

@@ -17,7 +17,7 @@ struct SelectionActionBar: View {
             Button {
                 showShareSheet = true
             } label: {
-                Label("Share with Cowork", systemImage: "person.2.fill")
+                Label("Share with Claude", systemImage: "person.2.fill")
             }
             .buttonStyle(.borderedProminent)
             .tint(.purple)

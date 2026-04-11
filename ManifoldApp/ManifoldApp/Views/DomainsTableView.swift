@@ -120,7 +120,7 @@ struct DomainsTableView: View {
             // Footer
             Section {
                 HStack {
-                    Text("\(filtered.count) domains")
+                    Text("\(filtered.count) domains").font(Typ.numericCaption)
                         .foregroundStyle(.tertiary)
                     Spacer()
                 }

@@ -16,9 +16,9 @@ struct VersionDetailView: View {
             // File header
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90").foregroundStyle(.secondary)
-                Text(filePath).font(.headline.monospaced()).lineLimit(1).truncationMode(.middle)
+                Text(filePath).font(Typ.heading).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                Text("\(snapshots.count) versions").font(.caption).foregroundStyle(.tertiary)
+                Text("\(snapshots.count) versions").font(Typ.numericCaption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Spacing.edge).padding(.vertical, Spacing.section)
 

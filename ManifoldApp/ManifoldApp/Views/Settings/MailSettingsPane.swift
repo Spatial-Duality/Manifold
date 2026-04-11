@@ -20,7 +20,7 @@ struct MailSettingsPane: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(account.displayName)
-                                    .font(.callout.weight(.medium))
+                                    .font(Typ.body.weight(.medium))
                                 Text(account.username ?? "")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -48,7 +48,7 @@ struct MailSettingsPane: View {
             Section("Storage") {
                 LabeledContent("Backup location") {
                     Text(store.emailAccounts.backupRootPath)
-                        .font(.caption.monospaced())
+                        .font(Typ.mono)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)

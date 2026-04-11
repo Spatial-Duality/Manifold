@@ -12,7 +12,7 @@ struct StorageSettingsPane: View {
                 LabeledContent("Location") {
                     HStack(spacing: Spacing.tight) {
                         Text(ManifoldStore.storeURL.path)
-                            .font(.caption.monospaced())
+                            .font(Typ.mono)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -68,7 +68,7 @@ struct StorageSettingsPane: View {
         .formStyle(.grouped)
         .safeAreaInset(edge: .bottom) {
             Text("Manifold \(Bundle.main.shortVersionString)")
-                .font(.caption2)
+                .font(Typ.caption)
                 .foregroundStyle(.quaternary)
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 8)

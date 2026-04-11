@@ -87,7 +87,7 @@ struct MenuBarHeaderView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Manifold")
-                    .font(.headline)
+                    .font(Typ.heading)
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -122,7 +122,7 @@ struct MenuBarWorkBlockStrip: View {
                 .frame(width: 8, height: 8)
 
             Text("Tracked Work Block")
-                .font(.caption.weight(.medium))
+                .font(Typ.caption.weight(.medium))
 
             Text("\u{00B7}")
                 .foregroundStyle(.tertiary)
@@ -134,7 +134,7 @@ struct MenuBarWorkBlockStrip: View {
                 } ?? 0
                 let min = Int(elapsed) / 60
                 Text("\(min)m")
-                    .font(.caption.monospacedDigit())
+                    .font(Typ.numericCaption)
                     .foregroundStyle(.secondary)
             }
 
@@ -168,18 +168,18 @@ struct MenuBarAgentCard: View {
                     .fill(agent == .codex ? Color.codexPurple : Color.claudeBlue)
                     .frame(width: 8, height: 8)
                 Text(agent == .codex ? "Codex" : "Claude")
-                    .font(.callout.weight(.medium))
+                    .font(Typ.body.weight(.medium))
 
                 if policy.isPaused {
                     Text("Paused")
-                        .font(.caption2.weight(.medium))
+                        .font(Typ.caption.weight(.medium))
                         .foregroundStyle(Color.statusPaused)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Color.statusPaused.opacity(Opacity.badgeFill), in: Capsule())
                 } else if !isConnected {
                     Text("Offline")
-                        .font(.caption2)
+                        .font(Typ.caption)
                         .foregroundStyle(.secondary)
                 }
 

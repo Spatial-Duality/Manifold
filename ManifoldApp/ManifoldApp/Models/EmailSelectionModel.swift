@@ -17,7 +17,7 @@ final class EmailSelectionModel {
     var activeFilter: QuickFilter?
     /// Sort key for message list.
     var sortKey: EmailSortKey = .date
-    /// Whether the sidebar "Shared with Cowork" section is selected.
+    /// Whether the sidebar "Shared with Claude" section is selected.
     var showingSharedEmails: Bool = false
     /// Selected smart mailbox ID.
     var selectedSmartMailboxID: String?
