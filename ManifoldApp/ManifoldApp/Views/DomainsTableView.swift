@@ -134,8 +134,10 @@ struct DomainsTableView: View {
 
     @ViewBuilder
     private func domainRow(_ domain: DomainAggregate) -> some View {
+        let isGranted = !domain.isHiddenBySensitivity && isDomainGranted(domain.domain)
+
         HStack(spacing: Spacing.section) {
-            // Domain name
+            // Domain name + policy text
             VStack(alignment: .leading, spacing: 2) {
                 Text("@\(domain.domain)")
                     .font(.body)
@@ -143,8 +145,12 @@ struct DomainsTableView: View {
                 HStack(spacing: Spacing.tight) {
                     Text("\(domain.emailCount) emails")
                         .monospacedDigit()
-                    if !domain.isHiddenBySensitivity {
-                        Text("+ future")
+                    // Per v4.1 spec: checked → "+ future mail", unchecked → nothing, hidden → "—"
+                    if domain.isHiddenBySensitivity {
+                        Text("\u{2014}")
+                            .foregroundStyle(.quaternary)
+                    } else if isGranted {
+                        Text("+ future mail")
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -154,14 +160,14 @@ struct DomainsTableView: View {
 
             Spacer()
 
-            // Hidden reason
+            // Hidden reason badge
             if let reason = domain.hiddenReason {
                 Text(reason)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(.secondary.opacity(0.1), in: Capsule())
+                    .background(.secondary.opacity(0.08), in: Capsule())
             }
 
             // Access checkbox — reads per-agent policy
