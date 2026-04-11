@@ -42,18 +42,12 @@ struct DomainsTableView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // NOTE: .searchable() removed — collides with EmailView's .searchable()
-        //       when both views exist in the same window toolbar.
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
+        .safeAreaInset(edge: .top) {
+            // Local controls — in content area, not window toolbar
+            HStack(spacing: Spacing.section) {
                 AgentFocusControl(focus: $store.agentFocus)
-            }
-            ToolbarItem(placement: .automatic) {
-                TextField("Search domains", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 160)
-            }
-            ToolbarItem(placement: .automatic) {
+
+                // Sensitivity — always visible per v4.1 spec Q3
                 HStack(spacing: Spacing.tight) {
                     Text("Sensitivity:")
                         .font(.callout)
@@ -65,7 +59,16 @@ struct DomainsTableView: View {
                     }
                     .frame(width: 110)
                 }
+
+                TextField("Search domains", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+
+                Spacer()
             }
+            .padding(.horizontal, Spacing.edge)
+            .padding(.vertical, Spacing.standard)
+            .background(.bar)
         }
         .overlay(alignment: .bottom) {
             if showUndoToast, let domain = undoDomain {

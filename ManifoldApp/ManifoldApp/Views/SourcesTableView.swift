@@ -35,20 +35,22 @@ struct SourcesTableView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
+        .safeAreaInset(edge: .top) {
+            // Local controls — below the global title bar, inside the content area
+            HStack(spacing: Spacing.section) {
                 AgentFocusControl(focus: $store.agentFocus)
-            }
-            ToolbarItem(placement: .automatic) {
                 TextField("Search sources", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 160)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("Add Folder", systemImage: "folder.badge.plus") {
+                Spacer()
+                Button("Add Folder\u{2026}", systemImage: "folder.badge.plus") {
                     store.addSourceFromPicker()
                 }
+                .controlSize(.small)
             }
+            .padding(.horizontal, Spacing.edge)
+            .padding(.vertical, Spacing.standard)
+            .background(.bar)
         }
         .overlay(alignment: .bottom) {
             if showUndoToast, let (source, _) = undoSource {
