@@ -16,23 +16,29 @@ struct OverviewView: View {
                     agentCards
                 }
 
-                // Track Changes button (below cards)
-                if store.isConnected && !store.sources.isEmpty {
-                    Button {
-                        reviewSheetChange = ReviewAccessChange(
-                            description: "Start tracking changes",
-                            kind: .startWorkBlock
-                        )
-                    } label: {
-                        Label("Track Changes", systemImage: "timeline.selection")
+                // Track Changes — first-class mode CTA with real weight
+                if store.isConnected && !store.sources.isEmpty && store.policy.activeWorkBlock == nil {
+                    VStack(spacing: Spacing.standard) {
+                        Button {
+                            reviewSheetChange = ReviewAccessChange(
+                                description: "Start tracking changes",
+                                kind: .startWorkBlock
+                            )
+                        } label: {
+                            Label("Start Tracked Work Block", systemImage: "timeline.selection")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        Text("Monitor and review all AI file changes in real time")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .controlSize(.large)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .padding(.top, Spacing.section)
                 }
             }
             .padding(Spacing.xlarge)
-            .frame(maxWidth: 640)
+            .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
