@@ -6,6 +6,7 @@ struct MainView: View {
     @Environment(CommandCenter.self) var commands
     @State private var showOnboarding = false
     @State private var reviewSheetChange: ReviewAccessChange?
+    @SceneStorage("selectedTab") private var restoredTab: String = "overview"
 
     var body: some View {
         @Bindable var commands = commands
@@ -102,11 +103,16 @@ struct MainView: View {
             for: .windowToolbar
         )
         .task {
+            // Restore tab from SceneStorage
+            if let tab = AppTab(rawValue: restoredTab) { store.selectedTab = tab }
             commands.bind(to: store)
             if !store.hasCompletedOnboarding { showOnboarding = true }
             await store.loadSummary()
             await store.policy.loadPolicies()
             await store.policy.loadActiveWorkBlock()
+        }
+        .onChange(of: store.selectedTab) { _, newTab in
+            restoredTab = newTab.rawValue
         }
     }
 
@@ -165,23 +171,44 @@ struct MainView: View {
     // MARK: - Error Banner
 
     private func errorBanner(_ error: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
+        let isDatabase = error.lowercased().contains("database") || error.lowercased().contains("sqlite")
+        let isConnection = error.lowercased().contains("connect") || error.lowercased().contains("network")
+
+        return HStack(spacing: 8) {
+            Image(systemName: isDatabase ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(isDatabase ? Color.statusDanger : Color.statusWarning)
                 .accessibilityHidden(true)
-            Text(error)
-                .font(.callout)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isDatabase ? "Database Error" : isConnection ? "Connection Issue" : "Notice")
+                    .font(Typ.caption.weight(.medium))
+                Text(error)
+                    .font(Typ.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
             Spacer()
-            Button("Dismiss") { store.lastError = nil }
-                .buttonStyle(.plain)
-                .font(.callout.weight(.medium))
+            if isConnection {
+                Button("Retry") { Task { await store.refresh() } }
+                    .controlSize(.small)
+            }
+            Button {
+                store.lastError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(Spacing.section)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Spacing.standard))
+        .toastElevation()
         .padding(.horizontal, Spacing.edge)
         .padding(.top, Spacing.standard)
         .transition(.move(edge: .top).combined(with: .opacity))
-        .animation(.spring, value: store.lastError)
+        .animation(Anim.entrance, value: store.lastError)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Error: \(error)")
     }
 }
 

@@ -234,7 +234,7 @@ struct SourcesTableView: View {
 
     private var sourcesEmptyState: some View {
         ContentUnavailableView {
-            Label("No Sources", systemImage: "folder.badge.plus")
+            Label("No Sources Added", systemImage: "folder.badge.plus")
         } description: {
             Text("Add a folder to let AI agents access your files.\nClaude and Codex will only see files in folders you choose.")
         } actions: {
