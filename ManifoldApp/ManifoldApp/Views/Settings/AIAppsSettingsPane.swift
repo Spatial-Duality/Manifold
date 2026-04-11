@@ -84,9 +84,15 @@ private struct AgentHealthCard: View {
             }
 
             if let onSetup {
-                Button(setupLabel) { onSetup() }
-                    .buttonStyle(state.overallStatus == .notInstalled ? .borderedProminent : .bordered)
-                    .controlSize(.small)
+                if state.overallStatus == .notInstalled {
+                    Button(setupLabel) { onSetup() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                } else {
+                    Button(setupLabel) { onSetup() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
         }
     }
