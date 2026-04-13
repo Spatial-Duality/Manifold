@@ -1,5 +1,7 @@
 .build/
 .swiftpm/
+.claude/settings.local.json
+**/xcuserdata/
 *.xcuserstate
 DerivedData/
 .DS_Store
