@@ -4,23 +4,22 @@ This directory contains the live design and product-support documents for Manifo
 
 ## Start Here
 
-- [PRODUCT-SPEC.md](/Users/x01/Developer/Projects/Manifold/design/PRODUCT-SPEC.md) — canonical product definition
-- [ARCHITECTURE.md](/Users/x01/Developer/Projects/Manifold/ARCHITECTURE.md) — runtime and system shape
-- [UI-BACKEND-GAP-AUDIT.md](/Users/x01/Developer/Projects/Manifold/design/UI-BACKEND-GAP-AUDIT.md) — current seam between UI and backend work
+- [PRODUCT-SPEC.md](PRODUCT-SPEC.md) — canonical product definition
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — runtime and system shape
+- [CLAUDE-CODEX-TESTING.md](CLAUDE-CODEX-TESTING.md) — practical governed-path testing workflow with Xcode, Claude, and Codex
+- [UI-BACKEND-GAP-AUDIT.md](UI-BACKEND-GAP-AUDIT.md) — current seam between UI and backend work
 
 ## Current Supporting Docs
 
-- [RUNTIME-MIGRATION.md](/Users/x01/Developer/Projects/Manifold/design/RUNTIME-MIGRATION.md) — runtime transition plan
-- [RUNTIME-ARCHITECTURE-PLAN.md](/Users/x01/Developer/Projects/Manifold/design/RUNTIME-ARCHITECTURE-PLAN.md) — runtime structure and rationale
-- [WHY-RUNTIME.md](/Users/x01/Developer/Projects/Manifold/design/WHY-RUNTIME.md) — product and trust rationale for the separate runtime
-- [EMAIL-CONTROLS-SPEC.md](/Users/x01/Developer/Projects/Manifold/design/EMAIL-CONTROLS-SPEC.md) — current email governance model
-- [MENU-BAR-SPEC.md](/Users/x01/Developer/Projects/Manifold/design/MENU-BAR-SPEC.md) — menu bar behavior and future extensions
-- [DESIGN-STANDARDS.md](/Users/x01/Developer/Projects/Manifold/design/DESIGN-STANDARDS.md) — shared UI language, copy, and QA rules
-- [APPLE-DESIGN-EXCELLENCE-GUIDE.md](/Users/x01/Developer/Projects/Manifold/design/APPLE-DESIGN-EXCELLENCE-GUIDE.md) — platform-level design constraints
-- [APP-QUALITY-ROADMAP.md](/Users/x01/Developer/Projects/Manifold/design/APP-QUALITY-ROADMAP.md) — quality priorities from the current baseline
+- [RUNTIME-MIGRATION.md](RUNTIME-MIGRATION.md) — runtime transition plan
+- [RUNTIME-ARCHITECTURE-PLAN.md](RUNTIME-ARCHITECTURE-PLAN.md) — runtime structure and rationale
+- [WHY-RUNTIME.md](WHY-RUNTIME.md) — product and trust rationale for the separate runtime
+- [EMAIL-CONTROLS-SPEC.md](EMAIL-CONTROLS-SPEC.md) — current email governance model
+- [MENU-BAR-SPEC.md](MENU-BAR-SPEC.md) — menu bar behavior and future extensions
+- [DESIGN-STANDARDS.md](DESIGN-STANDARDS.md) — shared UI language, copy, and QA rules
+- [APPLE-DESIGN-EXCELLENCE-GUIDE.md](APPLE-DESIGN-EXCELLENCE-GUIDE.md) — platform-level design constraints
+- [APP-QUALITY-ROADMAP.md](APP-QUALITY-ROADMAP.md) — quality priorities from the current baseline
 
 ## Historical Material
 
-Pre-April 13, 2026 planning, wireframes, prompts, and superseded UI specs are archived under [archive/pre-2026-04-13](/Users/x01/Developer/Projects/Manifold/design/archive/pre-2026-04-13).
-
-Those files are kept for historical context only and should not be treated as the active source of truth.
+Superseded planning, wireframes, prompts, and UI specs were removed during open-source preparation and are no longer part of the public repo.

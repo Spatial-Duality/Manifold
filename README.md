@@ -60,7 +60,7 @@ Manifold is designed around the macOS Claude and Codex apps, which have differen
 - `manifold-mcp`: thin MCP adapter that forwards agent requests into the runtime over XPC
 - `SQLite + blob storage`: local metadata, audit records, and tracked file history
 
-Start with [design/PRODUCT-SPEC.md](/Users/x01/Developer/Projects/Manifold/design/PRODUCT-SPEC.md) for the April 13, 2026 product model, then read [ARCHITECTURE.md](/Users/x01/Developer/Projects/Manifold/ARCHITECTURE.md) for the runtime shape and [design/README.md](/Users/x01/Developer/Projects/Manifold/design/README.md) for the current design/runtime document map.
+Start with [design/PRODUCT-SPEC.md](design/PRODUCT-SPEC.md) for the April 13, 2026 product model, then read [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime shape and [design/README.md](design/README.md) for the current design/runtime document map.
 
 ## Current State
 
@@ -75,6 +75,15 @@ swift build --product ManifoldAgent
 ```
 
 Open `Manifold.xcodeproj` to work in Xcode.
+
+## Testing with Claude and Codex
+
+For the real governed-path test loop, use [design/CLAUDE-CODEX-TESTING.md](design/CLAUDE-CODEX-TESTING.md).
+
+This repo now also includes:
+
+- [script/build_and_run.sh](script/build_and_run.sh) — repeatable local build and run loop for Xcode builds
+- [.codex/environments/environment.toml](.codex/environments/environment.toml) — Codex desktop `Run` action wiring
 
 ## License
 

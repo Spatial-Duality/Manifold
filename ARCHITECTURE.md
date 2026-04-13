@@ -224,7 +224,7 @@ Open `Manifold.xcodeproj` to work in Xcode.
 
 ## Related Documents
 
-- [design/PRODUCT-SPEC.md](/Users/x01/Developer/Projects/Manifold/design/PRODUCT-SPEC.md)
-- [design/README.md](/Users/x01/Developer/Projects/Manifold/design/README.md)
-- [design/RUNTIME-MIGRATION.md](/Users/x01/Developer/Projects/Manifold/design/RUNTIME-MIGRATION.md)
-- [design/WHY-RUNTIME.md](/Users/x01/Developer/Projects/Manifold/design/WHY-RUNTIME.md)
+- [design/PRODUCT-SPEC.md](design/PRODUCT-SPEC.md)
+- [design/README.md](design/README.md)
+- [design/RUNTIME-MIGRATION.md](design/RUNTIME-MIGRATION.md)
+- [design/WHY-RUNTIME.md](design/WHY-RUNTIME.md)
