@@ -1,3 +1,6 @@
+// Copyright 2026 Spatial Duality
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// A request from an agent to access a resource outside its current policy.

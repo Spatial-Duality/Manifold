@@ -1,3 +1,6 @@
+// Copyright 2026 Spatial Duality
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// Manages named access profiles (Work, Research, Code, Custom).

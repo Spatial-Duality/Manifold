@@ -1,3 +1,6 @@
+// Copyright 2026 Spatial Duality
+// SPDX-License-Identifier: Apache-2.0
+
 import SwiftUI
 
 /// B-06: About window — app icon, version, copyright, links.
@@ -23,7 +26,7 @@ struct AboutView: View {
             Divider()
                 .frame(width: 200)
 
-            Text("\u{00A9} 2026 Spatial Duality. All rights reserved.")
+            Text("© 2026 Spatial Duality. Apache License 2.0.")
                 .font(Typ.caption)
                 .foregroundStyle(.tertiary)
         }

@@ -1,3 +1,6 @@
+// Copyright 2026 Spatial Duality
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// Represents a file or folder in the lazy-loaded tree browser.

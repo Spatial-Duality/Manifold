@@ -1,3 +1,6 @@
+// Copyright 2026 Spatial Duality
+// SPDX-License-Identifier: Apache-2.0
+
 import SwiftUI
 
 /// DS-6: Unified badge component replacing all inline capsule/pill patterns.
