@@ -18,6 +18,15 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Build Xcode app
+        run: |
+          xcodebuild -project Manifold.xcodeproj \
+            -scheme Manifold \
+            -configuration Debug \
+            -derivedDataPath /tmp/manifold-derived-data \
+            build \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Build app bundle (release)
         if: github.ref == 'refs/heads/main'
         run: bash ManifoldApp/build.sh release
