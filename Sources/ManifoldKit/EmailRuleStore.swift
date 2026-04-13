@@ -6,15 +6,18 @@ import os
 
 private let emailRuleLogger = Logger(subsystem: "com.spatialduality.manifold", category: "email-rules")
 
+/// Persists the runtime-owned email rule set for each supported agent.
 public actor EmailRuleStore {
     private let db: DatabaseConnection
     private let policyStore: PolicyStore
 
+    /// Creates a rule store that keeps compatibility fields in sync with `PolicyStore`.
     public init(db: DatabaseConnection, policyStore: PolicyStore) {
         self.db = db
         self.policyStore = policyStore
     }
 
+    /// Returns the full email rule set for one agent.
     public func ruleSet(for agent: TargetApp) async throws -> EmailRuleSet {
         let policy = try await policyStore.policy(for: agent)
         let shields = try shieldStates(for: agent)
@@ -32,6 +35,7 @@ public actor EmailRuleStore {
         )
     }
 
+    /// Replaces the stored rule set for one agent after validation.
     public func updateRuleSet(_ ruleSet: EmailRuleSet) async throws {
         try validate(ruleSet)
         let now = ISO8601DateFormatter.shared.string(from: Date())
@@ -102,6 +106,7 @@ public actor EmailRuleStore {
         emailRuleLogger.info("Updated email rule set for \(ruleSet.agent.rawValue)")
     }
 
+    /// Returns the compact governance summary used by status surfaces in the app.
     public func emailGovernanceSummary(for agent: TargetApp) async throws -> AgentEmailGovernanceSummary {
         let ruleSet = try await ruleSet(for: agent)
         return AgentEmailGovernanceSummary(
@@ -115,6 +120,7 @@ public actor EmailRuleStore {
         )
     }
 
+    /// Inserts or replaces one domain rule, then persists the updated rule set.
     public func upsertDomainRule(
         agent: TargetApp,
         domain: String,
@@ -129,6 +135,7 @@ public actor EmailRuleStore {
         try await updateRuleSet(ruleSet)
     }
 
+    /// Removes one domain rule, then persists the updated rule set.
     public func removeDomainRule(agent: TargetApp, domain: String) async throws {
         var ruleSet = try await ruleSet(for: agent)
         let normalized = normalizedDomain(domain)

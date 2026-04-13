@@ -4,9 +4,7 @@
 import SwiftUI
 import ManifoldKit
 
-/// Dashboard-style agent card matching the interactive prototype.
-/// Left border in agent color, tinted background, sources/domains/activity inline,
-/// per-agent pause/resume control.
+/// Dashboard card for one agent's current governed scope, coverage, and recent activity.
 struct AgentPolicyCard: View {
     let agentName: String
     let agentColor: Color
@@ -123,7 +121,7 @@ struct AgentPolicyCard: View {
     private var accessSummarySection: some View {
         HStack(spacing: 12) {
             summaryPill(
-                title: "Shared Sources",
+                title: "Files Shared",
                 value: totalSources == 0 ? "None" : "\(sharedSources.count) of \(totalSources)"
             )
             summaryPill(
@@ -131,7 +129,7 @@ struct AgentPolicyCard: View {
                 value: emailGovernance.map { "\($0.totalRuleCount) rules" } ?? "Unavailable"
             )
             summaryPill(
-                title: "Default Email",
+                title: "Default Email Access",
                 value: emailGovernance?.defaultPolicy.displayName ?? "Unavailable"
             )
         }
@@ -158,7 +156,7 @@ struct AgentPolicyCard: View {
 
     private var sourcesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("FILES AND FOLDERS")
+            Text("CURRENT FILE ACCESS")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .tracking(0.5)
@@ -177,21 +175,21 @@ struct AgentPolicyCard: View {
                             .font(Typ.body)
                             .lineLimit(1)
                         Spacer()
-                        Text("Shared")
+                        Text("Visible")
                             .font(Typ.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 if sharedSources.count > 4 {
-                    Text("+\(sharedSources.count - 4) more shared")
+                    Text("+\(sharedSources.count - 4) more visible")
                         .font(Typ.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
 
             if hiddenSourceCount > 0 {
-                Text("\(hiddenSourceCount) source\(hiddenSourceCount == 1 ? "" : "s") not shared with \(agentName)")
+                Text("\(hiddenSourceCount) source\(hiddenSourceCount == 1 ? "" : "s") hidden from \(agentName)")
                     .font(Typ.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -202,7 +200,7 @@ struct AgentPolicyCard: View {
 
     private var emailGovernanceSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("EMAIL POLICY")
+            Text("EMAIL RULES")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .tracking(0.5)

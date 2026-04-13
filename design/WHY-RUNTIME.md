@@ -1,5 +1,7 @@
 # Why Manifold Needs a Separate Runtime
 
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
 ## The Core Reason Manifold Exists
 
 Every AI tool maker's incentive is to expand what the agent can access and do. More access means more capability means more revenue. Claude's sandboxing, Codex worktrees, Cursor's permissions — these are concessions to safety made by companies whose primary incentive is agent capability. They will always be "good enough" rather than "excellent" at access control, because excellent access control limits the product they are selling.

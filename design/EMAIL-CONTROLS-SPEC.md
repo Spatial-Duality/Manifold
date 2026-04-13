@@ -1,5 +1,7 @@
 # Email Controls — Design Spec
 
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
 ## The Problem
 
 The current "Domains" tab is a flat list of domains with toggles. It answers only one question: "Can this agent see emails from @stripe.com?" But email governance has several dimensions the current design completely ignores:

@@ -1,5 +1,7 @@
 # Testing Manifold with Xcode, Codex, and Claude
 
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
 This document is the practical test loop for Manifold as it exists today.
 
 The goal is not just to see whether the app launches. The goal is to verify the governed path:

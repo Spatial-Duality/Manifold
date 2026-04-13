@@ -11,6 +11,7 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 public final class DatabaseConnection: @unchecked Sendable {
     private var handle: OpaquePointer?
 
+    /// Creates a SQLite connection and applies the runtime PRAGMA defaults Manifold expects.
     public init(url: URL) throws {
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         let status = sqlite3_open_v2(url.path, &handle, flags, nil)
@@ -55,16 +56,19 @@ public final class DatabaseConnection: @unchecked Sendable {
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw ManifoldError.database(errorMessage)
         }
+        guard let preparedStatement = stmt else {
+            throw ManifoldError.database("SQLite prepared a nil statement for query: \(sql)")
+        }
         // Only cache deterministic queries (not PRAGMA, not CREATE)
         let upper = sql.trimmingCharacters(in: .whitespaces).uppercased()
         if upper.hasPrefix("SELECT") || upper.hasPrefix("INSERT") || upper.hasPrefix("UPDATE") || upper.hasPrefix("DELETE") {
-            stmtCache[sql] = stmt
+            stmtCache[sql] = preparedStatement
         }
-        return stmt!
+        return preparedStatement
     }
 
-    /// Execute a SQL statement with optional string parameters.
-    /// Pass nil for SQL NULL values (important for optional foreign key columns).
+    /// Executes a SQL statement with optional string parameters.
+    /// Pass `nil` values for SQL `NULL`.
     public func execute(_ sql: String, params: [String?] = []) throws {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -80,7 +84,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         }
     }
 
-    /// Query a single scalar value (first column of first row).
+    /// Returns the first column of the first row, or `nil` when the query has no rows.
     public func queryScalar(_ sql: String, params: [String?] = []) throws -> String? {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -95,15 +99,16 @@ public final class DatabaseConnection: @unchecked Sendable {
         return String(cString: cStr)
     }
 
-    /// Query all rows as [String: String] dictionaries.
-    /// queryAll does NOT use the statement cache because the cursor remains
-    /// open during row iteration, which would conflict with concurrent queries.
+    /// Returns all rows as `[String: String]` dictionaries.
+    /// `queryAll` does not use the statement cache because the cursor stays open during row iteration.
     public func queryAll(_ sql: String, params: [String?] = []) throws -> [[String: String]] {
         var s: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &s, nil) == SQLITE_OK else {
             throw ManifoldError.database(errorMessage)
         }
-        let stmt = s!
+        guard let stmt = s else {
+            throw ManifoldError.database("SQLite prepared a nil statement for query: \(sql)")
+        }
         defer { sqlite3_finalize(stmt) }
 
         bindParams(stmt, params)
@@ -124,7 +129,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         return rows
     }
 
-    /// Run a block inside a transaction. Rolls back on error.
+    /// Runs a block inside a transaction and rolls back on error.
     public func transaction(_ block: () throws -> Void) throws {
         try execute("BEGIN TRANSACTION")
         do {
@@ -137,7 +142,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         }
     }
 
-    /// Run an integrity check on the database.
+    /// Returns `true` when SQLite reports the database integrity check as `ok`.
     public func integrityCheck() throws -> Bool {
         let result = try queryScalar("PRAGMA integrity_check")
         return result == "ok"

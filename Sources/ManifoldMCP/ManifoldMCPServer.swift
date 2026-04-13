@@ -21,6 +21,7 @@ private actor MCPConnectionState {
 }
 
 @main
+/// Launches the stdio MCP adapter that forwards governed tool calls into the local runtime.
 struct ManifoldMCPServer {
     static func main() async throws {
         let version = "0.4.0"

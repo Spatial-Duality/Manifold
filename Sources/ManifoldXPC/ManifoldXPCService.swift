@@ -36,11 +36,13 @@ private struct CommandReplyBox: @unchecked Sendable {
     let reply: (Data, NSError?) -> Void
 }
 
+/// Hosts the local XPC boundary between the app or MCP adapter and the runtime.
 public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, ManifoldXPCProtocol, @unchecked Sendable {
     let runtime: ManifoldRuntime
     let agentVersion: String
     private let registry = XPCConnectionRegistry()
 
+    /// Creates an exported XPC service backed by the shared runtime instance.
     public init(runtime: ManifoldRuntime, version: String = "0.4.0") {
         self.runtime = runtime
         self.agentVersion = version

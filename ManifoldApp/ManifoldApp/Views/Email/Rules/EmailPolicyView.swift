@@ -16,7 +16,7 @@ struct EmailPolicyView: View {
                     Text("Email Policy")
                         .font(Typ.sectionTitle)
                         .accessibilityIdentifier("emailRules.policy.title")
-                    Text("Set the coarse sensitivity preset and what happens when no specific email rule matches.")
+                    Text("Choose the sensitivity preset and what should happen when no specific email rule matches.")
                         .font(Typ.body)
                         .foregroundStyle(.secondary)
                 }
@@ -61,7 +61,7 @@ struct EmailPolicyView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("How Evaluation Works")
                         .font(Typ.heading)
-                    Text("Manifold checks contact rules first, then keywords, then domains, then shields, then sensitivity. If none match, the default policy applies.")
+                    Text("Manifold checks contact rules first, then keywords, then domains, then shields, then sensitivity. If none match, the default policy applies. Block rules win over allow rules within the same tier.")
                         .font(Typ.body)
                         .foregroundStyle(.secondary)
                 }

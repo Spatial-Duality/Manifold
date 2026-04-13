@@ -27,7 +27,7 @@ struct ConnectClaudeSheet: View {
                 LiveCheckRow(
                     label: "Claude Desktop installed",
                     status: store.integrationHealth.claude.appInstalled,
-                    action: { NSWorkspace.shared.open(URL(string: "https://claude.ai/download")!) },
+                    action: { openWebPage("https://claude.ai/download") },
                     actionLabel: "Download",
                     onRefresh: { await store.integrationHealth.checkClaude() }
                 )
@@ -100,5 +100,10 @@ struct ConnectClaudeSheet: View {
         }
         .frame(width: 460, height: 420)
         .task { await store.integrationHealth.checkAll(force: true) }
+    }
+
+    private func openWebPage(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        NSWorkspace.shared.open(url)
     }
 }

@@ -13,19 +13,30 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Swift package
-        run: swift build
+        run: |
+          set -o pipefail
+          swift build 2>&1 | tee /tmp/manifold-swift-build.log
+          if grep -n "warning:" /tmp/manifold-swift-build.log; then
+            echo "Unexpected Swift package warnings detected"
+            exit 1
+          fi
 
       - name: Test Swift package
         run: swift test
 
       - name: Build Xcode app
         run: |
+          set -o pipefail
           xcodebuild -project Manifold.xcodeproj \
             -scheme Manifold \
             -configuration Debug \
             -derivedDataPath "$GITHUB_WORKSPACE/.deriveddata-app-build" \
             build \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/manifold-xcode-build.log
+          if grep -n "warning:" /tmp/manifold-xcode-build.log | grep -v "^--- xcodebuild: WARNING: Using the first of multiple matching destinations:"; then
+            echo "Unexpected Xcode build warnings detected"
+            exit 1
+          fi
 
       - name: Run app unit and integration tests
         run: |

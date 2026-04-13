@@ -47,6 +47,12 @@ bash script/build_and_run.sh
 4. For app changes, also verify with: `xcodebuild -project Manifold.xcodeproj -scheme Manifold -configuration Debug build CODE_SIGNING_ALLOWED=NO`
 5. Open a pull request with a clear description of what changed and why
 
+If your change affects the product story or first-run experience, update the docs that match the audience:
+
+- `README.md` for first impression and quick start
+- `docs/` for outsider-facing usage and architecture
+- `design/` for the deeper product and implementation source of truth
+
 ## Commit messages
 
 Write concise commit messages that explain the *why*, not just the *what*. One sentence is usually enough.
@@ -57,6 +63,8 @@ Write concise commit messages that explain the *why*, not just the *what*. One s
 - Prefer `os.Logger` over `print()` in library/runtime code
 - `print()` is fine in CLI tools
 - Follow existing patterns in the codebase
+- Add `///` doc comments to public API surfaces that contributors are likely to option-click in Xcode
+- Use inline comments to explain invariants, trust boundaries, or platform quirks, not obvious line-by-line mechanics
 
 ## Reporting issues
 

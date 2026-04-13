@@ -197,6 +197,9 @@ extension SHA256Digest {
             chars[i &* 2] = hexDigits[Int(byte >> 4)]
             chars[i &* 2 &+ 1] = hexDigits[Int(byte & 0x0F)]
         }
-        return String(bytes: chars, encoding: .ascii)!
+        guard let string = String(bytes: chars, encoding: .ascii) else {
+            preconditionFailure("Failed to convert SHA-256 digest into ASCII hex")
+        }
+        return string
     }
 }

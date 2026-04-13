@@ -12,29 +12,31 @@ public struct ConfigWriter {
     private let binaryPath: String
     private let homeDir: URL
 
+    /// Returns the CLI arguments that identify the target agent to `manifold-mcp`.
     public static func expectedArguments(for agent: TargetApp) -> [String] {
         ["--agent", agent.rawValue]
     }
 
+    /// Creates a config writer rooted at the current user's home directory.
     public init(binaryPath: String) {
         self.binaryPath = binaryPath
         self.homeDir = FileManager.default.homeDirectoryForCurrentUser
     }
 
-    /// Test-only initializer with custom home directory.
+    /// Creates a config writer with a custom home directory for tests or controlled installs.
     public init(binaryPath: String, homeDir: URL) {
         self.binaryPath = binaryPath
         self.homeDir = homeDir
     }
 
-    /// Install config for Claude Desktop, Claude Code, and Codex.
+    /// Installs or updates Manifold config for Claude Desktop, Claude Code, and Codex.
     public func installAll() throws {
         try installClaudeDesktop()
         try installClaudeCode()
         try installCodex()
     }
 
-    /// Write to ~/Library/Application Support/Claude/claude_desktop_config.json
+    /// Writes the Manifold MCP entry to Claude Desktop's JSON config.
     public func installClaudeDesktop() throws {
         let configDir = homeDir.appendingPathComponent("Library/Application Support/Claude")
         let configFile = configDir.appendingPathComponent("claude_desktop_config.json")
@@ -60,7 +62,7 @@ public struct ConfigWriter {
         logger.info("Wrote Claude Desktop config: \(configFile.path)")
     }
 
-    /// Write to ~/.claude/settings.json (Claude Code CLI / IDE extensions)
+    /// Writes the Manifold MCP entry to Claude Code's JSON config.
     public func installClaudeCode() throws {
         let configDir = homeDir.appendingPathComponent(".claude")
         let configFile = configDir.appendingPathComponent("settings.json")
@@ -86,7 +88,7 @@ public struct ConfigWriter {
         logger.info("Wrote Claude Code config: \(configFile.path)")
     }
 
-    /// Write to ~/.codex/config.toml
+    /// Writes the Manifold MCP entry to Codex's TOML config.
     public func installCodex() throws {
         let configDir = homeDir.appendingPathComponent(".codex")
         let configFile = configDir.appendingPathComponent("config.toml")

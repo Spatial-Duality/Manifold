@@ -374,6 +374,7 @@ public actor ManifoldBridge {
         }
     }
 
+    /// Merges client-provided context into the bridge's runtime metadata.
     public func registerClientContext(initializeParams: [String: Any]) async {
         runtimeContext.mergeInitializeParams(initializeParams)
         guard !connectionLogged else { return }
@@ -385,6 +386,7 @@ public actor ManifoldBridge {
         )
     }
 
+    /// Records the end of a live client connection in the audit trail.
     public func recordDisconnection() async {
         guard connectionLogged else { return }
         try? await auditStore.log(
@@ -397,14 +399,17 @@ public actor ManifoldBridge {
         )
     }
 
+    /// Associates the verified local caller identity with this bridge.
     public func registerVerifiedClientIdentity(_ identity: VerifiedClientIdentity) async {
         runtimeContext.updateVerifiedClientIdentity(identity)
     }
 
+    /// Returns the verified local caller identity for this bridge, if one is known.
     public func verifiedClientIdentity() -> VerifiedClientIdentity? {
         runtimeContext.verifiedClientIdentity
     }
 
+    /// Returns the current coverage snapshot for this bridge.
     public func currentCoverageSnapshot() async -> AgentCoverageSnapshot {
         let verificationStatus = runtimeContext.verifiedClientIdentity?.status ?? .unknown
         let coverageState: CoverageState
@@ -426,6 +431,7 @@ public actor ManifoldBridge {
         )
     }
 
+    /// Returns recent runtime coverage events for this bridge's agent.
     public func recentCoverageEvents(limit: Int = 20) async -> [CoverageEvent] {
         let entries = (try? await auditStore.recentEntries(limit: max(limit * 3, 30))) ?? []
         return entries
@@ -897,6 +903,7 @@ public actor ManifoldBridge {
 
     // MARK: - Tools
 
+    /// Returns the current governed status summary for this bridge.
     public func getStatus() async -> StatusResult {
         await logToolCall(tool: "get_status")
         do {
@@ -1014,6 +1021,7 @@ public actor ManifoldBridge {
         }
     }
 
+    /// Lists the governed files currently visible through this bridge.
     public func listFiles(intent: AccessIntent? = nil) async throws -> [FileInfo] {
         await logToolCall(tool: "list_files")
         let validatedIntent = try await validatedAccessIntent(for: "list_files", provided: intent)
@@ -1115,6 +1123,7 @@ public actor ManifoldBridge {
 
     // MARK: - Read File (P1 FIX: reject ambiguous bare paths)
 
+    /// Reads a governed file through the active access context.
     public func readFile(path: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "read_file", arguments: ["path": path])
         let validatedIntent = try await validatedAccessIntent(for: "read_file", provided: intent)
@@ -1190,6 +1199,7 @@ public actor ManifoldBridge {
 
     // MARK: - Write File (P1 FIX: record snapshots, use canonical paths, reject ambiguous)
 
+    /// Escalates file writes into tracked work instead of mutating originals directly.
     public func writeFile(path: String, content: String) async throws -> WriteResult {
         await logToolCall(tool: "write_file", arguments: ["path": path, "content_length": "\(content.count)"])
         let cleaned = cleanPath(path)
@@ -1833,6 +1843,7 @@ public actor ManifoldBridge {
 
     // MARK: - Sessions
 
+    /// Lists recent governed sessions.
     public func listSessions(limit: Int) async throws -> [SessionSummary] {
         await logToolCall(tool: "list_sessions", arguments: ["limit": "\(limit)"])
         let grants = try await grantStore.allGrants(limit: limit)
@@ -1854,6 +1865,7 @@ public actor ManifoldBridge {
         return results
     }
 
+    /// Returns the detailed governed record for one session or grant identifier.
     public func getSession(grantID: String) async throws -> SessionDetail {
         await logToolCall(tool: "get_session", arguments: ["grant_id": grantID])
         let grants = try await grantStore.allGrants(limit: 100)
@@ -1906,6 +1918,7 @@ public actor ManifoldBridge {
         return detail
     }
 
+    /// Saves a session note into the current governed history.
     public func saveSessionNote(note: String, noteType: SessionSummaryKind = .checkpointNote) async throws -> String {
         await logToolCall(
             tool: "save_session_note",
@@ -1930,6 +1943,7 @@ public actor ManifoldBridge {
 
     // MARK: - Email Tools (reads from .eml-backed email index)
 
+    /// Lists governed emails currently visible to this bridge.
     public func listEmails(intent: AccessIntent? = nil) async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
         let validatedIntent = try await validatedAccessIntent(for: "list_emails", provided: intent)
@@ -1957,6 +1971,7 @@ public actor ManifoldBridge {
         return summaries
     }
 
+    /// Reads one governed email message.
     public func readEmail(id: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
         let validatedIntent = try await validatedAccessIntent(for: "read_email", provided: intent)
@@ -2014,6 +2029,7 @@ public actor ManifoldBridge {
         return preview
     }
 
+    /// Searches governed email content through the runtime email policy engine.
     public func searchEmails(query: String, intent: AccessIntent? = nil) async throws -> [EmailMessageRecord] {
         await logToolCall(tool: "search_emails", arguments: ["query": query])
         let validatedIntent = try await validatedAccessIntent(for: "search_emails", provided: intent)
@@ -2054,6 +2070,7 @@ public actor ManifoldBridge {
         return visible
     }
 
+    /// Returns the durable history context for one governed file path.
     public func fileHistoryContext(filePath: String, limit: Int = 20) async throws -> FileHistoryContext {
         await logToolCall(tool: "get_file_history_context", arguments: ["file_path": filePath, "limit": limit])
         let (_, decisionID) = try await resolveAccessForTool(
@@ -2091,6 +2108,7 @@ public actor ManifoldBridge {
         return context
     }
 
+    /// Returns the durable history context for one governed session.
     public func sessionContext(sessionID: String) async throws -> SessionContextDetail {
         await logToolCall(tool: "get_session_context", arguments: ["session_id": sessionID])
         let (_, decisionID) = try await resolveAccessForTool(

@@ -330,9 +330,8 @@ public actor EmailSyncEngine {
 
                 // Map envelope fields
                 let envelope = item.envelope
-                let emailID = envelope?.messageID.isEmpty == false
-                    ? envelope!.messageID
-                    : "imap-\(accountID)-\(mailboxName)-\(uid)"
+                let messageID = envelope?.messageID.nilIfEmpty
+                let emailID = messageID ?? "imap-\(accountID)-\(mailboxName)-\(uid)"
 
                 // Normalize sender email and domain from envelope.from
                 let senderEmail = Self.extractEmail(from: envelope?.from ?? "")
@@ -359,8 +358,8 @@ public actor EmailSyncEngine {
                     contentType: contentType,
                     isRead: isRead,
                     isFlagged: isFlagged,
-                    inReplyTo: envelope?.inReplyTo.isEmpty == true ? nil : envelope?.inReplyTo,
-                    messageIDHeader: envelope?.messageID.isEmpty == true ? nil : envelope?.messageID,
+                    inReplyTo: envelope?.inReplyTo.nilIfEmpty,
+                    messageIDHeader: messageID,
                     attachmentCount: attachmentCount
                 )
 
@@ -474,17 +473,28 @@ public actor EmailSyncEngine {
     private static let htmlStripPatterns: [(NSRegularExpression, String)] = {
         [
             // Remove script/style blocks entirely
-            (try! NSRegularExpression(pattern: "<(script|style)[^>]*>[\\s\\S]*?</\\1>", options: .caseInsensitive), ""),
+            (compileRegex("<(script|style)[^>]*>[\\s\\S]*?</\\1>", options: .caseInsensitive), ""),
             // Replace block elements with newlines
-            (try! NSRegularExpression(pattern: "<(br|p|div|h[1-6]|li|tr)[^>]*/?>", options: .caseInsensitive), "\n"),
+            (compileRegex("<(br|p|div|h[1-6]|li|tr)[^>]*/?>", options: .caseInsensitive), "\n"),
             // Remove all remaining tags
-            (try! NSRegularExpression(pattern: "<[^>]+>"), ""),
+            (compileRegex("<[^>]+>"), ""),
             // Collapse horizontal whitespace
-            (try! NSRegularExpression(pattern: "[ \\t]+"), " "),
+            (compileRegex("[ \\t]+"), " "),
             // Collapse excessive newlines
-            (try! NSRegularExpression(pattern: "\\n{3,}"), "\n\n"),
+            (compileRegex("\\n{3,}"), "\n\n"),
         ]
     }()
+
+    private static func compileRegex(
+        _ pattern: String,
+        options: NSRegularExpression.Options = []
+    ) -> NSRegularExpression {
+        do {
+            return try NSRegularExpression(pattern: pattern, options: options)
+        } catch {
+            preconditionFailure("Invalid EmailSyncEngine regex pattern: \(pattern)")
+        }
+    }
 
     // MARK: - Cached Date Formatters
 

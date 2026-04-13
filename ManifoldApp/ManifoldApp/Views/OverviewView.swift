@@ -4,8 +4,7 @@
 import SwiftUI
 import ManifoldKit
 
-/// Overview tab — two-column agent dashboard matching the interactive prototype.
-/// No sidebar. Agent cards fill the viewport with real data.
+/// Overview tab — the quickest answer to “what can each agent see right now?”
 struct OverviewView: View {
     @Environment(ManifoldStore.self) var store
     @State private var reviewSheetChange: ReviewAccessChange?
@@ -25,7 +24,7 @@ struct OverviewView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Manifold")
+        .navigationTitle("Overview")
         .navigationSubtitle(statusSubtitle)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("overview.screen")
@@ -43,7 +42,7 @@ struct OverviewView: View {
     // MARK: - Status Subtitle
 
     private var statusSubtitle: String {
-        if !store.isRuntimeConnected { return "Connecting\u{2026}" }
+        if !store.isRuntimeConnected { return "Starting local runtime\u{2026}" }
         var parts: [String] = []
         if store.isClaudeConnected {
             parts.append(store.policy.claudePolicy?.isPaused == true ? "Claude paused" : "Claude active")
@@ -143,10 +142,10 @@ struct OverviewView: View {
         if store.isRuntimeConnected && store.sources.contains(where: { !$0.isRemoved }) && store.policy.activeWorkBlock == nil {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Tracked Work Block")
+                    Text("Need a governed edit?")
                         .font(Typ.body)
                         .fontWeight(.medium)
-                    Text("Monitor and review all AI file changes in real time")
+                    Text("Start a tracked workspace so file changes stay reviewable before anything touches your originals.")
                         .font(Typ.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -179,9 +178,9 @@ struct OverviewView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label("No AI Agents Connected", systemImage: "antenna.radiowaves.left.and.right.slash")
+            Label("Connect Claude Or Codex", systemImage: "antenna.radiowaves.left.and.right.slash")
         } description: {
-            Text("Connect Claude or Codex to start managing what AI can access on your Mac.")
+            Text("Choose the files and email access you want to govern, then review what each agent can see.")
         } actions: {
             Button("Open Settings\u{2026}") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)

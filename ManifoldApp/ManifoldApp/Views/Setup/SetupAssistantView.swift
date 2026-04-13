@@ -4,8 +4,7 @@
 import SwiftUI
 import ManifoldKit
 
-/// 4-screen first-run setup assistant. No nested sheets.
-/// Screen 2 shows connection checks inline. Screen 3 uses multi-select folder picker.
+/// First-run setup assistant for connecting apps and choosing the first governed data sources.
 struct SetupAssistantView: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
@@ -111,16 +110,18 @@ private struct WelcomeScreen: View {
                 .foregroundStyle(Color.accentColor)
                 .accessibilityHidden(true)
 
-            Text("Manifold controls what AI agents see on your Mac.")
+            Text("Control what Claude and Codex can see on your Mac.")
                 .font(.title2.weight(.semibold))
                 .multilineTextAlignment(.center)
+                .accessibilityIdentifier("setup.welcome.title")
 
-            Text("Nothing is shared until you decide. Every change is versioned automatically.")
+            Text("Choose the files and email access you want to share. Reads are recorded, and edits stay reviewable.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .accessibilityIdentifier("setup.welcome.subtitle")
 
-            Button("Continue") { advance() }
+            Button("Get Started") { advance() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .accessibilityIdentifier("setup.welcome.continue")
@@ -140,11 +141,11 @@ private struct ConnectAppsScreen: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Connect Claude or Codex")
+            Text("Connect your AI apps")
                 .font(.title2.weight(.semibold))
                 .accessibilityIdentifier("setup.connect.title")
 
-            Text("Manifold works with either or both. You can add more later in Settings.")
+            Text("Add Manifold to Claude Desktop, Codex, or both. You can always reconnect them later in Settings.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -233,10 +234,10 @@ private struct AddDataScreen: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Choose what to share")
+            Text("Choose files and email")
                 .font(.title2.weight(.semibold))
 
-            Text("Add folders or email accounts. Agents can only see what you allow.")
+            Text("Only the folders and email sources you add here can be shared with Claude or Codex through Manifold.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

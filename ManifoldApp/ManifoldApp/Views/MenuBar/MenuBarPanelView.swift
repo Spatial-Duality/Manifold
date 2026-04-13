@@ -4,9 +4,7 @@
 import SwiftUI
 import ManifoldKit
 
-/// Window-style menu bar extra panel. Answers five questions instantly:
-/// 1. Is any AI active? 2. What can each agent see? 3. Is a work block running?
-/// 4. Is an agent asking for more access? 5. How do I stop it?
+/// Menu bar panel for fast status: who is connected, what is governed, and whether tracked work is running.
 struct MenuBarPanelView: View {
     @Environment(ManifoldStore.self) var store
 
@@ -43,10 +41,10 @@ struct MenuBarPanelView: View {
             // Empty state
             if store.policy.claudePolicy == nil && store.policy.codexPolicy == nil {
                 VStack(spacing: Spacing.standard) {
-                    Text("No AI agents configured")
+                    Text("No agents connected")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Text("Open Settings to set up Claude or Codex.")
+                    Text("Open Settings to connect Claude or Codex.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -79,7 +77,7 @@ struct MenuBarHeaderView: View {
 
     private var statusText: String {
         if !store.isConnected && store.policy.claudePolicy == nil {
-            return "No agents connected"
+            return "No governed sessions yet"
         }
         var parts: [String] = []
         if let claude = store.policy.claudePolicy, !claude.isPaused { parts.append("Claude active") }
@@ -128,7 +126,7 @@ struct MenuBarWorkBlockStrip: View {
                 .fill(block.agent == .codex ? Color.codexPurple : Color.claudeBlue)
                 .frame(width: 8, height: 8)
 
-            Text("Tracked Work Block")
+            Text("Tracked edit in progress")
                 .font(Typ.caption.weight(.medium))
 
             Text("\u{00B7}")
@@ -217,7 +215,7 @@ struct MenuBarAgentCard: View {
                             .font(.caption)
                             .foregroundStyle(coverage.verificationStatus == .verified ? Color.statusActive : .orange)
                     }
-                    Label("\(policy.allowedSourceIDs.count) sources", systemImage: "folder")
+                    Label("\(policy.allowedSourceIDs.count) shared", systemImage: "folder")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let emailGovernance {

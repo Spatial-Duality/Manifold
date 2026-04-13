@@ -23,8 +23,7 @@ struct ReviewAccessChange: Identifiable {
     }
 }
 
-/// Full-height attached sheet for ALL broadening access changes.
-/// This is the product's commitment surface — every grant is deliberate.
+/// Full-height attached sheet for reviewing governed access without mutating policy by accident.
 struct ReviewAccessSheet: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss
@@ -118,7 +117,7 @@ struct ReviewAccessSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Review & Update Access")
                     .font(Typ.sectionTitle)
-                Text("Review what \(selectedAgent == .codex ? "Codex" : "Claude") can access")
+                Text("What can \(selectedAgent == .codex ? "Codex" : "Claude") see right now?")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -228,7 +227,7 @@ struct ReviewAccessSheet: View {
             let policy = store.policy.policy(for: selectedAgent)
             let governance = store.policy.emailGovernance(for: selectedAgent)
 
-            Text("Email access is managed in Email Rules.")
+            Text("Email access is managed separately in Email Rules.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -239,21 +238,24 @@ struct ReviewAccessSheet: View {
                 } else if let policy {
                     Text("Current sensitivity: \(policy.emailSensitivity.displayName).")
                 }
-                Text("Use Email Rules to edit shields, domain rules, contact overrides, keyword rules, and the default policy.")
+                Text("Use Email Rules to edit shields, domains, contacts, keywords, sensitivity, and the default policy in one place.")
             }
             .font(.caption)
             .foregroundStyle(.tertiary)
 
-            Button("Open Email Rules") {
+            Button("Open Email Rules\u{2026}") {
                 store.agentFocus = selectedAgent == .codex ? .codex : .claude
                 store.selectedTab = .emails
                 store.emailRulesDestination = .policy
                 dismiss()
             }
             .buttonStyle(.bordered)
+            .accessibilityLabel("Open Email Rules")
             .accessibilityIdentifier("reviewAccess.openEmailRules")
         }
         .padding(Spacing.edge)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("reviewAccess.emails.content")
     }
 
     // MARK: - Footer

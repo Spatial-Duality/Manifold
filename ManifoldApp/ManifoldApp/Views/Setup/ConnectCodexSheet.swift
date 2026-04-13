@@ -27,7 +27,7 @@ struct ConnectCodexSheet: View {
                 LiveCheckRow(
                     label: "Codex app installed",
                     status: store.integrationHealth.codex.codexAppInstalled,
-                    action: { NSWorkspace.shared.open(URL(string: "https://openai.com/index/introducing-codex/")!) },
+                    action: { openWebPage("https://openai.com/index/introducing-codex/") },
                     actionLabel: "Install",
                     onRefresh: { await store.integrationHealth.checkCodex() }
                 )
@@ -93,5 +93,10 @@ struct ConnectCodexSheet: View {
         }
         .frame(width: 460, height: 420)
         .task { await store.integrationHealth.checkCodex() }
+    }
+
+    private func openWebPage(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        NSWorkspace.shared.open(url)
     }
 }

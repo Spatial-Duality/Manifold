@@ -1,6 +1,8 @@
 # Manifold Architecture
 
-Manifold is a local runtime and app surface for one core job: giving Claude and Codex controlled access to the files and emails the user chooses, while recording what was exposed and keeping reviewable edits in tracked workspaces.
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
+Architecturally, that means a local runtime and app surface for one core job: giving Claude and Codex controlled access to the files and emails the user chooses, while recording what was exposed and keeping reviewable edits in tracked workspaces.
 
 This document explains the technical shape behind that product model.
 

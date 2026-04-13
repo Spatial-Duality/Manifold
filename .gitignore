@@ -4,8 +4,10 @@
 **/xcuserdata/
 *.xcuserstate
 DerivedData/
+.deriveddata-*/
 .DS_Store
 .gstack/
 default.profraw
 .mcp.json
+.mcp.json.disabled
 .xcodebuildmcp/

@@ -63,7 +63,7 @@ struct EmailStoreTests {
         isFlagged: Bool = false,
         attachmentCount: Int = 0
     ) async throws -> String {
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: emailID,
             accountID: accountID,
             mailbox: mailbox,
@@ -108,7 +108,7 @@ struct EmailStoreTests {
         let (store, _, tempDir) = try await makeStore()
         defer { cleanup(tempDir) }
 
-        let mailboxes = try await store.allSmartMailboxes()
+        let mailboxes = try store.allSmartMailboxes()
         let preset = mailboxes.first { $0.displayName == "Shared with Cowork" }
         #expect(preset != nil)
         #expect(preset?.iconName == "person.2.fill")
@@ -122,7 +122,7 @@ struct EmailStoreTests {
         defer { cleanup(tempDir) }
 
         let emailID = try await insertTestMessage(store: store, subject: "Hello World")
-        let messages = try await store.emailMessages(accountID: Self.testAccountID)
+        let messages = try store.emailMessages(accountID: Self.testAccountID)
         #expect(messages.count == 1)
         #expect(messages[0].emailID == emailID)
         #expect(messages[0].subject == "Hello World")
@@ -134,11 +134,11 @@ struct EmailStoreTests {
         defer { cleanup(tempDir) }
 
         let emailID = try await insertTestMessage(store: store)
-        let before = try await store.emailMessages(accountID: Self.testAccountID)
+        let before = try store.emailMessages(accountID: Self.testAccountID)
         #expect(before[0].localIsViewed == false)
 
-        try await store.updateLocalViewedState(emailID: emailID, viewed: true)
-        let after = try await store.emailMessages(accountID: Self.testAccountID)
+        try store.updateLocalViewedState(emailID: emailID, viewed: true)
+        let after = try store.emailMessages(accountID: Self.testAccountID)
         #expect(after[0].localIsViewed == true)
     }
 
@@ -148,8 +148,8 @@ struct EmailStoreTests {
         defer { cleanup(tempDir) }
 
         let emailID = try await insertTestMessage(store: store)
-        try await store.markDeletedOnServer(emailID: emailID)
-        let messages = try await store.emailMessages(accountID: Self.testAccountID)
+        try store.markDeletedOnServer(emailID: emailID)
+        let messages = try store.emailMessages(accountID: Self.testAccountID)
         #expect(messages[0].isDeletedOnServer == true)
         #expect(messages[0].deletedOnServerAt != nil)
     }
@@ -163,9 +163,9 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-1", isRead: true)
         _ = try await insertTestMessage(store: store, emailID: "msg-2", isRead: false)
         // Mark msg-2 as viewed
-        try await store.updateLocalViewedState(emailID: "msg-2", viewed: true)
+        try store.updateLocalViewedState(emailID: "msg-2", viewed: true)
 
-        let count = try await store.unviewedCount()
+        let count = try store.unviewedCount()
         #expect(count == 1) // msg-1 is unviewed (never opened), msg-2 is viewed
     }
 
@@ -178,9 +178,9 @@ struct EmailStoreTests {
 
         let junkID = try await insertTestMessage(store: store, emailID: "junk-1", subject: "Spam")
         _ = try await insertTestMessage(store: store, emailID: "normal-1", subject: "Normal")
-        try await store.updateJunkState(emailID: junkID, isJunk: true)
+        try store.updateJunkState(emailID: junkID, isJunk: true)
 
-        let results = try await store.searchEmailMessages(filter: .junk)
+        let results = try store.searchEmailMessages(filter: .junk)
         #expect(results.count == 1)
         #expect(results[0].emailID == "junk-1")
     }
@@ -192,9 +192,9 @@ struct EmailStoreTests {
 
         let deletedID = try await insertTestMessage(store: store, emailID: "del-1")
         _ = try await insertTestMessage(store: store, emailID: "normal-1")
-        try await store.markDeletedOnServer(emailID: deletedID)
+        try store.markDeletedOnServer(emailID: deletedID)
 
-        let results = try await store.searchEmailMessages(filter: .deletedOnServer)
+        let results = try store.searchEmailMessages(filter: .deletedOnServer)
         #expect(results.count == 1)
         #expect(results[0].emailID == "del-1")
     }
@@ -208,10 +208,10 @@ struct EmailStoreTests {
 
         let id1 = try await insertTestMessage(store: store, emailID: "msg-1", subject: "Invoice")
         let id2 = try await insertTestMessage(store: store, emailID: "msg-2", subject: "Meeting")
-        try await store.updateBodyText(emailID: id1, bodyText: "Please find attached the quarterly invoice for services rendered.")
-        try await store.updateBodyText(emailID: id2, bodyText: "Let's schedule a meeting to discuss the project timeline.")
+        try store.updateBodyText(emailID: id1, bodyText: "Please find attached the quarterly invoice for services rendered.")
+        try store.updateBodyText(emailID: id2, bodyText: "Let's schedule a meeting to discuss the project timeline.")
 
-        let results = try await store.searchEmailMessages(tokens: [SearchToken(type: .body, value: "invoice")])
+        let results = try store.searchEmailMessages(tokens: [SearchToken(type: .body, value: "invoice")])
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-1")
     }
@@ -223,10 +223,10 @@ struct EmailStoreTests {
 
         _ = try await insertTestMessage(store: store, emailID: "msg-1")
         _ = try await insertTestMessage(store: store, emailID: "msg-2")
-        #expect(try await store.bodyTextIndexedCount() == 0)
+        #expect(try store.bodyTextIndexedCount() == 0)
 
-        try await store.updateBodyText(emailID: "msg-1", bodyText: "Hello world")
-        #expect(try await store.bodyTextIndexedCount() == 1)
+        try store.updateBodyText(emailID: "msg-1", bodyText: "Hello world")
+        #expect(try store.bodyTextIndexedCount() == 1)
     }
 
     // MARK: - Rule Engine
@@ -243,7 +243,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "sender_domain", op: .equals, value: "work.com")]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-1")
     }
@@ -260,7 +260,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "subject", op: .contains, value: "Invoice")]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-1")
     }
@@ -281,7 +281,7 @@ struct EmailStoreTests {
                 RuleCondition(field: "subject", op: .contains, value: "Invoice"),
             ]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-1")
     }
@@ -302,7 +302,7 @@ struct EmailStoreTests {
                 RuleCondition(field: "subject", op: .contains, value: "Invoice"),
             ]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 2) // msg-1 (domain match) + msg-2 (subject match)
     }
 
@@ -318,9 +318,9 @@ struct EmailStoreTests {
             conditions: [RuleCondition(field: "sender; DROP TABLE email_messages;--", op: .equals, value: "hack")]
         )
         // Invalid field should be skipped, returning empty results (no crash)
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         // Should not crash and should not have dropped the table
-        let count = try await store.emailMessageCount()
+        let count = try store.emailMessageCount()
         #expect(count == 1) // Table still intact
         _ = results
     }
@@ -334,7 +334,7 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-2")
 
         let rules = SmartMailboxRules(match: .all, conditions: [])
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 2)
     }
 
@@ -350,7 +350,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "is_flagged", op: .equals, value: "1")]
         )
-        let count = try await store.smartMailboxCount(rules: rules)
+        let count = try store.smartMailboxCount(rules: rules)
         #expect(count == 1)
     }
 
@@ -366,11 +366,11 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-2")
         _ = try await insertTestMessage(store: store, emailID: "msg-3")
 
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 200, emailID: "msg-2")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Sent", imapUID: 50, emailID: "msg-3")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 200, emailID: "msg-2")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Sent", imapUID: 50, emailID: "msg-3")
 
-        let uids = try await store.storedUIDs(accountID: Self.testAccountID, mailbox: "INBOX")
+        let uids = try store.storedUIDs(accountID: Self.testAccountID, mailbox: "INBOX")
         #expect(uids == [100, 200])
     }
 
@@ -382,17 +382,17 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-1", mailbox: "INBOX")
         _ = try await insertTestMessage(store: store, emailID: "msg-2", mailbox: "Sent")
 
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Archive", imapUID: 200, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Sent", imapUID: 300, emailID: "msg-2")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Archive", imapUID: 200, emailID: "msg-1")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Sent", imapUID: 300, emailID: "msg-2")
 
-        let mailboxes = try await store.mailboxes(accountID: Self.testAccountID)
+        let mailboxes = try store.mailboxes(accountID: Self.testAccountID)
         #expect(mailboxes.count == 3)
         #expect(mailboxes.first(where: { $0.name == "Archive" })?.count == 1)
         #expect(mailboxes.first(where: { $0.name == "INBOX" })?.count == 1)
         #expect(mailboxes.first(where: { $0.name == "Sent" })?.count == 1)
 
-        let archiveMessages = try await store.emailMessages(accountID: Self.testAccountID, mailbox: "Archive")
+        let archiveMessages = try store.emailMessages(accountID: Self.testAccountID, mailbox: "Archive")
         #expect(archiveMessages.count == 1)
         #expect(archiveMessages[0].emailID == "msg-1")
     }
@@ -405,7 +405,7 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-1", mailbox: "Sent Messages")
         _ = try await insertTestMessage(store: store, emailID: "msg-2", mailbox: "INBOX")
 
-        let sentMessages = try await store.messagesInMailbox(accountID: Self.testAccountID, mailbox: "Sent Messages")
+        let sentMessages = try store.messagesInMailbox(accountID: Self.testAccountID, mailbox: "Sent Messages")
         #expect(sentMessages.count == 1)
         #expect(sentMessages[0].emailID == "msg-1")
     }
@@ -431,8 +431,8 @@ struct EmailStoreTests {
         defer { cleanup(tempDir) }
 
         _ = try await insertTestMessage(store: store, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
-        try await store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "INBOX", missingUIDs: [100])
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
+        try store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "INBOX", missingUIDs: [100])
 
         let rows = try db.queryAll("SELECT missing_from FROM email_mailbox_membership WHERE imap_uid = '100'")
         #expect(rows.first?["missing_from"] != nil)
@@ -444,9 +444,9 @@ struct EmailStoreTests {
         defer { cleanup(tempDir) }
 
         _ = try await insertTestMessage(store: store, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
-        try await store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "INBOX", missingUIDs: [100])
-        try await store.clearMissingFrom(accountID: Self.testAccountID, mailbox: "INBOX", reappearedUIDs: [100])
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
+        try store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "INBOX", missingUIDs: [100])
+        try store.clearMissingFrom(accountID: Self.testAccountID, mailbox: "INBOX", reappearedUIDs: [100])
 
         let rows = try db.queryAll("SELECT missing_from FROM email_mailbox_membership WHERE imap_uid = '100'")
         #expect(rows.first?["missing_from"] == nil)
@@ -459,24 +459,24 @@ struct EmailStoreTests {
 
         // Create message first, then add memberships in two mailboxes
         _ = try await insertTestMessage(store: store, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
-        try await store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Archive", imapUID: 50, emailID: "msg-1")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "INBOX", imapUID: 100, emailID: "msg-1")
+        try store.upsertMailboxMembership(accountID: Self.testAccountID, mailbox: "Archive", imapUID: 50, emailID: "msg-1")
 
         // Mark missing from INBOX only
-        try await store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "INBOX", missingUIDs: [100])
+        try store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "INBOX", missingUIDs: [100])
 
         // Should NOT confirm deletion (still in Archive)
-        let confirmed1 = try await store.confirmServerDeletions()
+        let confirmed1 = try store.confirmServerDeletions()
         #expect(confirmed1 == 0)
 
         // Now mark missing from Archive too
-        try await store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "Archive", missingUIDs: [50])
+        try store.markMissingFromMailbox(accountID: Self.testAccountID, mailbox: "Archive", missingUIDs: [50])
 
         // Should confirm deletion (missing from ALL mailboxes)
-        let confirmed2 = try await store.confirmServerDeletions()
+        let confirmed2 = try store.confirmServerDeletions()
         #expect(confirmed2 == 1)
 
-        let messages = try await store.emailMessages(accountID: Self.testAccountID)
+        let messages = try store.emailMessages(accountID: Self.testAccountID)
         #expect(messages[0].isDeletedOnServer == true)
     }
 
@@ -535,7 +535,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "sender_domain", op: .notEquals, value: "work.com")]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-2")
     }
@@ -551,12 +551,12 @@ struct EmailStoreTests {
         let old = fmt.string(from: Date(timeIntervalSince1970: 1_000_000))
         let recent = fmt.string(from: Date(timeIntervalSince1970: 2_000_000))
 
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "old-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Old",
             receivedAt: old, emlPath: nil, sizeBytes: 100, preview: nil
         )
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "recent-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Recent",
             receivedAt: recent, emlPath: nil, sizeBytes: 100, preview: nil
@@ -567,7 +567,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "received_at", op: .after, value: cutoff)]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "recent-msg")
     }
@@ -581,12 +581,12 @@ struct EmailStoreTests {
         let old = fmt.string(from: Date(timeIntervalSince1970: 1_000_000))
         let recent = fmt.string(from: Date(timeIntervalSince1970: 2_000_000))
 
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "old-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Old",
             receivedAt: old, emlPath: nil, sizeBytes: 100, preview: nil
         )
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "recent-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Recent",
             receivedAt: recent, emlPath: nil, sizeBytes: 100, preview: nil
@@ -597,7 +597,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "received_at", op: .before, value: cutoff)]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "old-msg")
     }
@@ -614,17 +614,17 @@ struct EmailStoreTests {
         let mid = fmt.string(from: Date(timeIntervalSince1970: 1_500_000))
         let late = fmt.string(from: Date(timeIntervalSince1970: 2_000_000))
 
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "early-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Early",
             receivedAt: early, emlPath: nil, sizeBytes: 100, preview: nil
         )
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "mid-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Mid",
             receivedAt: mid, emlPath: nil, sizeBytes: 100, preview: nil
         )
-        try await store.upsertEmailMessage(
+        try store.upsertEmailMessage(
             emailID: "late-msg", accountID: Self.testAccountID, mailbox: "INBOX",
             sender: "a@test.com", recipients: "b@test.com", subject: "Late",
             receivedAt: late, emlPath: nil, sizeBytes: 100, preview: nil
@@ -636,7 +636,7 @@ struct EmailStoreTests {
             match: .all,
             conditions: [RuleCondition(field: "received_at", op: .between, value: "\(lo),\(hi)")]
         )
-        let results = try await store.smartMailboxMessages(rules: rules)
+        let results = try store.smartMailboxMessages(rules: rules)
         #expect(results.count == 1)
         #expect(results[0].emailID == "mid-msg")
     }
@@ -653,18 +653,18 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-3", senderDomain: "work.com")
 
         // Initially nothing is shared
-        #expect(try await store.isEmailShared(emailID: id1) == false)
-        #expect(try await store.sharedEmailCount() == 0)
+        #expect(try store.isEmailShared(emailID: id1) == false)
+        #expect(try store.sharedEmailCount() == 0)
 
         // Share two emails
         let shareCount = try store.shareEmails(emailIDs: [id1, id2], label: "test")
         #expect(shareCount == 2)
-        #expect(try await store.isEmailShared(emailID: id1) == true)
-        #expect(try await store.isEmailShared(emailID: id2) == true)
-        #expect(try await store.sharedEmailCount() == 2)
+        #expect(try store.isEmailShared(emailID: id1) == true)
+        #expect(try store.isEmailShared(emailID: id2) == true)
+        #expect(try store.sharedEmailCount() == 2)
 
         // visibleEmailCount excludes hidden domains
-        let totalCount = try await store.emailMessageCount()
+        let totalCount = try store.emailMessageCount()
         #expect(totalCount == 3)
         let visibleCount = try store.visibleEmailCount(hiddenDomains: ["hidden.com"])
         #expect(visibleCount == 2)
@@ -686,7 +686,7 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-3", sender: "Charlie <charlie@example.com>", subject: "Alice Review")
 
         // freeText "Alice" should match msg-1 (sender) and msg-3 (subject)
-        let results = try await store.searchEmailMessages(freeText: "Alice")
+        let results = try store.searchEmailMessages(freeText: "Alice")
         let ids = Set(results.map(\.emailID))
         #expect(ids.contains("msg-1"))
         #expect(ids.contains("msg-3"))
@@ -703,7 +703,7 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-read", isRead: true)
         _ = try await insertTestMessage(store: store, emailID: "msg-unread", isRead: false)
 
-        let results = try await store.searchEmailMessages(filter: .unread)
+        let results = try store.searchEmailMessages(filter: .unread)
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-unread")
     }
@@ -716,7 +716,7 @@ struct EmailStoreTests {
         _ = try await insertTestMessage(store: store, emailID: "msg-flagged", isFlagged: true)
         _ = try await insertTestMessage(store: store, emailID: "msg-normal", isFlagged: false)
 
-        let results = try await store.searchEmailMessages(filter: .flagged)
+        let results = try store.searchEmailMessages(filter: .flagged)
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-flagged")
     }

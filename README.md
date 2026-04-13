@@ -5,15 +5,28 @@
 
 Give AI agents a copy of your project, not your whole Mac.
 
-Manifold is a local macOS app and runtime for giving AI tools controlled access to the files and email you choose, with reviewable workspaces, durable history, and a clear audit trail of what was exposed.
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
+It is a local macOS app and runtime for giving AI tools controlled access to the files and email you choose, with reviewable workspaces, durable history, and a clear audit trail of what was exposed.
+
+## Can I Use It?
+
+Manifold is currently for people who can run a modern local macOS build:
+
+- macOS 26.0 or later
+- Xcode 26.0 or later
+- Swift 6
+- local signing configured in Xcode for the app target
+
+If that fits your setup, you can clone, build, and run the app locally today.
 
 ## What It Does
 
-- Isolates agent work in controlled project copies instead of granting broad machine access
-- Applies per-agent access controls for files, folders, and governed email access
-- Keeps full local version history for tracked edits, snapshots, restores, and promotion flows
-- Records a cross-agent audit trail of reads, searches, and exposures routed through Manifold
-- Supports a review, restore, and promote workflow so governed work stays inspectable
+- Lets you choose which files, folders, and emails Claude can see
+- Lets you choose separately what Codex can see
+- Records what was actually exposed through the governed Manifold path
+- Routes reviewable edits through tracked workspaces instead of direct writes to originals
+- Keeps local version history and session context across sessions and across agents
 
 <!-- TODO: Add screenshot -->
 
@@ -27,11 +40,15 @@ swift test
 open Manifold.xcodeproj
 ```
 
-For app changes, you can also verify the Xcode target from the command line:
+Then run the `Manifold` scheme in Xcode.
+
+For a shell-first verification pass, you can also build the app target from the command line:
 
 ```bash
 xcodebuild -project Manifold.xcodeproj -scheme Manifold -configuration Debug build CODE_SIGNING_ALLOWED=NO
 ```
+
+For the full first-run walkthrough, see [docs/getting-started.md](docs/getting-started.md).
 
 ## Architecture
 
@@ -39,19 +56,38 @@ Manifold combines a native SwiftUI app, a local runtime, tracked workspaces, and
 
 ```mermaid
 flowchart LR
-    U["You choose access"] --> M["Manifold"]
-    A["Claude or Codex"] --> M
-    M --> R["Read/search through Manifold"]
-    R --> E["Record what was exposed"]
-    M --> W["Tracked workspace for edits"]
-    W --> H["History stays available later"]
+    A["Claude Desktop / Cowork"] --> M["manifold-mcp"]
+    B["Codex app"] --> M
+    U["Manifold.app"] --> X["XPC client"]
+    M --> X
+    X --> R["ManifoldRuntime"]
+    R --> S["Policy, snapshots, email, history"]
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
+See [docs/architecture.md](docs/architecture.md) for the outsider-friendly system view and [ARCHITECTURE.md](ARCHITECTURE.md) for the deeper architecture document.
+
+## Docs
+
+### Use It
+
+- [docs/getting-started.md](docs/getting-started.md)
+- [design/CLAUDE-CODEX-TESTING.md](design/CLAUDE-CODEX-TESTING.md)
+
+### Understand It
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/mcp-integration.md](docs/mcp-integration.md)
+- [docs/design-decisions.md](docs/design-decisions.md)
+
+### Contribute To It
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [design/PRODUCT-SPEC.md](design/PRODUCT-SPEC.md)
+- [design/README.md](design/README.md)
 
 ## Current Status
 
-Early development. Core runtime is stable with 230+ tests. UI is under active development.
+Early development, but already usable for local builds. The runtime, app tests, and fixture-mode UI tests are in place, and the main product model is now in the codebase.
 
 ## Known Limitations
 
@@ -59,6 +95,13 @@ Early development. Core runtime is stable with 230+ tests. UI is under active de
 - Local-only runtime and agent integration path
 - No real-time blocking for native activity outside the Manifold path
 - Unsigned local builds require per-developer signing choices for full app runs
+
+## How To Get Help
+
+- Start with [docs/getting-started.md](docs/getting-started.md) if you want to run it
+- Use [design/CLAUDE-CODEX-TESTING.md](design/CLAUDE-CODEX-TESTING.md) if you want to test live Claude/Codex integration
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) if you want to change code
+- Read [design/PRODUCT-SPEC.md](design/PRODUCT-SPEC.md) if you want the canonical product definition
 
 ## Contributing
 

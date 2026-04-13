@@ -4,8 +4,7 @@
 import SwiftUI
 import ManifoldKit
 
-/// Email Rules container — NavigationSplitView with rules sidebar + detail.
-/// Replaces the flat Domains tab with a layered rules engine.
+/// Navigation-driven email policy surface for shields, rules, and per-agent defaults.
 struct EmailRulesView: View {
     @Environment(ManifoldStore.self) var store
     @State private var rulesModel = EmailRulesModel()
@@ -158,7 +157,7 @@ struct EmailRulesView: View {
 
             // Priority footer
             Section {
-                Text("Priority: Contact \u{2192} Keyword \u{2192} Domain \u{2192} Shield \u{2192} Default")
+                Text("Evaluation order: Contact \u{2192} Keyword \u{2192} Domain \u{2192} Shield \u{2192} Default")
                     .font(Typ.caption)
                     .foregroundStyle(.quaternary)
             }

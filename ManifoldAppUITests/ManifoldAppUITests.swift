@@ -19,8 +19,9 @@ final class ManifoldAppUITests: XCTestCase {
         let app = launch(profile: "onboarding")
 
         XCTAssertTrue(element(in: app, id: "setup.assistant").waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Manifold controls what AI agents see on your Mac."].waitForExistence(timeout: 5))
-        XCTAssertTrue(control(named: "Continue", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, id: "setup.welcome.title").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, id: "setup.welcome.subtitle").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, id: "setup.welcome.continue").waitForExistence(timeout: 5))
     }
 
     func testDashboardFixtureShowsAgentCardsAndTrackedWorkCTA() {
@@ -41,14 +42,15 @@ final class ManifoldAppUITests: XCTestCase {
 
         let sheet = element(in: app, id: "reviewAccess.sheet")
         XCTAssertTrue(sheet.waitForExistence(timeout: 8))
-        let emailTab = control(named: "Emails", in: sheet)
+        let emailTab = element(in: sheet, id: "reviewAccess.tab.emails")
         XCTAssertTrue(emailTab.waitForExistence(timeout: 5))
         emailTab.click()
-        let openEmailRules = element(in: app, id: "reviewAccess.openEmailRules")
+        XCTAssertTrue(element(in: sheet, id: "reviewAccess.emails.content").waitForExistence(timeout: 5))
+        let openEmailRules = element(in: sheet, id: "reviewAccess.openEmailRules")
         XCTAssertTrue(openEmailRules.waitForExistence(timeout: 5))
         openEmailRules.click()
 
-        XCTAssertTrue(app.staticTexts["Email Policy"].waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "emailRules.policy.screen").waitForExistence(timeout: 8))
     }
 
     func testEmailRulesFixtureShowsPolicyControls() {
@@ -74,6 +76,10 @@ final class ManifoldAppUITests: XCTestCase {
 
     private func element(in app: XCUIApplication, id: String) -> XCUIElement {
         app.descendants(matching: .any)[id]
+    }
+
+    private func element(in container: XCUIElement, id: String) -> XCUIElement {
+        container.descendants(matching: .any)[id]
     }
 
     private func control(named label: String, in container: XCUIElement) -> XCUIElement {

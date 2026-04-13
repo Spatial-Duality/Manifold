@@ -453,7 +453,9 @@ struct EmailAccountSetupView: View {
                                         .font(.callout)
                                     if let url = suggestion.url {
                                         Button {
-                                            NSWorkspace.shared.open(URL(string: url)!)
+                                            if let targetURL = URL(string: url) {
+                                                NSWorkspace.shared.open(targetURL)
+                                            }
                                         } label: {
                                             Label("Open in Safari", systemImage: "safari")
                                                 .font(.caption)

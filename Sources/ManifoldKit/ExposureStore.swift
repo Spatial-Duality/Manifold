@@ -6,13 +6,16 @@ import os
 
 private let exposureLogger = Logger(subsystem: "com.spatialduality.manifold", category: "exposure")
 
+/// Persists access decisions and exposure records for governed activity.
 public actor ExposureStore {
     private let db: DatabaseConnection
 
+    /// Creates a store backed by the shared Manifold database.
     public init(db: DatabaseConnection) {
         self.db = db
     }
 
+    /// Persists one access decision.
     public func recordDecision(_ decision: AccessDecision) throws {
         try db.execute(
             """
@@ -41,6 +44,7 @@ public actor ExposureStore {
         )
     }
 
+    /// Persists one exposure record.
     public func recordExposure(_ exposure: ExposureRecord) throws {
         try db.execute(
             """
@@ -71,6 +75,7 @@ public actor ExposureStore {
         )
     }
 
+    /// Returns recent access decisions for one runtime connection.
     public func decisions(connectionID: String, limit: Int) throws -> [AccessDecision] {
         let rows = try db.queryAll(
             """
@@ -84,6 +89,7 @@ public actor ExposureStore {
         return rows.compactMap(Self.decision(from:))
     }
 
+    /// Returns recent exposure records for one runtime connection.
     public func exposures(connectionID: String, limit: Int) throws -> [ExposureRecord] {
         let rows = try db.queryAll(
             """
@@ -97,6 +103,7 @@ public actor ExposureStore {
         return rows.compactMap(Self.exposure(from:))
     }
 
+    /// Returns recent exposure records for one governed resource path.
     public func exposures(resourcePath: String, limit: Int) throws -> [ExposureRecord] {
         let rows = try db.queryAll(
             """
@@ -110,6 +117,7 @@ public actor ExposureStore {
         return rows.compactMap(Self.exposure(from:))
     }
 
+    /// Returns aggregate exposure counts for one runtime connection.
     public func totalExposure(connectionID: String) throws -> (fileCount: Int, totalBytes: Int) {
         let fileCount = Int(
             try db.queryScalar(
@@ -129,6 +137,7 @@ public actor ExposureStore {
         return (fileCount, totalBytes)
     }
 
+    /// Returns a human-readable explanation of the most recent matching access decision.
     public func explainDecision(connectionID: String, path: String, action: String) throws -> String {
         let rows = try db.queryAll(
             """

@@ -9,7 +9,9 @@
 
 ## What Manifold Is
 
-Manifold is a local macOS app that makes it easy to give Claude and Codex controlled access to the files and emails you choose. You decide what each agent can see, Manifold records what was actually exposed through that access path, and reviewable AI edits happen in a tracked workspace you can inspect, restore, promote, or discard.
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
+It is a local macOS app that makes it easy to give Claude and Codex controlled access to the files and emails you choose. You decide what each agent can see, Manifold records what was actually exposed through that access path, and reviewable AI edits happen in a tracked workspace you can inspect, restore, promote, or discard.
 
 Because that history stays on your Mac and persists across sessions, it can become durable context for future AI work.
 

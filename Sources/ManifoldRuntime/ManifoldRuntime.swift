@@ -8,25 +8,41 @@ import os
 
 private let runtimeLogger = Logger(subsystem: "com.spatialduality.manifold", category: "runtime")
 
+/// Owns the local runtime graph used by the app, XPC service, and MCP bridge.
 public actor ManifoldRuntime {
+    /// Shared database connection for runtime-owned stores.
     public nonisolated let db: DatabaseConnection
+    /// Content-addressed blob store for tracked file history.
     public nonisolated let contentStore: ContentStore
+    /// Audit log for sessions, activity, and coverage events.
     public nonisolated let auditStore: AuditStore
+    /// Snapshot timeline store for tracked file changes.
     public nonisolated let snapshotStore: SnapshotStore
+    /// Workspace lease manager for tracked materializations.
     public nonisolated let leaseManager: WorkspaceLeaseManager
+    /// Store for sources, grants, and tracked-work relationships.
     public nonisolated let grantStore: GrantStore
+    /// Local email archive and search store.
     public nonisolated let emailStore: EmailStore
+    /// Artifact lookup index for governed files.
     public nonisolated let artifactIndex: ArtifactIndex
+    /// Per-agent standing access policy store.
     public nonisolated let policyStore: PolicyStore
+    /// Runtime-owned email governance store.
     public nonisolated let emailRuleStore: EmailRuleStore
+    /// Persistent tracked work block store.
     public nonisolated let workBlockStore: WorkBlockStore
+    /// Mail synchronization engine.
     public nonisolated let emailSyncEngine: EmailSyncEngine
+    /// Approval queue for governed escalations.
     public nonisolated let approvalQueue: ApprovalQueue
+    /// Access decision and exposure record store.
     public nonisolated let exposureStore: ExposureStore
 
     private var bridges: [String: ManifoldBridge] = [:]
     private var recordedCoverageEventKeys: Set<String> = []
 
+    /// Creates the runtime and initializes all local stores at the chosen root URL.
     public init(storeURL: URL? = nil) throws {
         let rootURL = storeURL ?? Self.defaultStoreURL
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -67,6 +83,7 @@ public actor ManifoldRuntime {
         runtimeLogger.info("Initialized runtime at \(rootURL.path, privacy: .public)")
     }
 
+    /// Returns the bridge for a connection, creating it if this is the first request for that connection.
     public func bridge(for connectionID: String, targetApp: TargetApp, version: String) -> ManifoldBridge {
         if let existing = bridges[connectionID] {
             return existing
@@ -94,10 +111,12 @@ public actor ManifoldRuntime {
         return bridge
     }
 
+    /// Removes a bridge after a client disconnects.
     public func removeBridge(_ connectionID: String) {
         bridges.removeValue(forKey: connectionID)
     }
 
+    /// Returns the number of active bridge connections.
     public var activeBridgeCount: Int {
         bridges.count
     }
@@ -107,6 +126,7 @@ public actor ManifoldRuntime {
         Array(Set(bridges.values.map(\.agentName))).sorted()
     }
 
+    /// Returns the best current coverage snapshot for each supported agent.
     public func connectedClientSnapshots() async -> [AgentCoverageSnapshot] {
         let activeBlock = try? await workBlockStore.anyActiveBlock()
         var snapshots: [AgentCoverageSnapshot] = []
@@ -139,6 +159,7 @@ public actor ManifoldRuntime {
         return snapshots
     }
 
+    /// Records a coverage event in the audit log and optionally deduplicates repeated events.
     public func recordCoverageEvent(
         agent: TargetApp,
         coverageState: CoverageState,
@@ -167,11 +188,13 @@ public actor ManifoldRuntime {
         )
     }
 
+    /// Returns recent coverage and drift events.
     public func coverageEvents(limit: Int = 50) async -> [CoverageEvent] {
         let entries = (try? await auditStore.recentEntries(limit: max(limit * 3, 50))) ?? []
         return entries.compactMap { Self.coverageEvent(from: $0) }.prefix(limit).map { $0 }
     }
 
+    /// Scans active tracked work for original-file drift outside the governed workspace.
     public func scanForActiveWorkBlockDrift() async {
         guard let block = try? await workBlockStore.anyActiveBlock(),
               let grant = try? await grantStore.grant(id: block.grantID),
@@ -218,6 +241,7 @@ public actor ManifoldRuntime {
         }
     }
 
+    /// Returns version history, recent activity, and exposure context for one file path.
     public func fileHistoryContext(filePath: String, limit: Int = 20) async -> FileHistoryContext {
         let snapshots = ((try? await snapshotStore.fileHistory(filePath: filePath)) ?? []).prefix(limit).map { $0 }
         let activity = ((try? await auditStore.recentEntries(limit: max(limit * 10, 100))) ?? [])
@@ -235,6 +259,7 @@ public actor ManifoldRuntime {
         )
     }
 
+    /// Returns the governed session context for one session, optionally filtered to the viewer's current visibility.
     public func sessionContext(sessionID: String, viewingAs viewerAgent: TargetApp? = nil) async -> SessionContextDetail {
         let entries = (try? await auditStore.entries(sessionID: sessionID, limit: 200)) ?? []
         let events = (try? await auditStore.sessionEvents(sessionID: sessionID)) ?? []
@@ -302,6 +327,7 @@ public actor ManifoldRuntime {
         )
     }
 
+    /// Summarizes recent email-rule activity for one agent from the audit trail.
     public func emailRuleActivitySummary(for agent: TargetApp) async throws -> EmailRuleActivitySummary {
         let ruleSet = try await emailRuleStore.ruleSet(for: agent)
         let policy = try await policyStore.policy(for: agent)
@@ -314,10 +340,12 @@ public actor ManifoldRuntime {
         )
     }
 
+    /// Returns the compact email-governance summary used by the app UI.
     public func emailGovernanceSummary(for agent: TargetApp) async throws -> AgentEmailGovernanceSummary {
         try await emailRuleStore.emailGovernanceSummary(for: agent)
     }
 
+    /// Returns the default local storage root for the runtime.
     public nonisolated static var defaultStoreURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Manifold")

@@ -3,14 +3,18 @@
 
 import Foundation
 
+/// Thin async client for talking to the local Manifold runtime over XPC.
 public final class ManifoldXPCClient: @unchecked Sendable {
+    /// Mach service name exposed by the local runtime helper.
     public static let serviceName = "com.spatialduality.manifold.runtime"
 
     private let lock = NSLock()
     private var connection: NSXPCConnection?
 
+    /// Creates a client that lazily connects to the runtime helper.
     public init() {}
 
+    /// Calls a governed MCP-style tool on behalf of an existing runtime connection.
     public func callTool(
         connectionID: String,
         toolName: String,
@@ -35,6 +39,7 @@ public final class ManifoldXPCClient: @unchecked Sendable {
         }
     }
 
+    /// Sends an app command to the runtime and returns the decoded JSON payload.
     public func command(name: String, payload: [String: Any] = [:]) async throws -> [String: Any] {
         let request = try XPCJSON.data(from: payload)
         return try await withCheckedThrowingContinuation { continuation in
@@ -59,6 +64,7 @@ public final class ManifoldXPCClient: @unchecked Sendable {
         }
     }
 
+    /// Opens a runtime connection for the named agent client and returns the connection identifier.
     public func connectAgent(
         agent: String,
         clientName: String,
@@ -93,6 +99,7 @@ public final class ManifoldXPCClient: @unchecked Sendable {
         }
     }
 
+    /// Closes a previously opened runtime connection if the helper is reachable.
     public func disconnectAgent(connectionID: String) {
         guard let proxy = try? remoteProxy(errorHandler: { _ in }) else { return }
         proxy.disconnect(connectionID: connectionID)

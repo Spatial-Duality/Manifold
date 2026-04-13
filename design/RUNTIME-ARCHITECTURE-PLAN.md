@@ -6,6 +6,8 @@
 
 ---
 
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+
 ## The Problem
 
 Today Manifold has a structural defect at its foundation. Two independent processes — the SwiftUI app and the `manifold-mcp` server — independently instantiate all stores against the same SQLite file and independently make access decisions. They coordinate through `DistributedNotificationCenter`, which is fire-and-forget with no ordering guarantees, no request/response capability, and no way for the app to intercept or deny an action in-flight.

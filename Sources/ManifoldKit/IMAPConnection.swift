@@ -35,6 +35,7 @@ public actor IMAPConnection {
     private nonisolated let commandTimeout: TimeInterval = 30
     private nonisolated let connectTimeout: TimeInterval = 15
 
+    /// Creates a connection wrapper for one IMAP endpoint.
     public init(host: String, port: UInt16 = 993, useTLS: Bool = true) {
         self.host = host
         self.port = port
@@ -46,7 +47,9 @@ public actor IMAPConnection {
     /// Connect to the IMAP server and wait for the greeting.
     public func connect() async throws {
         let nwHost = NWEndpoint.Host(host)
-        let nwPort = NWEndpoint.Port(rawValue: port)!
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            throw IMAPError.connectionFailed("Invalid port: \(port)")
+        }
 
         let parameters: NWParameters
         if useTLS {
