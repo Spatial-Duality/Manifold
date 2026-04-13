@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "ConfigWriter")
 
 /// Writes Manifold MCP server config to Claude Desktop and Codex config files.
 /// Merges with existing config — never overwrites other servers.
@@ -54,7 +57,7 @@ public struct ConfigWriter {
         let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configFile, options: .atomic)
 
-        print("Wrote Claude Desktop config: \(configFile.path)")
+        logger.info("Wrote Claude Desktop config: \(configFile.path)")
     }
 
     /// Write to ~/.claude/settings.json (Claude Code CLI / IDE extensions)
@@ -80,7 +83,7 @@ public struct ConfigWriter {
         let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configFile, options: .atomic)
 
-        print("Wrote Claude Code config: \(configFile.path)")
+        logger.info("Wrote Claude Code config: \(configFile.path)")
     }
 
     /// Write to ~/.codex/config.toml
@@ -102,7 +105,7 @@ public struct ConfigWriter {
         content = upsertCodexServerConfig(content, agent: .codex)
 
         try content.write(to: configFile, atomically: true, encoding: .utf8)
-        print("Wrote Codex config: \(configFile.path)")
+        logger.info("Wrote Codex config: \(configFile.path)")
     }
 
     private func jsonMCPServerConfig(agent: TargetApp) -> [String: Any] {
