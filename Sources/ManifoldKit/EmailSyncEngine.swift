@@ -66,8 +66,8 @@ public actor EmailSyncEngine {
         isBackfilling = true
         defer { isBackfilling = false; backfillTask = nil }
 
-        let totalCount = (try? await emailStore.emailMessageCount()) ?? 0
-        let indexedCount = (try? await emailStore.bodyTextIndexedCount()) ?? 0
+        let totalCount = (try? emailStore.emailMessageCount()) ?? 0
+        let indexedCount = (try? emailStore.bodyTextIndexedCount()) ?? 0
         guard totalCount > indexedCount else {
             backfillProgress = 1.0
             return
@@ -77,7 +77,7 @@ public actor EmailSyncEngine {
         backfillProgress = totalCount > 0 ? Double(processed) / Double(totalCount) : 1.0
 
         while !Task.isCancelled && !isStopped {
-            let batch = (try? await emailStore.emailsNeedingBodyBackfill(limit: 100)) ?? []
+            let batch = (try? emailStore.emailsNeedingBodyBackfill(limit: 100)) ?? []
             guard !batch.isEmpty else { break }
 
             for (emailID, emlPath) in batch {
@@ -88,7 +88,7 @@ public actor EmailSyncEngine {
                 let rawBody = parsed.textBody ?? parsed.htmlBody.map { Self.stripHTML($0) }
                 guard let body = rawBody else { continue }
                 let truncated = String(body.prefix(51_200))
-                try? await emailStore.updateBodyText(emailID: emailID, bodyText: truncated)
+                try? emailStore.updateBodyText(emailID: emailID, bodyText: truncated)
 
                 processed += 1
                 backfillProgress = Double(processed) / Double(totalCount)
@@ -117,7 +117,7 @@ public actor EmailSyncEngine {
 
     private func periodicSync(accountID: String) async {
         while !isStopped && !Task.isCancelled {
-            guard let account = try? await emailStore.emailAccount(id: accountID) else {
+            guard let account = try? emailStore.emailAccount(id: accountID) else {
                 logger.warning("Account \(accountID) not found, stopping sync")
                 break
             }
@@ -148,7 +148,7 @@ public actor EmailSyncEngine {
         var mailboxResults: [MailboxSyncResult] = []
 
         do {
-            let account = try await emailStore.emailAccount(id: accountID)
+            let account = try emailStore.emailAccount(id: accountID)
             guard let account, let server = account.server, let port = account.port else {
                 return SyncResult(accountID: accountID, errors: ["Account not configured"])
             }
@@ -167,7 +167,7 @@ public actor EmailSyncEngine {
                     parentPath = nil
                 }
                 let isSelectable = !entry.flags.contains("\\Noselect") && !entry.flags.contains("\\NonExistent")
-                try await emailStore.upsertIMAPMailbox(
+                try emailStore.upsertIMAPMailbox(
                     accountID: accountID,
                     name: entry.name,
                     delimiter: entry.delimiter,
@@ -178,7 +178,7 @@ public actor EmailSyncEngine {
             }
 
             // Load persisted mailbox records to detect junk folders
-            let imapMailboxes = try await emailStore.imapMailboxes(accountID: accountID)
+            let imapMailboxes = try emailStore.imapMailboxes(accountID: accountID)
             let junkMailboxNames = Set(
                 imapMailboxes.filter { $0.folderType == .junk }.map(\.mailboxName)
             )
@@ -221,7 +221,7 @@ public actor EmailSyncEngine {
             }
 
             // Confirm deletions for messages missing from ALL mailboxes across two cycles
-            let confirmed = try await emailStore.confirmServerDeletions()
+            let confirmed = try emailStore.confirmServerDeletions()
             if confirmed > 0 {
                 logger.info("Confirmed \(confirmed) server-side deletions for \(accountID)")
             }
@@ -249,7 +249,7 @@ public actor EmailSyncEngine {
         isJunkMailbox: Bool = false
     ) async throws -> MailboxSyncResult {
         // Load sync state
-        let state = try await emailStore.syncState(accountID: accountID, mailbox: mailboxName)
+        let state = try emailStore.syncState(accountID: accountID, mailbox: mailboxName)
         var lastUID = state?.lastSyncUID ?? 0
         let savedValidity = state?.uidValidity
 
@@ -259,7 +259,7 @@ public actor EmailSyncEngine {
         // Check UIDVALIDITY — if changed, full resync
         if let saved = savedValidity, saved != selectResult.uidValidity {
             logger.warning("UIDVALIDITY changed for \(mailboxName), resetting")
-            try await emailStore.resetSyncState(accountID: accountID, mailbox: mailboxName)
+            try emailStore.resetSyncState(accountID: accountID, mailbox: mailboxName)
             lastUID = 0
         }
 
@@ -270,7 +270,7 @@ public actor EmailSyncEngine {
         let newUIDs = uids.filter { $0 > lastUID }.sorted(by: >)
 
         guard !newUIDs.isEmpty else {
-            try await emailStore.updateSyncState(
+            try emailStore.updateSyncState(
                 accountID: accountID, mailbox: mailboxName,
                 uidValidity: selectResult.uidValidity,
                 lastSyncUID: lastUID,
@@ -342,7 +342,7 @@ public actor EmailSyncEngine {
                 let isRead = item.flags.contains("\\Seen")
                 let isFlagged = item.flags.contains("\\Flagged")
 
-                try await emailStore.upsertEmailMessage(
+                try emailStore.upsertEmailMessage(
                     emailID: emailID,
                     accountID: accountID,
                     mailbox: mailboxName,
@@ -365,7 +365,7 @@ public actor EmailSyncEngine {
                 )
 
                 // Insert membership row (links this message to this mailbox)
-                try await emailStore.upsertMailboxMembership(
+                try emailStore.upsertMailboxMembership(
                     accountID: accountID,
                     mailbox: mailboxName,
                     imapUID: uid,
@@ -374,12 +374,12 @@ public actor EmailSyncEngine {
 
                 // Index body text in FTS5 for full-text search
                 if let body = bodyText {
-                    try await emailStore.updateBodyText(emailID: emailID, bodyText: body)
+                    try emailStore.updateBodyText(emailID: emailID, bodyText: body)
                 }
 
                 // Tag messages in junk/spam folders
                 if isJunkMailbox {
-                    try await emailStore.updateJunkState(emailID: emailID, isJunk: true)
+                    try emailStore.updateJunkState(emailID: emailID, isJunk: true)
                 }
 
                 newCount += 1
@@ -388,7 +388,7 @@ public actor EmailSyncEngine {
         }
 
         // Update sync state
-        try await emailStore.updateSyncState(
+        try emailStore.updateSyncState(
             accountID: accountID, mailbox: mailboxName,
             uidValidity: selectResult.uidValidity,
             lastSyncUID: lastUID,
@@ -419,7 +419,7 @@ public actor EmailSyncEngine {
         let serverUIDs = Set(try await conn.search(criteria: "ALL"))
 
         // Get all UIDs we have stored for this mailbox
-        let storedUIDs = try await emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
+        let storedUIDs = try emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
 
         // UIDs we have but server doesn't = potentially deleted
         let missingUIDs = storedUIDs.subtracting(serverUIDs)
@@ -428,7 +428,7 @@ public actor EmailSyncEngine {
         let reappearedUIDs = serverUIDs.intersection(storedUIDs)
 
         if !missingUIDs.isEmpty {
-            try await emailStore.markMissingFromMailbox(
+            try emailStore.markMissingFromMailbox(
                 accountID: accountID,
                 mailbox: mailboxName,
                 missingUIDs: missingUIDs
@@ -438,7 +438,7 @@ public actor EmailSyncEngine {
 
         // Clear missing_from for UIDs that reappeared
         if !reappearedUIDs.isEmpty {
-            try await emailStore.clearMissingFrom(
+            try emailStore.clearMissingFrom(
                 accountID: accountID,
                 mailbox: mailboxName,
                 reappearedUIDs: reappearedUIDs
