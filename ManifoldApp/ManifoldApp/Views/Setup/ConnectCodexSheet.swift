@@ -25,8 +25,8 @@ struct ConnectCodexSheet: View {
 
             VStack(alignment: .leading, spacing: 16) {
                 LiveCheckRow(
-                    label: "Codex installed",
-                    status: store.integrationHealth.codex.cliInstalled,
+                    label: "Codex app installed",
+                    status: store.integrationHealth.codex.codexAppInstalled,
                     action: { NSWorkspace.shared.open(URL(string: "https://openai.com/index/introducing-codex/")!) },
                     actionLabel: "Install",
                     onRefresh: { await store.integrationHealth.checkCodex() }
@@ -38,7 +38,7 @@ struct ConnectCodexSheet: View {
                     action: {
                         adding = true
                         addError = nil
-                        // Use ConfigWriter to add Manifold to Codex config.toml
+                        // Use ConfigWriter to add Manifold to Codex's MCP config.
                         do {
                             let writer = ConfigWriter(
                                 binaryPath: ManifoldStore.mcpBinaryPath,

@@ -21,6 +21,22 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
     public var isPaused: Bool { status == "paused" }
     public var isRemoved: Bool { status == "removed" }
 
+    public init(
+        sourceID: String,
+        displayName: String,
+        originalRootPath: String,
+        status: String,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.sourceID = sourceID
+        self.displayName = displayName
+        self.originalRootPath = originalRootPath
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
     init?(row: [String: String]) {
         guard let sourceID = row["source_id"],
               let displayName = row["display_name"],
@@ -120,6 +136,36 @@ public struct GrantRecord: Sendable, Identifiable, Codable {
         SessionNoteCaptureMode(rawValue: noteCaptureMode) ?? .off
     }
 
+    public init(
+        grantID: String,
+        targetApp: String,
+        profileID: String,
+        status: String,
+        startedAt: String,
+        endedAt: String? = nil,
+        materializationRoot: String,
+        inactivityDeadline: String? = nil,
+        refreshOfGrantID: String? = nil,
+        emailSensitivity: String = "moderate",
+        summaryFraming: String? = nil,
+        explicitSelection: Bool = false,
+        noteCaptureMode: String = SessionNoteCaptureMode.off.rawValue
+    ) {
+        self.grantID = grantID
+        self.targetApp = targetApp
+        self.profileID = profileID
+        self.status = status
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.materializationRoot = materializationRoot
+        self.inactivityDeadline = inactivityDeadline
+        self.refreshOfGrantID = refreshOfGrantID
+        self.emailSensitivity = emailSensitivity
+        self.summaryFraming = summaryFraming
+        self.explicitSelection = explicitSelection
+        self.noteCaptureMode = noteCaptureMode
+    }
+
     init?(row: [String: String]) {
         guard let grantID = row["grant_id"],
               let targetApp = row["target_app"],
@@ -153,6 +199,13 @@ public struct GrantSourceRecord: Sendable, Codable {
     public let sourceID: String
     public let mountName: String
     public let baselineManifestHash: String?
+
+    public init(grantID: String, sourceID: String, mountName: String, baselineManifestHash: String? = nil) {
+        self.grantID = grantID
+        self.sourceID = sourceID
+        self.mountName = mountName
+        self.baselineManifestHash = baselineManifestHash
+    }
 
     init?(row: [String: String]) {
         guard let grantID = row["grant_id"],
@@ -291,6 +344,60 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public let isJunk: Bool              // v10: in a junk/spam IMAP folder
     public let deletedOnServerAt: String? // v10: ISO8601 timestamp when server UID disappeared
     public let bodyText: String?         // v10: plaintext extracted from .eml for FTS5
+
+    public init(
+        emailID: String,
+        accountID: String,
+        mailbox: String,
+        sender: String,
+        senderEmail: String? = nil,
+        senderDomain: String? = nil,
+        recipients: String,
+        cc: String = "",
+        subject: String,
+        receivedAt: String,
+        emlPath: String? = nil,
+        sizeBytes: Int = 0,
+        preview: String? = nil,
+        contentType: String? = nil,
+        isRead: Bool = false,
+        isFlagged: Bool = false,
+        flagColor: String? = nil,
+        inReplyTo: String? = nil,
+        referencesHeader: String? = nil,
+        messageIDHeader: String? = nil,
+        attachmentCount: Int = 0,
+        localIsViewed: Bool = false,
+        isJunk: Bool = false,
+        deletedOnServerAt: String? = nil,
+        bodyText: String? = nil
+    ) {
+        self.emailID = emailID
+        self.accountID = accountID
+        self.mailbox = mailbox
+        self.sender = sender
+        self.senderEmail = senderEmail
+        self.senderDomain = senderDomain
+        self.recipients = recipients
+        self.cc = cc
+        self.subject = subject
+        self.receivedAt = receivedAt
+        self.emlPath = emlPath
+        self.sizeBytes = sizeBytes
+        self.preview = preview
+        self.contentType = contentType
+        self.isRead = isRead
+        self.isFlagged = isFlagged
+        self.flagColor = flagColor
+        self.inReplyTo = inReplyTo
+        self.referencesHeader = referencesHeader
+        self.messageIDHeader = messageIDHeader
+        self.attachmentCount = attachmentCount
+        self.localIsViewed = localIsViewed
+        self.isJunk = isJunk
+        self.deletedOnServerAt = deletedOnServerAt
+        self.bodyText = bodyText
+    }
 
     init?(row: [String: String]) {
         // account_id was added in v8; fall back to legacy "account" column

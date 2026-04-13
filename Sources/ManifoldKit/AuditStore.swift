@@ -299,6 +299,34 @@ public struct AuditEntry: Sendable, Identifiable, Codable {
     public let sessionID: String?
     public let grantID: String?
 
+    public init(
+        id: Int,
+        timestamp: String,
+        runID: String? = nil,
+        workspaceID: String? = nil,
+        agent: String? = nil,
+        action: String,
+        filePath: String? = nil,
+        beforeHash: String? = nil,
+        afterHash: String? = nil,
+        metadata: String? = nil,
+        sessionID: String? = nil,
+        grantID: String? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.runID = runID
+        self.workspaceID = workspaceID
+        self.agent = agent
+        self.action = action
+        self.filePath = filePath
+        self.beforeHash = beforeHash
+        self.afterHash = afterHash
+        self.metadata = metadata
+        self.sessionID = sessionID
+        self.grantID = grantID
+    }
+
     init?(row: [String: String]) {
         guard let idStr = row["id"], let id = Int(idStr),
               let timestamp = row["timestamp"],
@@ -332,6 +360,26 @@ public struct Session: Sendable, Identifiable, Hashable, Codable {
     public let writeCount: Int
     public let searchCount: Int
 
+    public init(
+        id: String,
+        agent: String,
+        startTime: String,
+        endTime: String,
+        actionCount: Int,
+        readCount: Int,
+        writeCount: Int,
+        searchCount: Int
+    ) {
+        self.id = id
+        self.agent = agent
+        self.startTime = startTime
+        self.endTime = endTime
+        self.actionCount = actionCount
+        self.readCount = readCount
+        self.writeCount = writeCount
+        self.searchCount = searchCount
+    }
+
     init?(row: [String: String]) {
         guard let sessionID = row["session_id"]?.nilIfEmpty,
               let agent = row["agent"],
@@ -360,6 +408,28 @@ public struct SessionEvent: Sendable, Identifiable, Codable {
     public let snapshotID: Int?
     public let beforeHash: String?
     public let afterHash: String?
+
+    public init(
+        id: Int,
+        timestamp: String,
+        action: String,
+        agent: String? = nil,
+        filePath: String? = nil,
+        metadata: String? = nil,
+        snapshotID: Int? = nil,
+        beforeHash: String? = nil,
+        afterHash: String? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.action = action
+        self.agent = agent
+        self.filePath = filePath
+        self.metadata = metadata
+        self.snapshotID = snapshotID ?? Self.snapshotID(from: metadata)
+        self.beforeHash = beforeHash
+        self.afterHash = afterHash
+    }
 
     init?(row: [String: String]) {
         guard let idStr = row["id"], let id = Int(idStr),

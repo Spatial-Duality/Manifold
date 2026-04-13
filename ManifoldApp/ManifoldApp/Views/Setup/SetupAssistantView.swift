@@ -84,6 +84,7 @@ struct SetupAssistantView: View {
         }
         .frame(width: 580, height: 500)
         .interactiveDismissDisabled(screen != .reviewFinish)
+        .accessibilityIdentifier("setup.assistant")
     }
 
     private func advance() {
@@ -122,8 +123,11 @@ private struct WelcomeScreen: View {
             Button("Continue") { advance() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .accessibilityIdentifier("setup.welcome.continue")
         }
         .padding(.horizontal, 48)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("setup.welcome.screen")
     }
 }
 
@@ -138,6 +142,7 @@ private struct ConnectAppsScreen: View {
         VStack(spacing: 20) {
             Text("Connect Claude or Codex")
                 .font(.title2.weight(.semibold))
+                .accessibilityIdentifier("setup.connect.title")
 
             Text("Manifold works with either or both. You can add more later in Settings.")
                 .font(.callout)
@@ -156,16 +161,18 @@ private struct ConnectAppsScreen: View {
                         CheckRow("Connection verified", status: store.integrationHealth.claude.connectionVerified),
                     ]
                 )
+                .accessibilityIdentifier("setup.connect.claudeCard")
 
                 // Codex — inline checks
                 InlineAgentCard(
                     agentName: "Codex",
                     agentColor: .purple,
                     checks: [
-                        CheckRow("CLI installed", status: store.integrationHealth.codex.cliInstalled),
+                        CheckRow("Codex app installed", status: store.integrationHealth.codex.codexAppInstalled),
                         CheckRow("Manifold added", status: store.integrationHealth.codex.mcpAdded),
                     ]
                 )
+                .accessibilityIdentifier("setup.connect.codexCard")
             }
             .frame(maxWidth: 440)
 
@@ -173,16 +180,19 @@ private struct ConnectAppsScreen: View {
                 store.installMCP()
             }
             .buttonStyle(.bordered)
+            .accessibilityIdentifier("setup.connect.installMCP")
 
             if store.integrationHealth.claude.overallStatus != .notInstalled
                 || store.integrationHealth.codex.overallStatus != .notInstalled {
                 Button("Continue") { advance() }
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("setup.connect.continue")
             }
 
             Button("Skip, I'll do this later") { skip() }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("setup.connect.skip")
         }
         .padding(.horizontal, 32)
         .task { await store.integrationHealth.checkAll(force: true) }
@@ -261,6 +271,7 @@ private struct AddDataScreen: View {
                         }
                     }
                     .controlSize(.small)
+                    .accessibilityIdentifier("setup.data.addFolders")
                 }
 
                 Divider()

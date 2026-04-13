@@ -30,7 +30,7 @@ public enum AgentConnectionStatus: String, Sendable {
     }
 }
 
-/// Per-agent connection state: Claude has 3 checks, Codex has 2.
+/// Per-agent connection state: Claude has 4 checks, Codex has 2.
 @Observable
 @MainActor
 public final class AgentConnectionState: Identifiable {
@@ -43,7 +43,7 @@ public final class AgentConnectionState: Identifiable {
     var connectionVerified: AgentConnectionStatus = .unknown
 
     // Codex checks
-    var cliInstalled: AgentConnectionStatus = .unknown
+    var codexAppInstalled: AgentConnectionStatus = .unknown
     var mcpAdded: AgentConnectionStatus = .unknown
 
     var errorDetail: String?
@@ -58,9 +58,9 @@ public final class AgentConnectionState: Identifiable {
             return .notInstalled
         case .codex:
             if mcpAdded == .connected { return .connected }
-            if [cliInstalled, mcpAdded].contains(.error) { return .error }
+            if [codexAppInstalled, mcpAdded].contains(.error) { return .error }
             if mcpAdded.isPassingCheck { return .configured }
-            if cliInstalled == .installed { return .installed }
+            if codexAppInstalled == .installed { return .installed }
             return .notInstalled
         }
     }

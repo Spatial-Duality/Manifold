@@ -71,6 +71,7 @@ struct MainView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 280)
+                .accessibilityIdentifier("main.tabPicker")
             }
 
             // Track Changes indicator (when active)
@@ -91,8 +92,11 @@ struct MainView: View {
         }
         // WWDC25 356: remove custom toolbar backgrounds. Let Liquid Glass handle it.
         .task {
-            // Restore tab from SceneStorage
-            if let tab = AppTab(rawValue: restoredTab) { store.selectedTab = tab }
+            // Fixture mode owns its startup state; live mode restores from SceneStorage.
+            if case .live = AppTestMode.current,
+               let tab = AppTab(rawValue: restoredTab) {
+                store.selectedTab = tab
+            }
             commands.bind(to: store)
             if !store.hasCompletedOnboarding { showOnboarding = true }
             await store.loadSummary()
@@ -304,10 +308,12 @@ private struct EmailsTab: View {
                     sidebarRow("Rules", systemImage: "shield", isSelected: emailMode == .rules) {
                         emailMode = .rules
                     }
+                    .accessibilityIdentifier("emails.sidebar.rules")
                     sidebarRow("Messages", systemImage: "envelope", isSelected: emailMode == .messages && emailSelection.selectedAccountID == nil) {
                         emailMode = .messages
                         emailSelection.navigate(accountID: store.emailAccounts.accounts.first?.accountID)
                     }
+                    .accessibilityIdentifier("emails.sidebar.messages")
                 } header: {
                     Text("Mail")
                 }

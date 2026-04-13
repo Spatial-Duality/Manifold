@@ -49,6 +49,24 @@ enum ClientIdentityVerifier {
         let hostApplication = hostPID.flatMap { NSRunningApplication(processIdentifier: $0) }
         let hostBundleIdentifier = hostApplication?.bundleIdentifier
             ?? inferredBundleIdentifier(from: hostExecutablePath)
+        return verify(
+            requestedAgent: requestedAgent,
+            clientProcessID: clientPID,
+            clientExecutablePath: clientPath,
+            hostProcessID: hostPID,
+            hostBundleIdentifier: hostBundleIdentifier,
+            hostExecutablePath: hostExecutablePath
+        )
+    }
+
+    static func verify(
+        requestedAgent: String,
+        clientProcessID: pid_t,
+        clientExecutablePath: String?,
+        hostProcessID: pid_t?,
+        hostBundleIdentifier: String?,
+        hostExecutablePath: String?
+    ) -> VerifiedClientIdentity {
         let effectiveTargetApp = hostBundleIdentifier
             .flatMap { supportedHosts[$0] }
             ?? inferredTargetApp(fromExecutablePath: hostExecutablePath)
@@ -57,9 +75,9 @@ enum ClientIdentityVerifier {
             return VerifiedClientIdentity(
                 requestedTargetApp: requestedAgent,
                 effectiveTargetApp: nil,
-                clientProcessID: clientPID,
-                clientExecutablePath: clientPath,
-                hostProcessID: hostPID,
+                clientProcessID: clientProcessID,
+                clientExecutablePath: clientExecutablePath,
+                hostProcessID: hostProcessID,
                 hostBundleIdentifier: hostBundleIdentifier,
                 hostExecutablePath: hostExecutablePath,
                 status: .unverified,
@@ -71,9 +89,9 @@ enum ClientIdentityVerifier {
             return VerifiedClientIdentity(
                 requestedTargetApp: requestedAgent,
                 effectiveTargetApp: effectiveTargetApp.rawValue,
-                clientProcessID: clientPID,
-                clientExecutablePath: clientPath,
-                hostProcessID: hostPID,
+                clientProcessID: clientProcessID,
+                clientExecutablePath: clientExecutablePath,
+                hostProcessID: hostProcessID,
                 hostBundleIdentifier: hostBundleIdentifier,
                 hostExecutablePath: hostExecutablePath,
                 status: .unverified,
@@ -84,9 +102,9 @@ enum ClientIdentityVerifier {
         return VerifiedClientIdentity(
             requestedTargetApp: requestedAgent,
             effectiveTargetApp: effectiveTargetApp.rawValue,
-            clientProcessID: clientPID,
-            clientExecutablePath: clientPath,
-            hostProcessID: hostPID,
+            clientProcessID: clientProcessID,
+            clientExecutablePath: clientExecutablePath,
+            hostProcessID: hostProcessID,
             hostBundleIdentifier: hostBundleIdentifier,
             hostExecutablePath: hostExecutablePath,
             status: .verified,

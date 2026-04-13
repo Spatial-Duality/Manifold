@@ -21,6 +21,34 @@
                ReferencedContainer = "container:Manifold.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E10000000000000000000041"
+               BuildableName = "ManifoldAppTests.xctest"
+               BlueprintName = "ManifoldAppTests"
+               ReferencedContainer = "container:Manifold.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E10000000000000000000042"
+               BuildableName = "ManifoldAppUITests.xctest"
+               BlueprintName = "ManifoldAppUITests"
+               ReferencedContainer = "container:Manifold.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -29,6 +57,37 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E10000000000000000000041"
+               BuildableName = "ManifoldAppTests.xctest"
+               BlueprintName = "ManifoldAppTests"
+               ReferencedContainer = "container:Manifold.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E10000000000000000000042"
+               BuildableName = "ManifoldAppUITests.xctest"
+               BlueprintName = "ManifoldAppUITests"
+               ReferencedContainer = "container:Manifold.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "A6679FE56DC4150E476E48D5"
+            BuildableName = "Manifold.app"
+            BlueprintName = "Manifold"
+            ReferencedContainer = "container:Manifold.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

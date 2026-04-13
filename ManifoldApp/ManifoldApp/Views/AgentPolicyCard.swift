@@ -15,7 +15,7 @@ struct AgentPolicyCard: View {
     let coverage: AgentCoverageSnapshot?
     let totalSources: Int
     let recentActivity: [AuditEntry]
-    let sourceNames: [(name: String, count: Int, hasAccess: Bool)]
+    let sourceNames: [(name: String, hasAccess: Bool)]
     let emailGovernance: AgentEmailGovernanceSummary?
     let isPaused: Bool
     let onPauseToggle: () -> Void
@@ -23,6 +23,18 @@ struct AgentPolicyCard: View {
     let onViewActivity: () -> Void
 
     @State private var isHovered = false
+
+    private var agentKey: String {
+        agentName.lowercased()
+    }
+
+    private var sharedSources: [(name: String, hasAccess: Bool)] {
+        sourceNames.filter { $0.hasAccess }
+    }
+
+    private var hiddenSourceCount: Int {
+        max(totalSources - sharedSources.count, 0)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -33,12 +45,14 @@ struct AgentPolicyCard: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 headerRow
+                accessSummarySection
                 sourcesSection
                 emailGovernanceSection
 
                 Divider()
 
                 activitySection
+                actionsRow
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,78 +69,129 @@ struct AgentPolicyCard: View {
         .opacity(isPaused ? 0.75 : 1.0)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(agentName) access card, \(isPaused ? "paused" : "active")")
+        .accessibilityIdentifier("agentCard.\(agentKey)")
     }
 
     // MARK: - Header
 
     private var headerRow: some View {
         HStack {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(agentColor)
-                    .frame(width: 10, height: 10)
-                Text(agentName)
-                    .font(.system(size: 15, weight: .semibold))
-                StatusBadge(
-                    text: isPaused ? "Paused" : (isConnected ? "Connected" : "Offline"),
-                    color: isPaused ? .statusPaused : (isConnected ? .statusActive : .secondary)
-                )
-                if let coverage {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(agentColor)
+                        .frame(width: 10, height: 10)
+                    Text(agentName)
+                        .font(.system(size: 15, weight: .semibold))
                     StatusBadge(
-                        text: coverage.coverageState.displayName,
-                        color: coverageColor(coverage.coverageState)
-                    )
-                    StatusBadge(
-                        text: coverage.verificationStatus.displayName,
-                        color: coverage.verificationStatus == .verified ? .statusActive : .orange
+                        text: isPaused ? "Paused" : (isConnected ? "Connected" : "Offline"),
+                        color: isPaused ? .statusPaused : (isConnected ? .statusActive : .secondary)
                     )
                 }
-                if let policy {
-                    StatusBadge(
-                        text: policy.accessRecordingLevel.displayName,
-                        color: .secondary
-                    )
+
+                HStack(spacing: 6) {
+                    if let coverage {
+                        StatusBadge(
+                            text: coverage.coverageState.displayName,
+                            color: coverageColor(coverage.coverageState)
+                        )
+                        .accessibilityIdentifier("agentCard.\(agentKey).coverage")
+                        StatusBadge(
+                            text: coverage.verificationStatus.displayName,
+                            color: coverage.verificationStatus == .verified ? .statusActive : .orange
+                        )
+                        .accessibilityIdentifier("agentCard.\(agentKey).verification")
+                    }
+                    if let policy {
+                        StatusBadge(
+                            text: policy.accessRecordingLevel.displayName,
+                            color: .secondary
+                        )
+                    }
                 }
             }
             Spacer()
             Button(isPaused ? "Resume Access" : "Pause Access", action: onPauseToggle)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .accessibilityIdentifier("agentCard.\(agentKey).pauseToggle")
         }
+    }
+
+    // MARK: - Access Summary
+
+    private var accessSummarySection: some View {
+        HStack(spacing: 12) {
+            summaryPill(
+                title: "Shared Sources",
+                value: totalSources == 0 ? "None" : "\(sharedSources.count) of \(totalSources)"
+            )
+            summaryPill(
+                title: "Email Rules",
+                value: emailGovernance.map { "\($0.totalRuleCount) rules" } ?? "Unavailable"
+            )
+            summaryPill(
+                title: "Default Email",
+                value: emailGovernance?.defaultPolicy.displayName ?? "Unavailable"
+            )
+        }
+    }
+
+    private func summaryPill(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .tracking(0.4)
+            Text(value)
+                .font(Typ.body)
+                .fontWeight(.medium)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Sources
 
     private var sourcesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("SOURCES")
+            Text("FILES AND FOLDERS")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .tracking(0.5)
 
-            ForEach(sourceNames.prefix(5), id: \.name) { source in
-                HStack {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder")
+            if sharedSources.isEmpty {
+                Text("No files or folders shared yet.")
+                    .font(Typ.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(sharedSources.prefix(4), id: \.name) { source in
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Color.statusActive)
                         Text(source.name)
                             .font(Typ.body)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("Shared")
+                            .font(Typ.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    HStack(spacing: 8) {
-                        Text("^[\(source.count) file](inflect: true)")
-                            .font(Typ.numericCaption)
-                            .foregroundStyle(.tertiary)
-                        Circle()
-                            .fill(source.hasAccess ? Color.statusActive : Color.gray)
-                            .frame(width: 6, height: 6)
-                    }
+                }
+
+                if sharedSources.count > 4 {
+                    Text("+\(sharedSources.count - 4) more shared")
+                        .font(Typ.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
 
-            if sourceNames.count > 5 {
-                Text("+\(sourceNames.count - 5) more")
+            if hiddenSourceCount > 0 {
+                Text("\(hiddenSourceCount) source\(hiddenSourceCount == 1 ? "" : "s") not shared with \(agentName)")
                     .font(Typ.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -137,7 +202,7 @@ struct AgentPolicyCard: View {
 
     private var emailGovernanceSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("EMAIL GOVERNANCE")
+            Text("EMAIL POLICY")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .tracking(0.5)
@@ -146,7 +211,7 @@ struct AgentPolicyCard: View {
                 governanceRow(systemImage: "shield", text: "\(emailGovernance.enabledShieldCount) active shields")
                 governanceRow(
                     systemImage: "line.3.horizontal.decrease.circle",
-                    text: "\(emailGovernance.domainRuleCount) domain rules · \(emailGovernance.contactRuleCount) contacts · \(emailGovernance.keywordRuleCount) keywords"
+                    text: "\(emailGovernance.domainRuleCount) domains · \(emailGovernance.contactRuleCount) contacts · \(emailGovernance.keywordRuleCount) keywords"
                 )
                 governanceRow(
                     systemImage: "dial.low",
@@ -162,6 +227,23 @@ struct AgentPolicyCard: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    // MARK: - Actions
+
+    private var actionsRow: some View {
+        HStack(spacing: 10) {
+            Button("Review Access", action: onReviewAccess)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityIdentifier("agentCard.\(agentKey).reviewAccess")
+            Button("View Activity", action: onViewActivity)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("agentCard.\(agentKey).viewActivity")
+            Spacer()
+        }
+        .padding(.top, 2)
     }
 
     private func governanceRow(systemImage: String, text: String) -> some View {

@@ -12,10 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build
+      - name: Build Swift package
         run: swift build
 
-      - name: Test
+      - name: Test Swift package
         run: swift test
 
       - name: Build Xcode app
@@ -23,9 +23,24 @@ jobs:
           xcodebuild -project Manifold.xcodeproj \
             -scheme Manifold \
             -configuration Debug \
-            -derivedDataPath /tmp/manifold-derived-data \
+            -derivedDataPath "$GITHUB_WORKSPACE/.deriveddata-app-build" \
             build \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Run app unit and integration tests
+        run: |
+          xcodebuild -project Manifold.xcodeproj \
+            -scheme Manifold \
+            -configuration Debug \
+            -derivedDataPath "$GITHUB_WORKSPACE/.deriveddata-app-tests" \
+            test \
+            -only-testing:ManifoldAppTests \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run fixture-mode UI tests
+        run: |
+          bash script/run_ui_tests.sh \
+            --derived-data "$GITHUB_WORKSPACE/.deriveddata-ui-tests"
 
       - name: Build app bundle (release)
         if: github.ref == 'refs/heads/main'

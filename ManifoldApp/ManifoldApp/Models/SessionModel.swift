@@ -44,11 +44,11 @@ final class SessionModel {
     var hasActiveSession: Bool { activeGrant?.isActive == true }
     var isPreviewing: Bool { preview != nil }
 
-    private var client: AppRuntimeClient?
+    private var client: (any RuntimeClientProtocol)?
 
     init() {}
 
-    func configure(client: AppRuntimeClient) {
+    func configure(client: any RuntimeClientProtocol) {
         self.client = client
     }
 

@@ -61,13 +61,21 @@ struct ReviewAccessSheet: View {
             }
 
             // Files | Emails tab bar
-            Picker("Review", selection: $selectedTab) {
-                Text("Files").tag(ReviewTab.files)
-                Text("Emails").tag(ReviewTab.emails)
+            Group {
+                Picker("Review", selection: $selectedTab) {
+                    Text("Files")
+                        .tag(ReviewTab.files)
+                        .accessibilityIdentifier("reviewAccess.tab.files")
+                    Text("Emails")
+                        .tag(ReviewTab.emails)
+                        .accessibilityIdentifier("reviewAccess.tab.emails")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 200)
             .padding(Spacing.section)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("reviewAccess.tabPicker")
 
             // Content
             ScrollView {
@@ -85,6 +93,7 @@ struct ReviewAccessSheet: View {
             sheetFooter
         }
         .frame(minWidth: 520, minHeight: 500)
+        .accessibilityIdentifier("reviewAccess.sheet")
         .task {
             guard !hasInitializedAgent else { return }
             selectedAgent = store.agentFocus.targetApp
@@ -238,9 +247,11 @@ struct ReviewAccessSheet: View {
             Button("Open Email Rules") {
                 store.agentFocus = selectedAgent == .codex ? .codex : .claude
                 store.selectedTab = .emails
+                store.emailRulesDestination = .policy
                 dismiss()
             }
             .buttonStyle(.bordered)
+            .accessibilityIdentifier("reviewAccess.openEmailRules")
         }
         .padding(Spacing.edge)
     }

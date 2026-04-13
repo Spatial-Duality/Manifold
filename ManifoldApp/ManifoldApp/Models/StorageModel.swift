@@ -13,11 +13,11 @@ final class StorageModel {
     var allTrackedFiles: [String] = []
     var storageUsed: Int64 = 0
 
-    private var client: AppRuntimeClient?
+    private var client: (any RuntimeClientProtocol)?
 
     init() {}
 
-    func configure(client: AppRuntimeClient) {
+    func configure(client: any RuntimeClientProtocol) {
         self.client = client
     }
 

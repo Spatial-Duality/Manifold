@@ -97,7 +97,25 @@
 		BBD10011 /* EmailPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD10012 /* EmailPolicyView.swift */; };
 		CCD10001 /* InlineMessagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD10002 /* InlineMessagePreview.swift */; };
 		DDD10001 /* RuleFormComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD10002 /* RuleFormComponents.swift */; };
+		E10000000000000000000001 /* DashboardStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000011 /* DashboardStateTests.swift */; };
+		E10000000000000000000002 /* IntegrationHealthModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000012 /* IntegrationHealthModelTests.swift */; };
+		E10000000000000000000003 /* EmailRulesModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000013 /* EmailRulesModelTests.swift */; };
+		E10000000000000000000004 /* ManifoldStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000014 /* ManifoldStoreTests.swift */; };
+		E10000000000000000000005 /* ManifoldAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000015 /* ManifoldAppUITests.swift */; };
+		E10000000000000000000006 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
+		E10000000000000000000007 /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */; };
+		E10000000000000000000008 /* ManifoldRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000018 /* ManifoldRuntime */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		E10000000000000000000071 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 410CD3A96BEA1EBB97FBA054 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A6679FE56DC4150E476E48D5;
+			remoteInfo = Manifold;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		01E2964F1F242AAC4C3CCF88 /* EmailHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailHeaderView.swift; sourceTree = "<group>"; };
@@ -191,6 +209,13 @@
 		BBD10012 /* EmailPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmailPolicyView.swift; path = ManifoldApp/ManifoldApp/Views/Email/Rules/EmailPolicyView.swift; sourceTree = SOURCE_ROOT; };
 		CCD10002 /* InlineMessagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InlineMessagePreview.swift; path = ManifoldApp/ManifoldApp/Views/Email/MessageList/InlineMessagePreview.swift; sourceTree = SOURCE_ROOT; };
 		DDD10002 /* RuleFormComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RuleFormComponents.swift; path = ManifoldApp/ManifoldApp/Components/RuleFormComponents.swift; sourceTree = SOURCE_ROOT; };
+		E10000000000000000000011 /* DashboardStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateTests.swift; sourceTree = "<group>"; };
+		E10000000000000000000012 /* IntegrationHealthModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationHealthModelTests.swift; sourceTree = "<group>"; };
+		E10000000000000000000013 /* EmailRulesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesModelTests.swift; sourceTree = "<group>"; };
+		E10000000000000000000014 /* ManifoldStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStoreTests.swift; sourceTree = "<group>"; };
+		E10000000000000000000015 /* ManifoldAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldAppUITests.swift; sourceTree = "<group>"; };
+		E10000000000000000000016 /* ManifoldAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ManifoldAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E10000000000000000000017 /* ManifoldAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ManifoldAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -200,6 +225,23 @@
 			files = (
 				6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */,
 				AA1E6D77C2B34D2EA0F7A103 /* ManifoldXPC in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000032 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E10000000000000000000006 /* ManifoldKit in Frameworks */,
+				E10000000000000000000007 /* ManifoldXPC in Frameworks */,
+				E10000000000000000000008 /* ManifoldRuntime in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000034 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -239,6 +281,8 @@
 			isa = PBXGroup;
 			children = (
 				564B55046AEBA3B1643FE2FE /* Manifold.app */,
+				E10000000000000000000016 /* ManifoldAppTests.xctest */,
+				E10000000000000000000017 /* ManifoldAppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -247,9 +291,30 @@
 			isa = PBXGroup;
 			children = (
 				A6F4968BF6A0BCAE922FEE85 /* ManifoldApp */,
+				E10000000000000000000021 /* ManifoldAppTests */,
+				E10000000000000000000022 /* ManifoldAppUITests */,
 				745D681E70055A184477B1F0 /* Packages */,
 				38B4BF091B2E419B65C70EA2 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		E10000000000000000000021 /* ManifoldAppTests */ = {
+			isa = PBXGroup;
+			children = (
+				E10000000000000000000011 /* DashboardStateTests.swift */,
+				E10000000000000000000012 /* IntegrationHealthModelTests.swift */,
+				E10000000000000000000013 /* EmailRulesModelTests.swift */,
+				E10000000000000000000014 /* ManifoldStoreTests.swift */,
+			);
+			path = ManifoldAppTests;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000022 /* ManifoldAppUITests */ = {
+			isa = PBXGroup;
+			children = (
+				E10000000000000000000015 /* ManifoldAppUITests.swift */,
+			);
+			path = ManifoldAppUITests;
 			sourceTree = "<group>";
 		};
 		6F33E03EE4063733D20230B0 /* Search */ = {
@@ -466,7 +531,61 @@
 			productReference = 564B55046AEBA3B1643FE2FE /* Manifold.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E10000000000000000000041 /* ManifoldAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000061 /* Build configuration list for PBXNativeTarget "ManifoldAppTests" */;
+			buildPhases = (
+				E10000000000000000000031 /* Sources */,
+				E10000000000000000000032 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E10000000000000000000072 /* PBXTargetDependency */,
+			);
+			name = ManifoldAppTests;
+			packageProductDependencies = (
+				59CA05998C5293BB2C2FB2E7 /* ManifoldKit */,
+				AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */,
+				E10000000000000000000018 /* ManifoldRuntime */,
+			);
+			productName = ManifoldAppTests;
+			productReference = E10000000000000000000016 /* ManifoldAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		E10000000000000000000042 /* ManifoldAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000062 /* Build configuration list for PBXNativeTarget "ManifoldAppUITests" */;
+			buildPhases = (
+				E10000000000000000000033 /* Sources */,
+				E10000000000000000000034 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E10000000000000000000073 /* PBXTargetDependency */,
+			);
+			name = ManifoldAppUITests;
+			packageProductDependencies = (
+			);
+			productName = ManifoldAppUITests;
+			productReference = E10000000000000000000017 /* ManifoldAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		E10000000000000000000072 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A6679FE56DC4150E476E48D5 /* Manifold */;
+			targetProxy = E10000000000000000000071 /* PBXContainerItemProxy */;
+		};
+		E10000000000000000000073 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A6679FE56DC4150E476E48D5 /* Manifold */;
+			targetProxy = E10000000000000000000071 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		410CD3A96BEA1EBB97FBA054 /* Project object */ = {
@@ -478,6 +597,12 @@
 					A6679FE56DC4150E476E48D5 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
+					};
+					E10000000000000000000041 = {
+						TestTargetID = A6679FE56DC4150E476E48D5;
+					};
+					E10000000000000000000042 = {
+						TestTargetID = A6679FE56DC4150E476E48D5;
 					};
 				};
 			};
@@ -499,6 +624,8 @@
 			projectRoot = "";
 			targets = (
 				A6679FE56DC4150E476E48D5 /* Manifold */,
+				E10000000000000000000041 /* ManifoldAppTests */,
+				E10000000000000000000042 /* ManifoldAppUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -596,6 +723,25 @@
 				BBD10011 /* EmailPolicyView.swift in Sources */,
 				CCD10001 /* InlineMessagePreview.swift in Sources */,
 				DDD10001 /* RuleFormComponents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000031 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E10000000000000000000001 /* DashboardStateTests.swift in Sources */,
+				E10000000000000000000002 /* IntegrationHealthModelTests.swift in Sources */,
+				E10000000000000000000003 /* EmailRulesModelTests.swift in Sources */,
+				E10000000000000000000004 /* ManifoldStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000033 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E10000000000000000000005 /* ManifoldAppUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -738,7 +884,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold;
 				PRODUCT_NAME = Manifold;
 				SDKROOT = macosx;
@@ -764,12 +910,90 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold;
 				PRODUCT_NAME = Manifold;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		E10000000000000000000051 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Manifold.app/Contents/MacOS/Manifold";
+				TEST_TARGET_NAME = Manifold;
+			};
+			name = Debug;
+		};
+		E10000000000000000000052 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Manifold.app/Contents/MacOS/Manifold";
+				TEST_TARGET_NAME = Manifold;
+			};
+			name = Release;
+		};
+		E10000000000000000000053 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = Manifold;
+			};
+			name = Debug;
+		};
+		E10000000000000000000054 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = Manifold;
 			};
 			name = Release;
 		};
@@ -794,6 +1018,24 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		E10000000000000000000061 /* Build configuration list for PBXNativeTarget "ManifoldAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000051 /* Debug */,
+				E10000000000000000000052 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E10000000000000000000062 /* Build configuration list for PBXNativeTarget "ManifoldAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000053 /* Debug */,
+				E10000000000000000000054 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -807,6 +1049,10 @@
 		59CA05998C5293BB2C2FB2E7 /* ManifoldKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ManifoldKit;
+		};
+		E10000000000000000000018 /* ManifoldRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ManifoldRuntime;
 		};
 		AA1E6D77C2B34D2EA0F7A104 /* ManifoldXPC */ = {
 			isa = XCSwiftPackageProductDependency;

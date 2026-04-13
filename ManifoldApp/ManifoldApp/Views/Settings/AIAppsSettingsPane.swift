@@ -127,7 +127,7 @@ private struct AgentHealthCard: View {
                     CheckRow("Claude Code configured", status: state.claudeCodeConfigured)
                     CheckRow("Connection verified", status: state.connectionVerified)
                 case .codex:
-                    CheckRow("CLI installed", status: state.cliInstalled)
+                    CheckRow("Codex app installed", status: state.codexAppInstalled)
                     CheckRow("Manifold added", status: state.mcpAdded)
                 }
             }

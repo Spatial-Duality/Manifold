@@ -18,6 +18,85 @@ struct DashboardState: Codable, Sendable {
     let pendingApprovalCount: Int
     let agentCoverages: [AgentCoverageSnapshot]
     let coverageEvents: [CoverageEvent]
+
+    private enum CodingKeys: String, CodingKey {
+        case runtimeConnected
+        case activeBridgeCount
+        case connectedAgents
+        case sources
+        case claudePolicy
+        case codexPolicy
+        case claudeEmailGovernance
+        case codexEmailGovernance
+        case activeWorkBlock
+        case pendingApprovalCount
+        case agentCoverages
+        case coverageEvents
+    }
+
+    init(
+        runtimeConnected: Bool,
+        activeBridgeCount: Int,
+        connectedAgents: [String],
+        sources: [SourceRecord],
+        claudePolicy: AgentAccessPolicy,
+        codexPolicy: AgentAccessPolicy,
+        claudeEmailGovernance: AgentEmailGovernanceSummary,
+        codexEmailGovernance: AgentEmailGovernanceSummary,
+        activeWorkBlock: WorkBlockRecord?,
+        pendingApprovalCount: Int,
+        agentCoverages: [AgentCoverageSnapshot],
+        coverageEvents: [CoverageEvent]
+    ) {
+        self.runtimeConnected = runtimeConnected
+        self.activeBridgeCount = activeBridgeCount
+        self.connectedAgents = connectedAgents
+        self.sources = sources
+        self.claudePolicy = claudePolicy
+        self.codexPolicy = codexPolicy
+        self.claudeEmailGovernance = claudeEmailGovernance
+        self.codexEmailGovernance = codexEmailGovernance
+        self.activeWorkBlock = activeWorkBlock
+        self.pendingApprovalCount = pendingApprovalCount
+        self.agentCoverages = agentCoverages
+        self.coverageEvents = coverageEvents
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let claudePolicy = try container.decode(AgentAccessPolicy.self, forKey: .claudePolicy)
+        let codexPolicy = try container.decode(AgentAccessPolicy.self, forKey: .codexPolicy)
+
+        self.runtimeConnected = try container.decodeIfPresent(Bool.self, forKey: .runtimeConnected) ?? true
+        self.activeBridgeCount = try container.decodeIfPresent(Int.self, forKey: .activeBridgeCount) ?? 0
+        self.connectedAgents = try container.decodeIfPresent([String].self, forKey: .connectedAgents) ?? []
+        self.sources = try container.decodeIfPresent([SourceRecord].self, forKey: .sources) ?? []
+        self.claudePolicy = claudePolicy
+        self.codexPolicy = codexPolicy
+        self.claudeEmailGovernance =
+            try container.decodeIfPresent(AgentEmailGovernanceSummary.self, forKey: .claudeEmailGovernance)
+            ?? Self.legacyGovernanceSummary(for: claudePolicy)
+        self.codexEmailGovernance =
+            try container.decodeIfPresent(AgentEmailGovernanceSummary.self, forKey: .codexEmailGovernance)
+            ?? Self.legacyGovernanceSummary(for: codexPolicy)
+        self.activeWorkBlock = try container.decodeIfPresent(WorkBlockRecord.self, forKey: .activeWorkBlock)
+        self.pendingApprovalCount = try container.decodeIfPresent(Int.self, forKey: .pendingApprovalCount) ?? 0
+        self.agentCoverages = try container.decodeIfPresent([AgentCoverageSnapshot].self, forKey: .agentCoverages) ?? []
+        self.coverageEvents = try container.decodeIfPresent([CoverageEvent].self, forKey: .coverageEvents) ?? []
+    }
+
+    private static func legacyGovernanceSummary(for policy: AgentAccessPolicy) -> AgentEmailGovernanceSummary {
+        AgentEmailGovernanceSummary(
+            agent: policy.agent,
+            enabledShieldCount: 0,
+            domainRuleCount: policy.allowedEmailDomains.count,
+            contactRuleCount: 0,
+            keywordRuleCount: 0,
+            defaultPolicy: policy.defaultEmailPolicy,
+            emailSensitivity: policy.emailSensitivity
+        )
+    }
 }
 
 struct ActiveGrantState: Codable, Sendable {
@@ -55,22 +134,618 @@ struct EmailBackupInfo: Codable, Sendable {
     let diskUsage: Int64
 }
 
-final class AppRuntimeClient: Sendable {
-    let xpc = ManifoldXPCClient()
+struct RuntimePingResult: Sendable {
+    let ok: Bool
+    let agentVersion: String?
+}
 
-    struct PingResult: Sendable {
-        let ok: Bool
-        let agentVersion: String?
+enum RuntimeClientStubError: Error, LocalizedError {
+    case unimplemented(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unimplemented(let method):
+            return "Runtime stub does not implement \(method)."
+        }
+    }
+}
+
+protocol RuntimeClientProtocol: Sendable {
+    func ping() async -> RuntimePingResult
+    func dashboardState() async throws -> DashboardState
+    func listSources() async throws -> [SourceRecord]
+    func addSource(path: String, displayName: String) async throws -> SourceRecord
+    func removeSource(sourceID: String) async throws
+    func pauseSource(sourceID: String) async throws
+    func resumeSource(sourceID: String) async throws
+    func policies() async throws -> DashboardState
+    func pauseAgent(_ agent: TargetApp) async throws
+    func resumeAgent(_ agent: TargetApp) async throws
+    func addSource(_ sourceID: String, to agent: TargetApp) async throws
+    func removeSource(_ sourceID: String, from agent: TargetApp) async throws
+    func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws
+    func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet
+    func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws
+    func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary
+    func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState
+    func sessionPreview(
+        targetApp: TargetApp,
+        fileScopes: [FileSelectionScope],
+        selectedEmailIDs: Set<String>,
+        emailSensitivity: String?
+    ) async throws -> SessionPreview
+    func startTrackedRun(
+        targetApp: TargetApp,
+        fileScopes: [FileSelectionScope],
+        selectedEmailIDs: Set<String>,
+        summaryFraming: String?,
+        noteCaptureMode: SessionNoteCaptureMode,
+        emailSensitivity: String?
+    ) async throws -> ActiveGrantState
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool
+    func markWorkBlockReviewing(id: String) async throws
+    func cancelWorkBlockReview(id: String) async throws
+    func pauseTrackedRun(id: String) async throws
+    func resumeTrackedRun(id: String) async throws
+    func discardTrackedRun(id: String, grantID: String?, endSession: Bool) async throws
+    func promotionPreview(grantID: String) async throws -> WorkBlockPreview
+    func applyTrackedRun(grantID: String, endSession: Bool) async throws -> ApplyTrackedRunResult
+    func recentActivity(limit: Int) async throws -> [AuditEntry]
+    func recentSessions(limit: Int) async throws -> [Session]
+    func sessionEvents(sessionID: String) async throws -> [SessionEvent]
+    func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult
+    func trackedFiles() async throws -> [String]
+    func storageStats() async throws -> StorageStatsSnapshot
+    func fileHistory(filePath: String) async throws -> [SnapshotRecord]
+    func fileHistoryContext(filePath: String, limit: Int) async throws -> FileHistoryContext
+    func sessionContext(sessionID: String, agent: TargetApp?) async throws -> SessionContextDetail
+    func snapshotData(hash: String) async throws -> Data?
+    func runGarbageCollection() async throws -> Int
+    func runIntegrityCheck() async throws -> Bool
+    func listEmailAccounts() async throws -> [EmailAccountRecord]
+    func syncStates(accountID: String) async throws -> [SyncStateRecord]
+    func emailMessageCount() async throws -> Int
+    func addIMAPAccount(
+        displayName: String,
+        provider: EmailProvider,
+        server: String,
+        port: Int,
+        username: String,
+        password: String
+    ) async throws -> EmailAccountRecord
+    func removeEmailAccount(id: String) async throws
+    func toggleEmailSync(accountID: String, enabled: Bool) async throws
+    func syncEmailNow(accountID: String) async throws -> SyncResult
+    func emailMessages(accountID: String?, mailbox: String?, ids: [String]?, limit: Int) async throws -> [EmailMessageRecord]
+    func domainCounts() async throws -> [String: Int]
+    func unreadCountAll() async throws -> Int
+    func unreadCount(accountID: String, mailbox: String?) async throws -> Int
+    func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord]
+    func sharedEmailCount() async throws -> Int
+    func sharedEmailIDs() async throws -> Set<String>
+    func sharedEmails(limit: Int) async throws -> [EmailMessageRecord]
+    func shareEmails(emailIDs: [String]) async throws
+    func unshareEmails(emailIDs: [String]) async throws
+    func unshareAllEmails() async throws
+    func updateEmailReadState(emailID: String, isRead: Bool) async throws
+    func updateEmailFlagState(emailID: String, isFlagged: Bool, flagColor: String?) async throws
+    func batchUpdateReadState(emailIDs: [String], isRead: Bool) async throws
+    func batchUpdateFlagState(emailIDs: [String], isFlagged: Bool, flagColor: String?) async throws
+    func searchEmailMessages(
+        tokens: [SearchToken],
+        freeText: String,
+        accountID: String?,
+        mailbox: String?,
+        filter: QuickFilter?,
+        sortKey: EmailSortKey,
+        limit: Int
+    ) async throws -> [EmailMessageRecord]
+    func createSmartMailbox(displayName: String, iconName: String, rulesJSON: String) async throws
+    func listSmartMailboxes() async throws -> [SmartMailboxRecord]
+    func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws
+    func deleteSmartMailbox(mailboxID: String) async throws
+    func emailBackupInfo() async throws -> EmailBackupInfo
+}
+
+extension RuntimeClientProtocol {
+    func ping() async -> RuntimePingResult { RuntimePingResult(ok: false, agentVersion: nil) }
+    func dashboardState() async throws -> DashboardState { throw RuntimeClientStubError.unimplemented("dashboardState") }
+    func listSources() async throws -> [SourceRecord] { throw RuntimeClientStubError.unimplemented("listSources") }
+    func addSource(path: String, displayName: String) async throws -> SourceRecord { throw RuntimeClientStubError.unimplemented("addSource") }
+    func removeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("removeSource") }
+    func pauseSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("pauseSource") }
+    func resumeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("resumeSource") }
+    func policies() async throws -> DashboardState { try await dashboardState() }
+    func pauseAgent(_ agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("pauseAgent") }
+    func resumeAgent(_ agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("resumeAgent") }
+    func addSource(_ sourceID: String, to agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("addSource(_:to:)") }
+    func removeSource(_ sourceID: String, from agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("removeSource(_:from:)") }
+    func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("updateAccessRecordingLevel") }
+    func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet { throw RuntimeClientStubError.unimplemented("getEmailRuleSet") }
+    func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws { throw RuntimeClientStubError.unimplemented("updateEmailRuleSet") }
+    func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary { throw RuntimeClientStubError.unimplemented("getEmailRuleActivitySummary") }
+    func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("activeGrantState") }
+    func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview { throw RuntimeClientStubError.unimplemented("sessionPreview") }
+    func startTrackedRun(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("startTrackedRun") }
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool { throw RuntimeClientStubError.unimplemented("restoreSnapshot") }
+    func markWorkBlockReviewing(id: String) async throws { throw RuntimeClientStubError.unimplemented("markWorkBlockReviewing") }
+    func cancelWorkBlockReview(id: String) async throws { throw RuntimeClientStubError.unimplemented("cancelWorkBlockReview") }
+    func pauseTrackedRun(id: String) async throws { throw RuntimeClientStubError.unimplemented("pauseTrackedRun") }
+    func resumeTrackedRun(id: String) async throws { throw RuntimeClientStubError.unimplemented("resumeTrackedRun") }
+    func discardTrackedRun(id: String, grantID: String?, endSession: Bool) async throws { throw RuntimeClientStubError.unimplemented("discardTrackedRun") }
+    func discardTrackedRun(id: String, grantID: String?) async throws { try await discardTrackedRun(id: id, grantID: grantID, endSession: false) }
+    func promotionPreview(grantID: String) async throws -> WorkBlockPreview { throw RuntimeClientStubError.unimplemented("promotionPreview") }
+    func applyTrackedRun(grantID: String, endSession: Bool) async throws -> ApplyTrackedRunResult { throw RuntimeClientStubError.unimplemented("applyTrackedRun") }
+    func applyTrackedRun(grantID: String) async throws -> ApplyTrackedRunResult { try await applyTrackedRun(grantID: grantID, endSession: false) }
+    func recentActivity(limit: Int) async throws -> [AuditEntry] { [] }
+    func recentSessions(limit: Int) async throws -> [Session] { [] }
+    func sessionEvents(sessionID: String) async throws -> [SessionEvent] { [] }
+    func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult { throw RuntimeClientStubError.unimplemented("revertSessionEvent") }
+    func trackedFiles() async throws -> [String] { [] }
+    func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: 0) }
+    func fileHistory(filePath: String) async throws -> [SnapshotRecord] { [] }
+    func fileHistoryContext(filePath: String, limit: Int) async throws -> FileHistoryContext { throw RuntimeClientStubError.unimplemented("fileHistoryContext") }
+    func sessionContext(sessionID: String, agent: TargetApp?) async throws -> SessionContextDetail { throw RuntimeClientStubError.unimplemented("sessionContext") }
+    func snapshotData(hash: String) async throws -> Data? { nil }
+    func runGarbageCollection() async throws -> Int { 0 }
+    func runIntegrityCheck() async throws -> Bool { true }
+    func listEmailAccounts() async throws -> [EmailAccountRecord] { [] }
+    func syncStates(accountID: String) async throws -> [SyncStateRecord] { [] }
+    func emailMessageCount() async throws -> Int { 0 }
+    func addIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, password: String) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addIMAPAccount") }
+    func removeEmailAccount(id: String) async throws { throw RuntimeClientStubError.unimplemented("removeEmailAccount") }
+    func toggleEmailSync(accountID: String, enabled: Bool) async throws { throw RuntimeClientStubError.unimplemented("toggleEmailSync") }
+    func syncEmailNow(accountID: String) async throws -> SyncResult { throw RuntimeClientStubError.unimplemented("syncEmailNow") }
+    func emailMessages(accountID: String? = nil, mailbox: String? = nil, ids: [String]? = nil, limit: Int = 500) async throws -> [EmailMessageRecord] { [] }
+    func domainCounts() async throws -> [String: Int] { [:] }
+    func unreadCountAll() async throws -> Int { 0 }
+    func unreadCount(accountID: String, mailbox: String? = nil) async throws -> Int { 0 }
+    func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] { [] }
+    func sharedEmailCount() async throws -> Int { 0 }
+    func sharedEmailIDs() async throws -> Set<String> { [] }
+    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] { [] }
+    func shareEmails(emailIDs: [String]) async throws { throw RuntimeClientStubError.unimplemented("shareEmails") }
+    func unshareEmails(emailIDs: [String]) async throws { throw RuntimeClientStubError.unimplemented("unshareEmails") }
+    func unshareAllEmails() async throws { throw RuntimeClientStubError.unimplemented("unshareAllEmails") }
+    func updateEmailReadState(emailID: String, isRead: Bool) async throws { throw RuntimeClientStubError.unimplemented("updateEmailReadState") }
+    func updateEmailFlagState(emailID: String, isFlagged: Bool, flagColor: String?) async throws { throw RuntimeClientStubError.unimplemented("updateEmailFlagState") }
+    func batchUpdateReadState(emailIDs: [String], isRead: Bool) async throws { throw RuntimeClientStubError.unimplemented("batchUpdateReadState") }
+    func batchUpdateFlagState(emailIDs: [String], isFlagged: Bool, flagColor: String?) async throws { throw RuntimeClientStubError.unimplemented("batchUpdateFlagState") }
+    func searchEmailMessages(tokens: [SearchToken], freeText: String, accountID: String?, mailbox: String?, filter: QuickFilter?, sortKey: EmailSortKey, limit: Int) async throws -> [EmailMessageRecord] { [] }
+    func createSmartMailbox(displayName: String, iconName: String, rulesJSON: String) async throws { throw RuntimeClientStubError.unimplemented("createSmartMailbox") }
+    func listSmartMailboxes() async throws -> [SmartMailboxRecord] { [] }
+    func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws { throw RuntimeClientStubError.unimplemented("updateSmartMailbox") }
+    func deleteSmartMailbox(mailboxID: String) async throws { throw RuntimeClientStubError.unimplemented("deleteSmartMailbox") }
+    func emailBackupInfo() async throws -> EmailBackupInfo { EmailBackupInfo(path: "", diskUsage: 0) }
+}
+
+enum AppFixtureProfile: String, Sendable {
+    case onboarding
+    case dashboard
+    case emailRules = "email-rules"
+    case trackedWork = "tracked-work"
+    case activity
+}
+
+enum AppTestMode: Sendable {
+    case live
+    case fixture(AppFixtureProfile)
+
+    static var current: AppTestMode {
+        let env = ProcessInfo.processInfo.environment
+        guard env["MANIFOLD_UI_TEST_MODE"] == "1" || env["MANIFOLD_DISABLE_REAL_RUNTIME"] == "1" else {
+            return .live
+        }
+        let profile = AppFixtureProfile(rawValue: env["MANIFOLD_FIXTURE_PROFILE"] ?? "") ?? .dashboard
+        return .fixture(profile)
+    }
+}
+
+actor FixtureRuntimeClient: RuntimeClientProtocol {
+    private struct FixtureState {
+        var version = "0.4.0"
+        var sources: [SourceRecord]
+        var claudePolicy: AgentAccessPolicy
+        var codexPolicy: AgentAccessPolicy
+        var claudeGovernance: AgentEmailGovernanceSummary
+        var codexGovernance: AgentEmailGovernanceSummary
+        var coverages: [AgentCoverageSnapshot]
+        var coverageEvents: [CoverageEvent]
+        var activeWorkBlock: WorkBlockRecord?
+        var connectedAgents: [String]
+        var activityEntries: [AuditEntry]
+        var sessions: [Session]
+        var sessionEvents: [String: [SessionEvent]]
+        var activeGrant: GrantRecord?
+        var activeGrantSources: [GrantSourceRecord]
+        var emailRuleSets: [TargetApp: EmailRuleSet]
+        var emailRuleSummaries: [TargetApp: EmailRuleActivitySummary]
+        var domainCounts: [String: Int]
+        var trackedFiles: [String]
+        var storageUsed: Int64
+        var emailAccounts: [EmailAccountRecord]
+        var syncStates: [String: [SyncStateRecord]]
+        var emails: [EmailMessageRecord]
     }
 
-    func ping() async -> PingResult {
+    private var state: FixtureState
+
+    init(profile: AppFixtureProfile) {
+        state = Self.makeState(profile: profile)
+    }
+
+    func ping() async -> RuntimePingResult {
+        RuntimePingResult(ok: true, agentVersion: state.version)
+    }
+
+    func dashboardState() async throws -> DashboardState {
+        DashboardState(
+            runtimeConnected: true,
+            activeBridgeCount: state.connectedAgents.count,
+            connectedAgents: state.connectedAgents,
+            sources: state.sources,
+            claudePolicy: state.claudePolicy,
+            codexPolicy: state.codexPolicy,
+            claudeEmailGovernance: state.claudeGovernance,
+            codexEmailGovernance: state.codexGovernance,
+            activeWorkBlock: state.activeWorkBlock,
+            pendingApprovalCount: 0,
+            agentCoverages: state.coverages,
+            coverageEvents: state.coverageEvents
+        )
+    }
+
+    func listSources() async throws -> [SourceRecord] { state.sources }
+
+    func addSource(path: String, displayName: String) async throws -> SourceRecord {
+        let source = SourceRecord(
+            sourceID: "src-\(UUID().uuidString.prefix(8).lowercased())",
+            displayName: displayName,
+            originalRootPath: path,
+            status: "idle",
+            createdAt: ISO8601DateFormatter.shared.string(from: Date()),
+            updatedAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+        state.sources.append(source)
+        return source
+    }
+
+    func removeSource(sourceID: String) async throws {
+        state.sources.removeAll { $0.sourceID == sourceID }
+        state.claudePolicy.allowedSourceIDs.remove(sourceID)
+        state.codexPolicy.allowedSourceIDs.remove(sourceID)
+    }
+
+    func pauseSource(sourceID: String) async throws {
+        guard let index = state.sources.firstIndex(where: { $0.sourceID == sourceID }) else { return }
+        var source = state.sources[index]
+        source = SourceRecord(
+            sourceID: source.sourceID,
+            displayName: source.displayName,
+            originalRootPath: source.originalRootPath,
+            status: "paused",
+            createdAt: source.createdAt,
+            updatedAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+        state.sources[index] = source
+    }
+
+    func resumeSource(sourceID: String) async throws {
+        guard let index = state.sources.firstIndex(where: { $0.sourceID == sourceID }) else { return }
+        var source = state.sources[index]
+        source = SourceRecord(
+            sourceID: source.sourceID,
+            displayName: source.displayName,
+            originalRootPath: source.originalRootPath,
+            status: "idle",
+            createdAt: source.createdAt,
+            updatedAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+        state.sources[index] = source
+    }
+
+    func pauseAgent(_ agent: TargetApp) async throws {
+        updatePolicy(agent: agent) { $0.isPaused = true }
+    }
+
+    func resumeAgent(_ agent: TargetApp) async throws {
+        updatePolicy(agent: agent) { $0.isPaused = false }
+    }
+
+    func addSource(_ sourceID: String, to agent: TargetApp) async throws {
+        updatePolicy(agent: agent) { $0.allowedSourceIDs.insert(sourceID) }
+    }
+
+    func removeSource(_ sourceID: String, from agent: TargetApp) async throws {
+        updatePolicy(agent: agent) { $0.allowedSourceIDs.remove(sourceID) }
+    }
+
+    func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws {
+        updatePolicy(agent: agent) { $0.accessRecordingLevel = level }
+    }
+
+    func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet {
+        state.emailRuleSets[agent] ?? EmailRuleSet(agent: agent)
+    }
+
+    func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws {
+        state.emailRuleSets[agent] = ruleSet
+        updateGovernance(agent: agent, ruleSet: ruleSet)
+    }
+
+    func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary {
+        state.emailRuleSummaries[agent] ?? EmailRuleActivitySummary(agent: agent)
+    }
+
+    func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState {
+        ActiveGrantState(activeGrant: state.activeGrant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
+    }
+
+    func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview {
+        let estimates = state.sources.filter { source in
+            policy(for: targetApp).allowedSourceIDs.contains(source.sourceID)
+        }.map { source in
+            SessionPreview.SourceEstimate(
+                sourceID: source.sourceID,
+                displayName: source.displayName,
+                fileCount: 12,
+                totalBytes: 48_000,
+                scopeCount: max(fileScopes.filter { $0.sourceID == source.sourceID }.count, 1)
+            )
+        }
+        return SessionPreview(
+            sources: estimates,
+            emailCount: state.emails.count,
+            visibleEmailCount: state.emails.count,
+            sensitivityLevel: emailSensitivity ?? policy(for: targetApp).emailSensitivity.rawValue,
+            selectedEmailCount: selectedEmailIDs.count
+        )
+    }
+
+    func startTrackedRun(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState {
+        let grant = GrantRecord(
+            grantID: "grant-\(UUID().uuidString.prefix(8).lowercased())",
+            targetApp: targetApp.rawValue,
+            profileID: "profile-fixture",
+            status: GrantStatus.active.rawValue,
+            startedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            materializationRoot: "/tmp/manifold-fixture/\(targetApp.rawValue)",
+            inactivityDeadline: nil,
+            emailSensitivity: (EmailSensitivityLevel(rawValue: emailSensitivity ?? "") ?? policy(for: targetApp).emailSensitivity).rawValue,
+            summaryFraming: summaryFraming,
+            explicitSelection: !selectedEmailIDs.isEmpty,
+            noteCaptureMode: noteCaptureMode.rawValue
+        )
+        state.activeGrant = grant
+        state.activeGrantSources = state.sources.filter { policy(for: targetApp).allowedSourceIDs.contains($0.sourceID) }.map {
+            GrantSourceRecord(grantID: grant.grantID, sourceID: $0.sourceID, mountName: $0.displayName.replacingOccurrences(of: " ", with: "-").lowercased())
+        }
+        state.activeWorkBlock = WorkBlockRecord(agent: targetApp, grantID: grant.grantID, sourceIDs: state.activeGrantSources.map(\.sourceID))
+        state.coverages = state.coverages.map { snapshot in
+            snapshot.agent == targetApp.rawValue
+                ? AgentCoverageSnapshot(agent: snapshot.agent, coverageState: .trackedWorkspace, verificationStatus: snapshot.verificationStatus, hostBundleIdentifier: snapshot.hostBundleIdentifier, reason: snapshot.reason)
+                : snapshot
+        }
+        return ActiveGrantState(activeGrant: grant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
+    }
+
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool { true }
+    func markWorkBlockReviewing(id: String) async throws { state.activeWorkBlock?.status = .reviewing }
+    func cancelWorkBlockReview(id: String) async throws { state.activeWorkBlock?.status = .active }
+    func pauseTrackedRun(id: String) async throws { state.activeWorkBlock?.status = .paused }
+    func resumeTrackedRun(id: String) async throws { state.activeWorkBlock?.status = .active }
+
+    func discardTrackedRun(id: String, grantID: String?, endSession: Bool) async throws {
+        state.activeWorkBlock = nil
+        state.activeGrant = nil
+        state.activeGrantSources = []
+        state.coverages = state.coverages.map { snapshot in
+            AgentCoverageSnapshot(agent: snapshot.agent, coverageState: .manifoldRouted, verificationStatus: snapshot.verificationStatus, hostBundleIdentifier: snapshot.hostBundleIdentifier, reason: snapshot.reason)
+        }
+    }
+
+    func promotionPreview(grantID: String) async throws -> WorkBlockPreview {
+        WorkBlockPreview(applied: ["shared/worklog.md"], conflicts: [], newFiles: [], skipped: 0)
+    }
+
+    func applyTrackedRun(grantID: String, endSession: Bool) async throws -> ApplyTrackedRunResult {
+        try await discardTrackedRun(id: state.activeWorkBlock?.id ?? "", grantID: grantID, endSession: endSession)
+        return ApplyTrackedRunResult(
+            grantID: grantID,
+            filesApplied: ["shared/worklog.md"],
+            filesConflicted: [],
+            appliedCount: 1,
+            conflictCount: 0
+        )
+    }
+
+    func recentActivity(limit: Int) async throws -> [AuditEntry] { Array(state.activityEntries.prefix(limit)) }
+    func recentSessions(limit: Int) async throws -> [Session] { Array(state.sessions.prefix(limit)) }
+    func sessionEvents(sessionID: String) async throws -> [SessionEvent] { state.sessionEvents[sessionID] ?? [] }
+    func trackedFiles() async throws -> [String] { state.trackedFiles }
+    func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: state.storageUsed) }
+    func listEmailAccounts() async throws -> [EmailAccountRecord] { state.emailAccounts }
+    func syncStates(accountID: String) async throws -> [SyncStateRecord] { state.syncStates[accountID] ?? [] }
+    func emailMessageCount() async throws -> Int { state.emails.count }
+    func domainCounts() async throws -> [String: Int] { state.domainCounts }
+    func unreadCountAll() async throws -> Int { state.emails.filter { !$0.isRead }.count }
+    func unreadCount(accountID: String, mailbox: String? = nil) async throws -> Int {
+        state.emails.filter { $0.accountID == accountID && (mailbox == nil || $0.mailbox == mailbox) && !$0.isRead }.count
+    }
+    func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] { [] }
+    func sharedEmailCount() async throws -> Int { state.emails.count }
+    func sharedEmailIDs() async throws -> Set<String> { Set(state.emails.map(\.emailID)) }
+    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] { Array(state.emails.prefix(limit)) }
+    func emailMessages(accountID: String? = nil, mailbox: String? = nil, ids: [String]? = nil, limit: Int = 500) async throws -> [EmailMessageRecord] {
+        let filtered = state.emails.filter { email in
+            (accountID == nil || email.accountID == accountID)
+                && (mailbox == nil || email.mailbox == mailbox)
+                && (ids == nil || ids?.contains(email.emailID) == true)
+        }
+        return Array(filtered.prefix(limit))
+    }
+    func searchEmailMessages(tokens: [SearchToken], freeText: String, accountID: String?, mailbox: String?, filter: QuickFilter?, sortKey: EmailSortKey, limit: Int) async throws -> [EmailMessageRecord] {
+        let term = freeText.lowercased()
+        let base = try await emailMessages(accountID: accountID, mailbox: mailbox, ids: nil, limit: limit)
+        guard !term.isEmpty else { return base }
+        return base.filter { email in
+            [email.sender, email.subject, email.preview ?? "", email.bodyText ?? ""]
+                .joined(separator: "\n")
+                .lowercased()
+                .contains(term)
+        }
+    }
+
+    private func policy(for agent: TargetApp) -> AgentAccessPolicy {
+        agent == .codex ? state.codexPolicy : state.claudePolicy
+    }
+
+    private func updatePolicy(agent: TargetApp, mutate: (inout AgentAccessPolicy) -> Void) {
+        if agent == .codex {
+            mutate(&state.codexPolicy)
+        } else {
+            mutate(&state.claudePolicy)
+        }
+    }
+
+    private func updateGovernance(agent: TargetApp, ruleSet: EmailRuleSet) {
+        let summary = AgentEmailGovernanceSummary(
+            agent: agent,
+            enabledShieldCount: ruleSet.shields.filter(\.isEnabled).count,
+            domainRuleCount: ruleSet.domainRules.count,
+            contactRuleCount: ruleSet.contactRules.count,
+            keywordRuleCount: ruleSet.keywordRules.count,
+            defaultPolicy: ruleSet.defaultPolicy,
+            emailSensitivity: ruleSet.emailSensitivity
+        )
+        if agent == .codex {
+            state.codexGovernance = summary
+            state.codexPolicy.emailSensitivity = ruleSet.emailSensitivity
+            state.codexPolicy.defaultEmailPolicy = ruleSet.defaultPolicy
+            state.codexPolicy.allowedEmailDomains = Set(ruleSet.domainRules.filter { $0.action == .allow }.map(\.domain))
+        } else {
+            state.claudeGovernance = summary
+            state.claudePolicy.emailSensitivity = ruleSet.emailSensitivity
+            state.claudePolicy.defaultEmailPolicy = ruleSet.defaultPolicy
+            state.claudePolicy.allowedEmailDomains = Set(ruleSet.domainRules.filter { $0.action == .allow }.map(\.domain))
+        }
+    }
+
+    private static func makeState(profile: AppFixtureProfile) -> FixtureState {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        let sourceA = SourceRecord(sourceID: "src-shared", displayName: "Shared", originalRootPath: "/Users/test/shared", status: "idle", createdAt: now, updatedAt: now)
+        let sourceB = SourceRecord(sourceID: "src-claude", displayName: "Claude Only", originalRootPath: "/Users/test/claude-only", status: "idle", createdAt: now, updatedAt: now)
+        let claudePolicy = AgentAccessPolicy(agent: .cowork, allowedSourceIDs: ["src-shared", "src-claude"], allowedEmailDomains: ["example.com"], emailSensitivity: .moderate, defaultEmailPolicy: .allowUnlessBlocked, accessRecordingLevel: .summary, isPaused: false)
+        let codexPolicy = AgentAccessPolicy(agent: .codex, allowedSourceIDs: ["src-shared"], allowedEmailDomains: [], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
+        let claudeRules = EmailRuleSet(
+            agent: .cowork,
+            domainRules: [EmailDomainRule(agent: .cowork, domain: "example.com", action: .allow)],
+            contactRules: [EmailContactRule(agent: .cowork, name: "Finance", email: "finance@example.com", action: .block)],
+            keywordRules: [EmailKeywordRule(agent: .cowork, pattern: "2fa", matchLocation: .subjectAndBody, action: .block, isRegex: false)],
+            defaultPolicy: .allowUnlessBlocked,
+            emailSensitivity: .moderate
+        )
+        let codexRules = EmailRuleSet(
+            agent: .codex,
+            domainRules: [EmailDomainRule(agent: .codex, domain: "builds.example.com", action: .allow)],
+            contactRules: [],
+            keywordRules: [EmailKeywordRule(agent: .codex, pattern: "invoice", matchLocation: .subject, action: .block, isRegex: false)],
+            defaultPolicy: .blockUnlessAllowed,
+            emailSensitivity: .strict
+        )
+        let claudeGovernance = AgentEmailGovernanceSummary(agent: .cowork, enabledShieldCount: claudeRules.shields.filter(\.isEnabled).count, domainRuleCount: claudeRules.domainRules.count, contactRuleCount: claudeRules.contactRules.count, keywordRuleCount: claudeRules.keywordRules.count, defaultPolicy: claudeRules.defaultPolicy, emailSensitivity: claudeRules.emailSensitivity)
+        let codexGovernance = AgentEmailGovernanceSummary(agent: .codex, enabledShieldCount: codexRules.shields.filter(\.isEnabled).count, domainRuleCount: codexRules.domainRules.count, contactRuleCount: codexRules.contactRules.count, keywordRuleCount: codexRules.keywordRules.count, defaultPolicy: codexRules.defaultPolicy, emailSensitivity: codexRules.emailSensitivity)
+        let coverages = [
+            AgentCoverageSnapshot(agent: TargetApp.cowork.rawValue, coverageState: .manifoldRouted, verificationStatus: .verified, hostBundleIdentifier: "com.anthropic.claudefordesktop", reason: "Fixture verified"),
+            AgentCoverageSnapshot(agent: TargetApp.codex.rawValue, coverageState: profile == .trackedWork ? .trackedWorkspace : .manifoldRouted, verificationStatus: .verified, hostBundleIdentifier: "com.openai.codex", reason: "Fixture verified"),
+        ]
+        let coverageEvents = [
+            CoverageEvent(id: "coverage-1", agent: TargetApp.codex.rawValue, coverageState: .outsideCoverage, eventType: "drift", message: "Original file changed outside the tracked workflow.", resourcePath: "shared/worklog.md", timestamp: now, metadata: nil),
+        ]
+        let activity = [
+            AuditEntry(id: 1, timestamp: now, agent: TargetApp.cowork.rawValue, action: AuditAction.fileRead.rawValue, filePath: "claude-only/marker.txt", metadata: "{}", sessionID: "session-1", grantID: nil),
+            AuditEntry(id: 2, timestamp: now, agent: TargetApp.codex.rawValue, action: AuditAction.contentDrift.rawValue, filePath: "shared/worklog.md", metadata: "{\"coverage_state\":\"outside_coverage\"}", sessionID: "session-2", grantID: "grant-fixture"),
+        ]
+        let sessions = [
+            Session(id: "session-1", agent: TargetApp.cowork.rawValue, startTime: now, endTime: now, actionCount: 4, readCount: 3, writeCount: 0, searchCount: 1),
+        ]
+        let sessionEvents = [
+            "session-1": [
+                SessionEvent(id: 1, timestamp: now, action: AuditAction.fileRead.rawValue, agent: TargetApp.cowork.rawValue, filePath: "shared/worklog.md", metadata: "{}"),
+            ]
+        ]
+        let email = EmailMessageRecord(
+            emailID: "email-1",
+            accountID: "account-1",
+            mailbox: "INBOX",
+            sender: "Ops <ops@example.com>",
+            senderEmail: "ops@example.com",
+            senderDomain: "example.com",
+            recipients: "you@example.com",
+            subject: "MANIFOLD_EMAIL_TEST",
+            receivedAt: now,
+            sizeBytes: 1200,
+            preview: "Governed email preview",
+            isRead: false,
+            bodyText: "Governed body text for fixture mode."
+        )
+        let account = EmailAccountRecord(accountID: "account-1", displayName: "Fixture Inbox", providerType: "gmail", syncEnabled: true, createdAt: now, updatedAt: now)
+        let activeGrant: GrantRecord? = profile == .trackedWork ? GrantRecord(
+            grantID: "grant-fixture",
+            targetApp: TargetApp.codex.rawValue,
+            profileID: "profile-fixture",
+            status: GrantStatus.active.rawValue,
+            startedAt: now,
+            materializationRoot: "/tmp/manifold-fixture/codex",
+            emailSensitivity: EmailSensitivityLevel.strict.rawValue,
+            summaryFraming: "Fixture tracked work",
+            explicitSelection: false,
+            noteCaptureMode: SessionNoteCaptureMode.basic.rawValue
+        ) : nil
+        let activeGrantSources = profile == .trackedWork ? [GrantSourceRecord(grantID: "grant-fixture", sourceID: "src-shared", mountName: "shared")] : []
+        let activeWorkBlock = profile == .trackedWork ? WorkBlockRecord(id: "wb-fixture", agent: .codex, grantID: "grant-fixture", sourceIDs: ["src-shared"], startedAt: now, status: .active, modifiedFileCount: 1, newFileCount: 0) : nil
+
+        return FixtureState(
+            sources: profile == .onboarding ? [] : [sourceA, sourceB],
+            claudePolicy: claudePolicy,
+            codexPolicy: codexPolicy,
+            claudeGovernance: claudeGovernance,
+            codexGovernance: codexGovernance,
+            coverages: coverages,
+            coverageEvents: profile == .activity ? coverageEvents : (profile == .trackedWork ? coverageEvents : []),
+            activeWorkBlock: activeWorkBlock,
+            connectedAgents: profile == .onboarding ? [] : [TargetApp.cowork.rawValue, TargetApp.codex.rawValue],
+            activityEntries: activity,
+            sessions: sessions,
+            sessionEvents: sessionEvents,
+            activeGrant: activeGrant,
+            activeGrantSources: activeGrantSources,
+            emailRuleSets: [.cowork: claudeRules, .codex: codexRules],
+            emailRuleSummaries: [
+                .cowork: EmailRuleActivitySummary(agent: .cowork, shieldBlockedCounts: ["security": 2], recentShieldMatches: [], domainRuleHits: [.init(ruleID: claudeRules.domainRules[0].id, count: 5)], contactRuleHits: [.init(ruleID: claudeRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: claudeRules.keywordRules[0].id, count: 3)]),
+                .codex: EmailRuleActivitySummary(agent: .codex, shieldBlockedCounts: ["financial": 1], recentShieldMatches: [], domainRuleHits: [.init(ruleID: codexRules.domainRules[0].id, count: 4)], contactRuleHits: [], keywordRuleHits: [.init(ruleID: codexRules.keywordRules[0].id, count: 2)]),
+            ],
+            domainCounts: ["example.com": 12, "builds.example.com": 7],
+            trackedFiles: ["shared/worklog.md"],
+            storageUsed: 24_576,
+            emailAccounts: profile == .onboarding ? [] : [account],
+            syncStates: ["account-1": [SyncStateRecord(accountID: "account-1", mailboxName: "INBOX", lastSyncAt: now, messageCount: 42, syncStatus: .idle)]],
+            emails: profile == .onboarding ? [] : [email]
+        )
+    }
+}
+
+final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
+    let xpc = ManifoldXPCClient()
+
+    func ping() async -> RuntimePingResult {
         do {
             let response = try await xpc.command(name: "ping", payload: [:])
             let ok = response["ok"] as? Bool ?? false
             let version = response["agentVersion"] as? String
-            return PingResult(ok: ok, agentVersion: version)
+            return RuntimePingResult(ok: ok, agentVersion: version)
         } catch {
-            return PingResult(ok: false, agentVersion: nil)
+            return RuntimePingResult(ok: false, agentVersion: nil)
         }
     }
 

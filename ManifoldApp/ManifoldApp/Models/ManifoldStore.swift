@@ -42,11 +42,17 @@ enum AgentFocus: String, Hashable, CaseIterable {
     }
 }
 
+enum EmailRulesDestination: Hashable {
+    case dashboard
+    case policy
+}
+
 @Observable
 @MainActor
 final class ManifoldStore {
     var selectedTab: AppTab = .overview
     var agentFocus: AgentFocus = .claude
+    var emailRulesDestination: EmailRulesDestination? = nil
 
     var showReviewSheet = false
     var showActivityDrawer = false
@@ -77,15 +83,21 @@ final class ManifoldStore {
     let setup: SetupModel
     let emailAccounts: EmailAccountModel
     let policy: PolicyModel
-    let integrationHealth = IntegrationHealthModel()
+    let integrationHealth: IntegrationHealthModel
 
-    let runtime = AppRuntimeClient()
+    let runtime: any RuntimeClientProtocol
     private var connectionMonitorTask: Task<Void, Never>?
     private var didAttemptAgentRestart = false
 
     var menuBarIcon: String { isRuntimeConnected ? "checkmark.shield.fill" : "shield.slash" }
 
-    init() {
+    init(
+        runtime: any RuntimeClientProtocol = AppRuntimeClient(),
+        integrationHealth: IntegrationHealthModel = IntegrationHealthModel(),
+        startServices: Bool = true
+    ) {
+        self.runtime = runtime
+        self.integrationHealth = integrationHealth
         session = SessionModel()
         history = HistoryModel()
         storage = StorageModel()
@@ -101,13 +113,15 @@ final class ManifoldStore {
 
         integrationHealth.store = self
 
-        registerAgent()
-        requestNotificationPermission()
-        startConnectionMonitor()
+        if startServices {
+            registerAgent()
+            requestNotificationPermission()
+            startConnectionMonitor()
 
-        Task {
-            await refreshAll(force: true)
-            await integrationHealth.checkAll()
+            Task {
+                await refreshAll(force: true)
+                await integrationHealth.checkAll()
+            }
         }
     }
 

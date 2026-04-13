@@ -20,12 +20,12 @@ final class EmailRulesModel {
     var loading = false
     var errorMessage: String?
 
-    private var client: AppRuntimeClient?
+    private var client: (any RuntimeClientProtocol)?
     private var ruleSet: EmailRuleSet?
     private var activitySummary: EmailRuleActivitySummary?
     private var domainCounts: [String: Int] = [:]
 
-    func configure(client: AppRuntimeClient) {
+    func configure(client: any RuntimeClientProtocol) {
         self.client = client
     }
 

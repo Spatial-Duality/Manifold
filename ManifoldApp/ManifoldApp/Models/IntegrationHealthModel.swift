@@ -1,65 +1,44 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 
+import AppKit
 import Foundation
 import ManifoldKit
 import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "health")
 
-/// Structured, pollable, debounced health state for AI agent integrations.
-/// Replaces flat booleans in SetupModel with per-agent, per-check granularity.
-/// Uses a 5-second cache to avoid redundant filesystem reads on rapid tab switches.
-@Observable
-@MainActor
-final class IntegrationHealthModel {
-    var claude = AgentConnectionState(agent: .cowork)
-    var codex = AgentConnectionState(agent: .codex)
+struct AgentHealthSnapshot: Sendable {
+    var appInstalled: AgentConnectionStatus = .unknown
+    var mcpConfigured: AgentConnectionStatus = .unknown
+    var claudeCodeConfigured: AgentConnectionStatus = .unknown
+    var connectionVerified: AgentConnectionStatus = .unknown
+    var codexAppInstalled: AgentConnectionStatus = .unknown
+    var mcpAdded: AgentConnectionStatus = .unknown
+    var errorDetail: String?
+}
 
-    weak var store: ManifoldStore?
+protocol IntegrationHealthChecking: Sendable {
+    func checkClaude(isConnected: Bool) async -> AgentHealthSnapshot
+    func checkCodex(isConnected: Bool) async -> AgentHealthSnapshot
+}
 
-    // MARK: - Debounce
+struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
+    func checkClaude(isConnected: Bool) async -> AgentHealthSnapshot {
+        var snapshot = AgentHealthSnapshot(
+            appInstalled: .checking,
+            mcpConfigured: .checking,
+            claudeCodeConfigured: .checking,
+            connectionVerified: .checking
+        )
 
-    private var lastCheckedAt: Date?
-    private static let cacheInterval: TimeInterval = 5.0
-
-    /// Check all agents. Returns cached results if called within 5 seconds.
-    /// Pass `force: true` for explicit user-initiated refresh.
-    func checkAll(force: Bool = false) async {
-        if !force, let last = lastCheckedAt,
-           Date().timeIntervalSince(last) < Self.cacheInterval {
-            logger.debug("Health check skipped — cached \(Date().timeIntervalSince(last), format: .fixed(precision: 1))s ago")
-            return
-        }
-        lastCheckedAt = Date()
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.checkClaude() }
-            group.addTask { await self.checkCodex() }
-        }
-    }
-
-    func state(for agent: TargetApp) -> AgentConnectionState {
-        agent == .codex ? codex : claude
-    }
-
-    // MARK: - Claude Checks
-
-    func checkClaude() async {
-        claude.appInstalled = .checking
-        claude.mcpConfigured = .checking
-        claude.claudeCodeConfigured = .checking
-        claude.connectionVerified = .checking
-        claude.errorDetail = nil
-
-        // 1. Claude Desktop.app installed?
         let appPath = "/Applications/Claude.app"
         let altPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications/Claude.app").path
-        claude.appInstalled = FileManager.default.fileExists(atPath: appPath)
+        snapshot.appInstalled = FileManager.default.fileExists(atPath: appPath)
             || FileManager.default.fileExists(atPath: altPath)
             ? .installed : .notInstalled
 
-        // 2. Claude Desktop config valid?
         let desktopConfigPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json").path
         let desktopConfig = validateJSONConfig(
@@ -67,9 +46,8 @@ final class IntegrationHealthModel {
             agent: .cowork,
             label: "Claude Desktop"
         )
-        claude.mcpConfigured = desktopConfig.status
+        snapshot.mcpConfigured = desktopConfig.status
 
-        // 3. Claude Code config valid?
         let claudeCodePath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/settings.json").path
         let claudeCodeConfig = validateJSONConfig(
@@ -77,54 +55,61 @@ final class IntegrationHealthModel {
             agent: .cowork,
             label: "Claude Code"
         )
-        claude.claudeCodeConfigured = claudeCodeConfig.status
+        snapshot.claudeCodeConfigured = claudeCodeConfig.status
 
-        // 4. Live connection?
-        if let store, store.isClaudeConnected {
-            claude.connectionVerified = .connected
+        if isConnected {
+            snapshot.connectionVerified = .connected
         } else if desktopConfig.status.isPassingCheck || claudeCodeConfig.status.isPassingCheck {
-            claude.connectionVerified = .configured
+            snapshot.connectionVerified = .configured
         } else if desktopConfig.status == .error || claudeCodeConfig.status == .error {
-            claude.connectionVerified = .error
+            snapshot.connectionVerified = .error
         } else {
-            claude.connectionVerified = .notInstalled
+            snapshot.connectionVerified = .notInstalled
         }
 
-        claude.errorDetail = [desktopConfig.detail, claudeCodeConfig.detail]
+        snapshot.errorDetail = [desktopConfig.detail, claudeCodeConfig.detail]
             .compactMap { $0 }
             .joined(separator: "\n")
             .nilIfEmpty
+
+        return snapshot
     }
 
-    // MARK: - Codex Checks
+    func checkCodex(isConnected: Bool) async -> AgentHealthSnapshot {
+        var snapshot = AgentHealthSnapshot(
+            codexAppInstalled: .checking,
+            mcpAdded: .checking
+        )
 
-    func checkCodex() async {
-        codex.cliInstalled = .checking
-        codex.mcpAdded = .checking
-        codex.errorDetail = nil
+        let codexHome = FileManager.default.homeDirectoryForCurrentUser
+        let configDir = codexHome.appendingPathComponent(".codex")
+        let codexAppFound = detectCodexDesktopApp()
+        snapshot.codexAppInstalled = codexAppFound ? .installed : .notInstalled
 
-        // 1. Codex CLI installed?
-        let paths = ["/usr/local/bin/codex", "/opt/homebrew/bin/codex",
-                     FileManager.default.homeDirectoryForCurrentUser
-                         .appendingPathComponent(".local/bin/codex").path]
-        let found = paths.contains { FileManager.default.fileExists(atPath: $0) }
-        codex.cliInstalled = found ? .installed : .notInstalled
-
-        guard found else {
-            codex.mcpAdded = .notInstalled
-            return
+        guard codexAppFound || FileManager.default.fileExists(atPath: configDir.path) else {
+            snapshot.mcpAdded = .notInstalled
+            return snapshot
         }
 
-        // 2. Manifold config valid?
-        let tomlPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/config.toml").path
+        let tomlPath = configDir.appendingPathComponent("config.toml").path
         let codexConfig = validateCodexConfig(at: tomlPath, agent: .codex)
-        if let store, store.isCodexConnected, codexConfig.status == .installed {
-            codex.mcpAdded = .connected
-        } else {
-            codex.mcpAdded = codexConfig.status
+        snapshot.mcpAdded = isConnected && codexConfig.status == .installed ? .connected : codexConfig.status
+        snapshot.errorDetail = codexConfig.detail
+        return snapshot
+    }
+
+    private func detectCodexDesktopApp() -> Bool {
+        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") != nil {
+            return true
         }
-        codex.errorDetail = codexConfig.detail
+
+        let candidatePaths = [
+            "/Applications/Codex.app",
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Applications/Codex.app").path,
+        ]
+
+        return candidatePaths.contains { FileManager.default.fileExists(atPath: $0) }
     }
 
     private func validateJSONConfig(at path: String, agent: TargetApp, label: String) -> ConfigValidation {
@@ -224,6 +209,105 @@ final class IntegrationHealthModel {
     }
 }
 
+struct FixtureIntegrationHealthChecker: IntegrationHealthChecking {
+    let profile: AppFixtureProfile
+
+    func checkClaude(isConnected: Bool) async -> AgentHealthSnapshot {
+        switch profile {
+        case .onboarding:
+            return AgentHealthSnapshot(
+                appInstalled: .installed,
+                mcpConfigured: .configured,
+                claudeCodeConfigured: .notInstalled,
+                connectionVerified: .configured
+            )
+        case .dashboard, .emailRules, .trackedWork, .activity:
+            return AgentHealthSnapshot(
+                appInstalled: .installed,
+                mcpConfigured: .connected,
+                claudeCodeConfigured: .configured,
+                connectionVerified: isConnected ? .connected : .configured
+            )
+        }
+    }
+
+    func checkCodex(isConnected: Bool) async -> AgentHealthSnapshot {
+        switch profile {
+        case .onboarding:
+            return AgentHealthSnapshot(
+                codexAppInstalled: .installed,
+                mcpAdded: .configured
+            )
+        case .dashboard, .emailRules, .trackedWork, .activity:
+            return AgentHealthSnapshot(
+                codexAppInstalled: .installed,
+                mcpAdded: isConnected ? .connected : .configured
+            )
+        }
+    }
+}
+
+/// Structured, pollable, debounced health state for AI agent integrations.
+/// Replaces flat booleans in SetupModel with per-agent, per-check granularity.
+/// Uses a 5-second cache to avoid redundant filesystem reads on rapid tab switches.
+@Observable
+@MainActor
+final class IntegrationHealthModel {
+    var claude = AgentConnectionState(agent: .cowork)
+    var codex = AgentConnectionState(agent: .codex)
+
+    weak var store: ManifoldStore?
+    private let checker: any IntegrationHealthChecking
+
+    private var lastCheckedAt: Date?
+    private static let cacheInterval: TimeInterval = 5.0
+
+    init(checker: any IntegrationHealthChecking = SystemIntegrationHealthChecker()) {
+        self.checker = checker
+    }
+
+    /// Check all agents. Returns cached results if called within 5 seconds.
+    /// Pass `force: true` for explicit user-initiated refresh.
+    func checkAll(force: Bool = false) async {
+        if !force, let last = lastCheckedAt,
+           Date().timeIntervalSince(last) < Self.cacheInterval {
+            logger.debug("Health check skipped — cached \(Date().timeIntervalSince(last), format: .fixed(precision: 1))s ago")
+            return
+        }
+
+        lastCheckedAt = Date()
+        let claudeConnected = store?.isClaudeConnected ?? false
+        let codexConnected = store?.isCodexConnected ?? false
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                let snapshot = await self.checker.checkClaude(isConnected: claudeConnected)
+                await MainActor.run { self.claude.apply(snapshot: snapshot) }
+            }
+            group.addTask {
+                let snapshot = await self.checker.checkCodex(isConnected: codexConnected)
+                await MainActor.run { self.codex.apply(snapshot: snapshot) }
+            }
+        }
+    }
+
+    func state(for agent: TargetApp) -> AgentConnectionState {
+        agent == .codex ? codex : claude
+    }
+
+    func checkClaude() async {
+        let snapshot = await checker.checkClaude(isConnected: store?.isClaudeConnected ?? false)
+        claude.apply(snapshot: snapshot)
+        lastCheckedAt = Date()
+    }
+
+    func checkCodex() async {
+        let snapshot = await checker.checkCodex(isConnected: store?.isCodexConnected ?? false)
+        codex.apply(snapshot: snapshot)
+        lastCheckedAt = Date()
+    }
+}
+
 private struct ConfigValidation {
     let status: AgentConnectionStatus
     let detail: String?
@@ -231,6 +315,18 @@ private struct ConfigValidation {
     init(status: AgentConnectionStatus, detail: String? = nil) {
         self.status = status
         self.detail = detail
+    }
+}
+
+private extension AgentConnectionState {
+    func apply(snapshot: AgentHealthSnapshot) {
+        appInstalled = snapshot.appInstalled
+        mcpConfigured = snapshot.mcpConfigured
+        claudeCodeConfigured = snapshot.claudeCodeConfigured
+        connectionVerified = snapshot.connectionVerified
+        codexAppInstalled = snapshot.codexAppInstalled
+        mcpAdded = snapshot.mcpAdded
+        errorDetail = snapshot.errorDetail
     }
 }
 

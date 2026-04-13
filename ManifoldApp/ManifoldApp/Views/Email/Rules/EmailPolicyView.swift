@@ -15,6 +15,7 @@ struct EmailPolicyView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Email Policy")
                         .font(Typ.sectionTitle)
+                        .accessibilityIdentifier("emailRules.policy.title")
                     Text("Set the coarse sensitivity preset and what happens when no specific email rule matches.")
                         .font(Typ.body)
                         .foregroundStyle(.secondary)
@@ -69,6 +70,7 @@ struct EmailPolicyView: View {
             .frame(maxWidth: 560, alignment: .leading)
         }
         .navigationTitle("Email Policy")
+        .accessibilityIdentifier("emailRules.policy.screen")
     }
 
     private func policyCard(agentName: String, color: Color, policy: Binding<AgentDefaultPolicy>) -> some View {
@@ -86,6 +88,7 @@ struct EmailPolicyView: View {
                     EmptyView()
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("emailRules.policy.defaultPolicyPicker")
 
                 Text(policy.wrappedValue == .allowUnlessBlocked
                      ? "Agent sees all emails except those caught by shields and rules."
@@ -123,6 +126,7 @@ struct EmailPolicyView: View {
                     EmptyView()
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("emailRules.policy.sensitivityPicker")
 
                 Text(sensitivityDescription(for: sensitivity.wrappedValue))
                     .font(Typ.caption)

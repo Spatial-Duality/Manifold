@@ -16,11 +16,11 @@ final class HistoryModel {
     var sessionEvents: [SessionEvent] = []
     var showSessionGrouping = true
 
-    private var client: AppRuntimeClient?
+    private var client: (any RuntimeClientProtocol)?
 
     init() {}
 
-    func configure(client: AppRuntimeClient) {
+    func configure(client: any RuntimeClientProtocol) {
         self.client = client
     }
 

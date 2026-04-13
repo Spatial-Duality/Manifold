@@ -135,16 +135,22 @@ struct ConfigWriterTests {
 
     // MARK: - Codex Config Tests
 
-    @Test("Codex install skipped when .codex directory missing")
-    func codexSkipWhenMissing() throws {
+    @Test("Codex install creates config when .codex directory is missing")
+    func codexCreatesConfigWhenMissing() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }
 
-        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
-        try writer.installCodex()  // Should not throw
-
         let configFile = home.appendingPathComponent(".codex/config.toml")
         #expect(!FileManager.default.fileExists(atPath: configFile.path))
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installCodex()
+
+        #expect(FileManager.default.fileExists(atPath: configFile.path))
+        let content = try String(contentsOf: configFile, encoding: .utf8)
+        #expect(content.contains("[mcp_servers.manifold]"))
+        #expect(content.contains("command = \"/usr/bin/manifold-mcp\""))
+        #expect(content.contains("args = [\"--agent\", \"codex\"]"))
     }
 
     @Test("Codex install appends to existing config")

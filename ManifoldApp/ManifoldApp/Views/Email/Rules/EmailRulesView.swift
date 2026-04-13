@@ -52,13 +52,19 @@ struct EmailRulesView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("emailRules.screen")
         .task {
             selectedAgent = store.agentFocus.targetApp
+            applyRequestedDestination()
             rulesModel.configure(client: store.runtime)
             await rulesModel.load(agent: selectedAgent)
         }
         .task(id: selectedAgent) {
             await rulesModel.load(agent: selectedAgent)
+        }
+        .onChange(of: store.emailRulesDestination) { _, _ in
+            applyRequestedDestination()
         }
     }
 
@@ -69,6 +75,7 @@ struct EmailRulesView: View {
             Section {
                 Label("Dashboard", systemImage: "chart.bar")
                     .tag(RulesSidebarItem.dashboard)
+                    .accessibilityIdentifier("emailRules.sidebar.dashboard")
             } header: {
                 Text("Overview")
             }
@@ -85,6 +92,7 @@ struct EmailRulesView: View {
                             .foregroundStyle(.tertiary)
                     }
                     .tag(RulesSidebarItem.shield(shield.id))
+                    .accessibilityIdentifier("emailRules.sidebar.shield.\(shield.id)")
                 }
             } header: {
                 let activeCount = rulesModel.shields.filter(\.isEnabled).count
@@ -105,6 +113,7 @@ struct EmailRulesView: View {
                     Image(systemName: "globe")
                 }
                 .tag(RulesSidebarItem.domains)
+                .accessibilityIdentifier("emailRules.sidebar.domains")
 
                 Label {
                     HStack {
@@ -118,6 +127,7 @@ struct EmailRulesView: View {
                     Image(systemName: "person")
                 }
                 .tag(RulesSidebarItem.contacts)
+                .accessibilityIdentifier("emailRules.sidebar.contacts")
 
                 Label {
                     HStack {
@@ -131,6 +141,7 @@ struct EmailRulesView: View {
                     Image(systemName: "magnifyingglass")
                 }
                 .tag(RulesSidebarItem.keywords)
+                .accessibilityIdentifier("emailRules.sidebar.keywords")
             } header: {
                 Text("Rules")
             }
@@ -139,6 +150,7 @@ struct EmailRulesView: View {
             Section {
                 Label("Policy", systemImage: "gearshape")
                     .tag(RulesSidebarItem.policy)
+                    .accessibilityIdentifier("emailRules.sidebar.policy")
             } header: {
                 Text("Policy")
             }
@@ -153,6 +165,25 @@ struct EmailRulesView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Email Rules")
+        .accessibilityIdentifier("emailRules.sidebar")
+    }
+
+    private func applyRequestedDestination() {
+        if case .fixture(.emailRules) = AppTestMode.current {
+            selectedItem = .policy
+            return
+        }
+
+        switch store.emailRulesDestination {
+        case .policy:
+            selectedItem = .policy
+            store.emailRulesDestination = nil
+        case .dashboard:
+            selectedItem = .dashboard
+            store.emailRulesDestination = nil
+        case .none:
+            break
+        }
     }
 
     @ViewBuilder
@@ -164,6 +195,7 @@ struct EmailRulesView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 200)
+            .accessibilityIdentifier("emailRules.agentPicker")
 
             if let coverage = store.policy.coverage(for: selectedAgent) {
                 StatusBadge(

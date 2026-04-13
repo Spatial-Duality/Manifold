@@ -6,8 +6,12 @@ import ManifoldKit
 
 @main
 struct ManifoldApp: App {
-    @State private var store = ManifoldStore()
+    @State private var store: ManifoldStore
     @State private var commands = CommandCenter()
+
+    init() {
+        _store = State(initialValue: Self.bootstrapStore())
+    }
 
     var body: some Scene {
         Window("Manifold", id: "main") {
@@ -119,6 +123,23 @@ struct ManifoldApp: App {
         let agent: TargetApp = store.agentFocus.targetApp
         let policy = store.policy.policy(for: agent)
         return policy?.isPaused == true ? "Resume Access" : "Pause Access"
+    }
+
+    private static func bootstrapStore() -> ManifoldStore {
+        switch AppTestMode.current {
+        case .live:
+            return ManifoldStore()
+        case .fixture(let profile):
+            let runtime = FixtureRuntimeClient(profile: profile)
+            let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: profile))
+            let store = ManifoldStore(runtime: runtime, integrationHealth: health, startServices: false)
+            store.setup.hasCompletedOnboarding = profile != .onboarding
+            if profile == .emailRules {
+                store.selectedTab = .emails
+                store.agentFocus = .claude
+            }
+            return store
+        }
     }
 
 }

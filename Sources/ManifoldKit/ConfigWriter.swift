@@ -90,12 +90,7 @@ public struct ConfigWriter {
     public func installCodex() throws {
         let configDir = homeDir.appendingPathComponent(".codex")
         let configFile = configDir.appendingPathComponent("config.toml")
-
-        // Only install if Codex directory exists
-        guard FileManager.default.fileExists(atPath: configDir.path) else {
-            print("Codex not found (~/.codex/ does not exist). Skipping.")
-            return
-        }
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
 
         var content = ""
         if let existing = try? String(contentsOf: configFile, encoding: .utf8) {

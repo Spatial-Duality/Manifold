@@ -19,11 +19,11 @@ final class PolicyModel {
     var codexCoverage: AgentCoverageSnapshot?
     var coverageEvents: [CoverageEvent] = []
 
-    private var client: AppRuntimeClient?
+    private var client: (any RuntimeClientProtocol)?
 
     init() {}
 
-    func configure(client: AppRuntimeClient) {
+    func configure(client: any RuntimeClientProtocol) {
         self.client = client
     }
 

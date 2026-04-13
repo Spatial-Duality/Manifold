@@ -27,6 +27,8 @@ struct OverviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Manifold")
         .navigationSubtitle(statusSubtitle)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("overview.screen")
         .task {
             await store.loadSummary()
             await store.policy.loadPolicies()
@@ -64,12 +66,10 @@ struct OverviewView: View {
 
         let claudeSourceData = activeSources.map { source in
             (name: source.displayName,
-             count: 0, // count populated by lazy enumeration elsewhere
              hasAccess: claudePolicy?.allowedSourceIDs.contains(source.sourceID) == true)
         }
         let codexSourceData = activeSources.map { source in
             (name: source.displayName,
-             count: 0,
              hasAccess: codexPolicy?.allowedSourceIDs.contains(source.sourceID) == true)
         }
 
@@ -160,6 +160,7 @@ struct OverviewView: View {
                     Text("Start Tracked Work Block")
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("overview.startTrackedWorkBlock")
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)

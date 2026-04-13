@@ -20,14 +20,13 @@ final class EmailAccountModel {
         syncStates.values.contains { states in states.contains { $0.syncStatus == .syncing } }
     }
 
-    private var client: AppRuntimeClient?
+    private var client: (any RuntimeClientProtocol)?
     private var backupInfo: EmailBackupInfo?
 
     init() {}
 
-    func configure(client: AppRuntimeClient) {
+    func configure(client: any RuntimeClientProtocol) {
         self.client = client
-        Task { await loadAccounts() }
     }
 
     func loadAccounts() async {
