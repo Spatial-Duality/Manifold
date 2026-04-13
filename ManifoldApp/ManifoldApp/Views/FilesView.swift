@@ -15,9 +15,7 @@ struct FilesView: View {
     @State private var reloadTask: Task<Void, Never>?
     @State private var contentSearchTask: Task<Void, Never>?
     @State private var filterSource = "All"
-    @State private var filterType = "All"
     @State private var cachedSourceNames: [String] = ["All"]
-    @State private var cachedFileTypes: [String] = ["All"]
 
     private var selectedSourceID: String? {
         guard case let .source(sourceID)? = sidebarSelection else { return nil }
@@ -75,11 +73,9 @@ struct FilesView: View {
             // File table
             if filteredFiles.isEmpty {
                 ContentUnavailableView {
-                    Label(allFiles.isEmpty ? "No Files" : "No Matches", systemImage: "doc")
+                    Label(emptyStateTitle, systemImage: emptyStateIcon)
                 } description: {
-                    Text(allFiles.isEmpty
-                        ? "Add a source folder from the Files sidebar to browse files."
-                        : "No files match your filters.")
+                    Text(emptyStateDescription)
                 }
             } else {
                 Table(filteredFiles, selection: $selectedFileIDs, sortOrder: $tableSortOrder) {
@@ -184,7 +180,6 @@ struct FilesView: View {
         .onChange(of: store.activeGrantSources.count) { _, _ in scheduleReload() }
         .onChange(of: searchText) { _, _ in scheduleFilter() }
         .onChange(of: filterSource) { _, _ in scheduleFilter() }
-        .onChange(of: filterType) { _, _ in scheduleFilter() }
     }
 
     // MARK: - Context Menu
@@ -250,7 +245,32 @@ struct FilesView: View {
 
     private func rebuildPickerCaches() {
         cachedSourceNames = ["All"] + Array(Set(allFiles.map(\.sourceName))).sorted()
-        cachedFileTypes = ["All"] + Array(Set(allFiles.map(\.fileExtension).filter { !$0.isEmpty })).sorted()
+    }
+
+    private var emptyStateTitle: String {
+        if !store.isRuntimeConnected { return "Runtime Disconnected" }
+        if allFiles.isEmpty && store.sources.isEmpty { return "No Sources" }
+        if allFiles.isEmpty { return "No Files" }
+        return "No Matches"
+    }
+
+    private var emptyStateDescription: String {
+        if !store.isRuntimeConnected {
+            return "Manifold can’t reach its runtime, so the Files view can’t load tracked sources yet."
+        }
+        if allFiles.isEmpty && store.sources.isEmpty {
+            return "Add a source folder from the Files sidebar to browse files."
+        }
+        if allFiles.isEmpty {
+            return "Your current sources do not contain any indexed files yet."
+        }
+        return "No files match your filters."
+    }
+
+    private var emptyStateIcon: String {
+        if !store.isRuntimeConnected { return "bolt.horizontal.circle" }
+        if allFiles.isEmpty && store.sources.isEmpty { return "folder.badge.plus" }
+        return "doc"
     }
 
     /// Runs filtering off the main thread, then assigns results back.
@@ -259,7 +279,6 @@ struct FilesView: View {
         let snapshot = allFiles
         let source = selectedSourceID
         let sourceName = filterSource
-        let fileType = filterType
         let aiTouched = isAITouchedSelection
         let query = searchText
         let sortOrder = tableSortOrder
@@ -271,9 +290,6 @@ struct FilesView: View {
                 items = items.filter { $0.sourceID == source }
             } else if sourceName != "All" {
                 items = items.filter { $0.sourceName == sourceName }
-            }
-            if fileType != "All" {
-                items = items.filter { $0.fileExtension == fileType }
             }
             if aiTouched {
                 items = items.filter(\.hasAIActivity)

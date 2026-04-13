@@ -244,7 +244,7 @@ Manifold's voice is **calm, factual, and respectful of the user's intelligence**
 - Never use exclamation marks in error or warning copy
 - Avoid "Oops", "Uh oh", "Something went wrong" — these are filler, not information
 
-### 10.2 Label conventions (from v4.1 Copy Guide)
+### 10.2 Label conventions for the current product model
 
 - "Pause Access" / "Resume Access" — not a toggle, a button
 - "Review & Update Access" — the sheet name
@@ -357,7 +357,7 @@ The "[Agent]" label reflects the currently focused agent (Claude or Codex).
 ### 13.2 ⌘Z support
 
 - `UndoManager` integration for narrowing actions (source removal, domain removal)
-- v5.2 Phase 9.8 covers the architecture — this standard covers the visual consistency
+- Keyboard undo support is required where the action model supports it. This standard covers the visual consistency.
 
 ---
 

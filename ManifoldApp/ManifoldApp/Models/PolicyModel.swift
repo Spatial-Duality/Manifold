@@ -9,7 +9,12 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 final class PolicyModel {
     var claudePolicy: AgentAccessPolicy?
     var codexPolicy: AgentAccessPolicy?
+    var claudeEmailGovernance: AgentEmailGovernanceSummary?
+    var codexEmailGovernance: AgentEmailGovernanceSummary?
     var activeWorkBlock: WorkBlockRecord?
+    var claudeCoverage: AgentCoverageSnapshot?
+    var codexCoverage: AgentCoverageSnapshot?
+    var coverageEvents: [CoverageEvent] = []
 
     private var client: AppRuntimeClient?
 
@@ -25,7 +30,12 @@ final class PolicyModel {
             let state = try await client.policies()
             claudePolicy = state.claudePolicy
             codexPolicy = state.codexPolicy
+            claudeEmailGovernance = state.claudeEmailGovernance
+            codexEmailGovernance = state.codexEmailGovernance
             activeWorkBlock = state.activeWorkBlock
+            claudeCoverage = state.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
+            codexCoverage = state.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
+            coverageEvents = state.coverageEvents
         } catch {
             logger.error("Failed to load policies: \(error.localizedDescription)")
         }
@@ -80,33 +90,13 @@ final class PolicyModel {
         }
     }
 
-    func addEmailDomain(_ domain: String, to agent: TargetApp) async {
+    func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async {
         guard let client else { return }
         do {
-            try await client.addEmailDomain(domain, to: agent)
+            try await client.updateAccessRecordingLevel(level, for: agent)
             await loadPolicies()
         } catch {
-            logger.error("Failed to add domain: \(error.localizedDescription)")
-        }
-    }
-
-    func removeEmailDomain(_ domain: String, from agent: TargetApp) async {
-        guard let client else { return }
-        do {
-            try await client.removeEmailDomain(domain, from: agent)
-            await loadPolicies()
-        } catch {
-            logger.error("Failed to remove domain: \(error.localizedDescription)")
-        }
-    }
-
-    func updateSensitivity(_ level: EmailSensitivityLevel, for agent: TargetApp) async {
-        guard let client else { return }
-        do {
-            try await client.updateSensitivity(level, for: agent)
-            await loadPolicies()
-        } catch {
-            logger.error("Failed to update sensitivity: \(error.localizedDescription)")
+            logger.error("Failed to update access recording level: \(error.localizedDescription)")
         }
     }
 
@@ -166,6 +156,14 @@ final class PolicyModel {
 
     func policy(for agent: TargetApp) -> AgentAccessPolicy? {
         agent == .codex ? codexPolicy : claudePolicy
+    }
+
+    func coverage(for agent: TargetApp) -> AgentCoverageSnapshot? {
+        agent == .codex ? codexCoverage : claudeCoverage
+    }
+
+    func emailGovernance(for agent: TargetApp) -> AgentEmailGovernanceSummary? {
+        agent == .codex ? codexEmailGovernance : claudeEmailGovernance
     }
 
     var isAnyAgentPaused: Bool {

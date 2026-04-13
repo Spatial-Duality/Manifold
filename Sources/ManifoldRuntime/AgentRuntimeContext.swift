@@ -22,6 +22,7 @@ struct AgentRuntimeContext: Sendable {
     var modelHint: String?
     var initializeKeys: [String]
     var capabilityKeys: [String]
+    var verifiedClientIdentity: VerifiedClientIdentity?
 
     init(
         connectionID: String? = nil,
@@ -54,6 +55,7 @@ struct AgentRuntimeContext: Sendable {
         )
         self.initializeKeys = []
         self.capabilityKeys = []
+        self.verifiedClientIdentity = nil
     }
 
     mutating func mergeInitializeParams(_ params: [String: Any]) {
@@ -118,6 +120,24 @@ struct AgentRuntimeContext: Sendable {
         if let modelHint {
             metadata["model_hint"] = modelHint
         }
+        if let verifiedClientIdentity {
+            metadata["verification_status"] = verifiedClientIdentity.status.rawValue
+            metadata["requested_target_app"] = verifiedClientIdentity.requestedTargetApp
+            if let effectiveTargetApp = verifiedClientIdentity.effectiveTargetApp {
+                metadata["effective_target_app"] = effectiveTargetApp
+            }
+            metadata["client_pid"] = "\(verifiedClientIdentity.clientProcessID)"
+            if let hostProcessID = verifiedClientIdentity.hostProcessID {
+                metadata["host_pid"] = "\(hostProcessID)"
+            }
+            if let hostBundleIdentifier = verifiedClientIdentity.hostBundleIdentifier {
+                metadata["host_bundle_id"] = hostBundleIdentifier
+            }
+            if let hostExecutablePath = verifiedClientIdentity.hostExecutablePath {
+                metadata["host_executable_path"] = hostExecutablePath
+            }
+            metadata["verification_reason"] = verifiedClientIdentity.reason
+        }
         if !initializeKeys.isEmpty {
             metadata["initialize_keys"] = initializeKeys.joined(separator: ",")
         }
@@ -146,7 +166,21 @@ struct AgentRuntimeContext: Sendable {
         if let modelHint {
             metadata["model_hint"] = modelHint
         }
+        if let verifiedClientIdentity {
+            metadata["verification_status"] = verifiedClientIdentity.status.rawValue
+            metadata["requested_target_app"] = verifiedClientIdentity.requestedTargetApp
+            if let effectiveTargetApp = verifiedClientIdentity.effectiveTargetApp {
+                metadata["effective_target_app"] = effectiveTargetApp
+            }
+            if let hostBundleIdentifier = verifiedClientIdentity.hostBundleIdentifier {
+                metadata["host_bundle_id"] = hostBundleIdentifier
+            }
+        }
         return metadata
+    }
+
+    mutating func updateVerifiedClientIdentity(_ identity: VerifiedClientIdentity) {
+        verifiedClientIdentity = identity
     }
 
     private static func stringValue(in dictionary: [String: Any], path: [String]) -> String? {

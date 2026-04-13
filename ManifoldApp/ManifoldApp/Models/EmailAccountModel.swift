@@ -9,9 +9,8 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 final class EmailAccountModel {
     var accounts: [EmailAccountRecord] = []
     var syncStates: [String: [SyncStateRecord]] = [:]
-    var isAddingAccount = false
-    var selectedAccountID: String?
     var totalMessageCount: Int = 0
+    var mailboxRefreshToken: Int = 0
 
     /// Whether any account is currently syncing.
     var isSyncing: Bool {
@@ -31,19 +30,20 @@ final class EmailAccountModel {
     func loadAccounts() async {
         guard let client else { return }
         do {
-            accounts = try await client.listEmailAccounts()
-            totalMessageCount = try await client.emailMessageCount()
-            backupInfo = try? await client.emailBackupInfo()
+            let fetchedAccounts = try await client.listEmailAccounts()
+            let fetchedMessageCount = try await client.emailMessageCount()
+            let fetchedBackupInfo = try? await client.emailBackupInfo()
             var nextStates: [String: [SyncStateRecord]] = [:]
-            for account in accounts {
+            for account in fetchedAccounts {
                 nextStates[account.accountID] = try await client.syncStates(accountID: account.accountID)
             }
+            accounts = fetchedAccounts
+            totalMessageCount = fetchedMessageCount
+            backupInfo = fetchedBackupInfo
             syncStates = nextStates
+            mailboxRefreshToken &+= 1
         } catch {
             logger.error("Failed to load email accounts: \(error.localizedDescription)")
-            accounts = []
-            syncStates = [:]
-            totalMessageCount = 0
         }
     }
 
@@ -121,16 +121,6 @@ final class EmailAccountModel {
         return (try? await client.emailMessages(ids: ids)) ?? []
     }
 
-    func messages(accountID: String, mailbox: String, limit: Int = 500) async -> [EmailMessageRecord] {
-        guard let client else { return [] }
-        return (try? await client.emailMessages(accountID: accountID, mailbox: mailbox, limit: limit)) ?? []
-    }
-
-    func mailboxes(accountID: String) async -> [(name: String, count: Int)] {
-        guard let client else { return [] }
-        return ((try? await client.mailboxes(accountID: accountID)) ?? []).map { ($0.name, $0.count) }
-    }
-
     func domainCounts() async -> [String: Int] {
         guard let client else { return [:] }
         return (try? await client.domainCounts()) ?? [:]
@@ -165,7 +155,13 @@ final class EmailAccountModel {
 
     func messagesInMailbox(accountID: String, mailbox: String, limit: Int = 500) async -> [EmailMessageRecord] {
         guard let client else { return [] }
-        return (try? await client.emailMessages(accountID: accountID, mailbox: mailbox, limit: limit)) ?? []
+        let resolvedMailbox = await resolvedMailboxName(accountID: accountID, requestedName: mailbox)
+        return (try? await client.emailMessages(accountID: accountID, mailbox: resolvedMailbox, limit: limit)) ?? []
+    }
+
+    func resolvedMailboxName(accountID: String, requestedName: String) async -> String {
+        let mailboxes = await imapMailboxes(accountID: accountID)
+        return MailboxResolver.resolve(requestedName: requestedName, imapMailboxes: mailboxes)
     }
 
     func sharedEmailCount() async -> Int {
@@ -264,25 +260,7 @@ final class EmailAccountModel {
         try await client.deleteSmartMailbox(mailboxID: mailboxID)
     }
 
-    func smartMailboxCount(rulesJSON: String) async -> Int {
-        guard let client else { return 0 }
-        return (try? await client.smartMailboxCount(rulesJSON: rulesJSON)) ?? 0
-    }
-
-    func smartMailboxMessages(rulesJSON: String, sortKey: EmailSortKey = .date) async -> [EmailMessageRecord] {
-        guard let client else { return [] }
-        return (try? await client.smartMailboxMessages(rulesJSON: rulesJSON, sortKey: sortKey)) ?? []
-    }
-
     var backupRootPath: String {
         backupInfo?.path ?? EmailSyncEngine.backupRoot.path
-    }
-
-    var backupDiskUsage: Int64 {
-        backupInfo?.diskUsage ?? 0
-    }
-
-    func registerAllAccounts() async {
-        await loadAccounts()
     }
 }

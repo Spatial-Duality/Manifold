@@ -258,4 +258,140 @@ struct DatabaseMigratorTests {
         #expect(summaryColumnNames.contains("summary_kind"))
         #expect(summaryColumnNames.contains("summary_origin"))
     }
+
+    @Test("Migration v18 adds exposure previews and client identity columns")
+    func governanceSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let decisionColumns = try db.queryAll("PRAGMA table_info(access_decisions)")
+        let decisionColumnNames = Set(decisionColumns.compactMap { $0["name"] })
+        #expect(decisionColumnNames.contains("client_identity"))
+
+        let exposureColumns = try db.queryAll("PRAGMA table_info(exposure_records)")
+        let exposureColumnNames = Set(exposureColumns.compactMap { $0["name"] })
+        #expect(exposureColumnNames.contains("payload_preview"))
+        #expect(exposureColumnNames.contains("payload_preview_truncated"))
+        #expect(exposureColumnNames.contains("client_identity"))
+    }
+
+    @Test("Migration v19 adds access recording and intent columns")
+    func accessRecordingSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let policyColumns = try db.queryAll("PRAGMA table_info(agent_access_policies)")
+        let policyColumnNames = Set(policyColumns.compactMap { $0["name"] })
+        #expect(policyColumnNames.contains("access_recording_level"))
+
+        let decisionColumns = try db.queryAll("PRAGMA table_info(access_decisions)")
+        let decisionColumnNames = Set(decisionColumns.compactMap { $0["name"] })
+        #expect(decisionColumnNames.contains("intent_summary"))
+        #expect(decisionColumnNames.contains("intent_details"))
+
+        let exposureColumns = try db.queryAll("PRAGMA table_info(exposure_records)")
+        let exposureColumnNames = Set(exposureColumns.compactMap { $0["name"] })
+        #expect(exposureColumnNames.contains("intent_summary"))
+        #expect(exposureColumnNames.contains("intent_details"))
+    }
+
+    @Test("Migration v20 backfills runtime email rules from legacy allowed domains")
+    func emailRulesRuntimeizationMigration() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )
+        """)
+        for version in 1 ... 19 {
+            try db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                params: ["\(version)", ISO8601DateFormatter.shared.string(from: Date())]
+            )
+        }
+
+        try db.execute("""
+            CREATE TABLE agent_access_policies (
+                policy_id TEXT PRIMARY KEY,
+                agent TEXT NOT NULL UNIQUE,
+                allowed_source_ids TEXT NOT NULL DEFAULT '[]',
+                allowed_email_domains TEXT NOT NULL DEFAULT '[]',
+                email_sensitivity TEXT NOT NULL DEFAULT 'moderate',
+                is_paused INTEGER NOT NULL DEFAULT 0,
+                has_completed_first_grant INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                access_recording_level TEXT NOT NULL DEFAULT 'lightweight'
+            )
+        """)
+        try db.execute("""
+            CREATE TABLE access_decisions (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                resource_path TEXT,
+                action TEXT NOT NULL,
+                allowed INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                access_mode TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                policy_snapshot TEXT,
+                client_identity TEXT,
+                intent_summary TEXT,
+                intent_details TEXT
+            )
+        """)
+        try db.execute("""
+            CREATE TABLE exposure_records (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                resource_path TEXT,
+                byte_count INTEGER NOT NULL,
+                content_hash TEXT NOT NULL,
+                exposure_type TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                access_decision_id TEXT NOT NULL,
+                payload_preview TEXT,
+                payload_preview_truncated INTEGER NOT NULL DEFAULT 0,
+                client_identity TEXT,
+                intent_summary TEXT,
+                intent_details TEXT
+            )
+        """)
+
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO agent_access_policies
+                (policy_id, agent, allowed_source_ids, allowed_email_domains, email_sensitivity, is_paused, has_completed_first_grant, created_at, updated_at, access_recording_level)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params: ["policy-cowork", "cowork", "[]", "[\"example.com\",\"alerts.example.com\"]", "moderate", "0", "0", now, now, "lightweight"]
+        )
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let policyColumns = try db.queryAll("PRAGMA table_info(agent_access_policies)")
+        let policyColumnNames = Set(policyColumns.compactMap { $0["name"] })
+        #expect(policyColumnNames.contains("default_email_policy"))
+
+        let rules = try db.queryAll("SELECT agent, domain, action FROM email_domain_rules ORDER BY domain ASC")
+        #expect(rules.count == 2)
+        #expect(rules.allSatisfy { $0["agent"] == "cowork" && $0["action"] == "allow" })
+        #expect(rules.map { $0["domain"] ?? "" } == ["alerts.example.com", "example.com"])
+    }
 }

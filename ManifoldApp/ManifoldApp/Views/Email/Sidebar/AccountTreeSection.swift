@@ -90,7 +90,7 @@ struct AccountTreeSection: View {
                 }
             }
         }
-        .task {
+        .task(id: store.emailAccounts.mailboxRefreshToken) {
             imapMailboxes = await store.emailAccounts.imapMailboxes(accountID: account.accountID)
         }
     }

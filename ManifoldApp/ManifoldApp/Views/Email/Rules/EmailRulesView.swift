@@ -7,6 +7,7 @@ struct EmailRulesView: View {
     @Environment(ManifoldStore.self) var store
     @State private var rulesModel = EmailRulesModel()
     @State private var selectedItem: RulesSidebarItem? = .dashboard
+    @State private var selectedAgent: TargetApp = .cowork
 
     enum RulesSidebarItem: Hashable {
         case dashboard
@@ -14,7 +15,7 @@ struct EmailRulesView: View {
         case domains
         case contacts
         case keywords
-        case defaults
+        case policy
     }
 
     var body: some View {
@@ -22,24 +23,40 @@ struct EmailRulesView: View {
             rulesSidebar
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
-            switch selectedItem {
-            case .dashboard, .none:
-                RulesDashboardView(rulesModel: rulesModel)
-            case .shield(let shieldID):
-                if let idx = rulesModel.shields.firstIndex(where: { $0.id == shieldID }) {
-                    ShieldDetailView(shield: $rulesModel.shields[idx])
+            VStack(spacing: 0) {
+                rulesHeader
+                Divider()
+                Group {
+                    switch selectedItem {
+                    case .dashboard, .none:
+                        RulesDashboardView(rulesModel: rulesModel, selectedAgent: selectedAgent)
+                    case .shield(let shieldID):
+                        if let shield = rulesModel.shields.first(where: { $0.id == shieldID }) {
+                            ShieldDetailView(shield: shield) { enabled in
+                                Task { await rulesModel.toggleShield(shieldID: shieldID, isEnabled: enabled) }
+                            }
+                        }
+                    case .domains:
+                        DomainRulesView(rulesModel: rulesModel, selectedAgent: selectedAgent)
+                    case .contacts:
+                        ContactRulesView(rulesModel: rulesModel, selectedAgent: selectedAgent)
+                    case .keywords:
+                        KeywordRulesView(rulesModel: rulesModel, selectedAgent: selectedAgent)
+                    case .policy:
+                        EmailPolicyView(rulesModel: rulesModel, selectedAgent: selectedAgent)
+                    }
                 }
-            case .domains:
-                DomainRulesView(rulesModel: rulesModel)
-            case .contacts:
-                ContactRulesView(rulesModel: rulesModel)
-            case .keywords:
-                KeywordRulesView(rulesModel: rulesModel)
-            case .defaults:
-                DefaultPolicyView(rulesModel: rulesModel)
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .task {
+            selectedAgent = store.agentFocus.targetApp
+            rulesModel.configure(client: store.runtime)
+            await rulesModel.load(agent: selectedAgent)
+        }
+        .task(id: selectedAgent) {
+            await rulesModel.load(agent: selectedAgent)
+        }
     }
 
     // MARK: - Rules Sidebar
@@ -117,8 +134,8 @@ struct EmailRulesView: View {
             .headerProminence(.increased)
 
             Section {
-                Label("Defaults", systemImage: "gearshape")
-                    .tag(RulesSidebarItem.defaults)
+                Label("Policy", systemImage: "gearshape")
+                    .tag(RulesSidebarItem.policy)
             } header: {
                 Text("Policy")
             }
@@ -133,5 +150,46 @@ struct EmailRulesView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Email Rules")
+    }
+
+    @ViewBuilder
+    private var rulesHeader: some View {
+        HStack(spacing: Spacing.standard) {
+            Picker("Agent", selection: $selectedAgent) {
+                Text("Claude").tag(TargetApp.cowork)
+                Text("Codex").tag(TargetApp.codex)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+
+            if let coverage = store.policy.coverage(for: selectedAgent) {
+                StatusBadge(
+                    text: coverage.coverageState.displayName,
+                    color: coverage.coverageState == .trackedWorkspace ? .statusActive :
+                        coverage.coverageState == .manifoldRouted ? .blue : .orange
+                )
+                StatusBadge(
+                    text: coverage.verificationStatus.displayName,
+                    color: coverage.verificationStatus == .verified ? .statusActive : .orange
+                )
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.section)
+        .padding(.vertical, 10)
+
+        if let errorMessage = rulesModel.errorMessage {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color.statusWarning)
+                Text(errorMessage)
+                    .font(Typ.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.section)
+            .padding(.bottom, 10)
+        }
     }
 }

@@ -44,7 +44,9 @@ final class IntegrationHealthModel {
     func checkClaude() async {
         claude.appInstalled = .checking
         claude.mcpConfigured = .checking
+        claude.claudeCodeConfigured = .checking
         claude.connectionVerified = .checking
+        claude.errorDetail = nil
 
         // 1. Claude Desktop.app installed?
         let appPath = "/Applications/Claude.app"
@@ -54,26 +56,41 @@ final class IntegrationHealthModel {
             || FileManager.default.fileExists(atPath: altPath)
             ? .installed : .notInstalled
 
-        // 2. Manifold MCP configured?
-        let configPath = FileManager.default.homeDirectoryForCurrentUser
+        // 2. Claude Desktop config valid?
+        let desktopConfigPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json").path
-        if let data = FileManager.default.contents(atPath: configPath),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let servers = json["mcpServers"] as? [String: Any],
-           servers.keys.contains(where: { $0.lowercased().contains("manifold") }) {
-            claude.mcpConfigured = .installed
-        } else {
-            claude.mcpConfigured = .notInstalled
-        }
+        let desktopConfig = validateJSONConfig(
+            at: desktopConfigPath,
+            agent: .cowork,
+            label: "Claude Desktop"
+        )
+        claude.mcpConfigured = desktopConfig.status
 
-        // 3. Live connection?
+        // 3. Claude Code config valid?
+        let claudeCodePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/settings.json").path
+        let claudeCodeConfig = validateJSONConfig(
+            at: claudeCodePath,
+            agent: .cowork,
+            label: "Claude Code"
+        )
+        claude.claudeCodeConfigured = claudeCodeConfig.status
+
+        // 4. Live connection?
         if let store, store.isClaudeConnected {
             claude.connectionVerified = .connected
-        } else if claude.mcpConfigured == .installed {
+        } else if desktopConfig.status.isPassingCheck || claudeCodeConfig.status.isPassingCheck {
             claude.connectionVerified = .configured
+        } else if desktopConfig.status == .error || claudeCodeConfig.status == .error {
+            claude.connectionVerified = .error
         } else {
             claude.connectionVerified = .notInstalled
         }
+
+        claude.errorDetail = [desktopConfig.detail, claudeCodeConfig.detail]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+            .nilIfEmpty
     }
 
     // MARK: - Codex Checks
@@ -81,6 +98,7 @@ final class IntegrationHealthModel {
     func checkCodex() async {
         codex.cliInstalled = .checking
         codex.mcpAdded = .checking
+        codex.errorDetail = nil
 
         // 1. Codex CLI installed?
         let paths = ["/usr/local/bin/codex", "/opt/homebrew/bin/codex",
@@ -94,14 +112,127 @@ final class IntegrationHealthModel {
             return
         }
 
-        // 2. Manifold in config.toml?
+        // 2. Manifold config valid?
         let tomlPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/config.toml").path
-        if let contents = try? String(contentsOfFile: tomlPath, encoding: .utf8),
-           contents.contains("[mcp_servers.manifold]") || contents.contains("mcp_servers.manifold") {
-            codex.mcpAdded = .installed
+        let codexConfig = validateCodexConfig(at: tomlPath, agent: .codex)
+        if let store, store.isCodexConnected, codexConfig.status == .installed {
+            codex.mcpAdded = .connected
         } else {
-            codex.mcpAdded = .notInstalled
+            codex.mcpAdded = codexConfig.status
         }
+        codex.errorDetail = codexConfig.detail
+    }
+
+    private func validateJSONConfig(at path: String, agent: TargetApp, label: String) -> ConfigValidation {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return .init(status: .notInstalled)
+        }
+        guard let data = FileManager.default.contents(atPath: path) else {
+            return .init(status: .error, detail: "\(label) config exists but could not be read.")
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .init(status: .error, detail: "\(label) config is not valid JSON.")
+        }
+        guard let servers = json["mcpServers"] as? [String: Any],
+              let manifold = servers["manifold"] as? [String: Any] else {
+            return .init(status: .notInstalled)
+        }
+        return validateServerEntry(manifold, agent: agent, label: label)
+    }
+
+    private func validateCodexConfig(at path: String, agent: TargetApp) -> ConfigValidation {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return .init(status: .notInstalled)
+        }
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
+            return .init(status: .error, detail: "Codex config exists but could not be read.")
+        }
+        guard let block = codexServerBlock(in: contents) else {
+            return .init(status: .notInstalled)
+        }
+
+        let commandPattern = #"\bcommand\s*=\s*"([^"]+)""#
+        guard let command = firstCapture(in: block, pattern: commandPattern) else {
+            return .init(status: .error, detail: "Codex Manifold config is missing its command path.")
+        }
+        guard FileManager.default.isExecutableFile(atPath: command) || FileManager.default.fileExists(atPath: command) else {
+            return .init(status: .error, detail: "Codex Manifold command path does not exist: \(command)")
+        }
+
+        let expectedArgs = ConfigWriter.expectedArguments(for: agent)
+        let argsPattern = #"args\s*=\s*\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]"#
+        guard let firstArg = firstCapture(in: block, pattern: argsPattern, group: 1),
+              let secondArg = firstCapture(in: block, pattern: argsPattern, group: 2),
+              [firstArg, secondArg] == expectedArgs else {
+            return .init(
+                status: .error,
+                detail: "Codex Manifold config must include args \(expectedArgs.joined(separator: " "))."
+            )
+        }
+
+        return .init(status: .installed)
+    }
+
+    private func validateServerEntry(_ server: [String: Any], agent: TargetApp, label: String) -> ConfigValidation {
+        guard let command = server["command"] as? String, !command.isEmpty else {
+            return .init(status: .error, detail: "\(label) Manifold config is missing its command path.")
+        }
+        guard FileManager.default.isExecutableFile(atPath: command) || FileManager.default.fileExists(atPath: command) else {
+            return .init(status: .error, detail: "\(label) Manifold command path does not exist: \(command)")
+        }
+
+        let expectedArgs = ConfigWriter.expectedArguments(for: agent)
+        let args = server["args"] as? [String] ?? []
+        guard args == expectedArgs else {
+            return .init(
+                status: .error,
+                detail: "\(label) Manifold config must include args \(expectedArgs.joined(separator: " "))."
+            )
+        }
+        return .init(status: .installed)
+    }
+
+    private func codexServerBlock(in contents: String) -> String? {
+        let patterns = [
+            #"\[mcp_servers\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
+            #"\[mcp\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
+            guard let match = regex.firstMatch(in: contents, options: [], range: range),
+                  let blockRange = Range(match.range, in: contents) else { continue }
+            return String(contents[blockRange])
+        }
+
+        return nil
+    }
+
+    private func firstCapture(in text: String, pattern: String, group: Int = 1) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              let captureRange = Range(match.range(at: group), in: text) else {
+            return nil
+        }
+        return String(text[captureRange])
+    }
+}
+
+private struct ConfigValidation {
+    let status: AgentConnectionStatus
+    let detail: String?
+
+    init(status: AgentConnectionStatus, detail: String? = nil) {
+        self.status = status
+        self.detail = detail
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

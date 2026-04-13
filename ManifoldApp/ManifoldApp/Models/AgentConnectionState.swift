@@ -5,6 +5,15 @@ import ManifoldKit
 public enum AgentConnectionStatus: String, Sendable {
     case unknown, checking, notInstalled, installed, configured, connected, error
 
+    var isPassingCheck: Bool {
+        switch self {
+        case .installed, .configured, .connected:
+            return true
+        case .unknown, .checking, .notInstalled, .error:
+            return false
+        }
+    }
+
     var displayLabel: String {
         switch self {
         case .unknown: ""
@@ -24,12 +33,13 @@ public enum AgentConnectionStatus: String, Sendable {
 public final class AgentConnectionState: Identifiable {
     public let id: TargetApp
 
-    // Claude (3 checks)
+    // Claude checks
     var appInstalled: AgentConnectionStatus = .unknown
     var mcpConfigured: AgentConnectionStatus = .unknown
+    var claudeCodeConfigured: AgentConnectionStatus = .unknown
     var connectionVerified: AgentConnectionStatus = .unknown
 
-    // Codex (2 checks)
+    // Codex checks
     var cliInstalled: AgentConnectionStatus = .unknown
     var mcpAdded: AgentConnectionStatus = .unknown
 
@@ -39,14 +49,15 @@ public final class AgentConnectionState: Identifiable {
         switch id {
         case .cowork:
             if connectionVerified == .connected { return .connected }
-            if [appInstalled, mcpConfigured, connectionVerified].contains(.error) { return .error }
-            if appInstalled == .notInstalled { return .notInstalled }
-            if mcpConfigured == .installed { return .configured }
+            if [appInstalled, mcpConfigured, claudeCodeConfigured, connectionVerified].contains(.error) { return .error }
+            if mcpConfigured.isPassingCheck || claudeCodeConfigured.isPassingCheck { return .configured }
+            if appInstalled == .installed { return .installed }
             return .notInstalled
         case .codex:
-            if mcpAdded == .installed { return .configured }
+            if mcpAdded == .connected { return .connected }
             if [cliInstalled, mcpAdded].contains(.error) { return .error }
-            if cliInstalled == .notInstalled { return .notInstalled }
+            if mcpAdded.isPassingCheck { return .configured }
+            if cliInstalled == .installed { return .installed }
             return .notInstalled
         }
     }

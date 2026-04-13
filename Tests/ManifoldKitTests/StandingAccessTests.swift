@@ -17,6 +17,7 @@ struct StandingAccessTests {
         let emailStore: EmailStore
         let artifactIndex: ArtifactIndex
         let policyStore: PolicyStore
+        let emailRuleStore: EmailRuleStore
         let workBlockStore: WorkBlockStore
         let approvalQueue: ApprovalQueue
         let exposureStore: ExposureStore
@@ -25,7 +26,7 @@ struct StandingAccessTests {
         let connectionID: String
     }
 
-    func makeHarness() throws -> Harness {
+    func makeHarness(targetApp: TargetApp = .cowork) throws -> Harness {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("manifold-standing-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -40,6 +41,7 @@ struct StandingAccessTests {
         let emailStore = EmailStore(db: db)
         let artifactIndex = try ArtifactIndex(db: db)
         let policyStore = PolicyStore(db: db)
+        let emailRuleStore = EmailRuleStore(db: db, policyStore: policyStore)
         let workBlockStore = WorkBlockStore(db: db)
         let approvalQueue = ApprovalQueue(db: db)
         let exposureStore = ExposureStore(db: db)
@@ -54,16 +56,18 @@ struct StandingAccessTests {
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
             policyStore: policyStore,
+            emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore,
             approvalQueue: approvalQueue,
             exposureStore: exposureStore,
+            targetApp: targetApp,
             connectionID: connectionID
         )
 
         return Harness(
             db: db, contentStore: contentStore, snapshotStore: snapshotStore,
             auditStore: auditStore, grantStore: grantStore, emailStore: emailStore,
-            artifactIndex: artifactIndex, policyStore: policyStore,
+            artifactIndex: artifactIndex, policyStore: policyStore, emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore, approvalQueue: approvalQueue,
             exposureStore: exposureStore, bridge: bridge, tempDir: tempDir,
             connectionID: connectionID
@@ -82,16 +86,62 @@ struct StandingAccessTests {
         return try await harness.grantStore.addSource(displayName: name, rootPath: sourceDir.path)
     }
 
+    func createEmail(
+        harness: Harness,
+        id: String,
+        sender: String,
+        senderEmail: String,
+        senderDomain: String,
+        subject: String,
+        body: String
+    ) throws {
+        let emlURL = harness.tempDir.appendingPathComponent("emails/\(id).eml")
+        try FileManager.default.createDirectory(at: emlURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(body.utf8).write(to: emlURL)
+        let account = try harness.emailStore.addEmailAccount(
+            displayName: "Test Account \(id)",
+            providerType: "other",
+            server: nil,
+            port: nil,
+            username: "user@example.com"
+        )
+        try harness.emailStore.upsertEmailMessage(
+            emailID: id,
+            accountID: account.accountID,
+            mailbox: "Inbox",
+            sender: sender,
+            senderEmail: senderEmail,
+            senderDomain: senderDomain,
+            recipients: "user@example.com",
+            subject: subject,
+            receivedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            emlPath: emlURL.path,
+            sizeBytes: body.utf8.count,
+            preview: body
+        )
+    }
+
     // MARK: - Status Tests
 
-    @Test("Status shows no access when policy is empty")
+    @Test("Status shows no access when a block-by-default agent has no standing grants")
     func emptyPolicyStatus() async throws {
-        let h = try makeHarness()
+        let h = try makeHarness(targetApp: .codex)
         defer { cleanup(h.tempDir) }
 
         let status = await h.bridge.getStatus()
         #expect(status.active == false)
         #expect(status.message.contains("No access configured"))
+    }
+
+    @Test("Claude default email policy counts as standing access even before explicit rules")
+    func defaultAllowEmailStatus() async throws {
+        let h = try makeHarness(targetApp: .cowork)
+        defer { cleanup(h.tempDir) }
+
+        let status = await h.bridge.getStatus()
+        #expect(status.active)
+        #expect(status.message.contains("standing access"))
+        #expect(status.message.contains("0 emails"))
     }
 
     @Test("Status shows standing access when policy has sources")
@@ -203,7 +253,158 @@ struct StandingAccessTests {
         #expect(exposures.contains {
             $0.toolName == "read_file" &&
             $0.exposureType == "full_file" &&
-            $0.byteCount == "hello world".utf8.count
+            $0.byteCount == "hello world".utf8.count &&
+            $0.payloadPreview == "hello world" &&
+            $0.payloadPreviewTruncated == false
         })
+    }
+
+    @Test("Summary access recording requires intent summary")
+    func summaryAccessRecordingRequiresIntent() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        try await h.policyStore.updateAccessRecordingLevel(.summary, for: .cowork)
+
+        do {
+            _ = try await h.bridge.readFile(path: "myapp/README.md")
+            Issue.record("Expected intent requirement error")
+        } catch let error as ManifoldMCPError {
+            if case .intentRequired = error {
+                // Expected
+            } else {
+                Issue.record("Expected intentRequired, got \(error)")
+            }
+        }
+
+        let content = try await h.bridge.readFile(
+            path: "myapp/README.md",
+            intent: AccessIntent(summary: "Checking the README before editing", details: nil)
+        )
+        #expect(content == "hello world")
+
+        let decisions = try await h.exposureStore.decisions(connectionID: h.connectionID, limit: 10)
+        #expect(decisions.contains { $0.intentSummary == "Checking the README before editing" })
+    }
+
+    @Test("Standing email access uses allowed domains without a tracked work block")
+    func standingEmailAccess() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        try createEmail(
+            harness: h,
+            id: "email-1",
+            sender: "Docs Team <updates@example.com>",
+            senderEmail: "updates@example.com",
+            senderDomain: "example.com",
+            subject: "Weekly project update",
+            body: "Project update for the governed workspace."
+        )
+
+        let emails = try await h.bridge.listEmails()
+        #expect(emails.count == 1)
+        #expect(emails.first?.id == "email-1")
+
+        let content = try await h.bridge.readEmail(id: "email-1")
+        #expect(content.contains("Project update"))
+    }
+
+    @Test("Standing email search is filtered by runtime email rules")
+    func standingEmailSearch() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        var ruleSet = try await h.emailRuleStore.ruleSet(for: .cowork)
+        ruleSet.defaultPolicy = .blockUnlessAllowed
+        ruleSet.domainRules = [
+            EmailDomainRule(agent: .cowork, domain: "example.com", action: .allow),
+        ]
+        try await h.emailRuleStore.updateRuleSet(ruleSet)
+
+        try createEmail(
+            harness: h,
+            id: "email-1",
+            sender: "Docs Team <updates@example.com>",
+            senderEmail: "updates@example.com",
+            senderDomain: "example.com",
+            subject: "Roadmap notes",
+            body: "Roadmap notes and shipping milestones."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-2",
+            sender: "Alerts <alerts@bank.com>",
+            senderEmail: "alerts@bank.com",
+            senderDomain: "bank.com",
+            subject: "Statement ready",
+            body: "Sensitive financial email."
+        )
+
+        let results = try await h.bridge.searchEmails(query: "Roadmap")
+        #expect(results.count == 1)
+        #expect(results.first?.emailID == "email-1")
+    }
+
+    @Test("Standing email access works when default policy allows mail without explicit allow rules")
+    func standingEmailAccessUsesDefaultAllowPolicy() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        var ruleSet = try await h.emailRuleStore.ruleSet(for: .cowork)
+        ruleSet.defaultPolicy = .allowUnlessBlocked
+        ruleSet.domainRules = []
+        ruleSet.contactRules = []
+        ruleSet.keywordRules = []
+        try await h.emailRuleStore.updateRuleSet(ruleSet)
+
+        try createEmail(
+            harness: h,
+            id: "email-default-allow",
+            sender: "Project Team <updates@docs.dev>",
+            senderEmail: "updates@docs.dev",
+            senderDomain: "docs.dev",
+            subject: "Project notes",
+            body: "Notes visible through standing access."
+        )
+
+        let emails = try await h.bridge.listEmails()
+        #expect(emails.contains { $0.id == "email-default-allow" })
+
+        let content = try await h.bridge.readEmail(id: "email-default-allow")
+        #expect(content.contains("Notes visible through standing access."))
+    }
+
+    @Test("Session context redacts emails hidden by current policy")
+    func sessionContextRedactsBlockedEmails() async throws {
+        let h = try makeHarness(targetApp: .codex)
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "History")
+        try await h.policyStore.addSource(sourceID, to: .codex)
+
+        try createEmail(
+            harness: h,
+            id: "email-hidden",
+            sender: "Payroll <payroll@work.com>",
+            senderEmail: "payroll@work.com",
+            senderDomain: "work.com",
+            subject: "Comp update",
+            body: "Confidential comp notes"
+        )
+
+        try await h.auditStore.log(
+            action: .fileRead,
+            agent: TargetApp.cowork.rawValue,
+            metadata: ["messageID": "email-hidden", "type": "email"]
+        )
+        let sessionID = try #require(try await h.auditStore.recentEntries(limit: 1).first?.sessionID)
+
+        let context = try await h.bridge.sessionContext(sessionID: sessionID)
+        let email = try #require(context.emails.first)
+        #expect(email.isRedacted)
+        #expect(email.from == "Redacted")
     }
 }

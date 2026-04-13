@@ -4,7 +4,7 @@ import ManifoldKit
 /// Rules Dashboard — protection summary, per-agent stats, active shields overview.
 struct RulesDashboardView: View {
     @Bindable var rulesModel: EmailRulesModel
-    @Environment(ManifoldStore.self) var store
+    let selectedAgent: TargetApp
 
     var body: some View {
         ScrollView {
@@ -18,21 +18,12 @@ struct RulesDashboardView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Per-agent stats
-                HStack(spacing: 12) {
-                    agentStatCard(
-                        name: "Claude",
-                        color: .claudeBlue,
-                        accessible: store.policy.claudePolicy?.allowedEmailDomains.count ?? 0,
-                        blocked: rulesModel.shields.filter(\.isEnabled).reduce(0) { $0 + $1.blockedCount }
-                    )
-                    agentStatCard(
-                        name: "Codex",
-                        color: .codexPurple,
-                        accessible: store.policy.codexPolicy?.allowedEmailDomains.count ?? 0,
-                        blocked: rulesModel.shields.filter(\.isEnabled).reduce(0) { $0 + $1.blockedCount }
-                    )
-                }
+                agentStatCard(
+                    name: selectedAgent == .codex ? "Codex" : "Claude",
+                    color: selectedAgent == .codex ? .codexPurple : .claudeBlue,
+                    accessible: rulesModel.domainRules.filter { $0.action == .allow }.count,
+                    blocked: rulesModel.shields.filter(\.isEnabled).reduce(0) { $0 + $1.blockedCount }
+                )
 
                 // Active shields
                 VStack(alignment: .leading, spacing: 8) {
@@ -71,6 +62,27 @@ struct RulesDashboardView: View {
                     } description: {
                         Text("Emails blocked by shields will appear here.")
                     }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Recent Shield Matches")
+                            .font(Typ.heading)
+                        ForEach(rulesModel.shields.flatMap(\.recentMatches).sorted { $0.date > $1.date }.prefix(8)) { match in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(match.subject)
+                                        .font(Typ.body)
+                                        .lineLimit(1)
+                                    Text(match.from)
+                                        .font(Typ.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(match.date, style: .relative)
+                                    .font(Typ.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
                 }
             }
             .padding(20)
@@ -83,7 +95,8 @@ struct RulesDashboardView: View {
         let activeShields = rulesModel.shields.filter(\.isEnabled).count
         let domainCount = rulesModel.domainRules.count
         let contactCount = rulesModel.contactRules.count
-        return "\(activeShields) shields active \u{00B7} \(domainCount) domain rules \u{00B7} \(contactCount) contact overrides"
+        let agentName = selectedAgent == .codex ? "Codex" : "Claude"
+        return "\(agentName): \(activeShields) shields active \u{00B7} \(domainCount) domain rules \u{00B7} \(contactCount) contact overrides"
     }
 
     private func agentStatCard(name: String, color: Color, accessible: Int, blocked: Int) -> some View {

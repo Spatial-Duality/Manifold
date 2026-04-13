@@ -4,12 +4,13 @@ import ManifoldKit
 /// Contact rules with inline creation form.
 struct ContactRulesView: View {
     @Bindable var rulesModel: EmailRulesModel
+    let selectedAgent: TargetApp
     @State private var showAddForm = false
 
     var body: some View {
         VStack(spacing: 0) {
             if showAddForm {
-                AddContactRuleForm(isPresented: $showAddForm, rulesModel: rulesModel)
+                AddContactRuleForm(isPresented: $showAddForm, rulesModel: rulesModel, selectedAgent: selectedAgent)
                 Divider()
             }
 
@@ -32,22 +33,18 @@ struct ContactRulesView: View {
                         StatusBadge(text: rule.action.rawValue.capitalized,
                                     color: rule.action == .allow ? .statusActive : .statusDanger)
                     }.width(70)
+                    TableColumn("Hits") { rule in
+                        Text("\(rule.matchedCount)").monospacedDigit().foregroundStyle(.secondary)
+                    }.width(60)
                     TableColumn("Overrides") { rule in
                         Text(rule.overridesDescription).font(Typ.caption).foregroundStyle(.secondary)
                     }.width(min: 100, ideal: 150)
-                    TableColumn("Agents") { rule in
-                        HStack(spacing: 4) {
-                            ForEach(rule.agents, id: \.self) { agent in
-                                Circle().fill(Color.agent(agent)).frame(width: 8, height: 8)
-                            }
-                        }
-                    }.width(60)
                 }
                 .tableStyle(.inset)
-                .contextMenu(forSelectionType: ContactRule.ID.self) { ids in
+                .contextMenu(forSelectionType: String.self) { ids in
                     if let id = ids.first {
                         Button("Delete Rule", role: .destructive) {
-                            rulesModel.removeContactRule(id: id)
+                            Task { await rulesModel.removeContactRule(id: id) }
                         }
                     }
                 }
@@ -70,11 +67,11 @@ struct ContactRulesView: View {
 private struct AddContactRuleForm: View {
     @Binding var isPresented: Bool
     @Bindable var rulesModel: EmailRulesModel
+    let selectedAgent: TargetApp
 
     @State private var name = ""
     @State private var email = ""
     @State private var action: RuleAction = .allow
-    @State private var selectedAgents: Set<TargetApp> = [.cowork, .codex]
     @FocusState private var nameFieldFocused: Bool
 
     private var isValid: Bool { email.contains("@") && email.contains(".") }
@@ -82,8 +79,7 @@ private struct AddContactRuleForm: View {
 
     private var previewText: String? {
         guard isValid else { return nil }
-        let agentLabel = selectedAgents.count == 2 ? "both agents" :
-            selectedAgents.contains(.cowork) ? "Claude" : "Codex"
+        let agentLabel = selectedAgent == .codex ? "Codex" : "Claude"
         let who = name.isEmpty ? email : name
         let domainNote = emailDomain.isEmpty ? "" : " \u{2014} overrides any @\(emailDomain) domain rule or shield"
         return action == .allow
@@ -125,11 +121,6 @@ private struct AddContactRuleForm: View {
                     Text("Action").font(.caption).fontWeight(.semibold)
                     ActionSegmented(action: $action)
                 }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Applies to").font(.caption).fontWeight(.semibold)
-                    AgentCheckboxSelector(selectedAgents: $selectedAgents)
-                }
             }
 
             RulePreviewStrip(text: previewText)
@@ -150,10 +141,13 @@ private struct AddContactRuleForm: View {
     }
 
     private func addRule() {
-        rulesModel.addContactRule(
-            name: name, email: email,
-            action: action, agents: Array(selectedAgents)
-        )
+        Task {
+            await rulesModel.addContactRule(
+                name: name,
+                email: email,
+                action: action
+            )
+        }
         withAnimation(Anim.structural) { isPresented = false }
     }
 }

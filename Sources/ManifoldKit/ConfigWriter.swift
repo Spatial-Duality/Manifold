@@ -6,6 +6,10 @@ public struct ConfigWriter {
     private let binaryPath: String
     private let homeDir: URL
 
+    public static func expectedArguments(for agent: TargetApp) -> [String] {
+        ["--agent", agent.rawValue]
+    }
+
     public init(binaryPath: String) {
         self.binaryPath = binaryPath
         self.homeDir = FileManager.default.homeDirectoryForCurrentUser
@@ -101,7 +105,7 @@ public struct ConfigWriter {
     private func jsonMCPServerConfig(agent: TargetApp) -> [String: Any] {
         [
             "command": binaryPath,
-            "args": ["--agent", agent.rawValue],
+            "args": Self.expectedArguments(for: agent),
         ]
     }
 
@@ -138,7 +142,7 @@ public struct ConfigWriter {
         """
         [mcp_servers.manifold]
         command = "\(binaryPath)"
-        args = ["--agent", "\(agent.rawValue)"]
+        args = ["\(Self.expectedArguments(for: agent)[0])", "\(Self.expectedArguments(for: agent)[1])"]
         """
     }
 }

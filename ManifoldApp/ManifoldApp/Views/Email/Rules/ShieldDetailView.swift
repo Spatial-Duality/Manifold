@@ -3,7 +3,8 @@ import ManifoldKit
 
 /// Shield detail view — toggle, description, detection patterns, recent matches.
 struct ShieldDetailView: View {
-    @Binding var shield: EmailShield
+    let shield: EmailShield
+    let onToggle: (Bool) -> Void
 
     var body: some View {
         ScrollView {
@@ -18,7 +19,10 @@ struct ShieldDetailView: View {
                             .font(Typ.sectionTitle)
                     }
                     Spacer()
-                    Toggle(shield.isEnabled ? "Active" : "Disabled", isOn: $shield.isEnabled)
+                    Toggle(shield.isEnabled ? "Active" : "Disabled", isOn: Binding(
+                        get: { shield.isEnabled },
+                        set: { onToggle($0) }
+                    ))
                         .toggleStyle(.switch)
                         .controlSize(.small)
                 }

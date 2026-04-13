@@ -147,8 +147,9 @@ private struct ConnectAppsScreen: View {
                     agentName: "Claude",
                     agentColor: .blue,
                     checks: [
-                        CheckRow("App installed", status: store.integrationHealth.claude.appInstalled),
-                        CheckRow("MCP configured", status: store.integrationHealth.claude.mcpConfigured),
+                        CheckRow("Claude Desktop installed", status: store.integrationHealth.claude.appInstalled),
+                        CheckRow("Claude Desktop configured", status: store.integrationHealth.claude.mcpConfigured),
+                        CheckRow("Claude Code configured", status: store.integrationHealth.claude.claudeCodeConfigured),
                         CheckRow("Connection verified", status: store.integrationHealth.claude.connectionVerified),
                     ]
                 )
@@ -164,6 +165,11 @@ private struct ConnectAppsScreen: View {
                 )
             }
             .frame(maxWidth: 440)
+
+            Button("Install or Repair Manifold MCP") {
+                store.installMCP()
+            }
+            .buttonStyle(.bordered)
 
             if store.integrationHealth.claude.overallStatus != .notInstalled
                 || store.integrationHealth.codex.overallStatus != .notInstalled {

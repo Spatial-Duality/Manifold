@@ -13,6 +13,8 @@ enum ActionFormatting {
         case "run_start": "play.circle"
         case "run_end": "stop.circle"
         case "restore": "arrow.uturn.backward"
+        case "content_drift": "exclamationmark.triangle"
+        case "coverage_warning": "shield.lefthalf.filled.slash"
         case "source_added": "plus.circle"
         case "source_removed": "minus.circle"
         case "tool_call": "terminal"
@@ -27,6 +29,7 @@ enum ActionFormatting {
         case "file_deleted": .red
         case "mcp_connection": .accentColor
         case "restore": .orange
+        case "content_drift", "coverage_warning": .orange
         case "tool_call": .purple
         default: .secondary
         }
@@ -42,6 +45,14 @@ enum ActionFormatting {
                 return tool
             }
             return "tool call"
+        }
+        if entry.action == "coverage_warning" || entry.action == "content_drift" {
+            if let metadata = entry.metadata,
+               let data = metadata.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+               let message = json["message"] {
+                return message
+            }
         }
         guard let path = entry.filePath else {
             return entry.agent ?? entry.action.replacing("_", with: " ")
@@ -65,6 +76,8 @@ enum ActionFormatting {
         case "run_start": "Started"
         case "run_end": "Ended"
         case "restore": "Restored"
+        case "content_drift": "Drift"
+        case "coverage_warning": "Coverage"
         case "source_added": "Added"
         case "source_removed": "Removed"
         case "tool_call": "Tool"

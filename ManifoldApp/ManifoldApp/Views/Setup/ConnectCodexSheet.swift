@@ -80,7 +80,7 @@ struct ConnectCodexSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                if store.integrationHealth.codex.mcpAdded == .installed {
+                if store.integrationHealth.codex.mcpAdded.isPassingCheck {
                     Button("Done") { dismiss() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)

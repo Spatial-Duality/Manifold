@@ -279,8 +279,8 @@ private struct FilesTab: View {
 // MARK: - Emails Tab (sidebar + content)
 
 /// Emails tab with sidebar-driven mode switching.
-/// "All Domains" → DomainsTableView (governance surface).
-/// Account/mailbox → EmailView (browsing surface with its own NavigationSplitView).
+/// "Rules" shows the runtime-backed email governance surface.
+/// "Messages" shows the governed email archive browser.
 /// Uses if/else to avoid nesting NavigationSplitViews which crashes on macOS.
 ///
 /// EmailSelectionModel lives here so it survives tab switches.

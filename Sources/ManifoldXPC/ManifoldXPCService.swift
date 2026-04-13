@@ -59,10 +59,41 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         reply: @escaping (String?, NSError?) -> Void
     ) {
         let replyBox = ConnectReplyBox(reply: reply)
+        let verifiedIdentity = ClientIdentityVerifier.verify(
+            requestedAgent: agent,
+            connection: NSXPCConnection.current()
+        )
+        guard verifiedIdentity.isVerified, let targetApp = verifiedIdentity.resolvedTargetApp else {
+            let requestedTarget = TargetApp(rawValue: agent) ?? .cowork
+            Task {
+                await runtime.recordCoverageEvent(
+                    agent: requestedTarget,
+                    coverageState: .outsideCoverage,
+                    eventType: "verification_failed",
+                    message: verifiedIdentity.reason,
+                    metadata: [
+                        "requested_target_app": agent,
+                        "verification_status": verifiedIdentity.status.rawValue,
+                        "client_pid": "\(verifiedIdentity.clientProcessID)",
+                    ],
+                    dedupeKey: "verification:\(verifiedIdentity.clientProcessID):\(agent):\(verifiedIdentity.reason)"
+                )
+            }
+            replyBox.reply(
+                nil,
+                NSError(
+                    domain: "com.spatialduality.manifold.xpc",
+                    code: 403,
+                    userInfo: [NSLocalizedDescriptionKey: verifiedIdentity.reason]
+                )
+            )
+            return
+        }
+
         Task {
             let connectionID = UUID().uuidString
-            let targetApp = TargetApp(rawValue: agent) ?? .cowork
             let bridge = await runtime.bridge(for: connectionID, targetApp: targetApp, version: clientVersion)
+            await bridge.registerVerifiedClientIdentity(verifiedIdentity)
             let params: [String: Any]
             do { params = try XPCJSON.dictionary(from: initializeParams) }
             catch { params = [:]; xpcLogger.warning("Malformed initializeParams: \(error.localizedDescription, privacy: .public)") }
@@ -129,12 +160,17 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             return ["ok": true, "agentVersion": agentVersion]
 
         case "getStatus":
+            await runtime.scanForActiveWorkBlockDrift()
             let sources = try await runtime.grantStore.allSources()
             let claudePolicy = try await runtime.policyStore.policy(for: .cowork)
             let codexPolicy = try await runtime.policyStore.policy(for: .codex)
+            let claudeEmailGovernance = try await runtime.emailGovernanceSummary(for: .cowork)
+            let codexEmailGovernance = try await runtime.emailGovernanceSummary(for: .codex)
             let activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
             let pendingApprovals = try await runtime.approvalQueue.pending()
             let connectedAgents = await runtime.connectedAgents
+            let coverageSnapshots = await runtime.connectedClientSnapshots()
+            let coverageEvents = await runtime.coverageEvents(limit: 20)
             return [
                 "runtimeConnected": true,
                 "activeBridgeCount": await runtime.activeBridgeCount,
@@ -142,8 +178,12 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 "sources": sources.map(Self.sourceJSON),
                 "claudePolicy": Self.policyJSON(claudePolicy),
                 "codexPolicy": Self.policyJSON(codexPolicy),
+                "claudeEmailGovernance": try XPCJSON.object(from: claudeEmailGovernance),
+                "codexEmailGovernance": try XPCJSON.object(from: codexEmailGovernance),
                 "activeWorkBlock": activeWorkBlock.map(Self.workBlockJSON) ?? NSNull(),
                 "pendingApprovalCount": pendingApprovals.count,
+                "agentCoverages": try XPCJSON.object(from: coverageSnapshots),
+                "coverageEvents": try XPCJSON.object(from: coverageEvents),
             ]
 
         case "pauseAgent":
@@ -237,29 +277,13 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 "activeWorkBlock": activeWorkBlock.map(Self.workBlockJSON) ?? NSNull(),
             ]
 
-        case "addEmailDomain":
-            guard let agent = payload["agent"] as? String,
-                  let domain = payload["domain"] as? String else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            try await runtime.policyStore.addEmailDomain(domain, to: TargetApp(rawValue: agent) ?? .cowork)
-            return ["ok": true]
-
-        case "removeEmailDomain":
-            guard let agent = payload["agent"] as? String,
-                  let domain = payload["domain"] as? String else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            try await runtime.policyStore.removeEmailDomain(domain, from: TargetApp(rawValue: agent) ?? .cowork)
-            return ["ok": true]
-
-        case "updateSensitivity":
+        case "updateAccessRecordingLevel":
             guard let agent = payload["agent"] as? String,
                   let level = payload["level"] as? String,
-                  let sensitivity = EmailSensitivityLevel(rawValue: level) else {
+                  let recordingLevel = AccessRecordingLevel(rawValue: level) else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try await runtime.policyStore.updateSensitivity(sensitivity, for: TargetApp(rawValue: agent) ?? .cowork)
+            try await runtime.policyStore.updateAccessRecordingLevel(recordingLevel, for: TargetApp(rawValue: agent) ?? .cowork)
             return ["ok": true]
 
         default:
@@ -276,13 +300,34 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
 
     private static func handleTool(name: String, arguments: [String: Any], bridge: ManifoldBridge) async -> [String: Any] {
         do {
+            let intent = accessIntent(from: arguments)
             switch name {
             case "get_status":
                 let status = await bridge.getStatus()
                 return textResult(formatStatus(status))
 
+            case "get_coverage_status":
+                let coverage = await bridge.currentCoverageSnapshot()
+                let text = """
+                Agent: \(coverage.agent)
+                Coverage: \(coverage.coverageState.displayName)
+                Verification: \(coverage.verificationStatus.displayName)
+                \(coverage.hostBundleIdentifier.map { "Host: \($0)" } ?? "")
+                \(coverage.reason.map { "Reason: \($0)" } ?? "")
+                """
+                return textResult(text.split(separator: "\n").joined(separator: "\n"))
+
+            case "list_coverage_events":
+                let limit = arguments["limit"] as? Int ?? 20
+                let events = await bridge.recentCoverageEvents(limit: limit)
+                if events.isEmpty { return textResult("No recent coverage events.") }
+                let formatted = events.map {
+                    "[\($0.timestamp)] \($0.coverageState.displayName) \($0.eventType): \($0.message)\($0.resourcePath.map { " (\($0))" } ?? "")"
+                }
+                return textResult(formatted.joined(separator: "\n"))
+
             case "list_files":
-                let files = try await bridge.listFiles()
+                let files = try await bridge.listFiles(intent: intent)
                 if files.isEmpty { return textResult("No files available.") }
                 let formatted = files.map { file in
                     let size = ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file)
@@ -294,7 +339,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 guard let path = arguments["path"] as? String else {
                     return errorResult("'path' parameter required")
                 }
-                return textResult(try await bridge.readFile(path: path))
+                return textResult(try await bridge.readFile(path: path, intent: intent))
 
             case "write_file":
                 guard let path = arguments["path"] as? String,
@@ -308,13 +353,13 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 guard let query = arguments["query"] as? String else {
                     return errorResult("'query' parameter required")
                 }
-                let results = try await bridge.searchFiles(query: query)
+                let results = try await bridge.searchFiles(query: query, intent: intent)
                 if results.isEmpty { return textResult("No matches found for '\(query)'") }
                 let formatted = results.map { "## [\($0.source)] \($0.path)\n" + $0.matches.joined(separator: "\n") }
                 return textResult(formatted.joined(separator: "\n\n"))
 
             case "list_emails":
-                let emails = try await bridge.listEmails()
+                let emails = try await bridge.listEmails(intent: intent)
                 if emails.isEmpty { return textResult("No shared emails.") }
                 let formatted = emails.map { "[\($0.id)] \($0.from) — \($0.subject) (\($0.date))" }
                 return textResult(formatted.joined(separator: "\n"))
@@ -323,7 +368,18 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 guard let id = arguments["id"] as? String else {
                     return errorResult("'id' parameter required")
                 }
-                return textResult(try await bridge.readEmail(id: id))
+                return textResult(try await bridge.readEmail(id: id, intent: intent))
+
+            case "search_emails":
+                guard let query = arguments["query"] as? String else {
+                    return errorResult("'query' parameter required")
+                }
+                let emails = try await bridge.searchEmails(query: query, intent: intent)
+                if emails.isEmpty { return textResult("No governed emails matched '\(query)'.") }
+                let formatted = emails.map {
+                    "[\($0.emailID)] \($0.sender) — \($0.subject)\n\($0.preview ?? "(no preview available)")"
+                }
+                return textResult(formatted.joined(separator: "\n\n"))
 
             case "list_changes":
                 let changes = try await bridge.listChanges()
@@ -335,7 +391,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 guard let path = arguments["path"] as? String else {
                     return errorResult("'path' parameter required")
                 }
-                let info = try await bridge.fileInfo(path: path)
+                let info = try await bridge.fileInfo(path: path, intent: intent)
                 let size = ByteCountFormatter.string(fromByteCount: Int64(info.sizeBytes), countStyle: .file)
                 var text = """
                 File: \(info.path)
@@ -354,7 +410,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 guard let path = arguments["path"] as? String else {
                     return errorResult("'path' parameter required")
                 }
-                let contents = try await bridge.listArchive(path: path)
+                let contents = try await bridge.listArchive(path: path, intent: intent)
                 return textResult("Archive: \(path)\n\(contents.count) files:\n\n" + contents.joined(separator: "\n"))
 
             case "extract_file":
@@ -362,7 +418,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                       let filePath = arguments["file_path"] as? String else {
                     return errorResult("'archive_path' and 'file_path' parameters required")
                 }
-                return textResult(try await bridge.extractFile(archivePath: archivePath, filePath: filePath))
+                return textResult(try await bridge.extractFile(archivePath: archivePath, filePath: filePath, intent: intent))
 
             case "list_sessions":
                 let limit = (arguments["limit"] as? String).flatMap(Int.init) ?? 20
@@ -379,6 +435,19 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 }
                 return textResult(formatSessionDetail(try await bridge.getSession(grantID: grantID)))
 
+            case "get_file_history_context":
+                guard let filePath = arguments["file_path"] as? String else {
+                    return errorResult("'file_path' parameter required")
+                }
+                let limit = intArgument(arguments["limit"]) ?? 20
+                return textResult(formatFileHistoryContext(try await bridge.fileHistoryContext(filePath: filePath, limit: limit)))
+
+            case "get_session_context":
+                guard let sessionID = arguments["session_id"] as? String else {
+                    return errorResult("'session_id' parameter required")
+                }
+                return textResult(formatSessionContext(try await bridge.sessionContext(sessionID: sessionID)))
+
             case "save_session_note":
                 guard let note = arguments["note"] as? String else {
                     return errorResult("'note' parameter required")
@@ -392,20 +461,20 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                       let endLine = intArgument(arguments["end_line"]) else {
                     return errorResult("'path', 'start_line', and 'end_line' parameters required")
                 }
-                return textResult(try await bridge.readRange(path: path, startLine: startLine, endLine: endLine))
+                return textResult(try await bridge.readRange(path: path, startLine: startLine, endLine: endLine, intent: intent))
 
             case "diff_file":
                 guard let path = arguments["path"] as? String else {
                     return errorResult("'path' parameter required")
                 }
-                return textResult(try await bridge.diffFile(path: path))
+                return textResult(try await bridge.diffFile(path: path, intent: intent))
 
             case "search_structured":
                 guard let query = arguments["query"] as? String else {
                     return errorResult("'query' parameter required")
                 }
                 let limit = intArgument(arguments["limit"]) ?? 10
-                return textResult(try await bridge.searchStructured(query: query, limit: limit))
+                return textResult(try await bridge.searchStructured(query: query, limit: limit, intent: intent))
 
             default:
                 return errorResult("Unknown tool: \(name)")
@@ -427,6 +496,14 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         if let intValue = value as? Int { return intValue }
         if let stringValue = value as? String { return Int(stringValue) }
         return nil
+    }
+
+    private static func accessIntent(from arguments: [String: Any]) -> AccessIntent? {
+        let intent = AccessIntent(
+            summary: arguments["intent_summary"] as? String,
+            details: arguments["intent_details"] as? String
+        )
+        return intent.isEmpty ? nil : intent
     }
 
     private static func formatStatus(_ status: StatusResult) -> String {
@@ -505,6 +582,97 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         return lines.joined(separator: "\n")
     }
 
+    private static func formatFileHistoryContext(_ context: FileHistoryContext) -> String {
+        var lines: [String] = []
+        lines.append("File: \(context.filePath)")
+        lines.append("Snapshots: \(context.snapshots.count)")
+        if !context.relatedSessionIDs.isEmpty {
+            lines.append("Related sessions: \(context.relatedSessionIDs.joined(separator: ", "))")
+        }
+
+        if !context.snapshots.isEmpty {
+            lines.append("")
+            lines.append("Recent snapshots:")
+            for snapshot in context.snapshots.prefix(10) {
+                let kind: String
+                if snapshot.isBaseline {
+                    kind = "baseline"
+                } else if snapshot.isDelete {
+                    kind = "delete"
+                } else {
+                    kind = "revision"
+                }
+                lines.append("- \(snapshot.timestamp) — \(kind) (\(snapshot.filePath))")
+            }
+        }
+
+        if !context.relatedActivity.isEmpty {
+            lines.append("")
+            lines.append("Nearby activity:")
+            for entry in context.relatedActivity.prefix(10) {
+                lines.append("- \(entry.timestamp) — \(entry.action) \(entry.filePath ?? "")".trimmingCharacters(in: .whitespaces))
+            }
+        }
+
+        if !context.recentExposures.isEmpty {
+            lines.append("")
+            lines.append("Recent exposures:")
+            for exposure in context.recentExposures.prefix(10) {
+                let preview = exposure.payloadPreview?.replacingOccurrences(of: "\n", with: " ") ?? "(no preview stored)"
+                lines.append("- \(exposure.toolName) at \(ISO8601DateFormatter.shared.string(from: Date(timeIntervalSince1970: exposure.timestamp))) — \(preview)")
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func formatSessionContext(_ context: SessionContextDetail) -> String {
+        var lines: [String] = []
+        lines.append("Session: \(context.session?.id ?? "unknown")")
+        if let grantID = context.grantID {
+            lines.append("Grant: \(grantID)")
+        }
+        if let session = context.session {
+            lines.append("Agent: \(session.agent)")
+            lines.append("Window: \(session.startTime) → \(session.endTime)")
+            lines.append("Actions: \(session.actionCount) (\(session.readCount) reads, \(session.writeCount) writes, \(session.searchCount) searches)")
+        }
+        if !context.filePaths.isEmpty {
+            lines.append("")
+            lines.append("Files:")
+            for path in context.filePaths.prefix(20) {
+                lines.append("- \(path)")
+            }
+        }
+        if !context.emails.isEmpty {
+            lines.append("")
+            lines.append("Emails:")
+            for email in context.emails.prefix(20) {
+                if email.isRedacted {
+                    lines.append("- [\(email.id)] \(email.subject)\(email.redactionReason.map { " (\($0))" } ?? "")")
+                } else {
+                    lines.append("- [\(email.id)] \(email.from) — \(email.subject)")
+                }
+            }
+        }
+        if !context.notes.isEmpty {
+            lines.append("")
+            lines.append("Notes:")
+            for note in context.notes.prefix(10) {
+                let kind = note.kind.displayName
+                lines.append("- \(kind) (\(note.origin), \(note.endedAt))")
+            }
+        }
+        if !context.events.isEmpty {
+            lines.append("")
+            lines.append("Timeline:")
+            for event in context.events.prefix(20) {
+                lines.append("- \(event.timestamp) — \(event.action) \(event.filePath ?? "")".trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     private static func sourceJSON(_ source: SourceRecord) -> [String: Any] {
         [
             "sourceID": source.sourceID,
@@ -526,6 +694,8 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             "allowedSourceIDs": policy.allowedSourceIDs.sorted(),
             "allowedEmailDomains": policy.allowedEmailDomains.sorted(),
             "emailSensitivity": policy.emailSensitivity.rawValue,
+            "defaultEmailPolicy": policy.defaultEmailPolicy.rawValue,
+            "accessRecordingLevel": policy.accessRecordingLevel.rawValue,
             "isPaused": policy.isPaused,
             "hasCompletedFirstGrant": policy.hasCompletedFirstGrant,
             "createdAt": policy.createdAt,
@@ -589,6 +759,11 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             "exposureType": record.exposureType,
             "timestamp": record.timestamp,
             "accessDecisionID": record.accessDecisionID,
+            "payloadPreview": record.payloadPreview as Any,
+            "payloadPreviewTruncated": record.payloadPreviewTruncated,
+            "clientIdentity": record.clientIdentity as Any,
+            "intentSummary": record.intentSummary as Any,
+            "intentDetails": record.intentDetails as Any,
         ]
     }
 }

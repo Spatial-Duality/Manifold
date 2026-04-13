@@ -55,6 +55,8 @@ struct ActivityView: View {
                             Button("Writes") { actionFilter = "file_modified" }
                             Button("Tool Calls") { actionFilter = "tool_call" }
                             Button("Connections") { actionFilter = "mcp_connection" }
+                            Button("Coverage") { actionFilter = "coverage_warning" }
+                            Button("Drift") { actionFilter = "content_drift" }
                             Button("Restores") { actionFilter = "restore" }
                         } label: {
                             HStack(spacing: Spacing.tight) {
@@ -129,6 +131,8 @@ struct ActivityView: View {
         case "file_modified": "Writes"
         case "tool_call": "Tool Calls"
         case "mcp_connection": "Connections"
+        case "coverage_warning": "Coverage"
+        case "content_drift": "Drift"
         case "restore": "Restores"
         default: "All"
         }

@@ -9,8 +9,6 @@ struct ReviewAccessChange: Identifiable {
 
     enum Kind {
         case addSource(sourceID: String, sourceName: String)
-        case addDomain(domain: String, emailCount: Int)
-        case loosenSensitivity(from: EmailSensitivityLevel, to: EmailSensitivityLevel)
         case bulkSources(sourceIDs: [String])
         case explicit // User clicked "Review & Update Access"
         case startWorkBlock
@@ -41,12 +39,6 @@ struct ReviewAccessSheet: View {
 
     /// Internal tab: Files or Emails
     @State private var selectedTab: ReviewTab = .files
-
-    /// Whether to start a tracked work block
-    @State private var startWorkBlock = false
-
-    /// Advanced section expanded
-    @State private var showAdvanced = false
 
     enum ReviewTab: Hashable {
         case files
@@ -84,21 +76,6 @@ struct ReviewAccessSheet: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            // Advanced disclosure
-            DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
-                VStack(alignment: .leading, spacing: Spacing.standard) {
-                    Toggle("Track changes with this access", isOn: $startWorkBlock)
-                        .toggleStyle(.checkbox)
-                    Text("Creates baseline snapshots and enables rollback for all included sources.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.top, Spacing.standard)
-            }
-            .padding(.horizontal, Spacing.edge)
-            .padding(.vertical, Spacing.standard)
-
             Divider()
 
             // Footer with counts + CTAs
@@ -236,12 +213,31 @@ struct ReviewAccessSheet: View {
 
     private var emailsContent: some View {
         VStack(alignment: .leading, spacing: Spacing.standard) {
-            Text("Domain access configuration")
+            let policy = store.policy.policy(for: selectedAgent)
+            let governance = store.policy.emailGovernance(for: selectedAgent)
+
+            Text("Email access is managed in Email Rules.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("Email domain controls will be wired in a future phase.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if let governance {
+                    Text("\(selectedAgent == .codex ? "Codex" : "Claude") currently has \(governance.enabledShieldCount) active shields and \(governance.totalRuleCount) explicit rules.")
+                    Text("Current sensitivity: \(governance.emailSensitivity.displayName). Default policy: \(governance.defaultPolicy.displayName).")
+                } else if let policy {
+                    Text("Current sensitivity: \(policy.emailSensitivity.displayName).")
+                }
+                Text("Use Email Rules to edit shields, domain rules, contact overrides, keyword rules, and the default policy.")
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+
+            Button("Open Email Rules") {
+                store.agentFocus = selectedAgent == .codex ? .codex : .claude
+                store.selectedTab = .emails
+                dismiss()
+            }
+            .buttonStyle(.bordered)
         }
         .padding(Spacing.edge)
     }
@@ -252,9 +248,10 @@ struct ReviewAccessSheet: View {
         HStack(spacing: Spacing.standard) {
             let agentName = selectedAgent == .codex ? "Codex" : "Claude"
             let policy = store.policy.policy(for: selectedAgent)
+            let governance = store.policy.emailGovernance(for: selectedAgent)
             let sourceCount = policy?.allowedSourceIDs.count ?? 0
-            let domainCount = policy?.allowedEmailDomains.count ?? 0
-            Text("\(agentName): \(sourceCount) sources \u{00B7} \(domainCount) domains")
+            let ruleCount = governance?.totalRuleCount ?? 0
+            Text("\(agentName): \(sourceCount) sources \u{00B7} \(ruleCount) email rules")
                 .font(Typ.caption)
                 .foregroundStyle(.secondary)
 
@@ -264,23 +261,12 @@ struct ReviewAccessSheet: View {
                 .buttonStyle(.bordered)
                 .keyboardShortcut(.cancelAction)
 
-            if startWorkBlock {
-                Button("Track Changes") {
-                    commitPolicyChange()
-                    // Work block start will be initiated by the caller
-                    // after the policy is committed
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            } else {
-                Button(primaryButtonLabel) {
-                    commitPolicyChange()
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
+            Button(primaryButtonLabel) {
+                commitPolicyChange()
+                dismiss()
             }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
         }
         .padding(Spacing.edge)
     }
@@ -305,14 +291,10 @@ struct ReviewAccessSheet: View {
             switch change.kind {
             case .addSource(let sourceID, _):
                 await store.policy.addSource(sourceID, to: selectedAgent)
-            case .addDomain(let domain, _):
-                await store.policy.addEmailDomain(domain, to: selectedAgent)
             case .bulkSources(let sourceIDs):
                 for id in sourceIDs {
                     await store.policy.addSource(id, to: selectedAgent)
                 }
-            case .loosenSensitivity(_, let newLevel):
-                await store.policy.updateSensitivity(newLevel, for: selectedAgent)
             case .explicit:
                 // Apply the draft policy — add new sources, remove unchecked ones
                 let current = store.policy.policy(for: selectedAgent)?.allowedSourceIDs ?? []

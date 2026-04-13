@@ -434,6 +434,7 @@ public enum ManifoldMCPError: Error, LocalizedError {
     case invalidPath(String)
     case accessPaused
     case noAccessConfigured
+    case intentRequired(String)
 
     public var errorDescription: String? {
         switch self {
@@ -449,6 +450,8 @@ public enum ManifoldMCPError: Error, LocalizedError {
             return "Access is paused for this agent. Resume access in Manifold to continue."
         case .noAccessConfigured:
             return "No file or email access configured. Use Review & Update Access in Manifold to grant access."
+        case .intentRequired(let message):
+            return message
         }
     }
 }

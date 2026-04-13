@@ -15,8 +15,9 @@ public actor ExposureStore {
             """
             INSERT INTO access_decisions (
                 id, connection_id, agent, tool_name, resource_path, action,
-                allowed, reason, access_mode, timestamp, policy_snapshot
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                allowed, reason, access_mode, timestamp, policy_snapshot, client_identity,
+                intent_summary, intent_details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             params: [
                 decision.id,
@@ -30,6 +31,9 @@ public actor ExposureStore {
                 decision.accessMode,
                 String(decision.timestamp),
                 decision.policySnapshot,
+                decision.clientIdentity,
+                decision.intentSummary,
+                decision.intentDetails,
             ]
         )
     }
@@ -39,8 +43,10 @@ public actor ExposureStore {
             """
             INSERT INTO exposure_records (
                 id, connection_id, agent, tool_name, resource_path, byte_count,
-                content_hash, exposure_type, timestamp, access_decision_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                content_hash, exposure_type, timestamp, access_decision_id,
+                payload_preview, payload_preview_truncated, client_identity,
+                intent_summary, intent_details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             params: [
                 exposure.id,
@@ -53,6 +59,11 @@ public actor ExposureStore {
                 exposure.exposureType,
                 String(exposure.timestamp),
                 exposure.accessDecisionID,
+                exposure.payloadPreview,
+                exposure.payloadPreviewTruncated ? "1" : "0",
+                exposure.clientIdentity,
+                exposure.intentSummary,
+                exposure.intentDetails,
             ]
         )
     }
@@ -79,6 +90,19 @@ public actor ExposureStore {
             LIMIT ?
             """,
             params: [connectionID, String(limit)]
+        )
+        return rows.compactMap(Self.exposure(from:))
+    }
+
+    public func exposures(resourcePath: String, limit: Int) throws -> [ExposureRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM exposure_records
+            WHERE resource_path = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            params: [resourcePath, String(limit)]
         )
         return rows.compactMap(Self.exposure(from:))
     }
@@ -152,7 +176,10 @@ public actor ExposureStore {
             reason: reason,
             accessMode: accessMode,
             timestamp: timestamp,
-            policySnapshot: row["policy_snapshot"]?.nilIfEmpty
+            policySnapshot: row["policy_snapshot"]?.nilIfEmpty,
+            clientIdentity: row["client_identity"]?.nilIfEmpty,
+            intentSummary: row["intent_summary"]?.nilIfEmpty,
+            intentDetails: row["intent_details"]?.nilIfEmpty
         )
     }
 
@@ -181,7 +208,12 @@ public actor ExposureStore {
             contentHash: contentHash,
             exposureType: exposureType,
             timestamp: timestamp,
-            accessDecisionID: accessDecisionID
+            accessDecisionID: accessDecisionID,
+            payloadPreview: row["payload_preview"]?.nilIfEmpty,
+            payloadPreviewTruncated: row["payload_preview_truncated"] == "1",
+            clientIdentity: row["client_identity"]?.nilIfEmpty,
+            intentSummary: row["intent_summary"]?.nilIfEmpty,
+            intentDetails: row["intent_details"]?.nilIfEmpty
         )
     }
 }

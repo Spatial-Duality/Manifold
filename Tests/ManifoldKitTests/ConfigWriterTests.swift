@@ -100,6 +100,36 @@ struct ConfigWriterTests {
         #expect(manifold["args"] as? [String] == ["--agent", "cowork"], "Cowork agent args preserved")
     }
 
+    @Test("Claude Desktop repair rewrites stale manifold args")
+    func claudeDesktopRepairsMissingArgs() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent("Library/Application Support/Claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let existing: [String: Any] = [
+            "mcpServers": [
+                "manifold": [
+                    "command": "/old/path/manifold-mcp",
+                    "args": [],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: existing, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configDir.appendingPathComponent("claude_desktop_config.json"))
+
+        let writer = ConfigWriter(binaryPath: "/new/path/manifold-mcp", homeDir: home)
+        try writer.installClaudeDesktop()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("claude_desktop_config.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+        let manifold = servers["manifold"] as! [String: Any]
+
+        #expect(manifold["command"] as? String == "/new/path/manifold-mcp")
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork"])
+    }
+
     // MARK: - Codex Config Tests
 
     @Test("Codex install skipped when .codex directory missing")
@@ -239,6 +269,59 @@ struct ConfigWriterTests {
         let manifold = servers["manifold"] as! [String: Any]
         #expect(manifold["command"] as? String == "/new/path/manifold-mcp", "Existing entry updated")
         #expect(manifold["args"] as? [String] == ["--agent", "cowork"], "Cowork agent args added")
+    }
+
+    @Test("Claude Code repair rewrites stale manifold args")
+    func claudeCodeRepairsMissingArgs() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let existing: [String: Any] = [
+            "mcpServers": [
+                "manifold": [
+                    "command": "/old/path/manifold-mcp",
+                    "args": [],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: existing, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configDir.appendingPathComponent("settings.json"))
+
+        let writer = ConfigWriter(binaryPath: "/new/path/manifold-mcp", homeDir: home)
+        try writer.installClaudeCode()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("settings.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+        let manifold = servers["manifold"] as! [String: Any]
+
+        #expect(manifold["command"] as? String == "/new/path/manifold-mcp")
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork"])
+    }
+
+    @Test("Codex repair rewrites stale manifold args")
+    func codexRepairsMissingArgs() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let codexDir = home.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+
+        let existing = """
+        [mcp_servers.manifold]
+        command = "/old/manifold-mcp"
+        args = []
+        """
+        try existing.write(to: codexDir.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let writer = ConfigWriter(binaryPath: "/new/manifold-mcp", homeDir: home)
+        try writer.installCodex()
+
+        let content = try String(contentsOf: codexDir.appendingPathComponent("config.toml"), encoding: .utf8)
+        #expect(content.contains("command = \"/new/manifold-mcp\""))
+        #expect(content.contains("args = [\"--agent\", \"codex\"]"))
     }
 
     // MARK: - installAll

@@ -1,61 +1,81 @@
 # Manifold
 
-Choose what AI agents can see. Get everything back.
+Controlled access for Claude and Codex on your Mac.
 
-Manifold is a native macOS app that controls which files and emails AI agents can access. Every file they touch is backed up. Restore any version with one click.
+Manifold is a local macOS app that makes it easy to give Claude and Codex controlled access to the files and emails you choose. It records what was actually exposed through that access path, keeps reviewable AI edits in tracked workspaces, and turns that history into durable local context for future AI work.
 
-## How it works
+## What It Is
 
-1. **Pick files** — Select files and folders through Finder. Connect Apple Mail for email context.
-2. **Grant access** — Click "Grant to Claude" to start a tracked access run. Manifold syncs your files into a managed workspace.
-3. **Work normally** — Claude works in the workspace. Manifold watches every change via FSEvents.
-4. **Restore anything** — See every modification in a timeline. Restore any version. Promote approved changes back to your real files.
+Manifold gives the user, not the AI vendor, the system of record for AI work on their own machine.
 
-## The design
+It does four things:
 
-Most tools in this space do **deny-first sandboxing**: block the agent from touching things. Manifold does **allow-first workspace curation**: give the agent exactly what it needs.
+- lets you choose which files and emails Claude can access
+- lets you choose separately what Codex can access
+- records what content was actually returned through Manifold
+- keeps AI edits reviewable, restorable, and useful later
 
-You pick files in a Finder dialog. That's it. No sandbox profiles, no config files, no technical knowledge required.
+## The Model
 
-The agent works in a managed copy of your files. Your originals are never modified. Every change is versioned. Every version is restorable.
+**Per-agent control → recorded exposure → tracked edits → durable context**
 
-## What Manifold controls (and what it doesn't)
+```mermaid
+flowchart LR
+    U["You choose access"] --> M["Manifold"]
+    A["Claude or Codex"] --> M
+    M --> R["Read/search through Manifold"]
+    R --> E["Record what was exposed"]
+    M --> W["Tracked workspace for edits"]
+    W --> H["History stays available later"]
+```
 
-Manifold controls **local files in the managed workspace**. It tracks and backs up every write. It lets you restore any previous state.
+## How It Works
 
-Manifold does **not** control agent connectors, plugins, computer use, or network access. Those capabilities are outside the workspace boundary. The boundary is honest and visible.
+1. You choose which files, folders, and emails each agent can see.
+2. Reads and searches go through Manifold and are recorded.
+3. Reviewable edits happen in a tracked workspace, not directly in original files.
+4. The resulting history stays on your Mac for later sessions.
 
-## Architecture
+## Coverage
 
-- **ManifoldKit** — Swift package. Content-addressed blob store (SHA-256 dedup), per-write snapshots, managed workspaces, access run lifecycle. Email backup with IMAP sync, FTS5 search, smart mailbox rules, and domain-based sensitivity filtering. `.manifoldignore` support via GlobMatcher. Materialization with size estimation and cleanup.
-- **Manifold.app** — Native SwiftUI. Menu bar + main window. Sources, Files, Activity, Emails, Versions views. Pre-session preview with confirmation. Domain preset selection. Liquid Glass on macOS 26.
-- **manifold-cli** — Terminal interface. `init`, `grant`, `watch`, `log`, `restore`, `promote`.
+Manifold is honest about what it governs.
 
-230+ tests across 20 suites covering grants, snapshots, content store, email store, email sensitivity, glob matching, grant types, promotions, MCP access control, and database migrations.
+- **Manifold-Routed**: reads and searches that go through Manifold are governed and recorded.
+- **Tracked Workspace**: reviewable edits happen in an isolated workspace with snapshots and restore.
+- **Outside Coverage**: native agent activity outside the Manifold path is not fully governed by Manifold, and the app should show that boundary clearly.
 
-## Status
+## Claude and Codex
 
-Early development. The core library works. The app shell exists. Working toward V1 with Apple Mail integration, onboarding, and macOS notifications.
+Manifold is designed around the macOS Claude and Codex apps, which have different native models.
 
-## Requirements
+- **Claude Desktop / Claude Cowork**: Claude can gain local capability through desktop extensions, remote capability through hosted connectors, and in Cowork can work in a VM or act on the real desktop through computer use.
+- **Codex app**: Codex works from the current project or a managed worktree, with sandbox and approval settings that constrain what it can read, edit, and run.
+- **Manifold in V1**: MCP is the first shared integration path, backed by a local runtime, tracked workspaces, audit/history storage, and approval flow.
 
-- macOS 14+
-- Swift 6.0+
-- Xcode 16+ (for building the app)
+## Architecture At A Glance
+
+- `Manifold.app`: native SwiftUI app for access control, activity, versions, and review
+- `ManifoldAgent`: bundled LaunchAgent that keeps the runtime available
+- `ManifoldRuntime`: local source of truth for policy, audit, snapshots, and history
+- `manifold-mcp`: thin MCP adapter that forwards agent requests into the runtime over XPC
+- `SQLite + blob storage`: local metadata, audit records, and tracked file history
+
+Start with [design/PRODUCT-SPEC.md](/Users/x01/Developer/Projects/Manifold/design/PRODUCT-SPEC.md) for the April 13, 2026 product model, then read [ARCHITECTURE.md](/Users/x01/Developer/Projects/Manifold/ARCHITECTURE.md) for the runtime shape and [design/README.md](/Users/x01/Developer/Projects/Manifold/design/README.md) for the current design/runtime document map.
+
+## Current State
+
+Early development. The core runtime, tracked workspace model, app shell, and audit/history primitives exist. The main areas still being tightened are caller identity, coverage visibility, and drift detection.
 
 ## Building
 
 ```bash
-# Build the library + CLI
 swift build
-
-# Run tests
 swift test
-
-# Build the app
-cd ManifoldApp && ./build.sh
+swift build --product ManifoldAgent
 ```
+
+Open `Manifold.xcodeproj` to work in Xcode.
 
 ## License
 
-MIT
+See `LICENSE`.

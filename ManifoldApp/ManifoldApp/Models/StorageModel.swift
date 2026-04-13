@@ -9,7 +9,6 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 final class StorageModel {
     var allTrackedFiles: [String] = []
     var storageUsed: Int64 = 0
-    var blobCount: Int = 0
 
     private var client: AppRuntimeClient?
 
@@ -34,11 +33,9 @@ final class StorageModel {
         do {
             let stats = try await client.storageStats()
             storageUsed = stats.storageUsed
-            blobCount = stats.blobCount
         } catch {
             logger.warning("Failed to load storage stats: \(error.localizedDescription)")
             storageUsed = 0
-            blobCount = 0
         }
     }
 
@@ -55,11 +52,6 @@ final class StorageModel {
     func runGarbageCollection() async -> Int {
         guard let client else { return 0 }
         return (try? await client.runGarbageCollection()) ?? 0
-    }
-
-    func pruneOldRuns() async -> Int {
-        guard let client else { return 0 }
-        return (try? await client.pruneOldRuns()) ?? 0
     }
 
     func runIntegrityCheck() async -> Bool {

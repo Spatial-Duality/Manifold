@@ -4,12 +4,13 @@ import ManifoldKit
 /// Keyword rules with inline creation form.
 struct KeywordRulesView: View {
     @Bindable var rulesModel: EmailRulesModel
+    let selectedAgent: TargetApp
     @State private var showAddForm = false
 
     var body: some View {
         VStack(spacing: 0) {
             if showAddForm {
-                AddKeywordRuleForm(isPresented: $showAddForm, rulesModel: rulesModel)
+                AddKeywordRuleForm(isPresented: $showAddForm, rulesModel: rulesModel, selectedAgent: selectedAgent)
                 Divider()
             }
 
@@ -52,19 +53,12 @@ struct KeywordRulesView: View {
                         Text("\(rule.matchedCount)").monospacedDigit().foregroundStyle(.secondary)
                     }.width(60)
 
-                    TableColumn("Agents") { rule in
-                        HStack(spacing: 4) {
-                            ForEach(rule.agents, id: \.self) { agent in
-                                Circle().fill(Color.agent(agent)).frame(width: 8, height: 8)
-                            }
-                        }
-                    }.width(60)
                 }
                 .tableStyle(.inset)
-                .contextMenu(forSelectionType: KeywordRule.ID.self) { ids in
+                .contextMenu(forSelectionType: String.self) { ids in
                     if let id = ids.first {
                         Button("Delete Rule", role: .destructive) {
-                            rulesModel.removeKeywordRule(id: id)
+                            Task { await rulesModel.removeKeywordRule(id: id) }
                         }
                     }
                 }
@@ -87,20 +81,19 @@ struct KeywordRulesView: View {
 private struct AddKeywordRuleForm: View {
     @Binding var isPresented: Bool
     @Bindable var rulesModel: EmailRulesModel
+    let selectedAgent: TargetApp
 
     @State private var pattern = ""
     @State private var matchIn: KeywordMatchLocation = .subjectAndBody
     @State private var action: RuleAction = .block
     @State private var isRegex = false
-    @State private var selectedAgents: Set<TargetApp> = [.cowork, .codex]
     @FocusState private var patternFieldFocused: Bool
 
     private var isValid: Bool { !pattern.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private var previewText: String? {
         guard isValid else { return nil }
-        let agentLabel = selectedAgents.count == 2 ? "both agents" :
-            selectedAgents.contains(.cowork) ? "Claude" : "Codex"
+        let agentLabel = selectedAgent == .codex ? "Codex" : "Claude"
         let location = matchIn == .subject ? "in subject lines" :
             matchIn == .subjectAndBody ? "in subjects and bodies" : "anywhere"
         let regexNote = isRegex ? " (regex pattern)" : ""
@@ -157,11 +150,6 @@ private struct AddKeywordRuleForm: View {
                     Text("Action").font(.caption).fontWeight(.semibold)
                     ActionSegmented(action: $action)
                 }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Applies to").font(.caption).fontWeight(.semibold)
-                    AgentCheckboxSelector(selectedAgents: $selectedAgents)
-                }
             }
 
             RulePreviewStrip(text: previewText)
@@ -182,11 +170,14 @@ private struct AddKeywordRuleForm: View {
     }
 
     private func addRule() {
-        rulesModel.addKeywordRule(
-            pattern: pattern.trimmingCharacters(in: .whitespaces),
-            matchLocation: matchIn, action: action,
-            agents: Array(selectedAgents), isRegex: isRegex
-        )
+        Task {
+            await rulesModel.addKeywordRule(
+                pattern: pattern.trimmingCharacters(in: .whitespaces),
+                matchLocation: matchIn,
+                action: action,
+                isRegex: isRegex
+            )
+        }
         withAnimation(Anim.structural) { isPresented = false }
     }
 }

@@ -9,10 +9,11 @@ struct AgentPolicyCard: View {
     let agentColor: Color
     let isConnected: Bool
     let policy: AgentAccessPolicy?
+    let coverage: AgentCoverageSnapshot?
     let totalSources: Int
     let recentActivity: [AuditEntry]
     let sourceNames: [(name: String, count: Int, hasAccess: Bool)]
-    let domainNames: [(name: String, count: Int)]
+    let emailGovernance: AgentEmailGovernanceSummary?
     let isPaused: Bool
     let onPauseToggle: () -> Void
     let onReviewAccess: () -> Void
@@ -30,7 +31,7 @@ struct AgentPolicyCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 headerRow
                 sourcesSection
-                domainsSection
+                emailGovernanceSection
 
                 Divider()
 
@@ -64,9 +65,25 @@ struct AgentPolicyCard: View {
                 Text(agentName)
                     .font(.system(size: 15, weight: .semibold))
                 StatusBadge(
-                    text: isPaused ? "Paused" : "Active",
-                    color: isPaused ? .statusPaused : .statusActive
+                    text: isPaused ? "Paused" : (isConnected ? "Connected" : "Offline"),
+                    color: isPaused ? .statusPaused : (isConnected ? .statusActive : .secondary)
                 )
+                if let coverage {
+                    StatusBadge(
+                        text: coverage.coverageState.displayName,
+                        color: coverageColor(coverage.coverageState)
+                    )
+                    StatusBadge(
+                        text: coverage.verificationStatus.displayName,
+                        color: coverage.verificationStatus == .verified ? .statusActive : .orange
+                    )
+                }
+                if let policy {
+                    StatusBadge(
+                        text: policy.accessRecordingLevel.displayName,
+                        color: .secondary
+                    )
+                }
             }
             Spacer()
             Button(isPaused ? "Resume Access" : "Pause Access", action: onPauseToggle)
@@ -113,36 +130,45 @@ struct AgentPolicyCard: View {
         }
     }
 
-    // MARK: - Domains
+    // MARK: - Email Governance
 
-    private var domainsSection: some View {
+    private var emailGovernanceSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("EMAIL DOMAINS")
+            Text("EMAIL GOVERNANCE")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .tracking(0.5)
 
-            ForEach(domainNames.prefix(4), id: \.name) { domain in
-                HStack {
-                    HStack(spacing: 6) {
-                        Image(systemName: "globe")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Text("@\(domain.name)")
-                            .font(Typ.body)
-                    }
-                    Spacer()
-                    Text("\(domain.count)")
-                        .font(Typ.numericCaption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            if domainNames.isEmpty {
-                Text("No email domains")
+            if let emailGovernance {
+                governanceRow(systemImage: "shield", text: "\(emailGovernance.enabledShieldCount) active shields")
+                governanceRow(
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    text: "\(emailGovernance.domainRuleCount) domain rules · \(emailGovernance.contactRuleCount) contacts · \(emailGovernance.keywordRuleCount) keywords"
+                )
+                governanceRow(
+                    systemImage: "dial.low",
+                    text: "Sensitivity: \(emailGovernance.emailSensitivity.displayName)"
+                )
+                governanceRow(
+                    systemImage: "gearshape",
+                    text: "Default: \(emailGovernance.defaultPolicy.displayName)"
+                )
+            } else {
+                Text("Email policy unavailable")
                     .font(Typ.body)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    private func governanceRow(systemImage: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(Typ.body)
+            Spacer()
         }
     }
 
@@ -178,6 +204,17 @@ struct AgentPolicyCard: View {
                     }
                 }
             }
+        }
+    }
+
+    private func coverageColor(_ state: CoverageState) -> Color {
+        switch state {
+        case .manifoldRouted:
+            return .blue
+        case .trackedWorkspace:
+            return agentColor
+        case .outsideCoverage:
+            return .orange
         }
     }
 }

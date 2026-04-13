@@ -248,6 +248,12 @@ struct EmailMessageList: View {
                 } description: {
                     Text("Try a different search term or clear filters.")
                 }
+            } else if !store.isRuntimeConnected {
+                ContentUnavailableView {
+                    Label("Runtime Disconnected", systemImage: "bolt.horizontal.circle")
+                } description: {
+                    Text("Reconnect the Manifold runtime to load this mailbox.")
+                }
             } else if store.emailAccounts.isSyncing {
                 VStack(spacing: Spacing.standard) {
                     ProgressView()

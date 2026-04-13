@@ -9,8 +9,12 @@ struct DashboardState: Codable, Sendable {
     let sources: [SourceRecord]
     let claudePolicy: AgentAccessPolicy
     let codexPolicy: AgentAccessPolicy
+    let claudeEmailGovernance: AgentEmailGovernanceSummary
+    let codexEmailGovernance: AgentEmailGovernanceSummary
     let activeWorkBlock: WorkBlockRecord?
     let pendingApprovalCount: Int
+    let agentCoverages: [AgentCoverageSnapshot]
+    let coverageEvents: [CoverageEvent]
 }
 
 struct ActiveGrantState: Codable, Sendable {
@@ -21,7 +25,6 @@ struct ActiveGrantState: Codable, Sendable {
 
 struct StorageStatsSnapshot: Codable, Sendable {
     let storageUsed: Int64
-    let blobCount: Int
 }
 
 struct WorkBlockPreview: Codable, Sendable {
@@ -47,11 +50,6 @@ struct RevertEventResult: Codable, Sendable {
 struct EmailBackupInfo: Codable, Sendable {
     let path: String
     let diskUsage: Int64
-}
-
-struct MailboxCount: Codable, Sendable {
-    let name: String
-    let count: Int
 }
 
 final class AppRuntimeClient: Sendable {
@@ -122,16 +120,36 @@ final class AppRuntimeClient: Sendable {
         _ = try await xpc.command(name: "removeSourceFromPolicy", payload: ["sourceID": sourceID, "agent": agent.rawValue])
     }
 
-    func addEmailDomain(_ domain: String, to agent: TargetApp) async throws {
-        _ = try await xpc.command(name: "addEmailDomain", payload: ["domain": domain, "agent": agent.rawValue])
+    func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws {
+        _ = try await xpc.command(name: "updateAccessRecordingLevel", payload: ["level": level.rawValue, "agent": agent.rawValue])
     }
 
-    func removeEmailDomain(_ domain: String, from agent: TargetApp) async throws {
-        _ = try await xpc.command(name: "removeEmailDomain", payload: ["domain": domain, "agent": agent.rawValue])
+    func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet {
+        try await command(
+            name: "getEmailRuleSet",
+            payload: ["agent": agent.rawValue],
+            field: "ruleSet",
+            as: EmailRuleSet.self
+        )
     }
 
-    func updateSensitivity(_ level: EmailSensitivityLevel, for agent: TargetApp) async throws {
-        _ = try await xpc.command(name: "updateSensitivity", payload: ["level": level.rawValue, "agent": agent.rawValue])
+    func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws {
+        _ = try await xpc.command(
+            name: "updateEmailRuleSet",
+            payload: [
+                "agent": agent.rawValue,
+                "ruleSet": try XPCJSON.object(from: ruleSet),
+            ]
+        )
+    }
+
+    func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary {
+        try await command(
+            name: "getEmailRuleActivitySummary",
+            payload: ["agent": agent.rawValue],
+            field: "summary",
+            as: EmailRuleActivitySummary.self
+        )
     }
 
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState {
@@ -261,16 +279,34 @@ final class AppRuntimeClient: Sendable {
         try await command(name: "fileHistory", payload: ["filePath": filePath], field: "snapshots", as: [SnapshotRecord].self)
     }
 
+    func fileHistoryContext(filePath: String, limit: Int = 20) async throws -> FileHistoryContext {
+        try await command(
+            name: "fileHistoryContext",
+            payload: ["filePath": filePath, "limit": limit],
+            field: "context",
+            as: FileHistoryContext.self
+        )
+    }
+
+    func sessionContext(sessionID: String, agent: TargetApp? = nil) async throws -> SessionContextDetail {
+        var payload: [String: Any] = ["sessionID": sessionID]
+        if let agent {
+            payload["agent"] = agent.rawValue
+        }
+        return try await command(
+            name: "sessionContext",
+            payload: payload,
+            field: "context",
+            as: SessionContextDetail.self
+        )
+    }
+
     func snapshotData(hash: String) async throws -> Data? {
         try await optionalCommand(name: "snapshotData", payload: ["hash": hash], field: "data", as: Data.self)
     }
 
     func runGarbageCollection() async throws -> Int {
         try await command(name: "runGarbageCollection", field: "count", as: Int.self)
-    }
-
-    func pruneOldRuns(keepLast: Int = 10) async throws -> Int {
-        try await command(name: "pruneOldRuns", payload: ["keepLast": keepLast], field: "count", as: Int.self)
     }
 
     func runIntegrityCheck() async throws -> Bool {
@@ -330,10 +366,6 @@ final class AppRuntimeClient: Sendable {
         if let mailbox { payload["mailbox"] = mailbox }
         if let ids { payload["ids"] = ids }
         return try await command(name: "emailMessages", payload: payload, field: "messages", as: [EmailMessageRecord].self)
-    }
-
-    func mailboxes(accountID: String) async throws -> [MailboxCount] {
-        try await command(name: "mailboxes", payload: ["accountID": accountID], field: "mailboxes", as: [MailboxCount].self)
     }
 
     func domainCounts() async throws -> [String: Int] {
@@ -444,19 +476,6 @@ final class AppRuntimeClient: Sendable {
 
     func deleteSmartMailbox(mailboxID: String) async throws {
         _ = try await xpc.command(name: "deleteSmartMailbox", payload: ["mailboxID": mailboxID])
-    }
-
-    func smartMailboxCount(rulesJSON: String) async throws -> Int {
-        try await command(name: "smartMailboxCount", payload: ["rulesJSON": rulesJSON], field: "count", as: Int.self)
-    }
-
-    func smartMailboxMessages(rulesJSON: String, sortKey: EmailSortKey) async throws -> [EmailMessageRecord] {
-        try await command(
-            name: "smartMailboxMessages",
-            payload: ["rulesJSON": rulesJSON, "sortKey": try XPCJSON.object(from: sortKey)],
-            field: "messages",
-            as: [EmailMessageRecord].self
-        )
     }
 
     func emailBackupInfo() async throws -> EmailBackupInfo {

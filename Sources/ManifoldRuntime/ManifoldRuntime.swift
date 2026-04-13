@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ManifoldKit
 import os
 
@@ -14,12 +15,14 @@ public actor ManifoldRuntime {
     public nonisolated let emailStore: EmailStore
     public nonisolated let artifactIndex: ArtifactIndex
     public nonisolated let policyStore: PolicyStore
+    public nonisolated let emailRuleStore: EmailRuleStore
     public nonisolated let workBlockStore: WorkBlockStore
     public nonisolated let emailSyncEngine: EmailSyncEngine
     public nonisolated let approvalQueue: ApprovalQueue
     public nonisolated let exposureStore: ExposureStore
 
     private var bridges: [String: ManifoldBridge] = [:]
+    private var recordedCoverageEventKeys: Set<String> = []
 
     public init(storeURL: URL? = nil) throws {
         let rootURL = storeURL ?? Self.defaultStoreURL
@@ -37,6 +40,7 @@ public actor ManifoldRuntime {
         let emailStore = EmailStore(db: db)
         let artifactIndex = try ArtifactIndex(db: db)
         let policyStore = PolicyStore(db: db)
+        let emailRuleStore = EmailRuleStore(db: db, policyStore: policyStore)
         let workBlockStore = WorkBlockStore(db: db)
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
         let approvalQueue = ApprovalQueue(db: db)
@@ -51,6 +55,7 @@ public actor ManifoldRuntime {
         self.emailStore = emailStore
         self.artifactIndex = artifactIndex
         self.policyStore = policyStore
+        self.emailRuleStore = emailRuleStore
         self.workBlockStore = workBlockStore
         self.emailSyncEngine = emailSyncEngine
         self.approvalQueue = approvalQueue
@@ -73,6 +78,7 @@ public actor ManifoldRuntime {
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
             policyStore: policyStore,
+            emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore,
             approvalQueue: approvalQueue,
             exposureStore: exposureStore,
@@ -98,9 +104,260 @@ public actor ManifoldRuntime {
         Array(Set(bridges.values.map(\.agentName))).sorted()
     }
 
+    public func connectedClientSnapshots() async -> [AgentCoverageSnapshot] {
+        let activeBlock = try? await workBlockStore.anyActiveBlock()
+        var snapshots: [AgentCoverageSnapshot] = []
+
+        for agent in TargetApp.allCases {
+            let identities = await bridges.values
+                .filter { $0.agentName == agent.rawValue }
+                .asyncCompactMap { await $0.verifiedClientIdentity() }
+            let bestIdentity = identities.first(where: \.isVerified) ?? identities.first
+            let coverageState: CoverageState
+            if activeBlock?.agent == agent {
+                coverageState = .trackedWorkspace
+            } else if bestIdentity?.status == .verified {
+                coverageState = .manifoldRouted
+            } else {
+                coverageState = .outsideCoverage
+            }
+
+            snapshots.append(
+                AgentCoverageSnapshot(
+                    agent: agent.rawValue,
+                    coverageState: coverageState,
+                    verificationStatus: bestIdentity?.status ?? .unknown,
+                    hostBundleIdentifier: bestIdentity?.hostBundleIdentifier,
+                    reason: bestIdentity?.reason
+                )
+            )
+        }
+
+        return snapshots
+    }
+
+    public func recordCoverageEvent(
+        agent: TargetApp,
+        coverageState: CoverageState,
+        eventType: String,
+        message: String,
+        resourcePath: String? = nil,
+        metadata: [String: String] = [:],
+        dedupeKey: String? = nil
+    ) async {
+        if let dedupeKey {
+            guard !recordedCoverageEventKeys.contains(dedupeKey) else { return }
+            recordedCoverageEventKeys.insert(dedupeKey)
+        }
+
+        var payload = metadata
+        payload["coverage_state"] = coverageState.rawValue
+        payload["event_type"] = eventType
+        payload["message"] = message
+
+        let action: AuditAction = eventType == "drift" ? .contentDrift : .coverageWarning
+        try? await auditStore.log(
+            action: action,
+            agent: agent.rawValue,
+            filePath: resourcePath,
+            metadata: payload
+        )
+    }
+
+    public func coverageEvents(limit: Int = 50) async -> [CoverageEvent] {
+        let entries = (try? await auditStore.recentEntries(limit: max(limit * 3, 50))) ?? []
+        return entries.compactMap { Self.coverageEvent(from: $0) }.prefix(limit).map { $0 }
+    }
+
+    public func scanForActiveWorkBlockDrift() async {
+        guard let block = try? await workBlockStore.anyActiveBlock(),
+              let grant = try? await grantStore.grant(id: block.grantID),
+              let grantSources = try? await grantStore.grantSources(grantID: grant.grantID) else {
+            return
+        }
+
+        let sourceIndex = ((try? await grantStore.allSources()) ?? []).reduce(into: [String: SourceRecord]()) { result, source in
+            result[source.sourceID] = source
+        }
+        let workspaceURL = URL(fileURLWithPath: grant.materializationRoot)
+
+        for grantSource in grantSources {
+            guard let source = sourceIndex[grantSource.sourceID] else { continue }
+            let baselineURL = workspaceURL
+                .appendingPathComponent(grantSource.mountName)
+                .appendingPathComponent(".manifold-baseline.json")
+            guard let baselineData = try? Data(contentsOf: baselineURL),
+                  let baseline = try? JSONSerialization.jsonObject(with: baselineData) as? [String: String] else {
+                continue
+            }
+
+            for (relativePath, baselineHash) in baseline {
+                let originalURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(relativePath)
+                let currentHash = Self.hashForFile(at: originalURL) ?? "__missing__"
+                guard currentHash != baselineHash else { continue }
+
+                await recordCoverageEvent(
+                    agent: block.agent,
+                    coverageState: .outsideCoverage,
+                    eventType: "drift",
+                    message: "Original file changed outside the tracked workflow.",
+                    resourcePath: "\(grantSource.mountName)/\(relativePath)",
+                    metadata: [
+                        "grant_id": grant.grantID,
+                        "work_block_id": block.id,
+                        "source_id": grantSource.sourceID,
+                        "baseline_hash": baselineHash,
+                        "current_hash": currentHash,
+                    ],
+                    dedupeKey: "\(block.id):\(grantSource.sourceID):\(relativePath):\(currentHash)"
+                )
+            }
+        }
+    }
+
+    public func fileHistoryContext(filePath: String, limit: Int = 20) async -> FileHistoryContext {
+        let snapshots = ((try? await snapshotStore.fileHistory(filePath: filePath)) ?? []).prefix(limit).map { $0 }
+        let activity = ((try? await auditStore.recentEntries(limit: max(limit * 10, 100))) ?? [])
+            .filter { $0.filePath == filePath }
+            .prefix(limit)
+            .map { $0 }
+        let exposures = (try? await exposureStore.exposures(resourcePath: filePath, limit: limit)) ?? []
+        let sessionIDs = Array(Set(activity.compactMap(\.sessionID))).sorted()
+        return FileHistoryContext(
+            filePath: filePath,
+            snapshots: snapshots,
+            relatedActivity: activity,
+            recentExposures: exposures,
+            relatedSessionIDs: sessionIDs
+        )
+    }
+
+    public func sessionContext(sessionID: String, viewingAs viewerAgent: TargetApp? = nil) async -> SessionContextDetail {
+        let entries = (try? await auditStore.entries(sessionID: sessionID, limit: 200)) ?? []
+        let events = (try? await auditStore.sessionEvents(sessionID: sessionID)) ?? []
+        let session = (try? await auditStore.recentSessions(limit: 200))?.first { $0.id == sessionID }
+        let grantID = entries.compactMap(\.grantID).first
+        let notes: [SessionSummaryRecord]
+        if let grantID {
+            notes = (try? await grantStore.summaries(grantID: grantID)) ?? []
+        } else {
+            notes = []
+        }
+        let filePaths = Array(Set(entries.compactMap(\.filePath))).sorted()
+        let messageIDs: [String] = Array(
+            Set<String>(
+                entries.compactMap { entry in
+                    guard let metadata = entry.metadata?.data(using: .utf8),
+                          let object = try? JSONSerialization.jsonObject(with: metadata) as? [String: String] else {
+                        return nil
+                    }
+                    return object["messageID"]
+                }
+            )
+        ).sorted()
+        let emails = (try? emailStore.emailMessages(ids: messageIDs)) ?? []
+        let viewerPolicy: AgentAccessPolicy?
+        if let viewerAgent {
+            viewerPolicy = try? await policyStore.policy(for: viewerAgent)
+        } else {
+            viewerPolicy = nil
+        }
+        let emailSummaries = (try? await HistoryVisibilityFilter.relatedEmails(
+            emails,
+            viewerPolicy: viewerPolicy,
+            decisionResolver: { [emailRuleStore, policyStore, emailStore] email, policy in
+                let ruleSet = (try? await emailRuleStore.ruleSet(for: policy.agent))
+                    ?? EmailRuleSet(
+                        agent: policy.agent,
+                        defaultPolicy: policy.defaultEmailPolicy,
+                        emailSensitivity: policy.emailSensitivity
+                    )
+                let sharedEmailIDs = (try? emailStore.sharedEmailIDs()) ?? []
+                let temporaryRevealIDs = Set((try? await policyStore.temporaryReveals(for: policy.agent).map(\.emailID)) ?? [])
+                let context = EmailPolicyEngine.Context(
+                    agent: policy.agent,
+                    ruleSet: ruleSet,
+                    policy: policy,
+                    sharedEmailIDs: sharedEmailIDs,
+                    temporaryRevealIDs: temporaryRevealIDs,
+                    explicitGrantEmailIDs: nil,
+                    sensitivity: ruleSet.emailSensitivity
+                )
+                return EmailPolicyEngine.decision(for: email, context: context)
+            }
+        )) ?? emails.map {
+            RelatedEmailContext(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
+        }
+        return SessionContextDetail(
+            session: session,
+            grantID: grantID,
+            entries: entries,
+            events: events,
+            filePaths: filePaths,
+            emails: emailSummaries,
+            notes: notes
+        )
+    }
+
+    public func emailRuleActivitySummary(for agent: TargetApp) async throws -> EmailRuleActivitySummary {
+        let ruleSet = try await emailRuleStore.ruleSet(for: agent)
+        let policy = try await policyStore.policy(for: agent)
+        let emails = try emailStore.allEmailMessages(limit: 2_000)
+        return EmailPolicyEngine.activitySummary(
+            agent: agent,
+            ruleSet: ruleSet,
+            policy: policy,
+            emails: emails
+        )
+    }
+
+    public func emailGovernanceSummary(for agent: TargetApp) async throws -> AgentEmailGovernanceSummary {
+        try await emailRuleStore.emailGovernanceSummary(for: agent)
+    }
+
     public nonisolated static var defaultStoreURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Manifold")
             .appendingPathComponent("store")
+    }
+
+    private static func hashForFile(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func coverageEvent(from entry: ManifoldKit.AuditEntry) -> CoverageEvent? {
+        guard entry.action == AuditAction.contentDrift.rawValue || entry.action == AuditAction.coverageWarning.rawValue else {
+            return nil
+        }
+        let metadata = entry.metadata
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
+        let coverageState = metadata
+            .flatMap { $0["coverage_state"] }
+            .flatMap(CoverageState.init(rawValue:))
+            ?? .outsideCoverage
+        return CoverageEvent(
+            id: "\(entry.timestamp):\(entry.action):\(entry.filePath ?? "")",
+            agent: entry.agent ?? "",
+            coverageState: coverageState,
+            eventType: metadata?["event_type"] ?? entry.action,
+            message: metadata?["message"] ?? entry.action.replacingOccurrences(of: "_", with: " ").capitalized,
+            resourcePath: entry.filePath,
+            timestamp: entry.timestamp,
+            metadata: entry.metadata
+        )
+    }
+}
+
+private extension Sequence {
+    func asyncCompactMap<T>(_ transform: @escaping (Element) async -> T?) async -> [T] {
+        var values: [T] = []
+        for element in self {
+            if let value = await transform(element) {
+                values.append(value)
+            }
+        }
+        return values
     }
 }

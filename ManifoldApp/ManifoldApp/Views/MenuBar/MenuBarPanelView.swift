@@ -24,6 +24,7 @@ struct MenuBarPanelView: View {
                 MenuBarAgentCard(
                     agent: .cowork,
                     policy: claude,
+                    emailGovernance: store.policy.emailGovernance(for: .cowork),
                     isConnected: store.isClaudeConnected
                 )
             }
@@ -31,6 +32,7 @@ struct MenuBarPanelView: View {
                 MenuBarAgentCard(
                     agent: .codex,
                     policy: codex,
+                    emailGovernance: store.policy.emailGovernance(for: .codex),
                     isConnected: store.isCodexConnected
                 )
             }
@@ -159,11 +161,13 @@ struct MenuBarWorkBlockStrip: View {
 struct MenuBarAgentCard: View {
     let agent: TargetApp
     let policy: AgentAccessPolicy
+    let emailGovernance: AgentEmailGovernanceSummary?
     let isConnected: Bool
     @Environment(ManifoldStore.self) var store
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            let coverage = store.policy.coverage(for: agent)
             HStack {
                 Circle()
                     .fill(agent == .codex ? Color.codexPurple : Color.claudeBlue)
@@ -202,13 +206,29 @@ struct MenuBarAgentCard: View {
 
             if !policy.isPaused {
                 HStack(spacing: 12) {
+                    if let coverage {
+                        Label(coverage.coverageState.displayName, systemImage: coverageIcon(coverage.coverageState))
+                            .font(.caption)
+                            .foregroundStyle(coverageColor(coverage.coverageState))
+                        Text(coverage.verificationStatus.displayName)
+                            .font(.caption)
+                            .foregroundStyle(coverage.verificationStatus == .verified ? Color.statusActive : .orange)
+                    }
                     Label("\(policy.allowedSourceIDs.count) sources", systemImage: "folder")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Label("\(policy.allowedEmailDomains.count) domains", systemImage: "envelope")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(policy.emailSensitivity.rawValue.capitalized)
+                    if let emailGovernance {
+                        Label("\(emailGovernance.totalRuleCount) rules", systemImage: "line.3.horizontal.decrease.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Label("\(emailGovernance.enabledShieldCount) shields", systemImage: "shield")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(emailGovernance.emailSensitivity.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(policy.accessRecordingLevel.displayName)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -217,6 +237,28 @@ struct MenuBarAgentCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .opacity(policy.isPaused ? 0.6 : 1.0)
+    }
+
+    private func coverageIcon(_ state: CoverageState) -> String {
+        switch state {
+        case .manifoldRouted:
+            return "shield"
+        case .trackedWorkspace:
+            return "square.stack.3d.up"
+        case .outsideCoverage:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    private func coverageColor(_ state: CoverageState) -> Color {
+        switch state {
+        case .manifoldRouted:
+            return .blue
+        case .trackedWorkspace:
+            return agent == .codex ? .codexPurple : .claudeBlue
+        case .outsideCoverage:
+            return .orange
+        }
     }
 }
 

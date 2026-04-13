@@ -3,14 +3,16 @@ import Foundation
 // MARK: - Agent Access Policy
 
 /// Persistent standing access policy per agent.
-/// Each agent has one policy that defines what files and emails it can access.
-/// Policies persist across connections and app restarts.
+/// File access lives here directly. Email policy fields are compatibility storage
+/// mirrored from the runtime-owned email rule set.
 public struct AgentAccessPolicy: Sendable, Identifiable, Codable {
     public let id: String
     public let agent: TargetApp
     public var allowedSourceIDs: Set<String>
     public var allowedEmailDomains: Set<String>
     public var emailSensitivity: EmailSensitivityLevel
+    public var defaultEmailPolicy: EmailDefaultPolicy
+    public var accessRecordingLevel: AccessRecordingLevel
     public var isPaused: Bool
     public var hasCompletedFirstGrant: Bool
     public let createdAt: String
@@ -22,6 +24,8 @@ public struct AgentAccessPolicy: Sendable, Identifiable, Codable {
         allowedSourceIDs: Set<String> = [],
         allowedEmailDomains: Set<String> = [],
         emailSensitivity: EmailSensitivityLevel = .moderate,
+        defaultEmailPolicy: EmailDefaultPolicy? = nil,
+        accessRecordingLevel: AccessRecordingLevel = .lightweight,
         isPaused: Bool = false,
         hasCompletedFirstGrant: Bool = false,
         createdAt: String = ISO8601DateFormatter.shared.string(from: Date()),
@@ -32,6 +36,8 @@ public struct AgentAccessPolicy: Sendable, Identifiable, Codable {
         self.allowedSourceIDs = allowedSourceIDs
         self.allowedEmailDomains = allowedEmailDomains
         self.emailSensitivity = emailSensitivity
+        self.defaultEmailPolicy = defaultEmailPolicy ?? .defaultValue(for: agent)
+        self.accessRecordingLevel = accessRecordingLevel
         self.isPaused = isPaused
         self.hasCompletedFirstGrant = hasCompletedFirstGrant
         self.createdAt = createdAt
@@ -51,6 +57,8 @@ public struct AgentAccessPolicy: Sendable, Identifiable, Codable {
         self.allowedSourceIDs = Self.decodeSet(row["allowed_source_ids"])
         self.allowedEmailDomains = Self.decodeSet(row["allowed_email_domains"])
         self.emailSensitivity = EmailSensitivityLevel(rawValue: row["email_sensitivity"] ?? "moderate") ?? .moderate
+        self.defaultEmailPolicy = EmailDefaultPolicy(rawValue: row["default_email_policy"] ?? "") ?? .defaultValue(for: agent)
+        self.accessRecordingLevel = AccessRecordingLevel(rawValue: row["access_recording_level"] ?? "lightweight") ?? .lightweight
         self.isPaused = row["is_paused"] == "1"
         self.hasCompletedFirstGrant = row["has_completed_first_grant"] == "1"
         self.createdAt = createdAt
@@ -98,6 +106,10 @@ public enum EmailSensitivityLevel: String, Sendable, CaseIterable, Codable {
     /// True if self allows more data visibility than `other`.
     public func isLooserThan(_ other: EmailSensitivityLevel) -> Bool {
         rank > other.rank
+    }
+
+    public var displayName: String {
+        rawValue.capitalized
     }
 }
 

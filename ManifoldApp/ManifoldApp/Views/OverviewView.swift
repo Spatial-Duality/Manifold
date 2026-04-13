@@ -70,8 +70,8 @@ struct OverviewView: View {
              hasAccess: codexPolicy?.allowedSourceIDs.contains(source.sourceID) == true)
         }
 
-        let claudeDomains = (claudePolicy?.allowedEmailDomains ?? []).map { (name: $0, count: 0) }
-        let codexDomains = (codexPolicy?.allowedEmailDomains ?? []).map { (name: $0, count: 0) }
+        let claudeEmailGovernance = store.policy.emailGovernance(for: .cowork)
+        let codexEmailGovernance = store.policy.emailGovernance(for: .codex)
 
         let claudeActivity = store.history.activityEntries
             .filter { $0.agent?.lowercased() == "claude" || $0.agent == TargetApp.cowork.rawValue }
@@ -84,10 +84,11 @@ struct OverviewView: View {
                 agentColor: .claudeBlue,
                 isConnected: store.isClaudeConnected,
                 policy: claudePolicy,
+                coverage: store.policy.claudeCoverage,
                 totalSources: totalSources,
                 recentActivity: Array(claudeActivity.prefix(3)),
                 sourceNames: claudeSourceData,
-                domainNames: claudeDomains,
+                emailGovernance: claudeEmailGovernance,
                 isPaused: claudePolicy?.isPaused ?? false,
                 onPauseToggle: {
                     Task {
@@ -109,10 +110,11 @@ struct OverviewView: View {
                 agentColor: .codexPurple,
                 isConnected: store.isCodexConnected,
                 policy: codexPolicy,
+                coverage: store.policy.codexCoverage,
                 totalSources: totalSources,
                 recentActivity: Array(codexActivity.prefix(3)),
                 sourceNames: codexSourceData,
-                domainNames: codexDomains,
+                emailGovernance: codexEmailGovernance,
                 isPaused: codexPolicy?.isPaused ?? false,
                 onPauseToggle: {
                     Task {

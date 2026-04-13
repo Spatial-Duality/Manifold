@@ -44,13 +44,15 @@ public actor PolicyStore {
         try db.execute("""
             UPDATE agent_access_policies
             SET allowed_source_ids = ?, allowed_email_domains = ?,
-                email_sensitivity = ?, is_paused = ?, has_completed_first_grant = ?,
+                email_sensitivity = ?, default_email_policy = ?, access_recording_level = ?, is_paused = ?, has_completed_first_grant = ?,
                 updated_at = ?
             WHERE policy_id = ?
         """, params: [
             policy.encodeSourceIDs(),
             policy.encodeDomains(),
             policy.emailSensitivity.rawValue,
+            policy.defaultEmailPolicy.rawValue,
+            policy.accessRecordingLevel.rawValue,
             policy.isPaused ? "1" : "0",
             policy.hasCompletedFirstGrant ? "1" : "0",
             now,
@@ -95,6 +97,27 @@ public actor PolicyStore {
     public func updateSensitivity(_ level: EmailSensitivityLevel, for agent: TargetApp) throws {
         var policy = try policy(for: agent)
         policy.emailSensitivity = level
+        try updatePolicy(policy)
+    }
+
+    /// Update default email policy for an agent.
+    public func updateDefaultEmailPolicy(_ defaultPolicy: EmailDefaultPolicy, for agent: TargetApp) throws {
+        var policy = try policy(for: agent)
+        policy.defaultEmailPolicy = defaultPolicy
+        try updatePolicy(policy)
+    }
+
+    /// Replace the compatibility domain list for an agent.
+    public func updateAllowedEmailDomains(_ domains: Set<String>, for agent: TargetApp) throws {
+        var policy = try policy(for: agent)
+        policy.allowedEmailDomains = Set(domains.map { $0.lowercased() })
+        try updatePolicy(policy)
+    }
+
+    /// Update access recording level for an agent.
+    public func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) throws {
+        var policy = try policy(for: agent)
+        policy.accessRecordingLevel = level
         try updatePolicy(policy)
     }
 
@@ -169,14 +192,16 @@ public actor PolicyStore {
     private func insertPolicy(_ policy: AgentAccessPolicy) throws {
         try db.execute("""
             INSERT INTO agent_access_policies (policy_id, agent, allowed_source_ids, allowed_email_domains,
-                email_sensitivity, is_paused, has_completed_first_grant, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                email_sensitivity, default_email_policy, access_recording_level, is_paused, has_completed_first_grant, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, params: [
             policy.id,
             policy.agent.rawValue,
             policy.encodeSourceIDs(),
             policy.encodeDomains(),
             policy.emailSensitivity.rawValue,
+            policy.defaultEmailPolicy.rawValue,
+            policy.accessRecordingLevel.rawValue,
             policy.isPaused ? "1" : "0",
             policy.hasCompletedFirstGrant ? "1" : "0",
             policy.createdAt,

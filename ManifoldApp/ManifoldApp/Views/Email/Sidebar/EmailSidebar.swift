@@ -14,11 +14,8 @@ enum MessagesSidebarFilter: Hashable {
 
 struct EmailSidebar: View {
     @Environment(ManifoldStore.self) var store
-    @Bindable var selection: EmailSelectionModel
     @Binding var sidebarFilter: MessagesSidebarFilter
     @Binding var showAddAccount: Bool
-    @Binding var showAccountDetail: EmailAccountRecord?
-    @State private var showSmartMailboxEditor = false
 
     @State private var favoritesExpanded = true
     @State private var agentAccessExpanded = true

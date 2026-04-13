@@ -4,8 +4,8 @@
 <dict>
     <key>Label</key>
     <string>com.spatialduality.manifold.runtime</string>
-    <key>BundleIdentifier</key>
-    <string>com.spatialduality.manifold.runtime</string>
+    <key>BundleProgram</key>
+    <string>Contents/Library/LaunchServices/ManifoldAgent</string>
     <key>MachServices</key>
     <dict>
         <key>com.spatialduality.manifold.runtime</key>

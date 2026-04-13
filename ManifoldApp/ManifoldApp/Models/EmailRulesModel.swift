@@ -1,18 +1,239 @@
 import Foundation
 import ManifoldKit
+import os
 
-/// Shield categories for email protection.
+private let emailRulesLogger = Logger(subsystem: "com.spatialduality.manifold", category: "email-rules-model")
+
 @Observable
 @MainActor
 final class EmailRulesModel {
-    var shields: [EmailShield] = EmailShield.defaults
+    var selectedAgent: TargetApp = .cowork
+    var shields: [EmailShield] = []
     var domainRules: [DomainRule] = []
     var contactRules: [ContactRule] = []
     var keywordRules: [KeywordRule] = []
-    var claudeDefaultPolicy: AgentDefaultPolicy = .allowUnlessBlocked
-    var codexDefaultPolicy: AgentDefaultPolicy = .blockUnlessAllowed
+    var defaultPolicy: AgentDefaultPolicy = .allowUnlessBlocked
+    var emailSensitivity: EmailSensitivityLevel = .moderate
+    var loading = false
+    var errorMessage: String?
 
-    init() {}
+    private var client: AppRuntimeClient?
+    private var ruleSet: EmailRuleSet?
+    private var activitySummary: EmailRuleActivitySummary?
+    private var domainCounts: [String: Int] = [:]
+
+    func configure(client: AppRuntimeClient) {
+        self.client = client
+    }
+
+    func load(agent: TargetApp) async {
+        guard let client else { return }
+        loading = true
+        defer { loading = false }
+
+        do {
+            selectedAgent = agent
+            async let ruleSet = client.getEmailRuleSet(agent: agent)
+            async let summary = client.getEmailRuleActivitySummary(agent: agent)
+            async let counts = client.domainCounts()
+            let resolvedRuleSet = try await ruleSet
+            let resolvedSummary = try await summary
+            let resolvedCounts = try await counts
+            self.ruleSet = resolvedRuleSet
+            self.activitySummary = resolvedSummary
+            self.domainCounts = resolvedCounts
+            apply(ruleSet: resolvedRuleSet, summary: resolvedSummary, domainCounts: resolvedCounts)
+            errorMessage = nil
+        } catch {
+            emailRulesLogger.error("Failed to load email rules: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func toggleShield(shieldID: String, isEnabled: Bool) async {
+        guard var ruleSet else { return }
+        if let index = ruleSet.shields.firstIndex(where: { $0.shieldID == shieldID }) {
+            ruleSet.shields[index].isEnabled = isEnabled
+            await persist(ruleSet)
+        }
+    }
+
+    func addDomainRule(domain: String, action: RuleAction, category _: String) async {
+        guard var ruleSet else { return }
+        ruleSet.domainRules.append(
+            EmailDomainRule(
+                agent: selectedAgent,
+                domain: domain,
+                action: action.runtimeValue
+            )
+        )
+        await persist(ruleSet)
+    }
+
+    func removeDomainRule(id: String) async {
+        guard var ruleSet else { return }
+        ruleSet.domainRules.removeAll { $0.id == id }
+        await persist(ruleSet)
+    }
+
+    func addContactRule(name: String, email: String, action: RuleAction) async {
+        guard var ruleSet else { return }
+        ruleSet.contactRules.append(
+            EmailContactRule(
+                agent: selectedAgent,
+                name: name,
+                email: email,
+                action: action.runtimeValue
+            )
+        )
+        await persist(ruleSet)
+    }
+
+    func removeContactRule(id: String) async {
+        guard var ruleSet else { return }
+        ruleSet.contactRules.removeAll { $0.id == id }
+        await persist(ruleSet)
+    }
+
+    func addKeywordRule(pattern: String, matchLocation: KeywordMatchLocation, action: RuleAction, isRegex: Bool) async {
+        guard var ruleSet else { return }
+        ruleSet.keywordRules.append(
+            EmailKeywordRule(
+                agent: selectedAgent,
+                pattern: pattern,
+                matchLocation: matchLocation.runtimeValue,
+                action: action.runtimeValue,
+                isRegex: isRegex
+            )
+        )
+        await persist(ruleSet)
+    }
+
+    func removeKeywordRule(id: String) async {
+        guard var ruleSet else { return }
+        ruleSet.keywordRules.removeAll { $0.id == id }
+        await persist(ruleSet)
+    }
+
+    func updateDefaultPolicy(_ policy: AgentDefaultPolicy) async {
+        guard var ruleSet else { return }
+        ruleSet.defaultPolicy = policy.runtimeValue
+        await persist(ruleSet)
+    }
+
+    func updateSensitivity(_ sensitivity: EmailSensitivityLevel) async {
+        guard var ruleSet else { return }
+        ruleSet.emailSensitivity = sensitivity
+        await persist(ruleSet)
+    }
+
+    private func persist(_ ruleSet: EmailRuleSet) async {
+        guard let client else { return }
+        do {
+            try await client.updateEmailRuleSet(agent: selectedAgent, ruleSet: ruleSet)
+            await load(agent: selectedAgent)
+        } catch {
+            emailRulesLogger.error("Failed to persist email rules: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func apply(ruleSet: EmailRuleSet, summary: EmailRuleActivitySummary, domainCounts: [String: Int]) {
+        let recentMatchesByShield = Dictionary(grouping: summary.recentShieldMatches, by: \.shieldID)
+        let domainHitCounts = Dictionary(uniqueKeysWithValues: summary.domainRuleHits.map { ($0.ruleID, $0.count) })
+        let contactHitCounts = Dictionary(uniqueKeysWithValues: summary.contactRuleHits.map { ($0.ruleID, $0.count) })
+        let keywordHitCounts = Dictionary(uniqueKeysWithValues: summary.keywordRuleHits.map { ($0.ruleID, $0.count) })
+
+        shields = ruleSet.shields.map { shield in
+            EmailShield(
+                id: shield.shieldID,
+                name: shield.name,
+                description: shield.description,
+                isEnabled: shield.isEnabled,
+                icon: shield.icon,
+                domains: shield.domains,
+                patterns: shield.patterns,
+                blockedCount: summary.shieldBlockedCounts[shield.shieldID] ?? 0,
+                recentMatches: (recentMatchesByShield[shield.shieldID] ?? []).map {
+                    ShieldMatch(
+                        id: UUID(),
+                        subject: $0.subject,
+                        from: $0.from,
+                        date: ISO8601DateFormatter.shared.date(from: $0.date) ?? Date(),
+                        agentBlocked: selectedAgent
+                    )
+                }
+            )
+        }
+
+        domainRules = ruleSet.domainRules.map { rule in
+            let normalizedDomain = rule.domain.lowercased()
+            return DomainRule(
+                id: rule.id,
+                domain: normalizedDomain,
+                action: RuleAction(runtimeValue: rule.action),
+                category: EmailDomainCategorizer.categorize(domain: normalizedDomain).rawValue,
+                emailCount: domainCounts[normalizedDomain] ?? 0,
+                matchedCount: domainHitCounts[rule.id] ?? 0,
+                shieldOverlap: shields.first(where: { shield in
+                    shield.domains.contains { token in
+                        normalizedDomain.contains(token.lowercased()) || token.lowercased().contains(normalizedDomain)
+                    }
+                })?.name
+            )
+        }
+
+        contactRules = ruleSet.contactRules.map { rule in
+            let domain = rule.email.split(separator: "@").last.map(String.init)?.lowercased() ?? ""
+            let existingDomainRule = domainRules.first { $0.domain == domain }
+            let overrides = existingDomainRule != nil
+                ? "@\(domain) domain (\(existingDomainRule!.action.rawValue)) -> \(RuleAction(runtimeValue: rule.action).rawValue) for this contact"
+                : "No existing domain or shield override"
+            return ContactRule(
+                id: rule.id,
+                name: rule.name,
+                email: rule.email,
+                action: RuleAction(runtimeValue: rule.action),
+                matchedCount: contactHitCounts[rule.id] ?? 0,
+                overridesDescription: overrides
+            )
+        }
+
+        keywordRules = ruleSet.keywordRules.map { rule in
+            KeywordRule(
+                id: rule.id,
+                pattern: rule.pattern,
+                matchLocation: KeywordMatchLocation(runtimeValue: rule.matchLocation),
+                action: RuleAction(runtimeValue: rule.action),
+                matchedCount: keywordHitCounts[rule.id] ?? 0,
+                isRegex: rule.isRegex
+            )
+        }
+
+        defaultPolicy = AgentDefaultPolicy(runtimeValue: ruleSet.defaultPolicy)
+        emailSensitivity = ruleSet.emailSensitivity
+    }
+}
+
+private enum EmailDomainCategory: String, CaseIterable, Sendable, Hashable {
+    case work = "Work"
+    case automated = "Automated"
+    case personal = "Personal"
+    case hidden = "Hidden by sensitivity"
+}
+
+private enum EmailDomainCategorizer {
+    private static let automated = ["github.com", "circleci.com", "gitlab.com", "bitbucket.org",
+                                    "linear.app", "notion.so", "slack.com", "vercel.com"]
+    private static let personal = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
+                                   "protonmail.com", "fastmail.com"]
+
+    static func categorize(domain: String, isHidden: Bool = false) -> EmailDomainCategory {
+        if isHidden { return .hidden }
+        if automated.contains(where: { domain.hasSuffix($0) }) { return .automated }
+        if personal.contains(domain) { return .personal }
+        return .work
+    }
 }
 
 struct EmailShield: Identifiable, Sendable {
@@ -23,66 +244,8 @@ struct EmailShield: Identifiable, Sendable {
     let icon: String
     let domains: [String]
     let patterns: [String]
-    var blockedCount: Int
-    var recentMatches: [ShieldMatch]
-
-    static let defaults: [EmailShield] = [
-        EmailShield(
-            id: "security",
-            name: "Security & 2FA",
-            description: "Catches OTP codes, verification emails, password resets, login alerts, and new device notifications. An agent with your 2FA codes could bypass authentication.",
-            isEnabled: true,
-            icon: "shield.checkered",
-            domains: ["accounts.google.com", "appleid.apple.com", "noreply@github.com"],
-            patterns: ["verification code", "one-time password", "security alert", "reset your password"],
-            blockedCount: 0,
-            recentMatches: []
-        ),
-        EmailShield(
-            id: "financial",
-            name: "Financial",
-            description: "Catches bank statements, transaction alerts, credit card notifications, invoices with account numbers, and tax documents.",
-            isEnabled: true,
-            icon: "banknote",
-            domains: ["chase.com", "bankofamerica.com", "stripe.com", "venmo.com"],
-            patterns: ["statement ready", "transaction alert", "payment received", "tax document"],
-            blockedCount: 0,
-            recentMatches: []
-        ),
-        EmailShield(
-            id: "medical",
-            name: "Medical",
-            description: "Catches appointment confirmations, lab results, prescription notifications, insurance claims, and provider messages.",
-            isEnabled: true,
-            icon: "cross.case",
-            domains: ["mychart.com", "myhealth.com"],
-            patterns: ["appointment confirmation", "lab results", "prescription", "visit summary"],
-            blockedCount: 0,
-            recentMatches: []
-        ),
-        EmailShield(
-            id: "legal",
-            name: "Legal",
-            description: "Catches attorney correspondence, legal notices, NDA-related emails, and contract reviews.",
-            isEnabled: false,
-            icon: "building.columns",
-            domains: [],
-            patterns: ["attorney-client", "privileged", "NDA", "legal notice", "subpoena"],
-            blockedCount: 0,
-            recentMatches: []
-        ),
-        EmailShield(
-            id: "personal",
-            name: "Personal",
-            description: "Catches family/friend emails, dating, personal purchases, and social invitations. Highly subjective, configure contact lists manually.",
-            isEnabled: false,
-            icon: "person.crop.circle",
-            domains: [],
-            patterns: [],
-            blockedCount: 0,
-            recentMatches: []
-        ),
-    ]
+    let blockedCount: Int
+    let recentMatches: [ShieldMatch]
 }
 
 struct ShieldMatch: Identifiable, Sendable {
@@ -94,82 +257,83 @@ struct ShieldMatch: Identifiable, Sendable {
 }
 
 struct DomainRule: Identifiable, Sendable {
-    let id: UUID
+    let id: String
     let domain: String
     var action: RuleAction
     let category: String
-    var agents: [TargetApp]
     let emailCount: Int
+    let matchedCount: Int
     var shieldOverlap: String?
 }
 
 struct ContactRule: Identifiable, Sendable {
-    let id: UUID
+    let id: String
     let name: String
     let email: String
     var action: RuleAction
+    let matchedCount: Int
     let overridesDescription: String
-    var agents: [TargetApp]
 }
 
 struct KeywordRule: Identifiable, Sendable {
-    let id: UUID
+    let id: String
     let pattern: String
     let matchLocation: KeywordMatchLocation
     var action: RuleAction
     var matchedCount: Int
-    var agents: [TargetApp]
     var isRegex: Bool
 }
 
 enum RuleAction: String, CaseIterable, Sendable {
-    case allow, block
+    case allow
+    case block
+
+    init(runtimeValue: EmailRuleAction) {
+        self = runtimeValue == .allow ? .allow : .block
+    }
+
+    var runtimeValue: EmailRuleAction {
+        self == .allow ? .allow : .block
+    }
 }
 
 enum KeywordMatchLocation: String, CaseIterable, Sendable {
     case subject = "Subject"
     case subjectAndBody = "Subject + Body"
     case anywhere = "Anywhere"
+
+    init(runtimeValue: EmailKeywordMatchLocation) {
+        switch runtimeValue {
+        case .subject:
+            self = .subject
+        case .subjectAndBody:
+            self = .subjectAndBody
+        case .anywhere:
+            self = .anywhere
+        }
+    }
+
+    var runtimeValue: EmailKeywordMatchLocation {
+        switch self {
+        case .subject:
+            return .subject
+        case .subjectAndBody:
+            return .subjectAndBody
+        case .anywhere:
+            return .anywhere
+        }
+    }
 }
 
 enum AgentDefaultPolicy: String, CaseIterable, Sendable {
     case allowUnlessBlocked = "Allow unless blocked"
     case blockUnlessAllowed = "Block unless allowed"
-}
 
-// MARK: - Rule CRUD
-
-extension EmailRulesModel {
-    func addDomainRule(domain: String, action: RuleAction, category: String, agents: [TargetApp]) {
-        domainRules.append(DomainRule(
-            id: UUID(), domain: domain, action: action,
-            category: category, agents: agents,
-            emailCount: 0, shieldOverlap: nil
-        ))
+    init(runtimeValue: EmailDefaultPolicy) {
+        self = runtimeValue == .allowUnlessBlocked ? .allowUnlessBlocked : .blockUnlessAllowed
     }
 
-    func addContactRule(name: String, email: String, action: RuleAction, agents: [TargetApp]) {
-        let emailDomain = email.split(separator: "@").last.map(String.init) ?? ""
-        let existing = domainRules.first { $0.domain == emailDomain }
-        let overrides = existing != nil
-            ? "\(emailDomain) domain (\(existing!.action.rawValue)) \u{2192} \(action.rawValue) for this contact"
-            : "No existing domain or shield override"
-        contactRules.append(ContactRule(
-            id: UUID(), name: name, email: email,
-            action: action, overridesDescription: overrides,
-            agents: agents
-        ))
+    var runtimeValue: EmailDefaultPolicy {
+        self == .allowUnlessBlocked ? .allowUnlessBlocked : .blockUnlessAllowed
     }
-
-    func addKeywordRule(pattern: String, matchLocation: KeywordMatchLocation, action: RuleAction, agents: [TargetApp], isRegex: Bool) {
-        keywordRules.append(KeywordRule(
-            id: UUID(), pattern: pattern,
-            matchLocation: matchLocation, action: action,
-            matchedCount: 0, agents: agents, isRegex: isRegex
-        ))
-    }
-
-    func removeDomainRule(id: UUID) { domainRules.removeAll { $0.id == id } }
-    func removeContactRule(id: UUID) { contactRules.removeAll { $0.id == id } }
-    func removeKeywordRule(id: UUID) { keywordRules.removeAll { $0.id == id } }
 }

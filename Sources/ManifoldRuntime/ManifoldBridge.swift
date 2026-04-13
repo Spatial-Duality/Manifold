@@ -7,6 +7,7 @@ import os
 /// Dual-path access: standing access via PolicyStore, work block via grant materialization.
 /// Fail-closed: no policy and no grant = no access.
 public actor ManifoldBridge {
+    private static let maxExposurePreviewCharacters = 512
     private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "runtime")
     private let db: DatabaseConnection
     private let auditStore: AuditStore
@@ -16,6 +17,7 @@ public actor ManifoldBridge {
     private let snapshotStore: SnapshotStore
     private let artifactIndex: ArtifactIndex
     private let policyStore: PolicyStore?
+    private let emailRuleStore: EmailRuleStore?
     private let workBlockStore: WorkBlockStore?
     private let approvalQueue: ApprovalQueue?
     private let exposureStore: ExposureStore?
@@ -33,6 +35,7 @@ public actor ManifoldBridge {
         snapshotStore: SnapshotStore,
         artifactIndex: ArtifactIndex,
         policyStore: PolicyStore? = nil,
+        emailRuleStore: EmailRuleStore? = nil,
         workBlockStore: WorkBlockStore? = nil,
         approvalQueue: ApprovalQueue? = nil,
         exposureStore: ExposureStore? = nil,
@@ -50,6 +53,7 @@ public actor ManifoldBridge {
         self.snapshotStore = snapshotStore
         self.artifactIndex = artifactIndex
         self.policyStore = policyStore
+        self.emailRuleStore = emailRuleStore
         self.workBlockStore = workBlockStore
         self.approvalQueue = approvalQueue
         self.exposureStore = exposureStore
@@ -81,9 +85,18 @@ public actor ManifoldBridge {
             "allowed_source_ids": policy.allowedSourceIDs.sorted(),
             "allowed_email_domains": policy.allowedEmailDomains.sorted(),
             "email_sensitivity": policy.emailSensitivity.rawValue,
+            "default_email_policy": policy.defaultEmailPolicy.rawValue,
             "is_paused": policy.isPaused,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func clientIdentityJSON() -> String? {
+        guard let identity = runtimeContext.verifiedClientIdentity,
+              let data = try? JSONEncoder().encode(identity) else {
             return nil
         }
         return String(data: data, encoding: .utf8)
@@ -121,6 +134,8 @@ public actor ManifoldBridge {
                 return DecisionContext(reason: "policy_denied", accessMode: "standing", policySnapshot: nil)
             case .noActiveSession:
                 return DecisionContext(reason: "policy_denied", accessMode: "tracked_run", policySnapshot: nil)
+            case .intentRequired:
+                return DecisionContext(reason: "intent_required", accessMode: "governed", policySnapshot: nil)
             case .noSources, .fileNotFound, .invalidPath:
                 return DecisionContext(reason: "policy_denied", accessMode: "unknown", policySnapshot: nil)
             }
@@ -136,7 +151,8 @@ public actor ManifoldBridge {
         allowed: Bool,
         reason: String,
         accessMode: String,
-        policySnapshot: String? = nil
+        policySnapshot: String? = nil,
+        intent: AccessIntent? = nil
     ) async -> String? {
         guard let exposureStore else { return nil }
         let decision = AccessDecision(
@@ -148,7 +164,10 @@ public actor ManifoldBridge {
             allowed: allowed,
             reason: reason,
             accessMode: accessMode,
-            policySnapshot: policySnapshot
+            policySnapshot: policySnapshot,
+            clientIdentity: clientIdentityJSON(),
+            intentSummary: intent?.summary,
+            intentDetails: intent?.details
         )
         do {
             try await exposureStore.recordDecision(decision)
@@ -164,7 +183,8 @@ public actor ManifoldBridge {
         resourcePath: String?,
         text: String,
         exposureType: String,
-        decisionID: String?
+        decisionID: String?,
+        intent: AccessIntent? = nil
     ) async {
         guard decisionID != nil else { return }
         await recordExposure(
@@ -172,7 +192,8 @@ public actor ManifoldBridge {
             resourcePath: resourcePath,
             data: Data(text.utf8),
             exposureType: exposureType,
-            decisionID: decisionID
+            decisionID: decisionID,
+            intent: intent
         )
     }
 
@@ -181,10 +202,21 @@ public actor ManifoldBridge {
         resourcePath: String?,
         data: Data,
         exposureType: String,
-        decisionID: String?
+        decisionID: String?,
+        intent: AccessIntent? = nil
     ) async {
         guard let exposureStore, let decisionID else { return }
         let hash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+        let previewText: String?
+        let previewTruncated: Bool
+        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
+            let preview = String(text.prefix(Self.maxExposurePreviewCharacters))
+            previewText = preview
+            previewTruncated = text.count > preview.count
+        } else {
+            previewText = nil
+            previewTruncated = false
+        }
         let exposure = ExposureRecord(
             connectionID: runtimeContext.connectionID,
             agent: agentName,
@@ -193,7 +225,12 @@ public actor ManifoldBridge {
             byteCount: data.count,
             contentHash: hash,
             exposureType: exposureType,
-            accessDecisionID: decisionID
+            accessDecisionID: decisionID,
+            payloadPreview: previewText,
+            payloadPreviewTruncated: previewTruncated,
+            clientIdentity: clientIdentityJSON(),
+            intentSummary: intent?.summary,
+            intentDetails: intent?.details
         )
         do {
             try await exposureStore.recordExposure(exposure)
@@ -205,7 +242,8 @@ public actor ManifoldBridge {
     private func resolveAccessForTool(
         toolName: String,
         action: String,
-        resourcePath: String? = nil
+        resourcePath: String? = nil,
+        intent: AccessIntent? = nil
     ) async throws -> (AccessContext, String?) {
         do {
             let context = try await resolveAccess()
@@ -217,7 +255,8 @@ public actor ManifoldBridge {
                 allowed: true,
                 reason: decision.reason,
                 accessMode: decision.accessMode,
-                policySnapshot: decision.policySnapshot
+                policySnapshot: decision.policySnapshot,
+                intent: intent
             )
             return (context, decisionID)
         } catch {
@@ -228,9 +267,37 @@ public actor ManifoldBridge {
                 action: action,
                 allowed: false,
                 reason: decision.reason,
-                accessMode: decision.accessMode
+                accessMode: decision.accessMode,
+                intent: intent
             )
             throw error
+        }
+    }
+
+    private func validatedAccessIntent(for toolName: String, provided intent: AccessIntent?) async throws -> AccessIntent? {
+        let level = (try? await policyStore?.policy(for: targetApp))?.accessRecordingLevel ?? .lightweight
+        let sanitized = AccessIntent(
+            summary: intent?.summary.map { String($0.prefix(240)) },
+            details: intent?.details.map { String($0.prefix(1000)) }
+        )
+
+        switch level {
+        case .lightweight:
+            return sanitized
+        case .summary:
+            guard sanitized.summary != nil else {
+                throw ManifoldMCPError.intentRequired(
+                    "\(toolName) requires `intent_summary` because access recording is set to Summary."
+                )
+            }
+            return sanitized
+        case .detailed:
+            guard sanitized.summary != nil, sanitized.details != nil else {
+                throw ManifoldMCPError.intentRequired(
+                    "\(toolName) requires both `intent_summary` and `intent_details` because access recording is set to Detailed."
+                )
+            }
+            return sanitized
         }
     }
 
@@ -327,6 +394,63 @@ public actor ManifoldBridge {
         )
     }
 
+    public func registerVerifiedClientIdentity(_ identity: VerifiedClientIdentity) async {
+        runtimeContext.updateVerifiedClientIdentity(identity)
+    }
+
+    public func verifiedClientIdentity() -> VerifiedClientIdentity? {
+        runtimeContext.verifiedClientIdentity
+    }
+
+    public func currentCoverageSnapshot() async -> AgentCoverageSnapshot {
+        let verificationStatus = runtimeContext.verifiedClientIdentity?.status ?? .unknown
+        let coverageState: CoverageState
+        if let workBlockStore,
+           let _ = try? await workBlockStore.activeBlock(for: targetApp) {
+            coverageState = .trackedWorkspace
+        } else if verificationStatus == .verified {
+            coverageState = .manifoldRouted
+        } else {
+            coverageState = .outsideCoverage
+        }
+
+        return AgentCoverageSnapshot(
+            agent: agentName,
+            coverageState: coverageState,
+            verificationStatus: verificationStatus,
+            hostBundleIdentifier: runtimeContext.verifiedClientIdentity?.hostBundleIdentifier,
+            reason: runtimeContext.verifiedClientIdentity?.reason
+        )
+    }
+
+    public func recentCoverageEvents(limit: Int = 20) async -> [CoverageEvent] {
+        let entries = (try? await auditStore.recentEntries(limit: max(limit * 3, 30))) ?? []
+        return entries
+            .compactMap { entry in
+                guard entry.action == AuditAction.contentDrift.rawValue || entry.action == AuditAction.coverageWarning.rawValue else {
+                    return nil
+                }
+                let metadata = entry.metadata
+                    .flatMap { $0.data(using: .utf8) }
+                    .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
+                return CoverageEvent(
+                    id: "\(entry.id)",
+                    agent: entry.agent ?? agentName,
+                    coverageState: metadata
+                        .flatMap { $0["coverage_state"] }
+                        .flatMap(CoverageState.init(rawValue:))
+                        ?? .outsideCoverage,
+                    eventType: metadata?["event_type"] ?? entry.action,
+                    message: metadata?["message"] ?? entry.action,
+                    resourcePath: entry.filePath,
+                    timestamp: entry.timestamp,
+                    metadata: entry.metadata
+                )
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
     // MARK: - Access Resolution (dual-path: standing policy + work block grant)
 
     /// Resolved access context for a tool call.
@@ -364,8 +488,9 @@ public actor ManifoldBridge {
                 }
             }
 
-            // Standing access — check if any sources are allowed
-            if policy.allowedSourceIDs.isEmpty && policy.allowedEmailDomains.isEmpty {
+            // Standing access — fail only when neither file policy nor the
+            // governed email rule set expose anything to the agent.
+            if policy.allowedSourceIDs.isEmpty, !(try await hasStandingEmailAccess(policy: policy)) {
                 throw ManifoldMCPError.noAccessConfigured
             }
 
@@ -377,6 +502,30 @@ public actor ManifoldBridge {
 
         // Path 2: Legacy grant-only (PolicyStore not injected)
         return try await legacyRequireGrant()
+    }
+
+    private func hasStandingEmailAccess(policy: AgentAccessPolicy) async throws -> Bool {
+        if policy.defaultEmailPolicy == .allowUnlessBlocked {
+            return true
+        }
+
+        guard let emailRuleStore, let policyStore else {
+            return !policy.allowedEmailDomains.isEmpty
+        }
+
+        let ruleSet = try await emailRuleStore.ruleSet(for: policy.agent)
+        let hasAllowRules = ruleSet.domainRules.contains { $0.action == .allow }
+            || ruleSet.contactRules.contains { $0.action == .allow }
+            || ruleSet.keywordRules.contains { $0.action == .allow }
+        if hasAllowRules {
+            return true
+        }
+
+        if !(try await policyStore.temporaryReveals(for: policy.agent)).isEmpty {
+            return true
+        }
+
+        return (try emailStore.sharedEmailCount()) > 0
     }
 
     /// Legacy grant resolution — kept for backward compatibility during transition.
@@ -416,7 +565,8 @@ public actor ManifoldBridge {
     private func requireGrantForTool(
         toolName: String,
         action: String,
-        resourcePath: String? = nil
+        resourcePath: String? = nil,
+        intent: AccessIntent? = nil
     ) async throws -> (GrantRecord, [GrantSourceRecord], String?) {
         do {
             let (grant, grantSources) = try await requireGrant()
@@ -427,7 +577,8 @@ public actor ManifoldBridge {
                 allowed: true,
                 reason: "work_block",
                 accessMode: "tracked_run",
-                policySnapshot: "{\"grant_id\":\"\(grant.grantID)\"}"
+                policySnapshot: "{\"grant_id\":\"\(grant.grantID)\"}",
+                intent: intent
             )
             return (grant, grantSources, decisionID)
         } catch {
@@ -438,7 +589,8 @@ public actor ManifoldBridge {
                 action: action,
                 allowed: false,
                 reason: decision.reason,
-                accessMode: decision.accessMode
+                accessMode: decision.accessMode,
+                intent: intent
             )
             throw error
         }
@@ -468,12 +620,14 @@ public actor ManifoldBridge {
     private func resolveAccessMounts(
         toolName: String,
         action: String,
-        resourcePath: String? = nil
+        resourcePath: String? = nil,
+        intent: AccessIntent? = nil
     ) async throws -> ResolvedMounts {
         let (context, decisionID) = try await resolveAccessForTool(
             toolName: toolName,
             action: action,
-            resourcePath: resourcePath
+            resourcePath: resourcePath,
+            intent: intent
         )
         switch context {
         case .standing(_, let sources):
@@ -531,7 +685,7 @@ public actor ManifoldBridge {
             mounts: artifactMounts(from: mounts)
         )
 
-        let emails = try accessibleEmails(grant: grant, limit: 1_000)
+        let emails = try await accessibleEmails(grant: grant, limit: 1_000)
         let attachments = try emailStore.emailAttachments(emailIDs: emails.map(\.emailID))
         try await artifactIndex.syncEmails(
             grantID: grant.grantID,
@@ -543,15 +697,118 @@ public actor ManifoldBridge {
         try await artifactIndex.syncSessionSummaries(grantID: grant.grantID, summaries: summaries)
     }
 
-    private func accessibleEmails(grant: GrantRecord, limit: Int) throws -> [EmailMessageRecord] {
-        if grant.explicitSelection {
-            return try emailStore.grantEmails(grantID: grant.grantID, limit: limit)
+    private func accessibleEmails(grant: GrantRecord, limit: Int) async throws -> [EmailMessageRecord] {
+        let policy = try await policyStore?.policy(for: targetApp) ?? AgentAccessPolicy(agent: targetApp)
+        let context = try await emailPolicyContext(
+            policy: policy,
+            sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
+            explicitGrantEmailIDs: grant.explicitSelection
+                ? Set(try emailStore.grantEmails(grantID: grant.grantID, limit: limit).map(\.emailID))
+                : nil
+        )
+        let allEmails = try emailStore.allEmailMessages(limit: limit)
+        return allEmails.filter { email in
+            EmailPolicyEngine.decision(for: email, context: context).allowed
         }
-        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
-        if filter.level == .strict {
-            return try emailStore.sharedEmails(limit: limit)
+    }
+
+    private func accessibleEmails(policy: AgentAccessPolicy, limit: Int) async throws -> [EmailMessageRecord] {
+        let context = try await emailPolicyContext(policy: policy, explicitGrantEmailIDs: nil)
+        let allEmails = try emailStore.allEmailMessages(limit: limit)
+        return allEmails.filter { email in
+            EmailPolicyEngine.decision(for: email, context: context).allowed
         }
-        return try emailStore.allEmailMessages(limit: limit).filter { filter.isVisible(email: $0) }
+    }
+
+    private func isEmailAccessible(email: EmailMessageRecord, policy: AgentAccessPolicy) async throws -> Bool {
+        let context = try await emailPolicyContext(policy: policy, explicitGrantEmailIDs: nil)
+        return EmailPolicyEngine.decision(for: email, context: context).allowed
+    }
+
+    private func isEmailAccessible(email: EmailMessageRecord, grant: GrantRecord) async throws -> Bool {
+        let policy = try await policyStore?.policy(for: targetApp) ?? AgentAccessPolicy(agent: targetApp)
+        let context = try await emailPolicyContext(
+            policy: policy,
+            sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
+            explicitGrantEmailIDs: grant.explicitSelection
+                ? Set(try emailStore.grantEmails(grantID: grant.grantID, limit: 1_000).map(\.emailID))
+                : nil
+        )
+        return EmailPolicyEngine.decision(for: email, context: context).allowed
+    }
+
+    private func emailRuleDecision(for email: EmailMessageRecord, policy: AgentAccessPolicy) async throws -> EmailRuleDecision {
+        let context = try await emailPolicyContext(policy: policy, explicitGrantEmailIDs: nil)
+        return EmailPolicyEngine.decision(for: email, context: context)
+    }
+
+    private func emailRuleDecision(for email: EmailMessageRecord, grant: GrantRecord) async throws -> EmailRuleDecision {
+        let policy = try await policyStore?.policy(for: targetApp) ?? AgentAccessPolicy(agent: targetApp)
+        let context = try await emailPolicyContext(
+            policy: policy,
+            sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
+            explicitGrantEmailIDs: grant.explicitSelection
+                ? Set(try emailStore.grantEmails(grantID: grant.grantID, limit: 1_000).map(\.emailID))
+                : nil
+        )
+        return EmailPolicyEngine.decision(for: email, context: context)
+    }
+
+    private func emailPolicyContext(
+        policy: AgentAccessPolicy,
+        sensitivity: EmailSensitivityLevel? = nil,
+        explicitGrantEmailIDs: Set<String>? = nil
+    ) async throws -> EmailPolicyEngine.Context {
+        let ruleSet = try await emailRuleStore?.ruleSet(for: policy.agent)
+            ?? EmailRuleSet(
+                agent: policy.agent,
+                defaultPolicy: policy.defaultEmailPolicy,
+                emailSensitivity: policy.emailSensitivity
+            )
+        let sharedEmailIDs = try emailStore.sharedEmailIDs()
+        let temporaryRevealIDs = Set((try await policyStore?.temporaryReveals(for: policy.agent) ?? []).map(\.emailID))
+        return EmailPolicyEngine.Context(
+            agent: policy.agent,
+            ruleSet: ruleSet,
+            policy: policy,
+            sharedEmailIDs: sharedEmailIDs,
+            temporaryRevealIDs: temporaryRevealIDs,
+            explicitGrantEmailIDs: explicitGrantEmailIDs,
+            sensitivity: sensitivity ?? ruleSet.emailSensitivity
+        )
+    }
+
+    private func auditEmailRead(email: EmailMessageRecord, grantID: String?, decision: EmailRuleDecision? = nil) async {
+        var metadata = mergedMetadata([
+            "type": "email",
+            "messageID": email.emailID,
+            "grant_id": grantID ?? "",
+        ])
+        if let decision {
+            metadata.merge(decision.metadata) { _, new in new }
+        }
+        try? await auditStore.log(
+            action: .fileRead,
+            runID: grantID,
+            agent: agentName,
+            filePath: email.emlPath,
+            metadata: metadata,
+            grantID: grantID
+        )
+    }
+
+    private func messageIDs(from entries: [ManifoldKit.AuditEntry]) -> [String] {
+        Array(
+            Set(
+                entries.compactMap { entry in
+                    guard let metadata = entry.metadata?.data(using: .utf8),
+                          let object = try? JSONSerialization.jsonObject(with: metadata) as? [String: String] else {
+                        return nil
+                    }
+                    return object["messageID"]
+                }
+            )
+        ).sorted()
     }
 
     // MARK: - Path Safety
@@ -647,7 +904,7 @@ public actor ManifoldBridge {
                 // Use cached file list for count (avoids full enumeration on every getStatus)
                 let mounts = standingMounts(sources: sources)
                 let totalFiles = (try? listFilesFromOriginals(mounts: mounts).count) ?? 0
-                let emailCount = policy.allowedEmailDomains.count > 0 ? (try? emailStore.emailMessageCount()) ?? 0 : 0
+                let emailCount = (try? await accessibleEmails(policy: policy, limit: 5_000).count) ?? 0
                 let message = "Manifold standing access active. \(sources.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails. Sensitivity: \(policy.emailSensitivity.rawValue)."
                 let status = StatusResult(
                     active: true,
@@ -667,7 +924,7 @@ public actor ManifoldBridge {
                 let mounts = grantMounts(grant: grant, sources: grantSources)
                 try await ensureIndexed(grant: grant, mounts: mounts)
                 let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
-                let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
+                let emailCount = (try? await accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
                 let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
                 let noteGuidance = noteGuidance(for: grant, summaries: summaries)
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
@@ -691,7 +948,7 @@ public actor ManifoldBridge {
                 let mounts = grantMounts(grant: grant, sources: grantSources)
                 try await ensureIndexed(grant: grant, mounts: mounts)
                 let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
-                let emailCount = (try? accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
+                let emailCount = (try? await accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
                 let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
                 let noteGuidance = noteGuidance(for: grant, summaries: summaries)
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
@@ -754,9 +1011,10 @@ public actor ManifoldBridge {
         }
     }
 
-    public func listFiles() async throws -> [FileInfo] {
+    public func listFiles(intent: AccessIntent? = nil) async throws -> [FileInfo] {
         await logToolCall(tool: "list_files")
-        let resolved = try await resolveAccessMounts(toolName: "list_files", action: "list")
+        let validatedIntent = try await validatedAccessIntent(for: "list_files", provided: intent)
+        let resolved = try await resolveAccessMounts(toolName: "list_files", action: "list", intent: validatedIntent)
         let files: [FileInfo]
 
         // Standing access: enumerate files from original source paths
@@ -781,7 +1039,7 @@ public actor ManifoldBridge {
             }
         }
         let serialized = files.map { "\($0.sourceName)/\($0.path)" }.joined(separator: "\n")
-        await recordExposure(toolName: "list_files", resourcePath: nil, text: serialized, exposureType: "snippet", decisionID: resolved.decisionID)
+        await recordExposure(toolName: "list_files", resourcePath: nil, text: serialized, exposureType: "snippet", decisionID: resolved.decisionID, intent: validatedIntent)
         return files
     }
 
@@ -854,9 +1112,10 @@ public actor ManifoldBridge {
 
     // MARK: - Read File (P1 FIX: reject ambiguous bare paths)
 
-    public func readFile(path: String) async throws -> String {
+    public func readFile(path: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "read_file", arguments: ["path": path])
-        let resolved = try await resolveAccessMounts(toolName: "read_file", action: "read", resourcePath: path)
+        let validatedIntent = try await validatedAccessIntent(for: "read_file", provided: intent)
+        let resolved = try await resolveAccessMounts(toolName: "read_file", action: "read", resourcePath: path, intent: validatedIntent)
         let mounts = resolved.mounts
         let cleaned = cleanPath(path)
 
@@ -874,7 +1133,8 @@ public actor ManifoldBridge {
                 mountPath: mount.mountPath,
                 mountName: mount.mountName,
                 grantID: grantID,
-                decisionID: resolved.decisionID
+                decisionID: resolved.decisionID,
+                intent: validatedIntent
             )
         }
 
@@ -885,7 +1145,8 @@ public actor ManifoldBridge {
             mountPath: mount.mountPath,
             mountName: mount.mountName,
             grantID: grantID,
-            decisionID: resolved.decisionID
+            decisionID: resolved.decisionID,
+            intent: validatedIntent
         )
     }
 
@@ -894,7 +1155,8 @@ public actor ManifoldBridge {
         mountPath: String,
         mountName: String,
         grantID: String,
-        decisionID: String?
+        decisionID: String?,
+        intent: AccessIntent?
     ) async throws -> String {
         let fileURL = try validatePath(relativePath, rootPath: mountPath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -919,7 +1181,7 @@ public actor ManifoldBridge {
             ]),
             grantID: grantID
         )
-        await recordExposure(toolName: "read_file", resourcePath: canonicalPath, text: read.text, exposureType: "full_file", decisionID: decisionID)
+        await recordExposure(toolName: "read_file", resourcePath: canonicalPath, text: read.text, exposureType: "full_file", decisionID: decisionID, intent: intent)
         return read.text
     }
 
@@ -1080,9 +1342,10 @@ public actor ManifoldBridge {
         return .written(message: "Wrote \(data.count) bytes to \(canonicalPath)", path: canonicalPath)
     }
 
-    public func searchFiles(query: String) async throws -> [(path: String, source: String, matches: [String])] {
+    public func searchFiles(query: String, intent: AccessIntent? = nil) async throws -> [(path: String, source: String, matches: [String])] {
         await logToolCall(tool: "search_files", arguments: ["query": query])
-        let resolved = try await resolveAccessMounts(toolName: "search_files", action: "search")
+        let validatedIntent = try await validatedAccessIntent(for: "search_files", provided: intent)
+        let resolved = try await resolveAccessMounts(toolName: "search_files", action: "search", intent: validatedIntent)
         let results: [(path: String, source: String, matches: [String])]
 
         // Standing access: grep through original source files
@@ -1111,7 +1374,8 @@ public actor ManifoldBridge {
                     resourcePath: result.path,
                     text: snippet,
                     exposureType: "snippet",
-                    decisionID: resolved.decisionID
+                    decisionID: resolved.decisionID,
+                    intent: validatedIntent
                 )
             }
         }
@@ -1177,9 +1441,10 @@ public actor ManifoldBridge {
 
     // MARK: - File Info
 
-    public func fileInfo(path: String) async throws -> FileInfoDetail {
+    public func fileInfo(path: String, intent: AccessIntent? = nil) async throws -> FileInfoDetail {
         await logToolCall(tool: "file_info", arguments: ["path": path])
-        let access = try await resolveAccessMounts(toolName: "file_info", action: "read", resourcePath: path)
+        let validatedIntent = try await validatedAccessIntent(for: "file_info", provided: intent)
+        let access = try await resolveAccessMounts(toolName: "file_info", action: "read", resourcePath: path, intent: validatedIntent)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1242,15 +1507,16 @@ public actor ManifoldBridge {
             detail.isBinary ? "binary" : "text",
             detail.lastModified,
         ].joined(separator: "\n")
-        await recordExposure(toolName: "file_info", resourcePath: canonicalPath, text: detailString, exposureType: "snippet", decisionID: access.decisionID)
+        await recordExposure(toolName: "file_info", resourcePath: canonicalPath, text: detailString, exposureType: "snippet", decisionID: access.decisionID, intent: validatedIntent)
         return detail
     }
 
     // MARK: - Archive Listing
 
-    public func listArchive(path: String) async throws -> [String] {
+    public func listArchive(path: String, intent: AccessIntent? = nil) async throws -> [String] {
         await logToolCall(tool: "list_archive", arguments: ["path": path])
-        let access = try await resolveAccessMounts(toolName: "list_archive", action: "read", resourcePath: path)
+        let validatedIntent = try await validatedAccessIntent(for: "list_archive", provided: intent)
+        let access = try await resolveAccessMounts(toolName: "list_archive", action: "read", resourcePath: path, intent: validatedIntent)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1270,22 +1536,23 @@ public actor ManifoldBridge {
         let grantID = access.grantID ?? "standing"
         let indexedEntries = try await artifactIndex.archiveEntries(grantID: grantID, canonicalPath: canonicalPath)
         if !indexedEntries.isEmpty {
-            await recordExposure(toolName: "list_archive", resourcePath: canonicalPath, text: indexedEntries.joined(separator: "\n"), exposureType: "snippet", decisionID: access.decisionID)
+            await recordExposure(toolName: "list_archive", resourcePath: canonicalPath, text: indexedEntries.joined(separator: "\n"), exposureType: "snippet", decisionID: access.decisionID, intent: validatedIntent)
             return indexedEntries
         }
 
         guard let contents = listZipContents(atPath: archiveURL.path) else {
             throw ManifoldMCPError.invalidPath("Not a valid zip archive or archive is empty")
         }
-        await recordExposure(toolName: "list_archive", resourcePath: canonicalPath, text: contents.joined(separator: "\n"), exposureType: "snippet", decisionID: access.decisionID)
+        await recordExposure(toolName: "list_archive", resourcePath: canonicalPath, text: contents.joined(separator: "\n"), exposureType: "snippet", decisionID: access.decisionID, intent: validatedIntent)
         return contents
     }
 
     // MARK: - Extract File
 
-    public func extractFile(archivePath: String, filePath: String) async throws -> String {
+    public func extractFile(archivePath: String, filePath: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "extract_file", arguments: ["archive": archivePath, "file": filePath])
-        let access = try await resolveAccessMounts(toolName: "extract_file", action: "read", resourcePath: archivePath)
+        let validatedIntent = try await validatedAccessIntent(for: "extract_file", provided: intent)
+        let access = try await resolveAccessMounts(toolName: "extract_file", action: "read", resourcePath: archivePath, intent: validatedIntent)
         let mounts = access.mounts
         let cleaned = cleanPath(archivePath)
 
@@ -1313,20 +1580,21 @@ public actor ManifoldBridge {
         }
 
         let content = try extractFromZip(archivePath: archiveURL.path, entryPath: targetEntry)
-        await recordExposure(toolName: "extract_file", resourcePath: "\(archivePath)#\(targetEntry)", text: content, exposureType: "full_file", decisionID: access.decisionID)
+        await recordExposure(toolName: "extract_file", resourcePath: "\(archivePath)#\(targetEntry)", text: content, exposureType: "full_file", decisionID: access.decisionID, intent: validatedIntent)
         return content
     }
 
-    public func readRange(path: String, startLine: Int, endLine: Int) async throws -> String {
+    public func readRange(path: String, startLine: Int, endLine: Int, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(
             tool: "read_range",
             arguments: ["path": path, "start_line": "\(startLine)", "end_line": "\(endLine)"]
         )
+        let validatedIntent = try await validatedAccessIntent(for: "read_range", provided: intent)
         guard startLine > 0, endLine >= startLine else {
             throw ManifoldMCPError.invalidPath("Line range must be positive and end_line must be >= start_line")
         }
 
-        let access = try await resolveAccessMounts(toolName: "read_range", action: "read", resourcePath: path)
+        let access = try await resolveAccessMounts(toolName: "read_range", action: "read", resourcePath: path, intent: validatedIntent)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1361,13 +1629,14 @@ public actor ManifoldBridge {
             grantID: grantID
         )
 
-        await recordExposure(toolName: "read_range", resourcePath: canonicalPath, text: read.text, exposureType: "range", decisionID: access.decisionID)
+        await recordExposure(toolName: "read_range", resourcePath: canonicalPath, text: read.text, exposureType: "range", decisionID: access.decisionID, intent: validatedIntent)
         return read.text
     }
 
-    public func diffFile(path: String) async throws -> String {
+    public func diffFile(path: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "diff_file", arguments: ["path": path])
-        let access = try await resolveAccessMounts(toolName: "diff_file", action: "read", resourcePath: path)
+        let validatedIntent = try await validatedAccessIntent(for: "diff_file", provided: intent)
+        let access = try await resolveAccessMounts(toolName: "diff_file", action: "read", resourcePath: path, intent: validatedIntent)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1432,13 +1701,14 @@ public actor ManifoldBridge {
             }
         }.joined(separator: "\n")
 
-        await recordExposure(toolName: "diff_file", resourcePath: canonicalPath, text: rendered, exposureType: "diff", decisionID: access.decisionID)
+        await recordExposure(toolName: "diff_file", resourcePath: canonicalPath, text: rendered, exposureType: "diff", decisionID: access.decisionID, intent: validatedIntent)
         return rendered
     }
 
-    public func searchStructured(query: String, limit: Int = 10) async throws -> String {
+    public func searchStructured(query: String, limit: Int = 10, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "search_structured", arguments: ["query": query, "limit": "\(limit)"])
-        let access = try await resolveAccessMounts(toolName: "search_structured", action: "search")
+        let validatedIntent = try await validatedAccessIntent(for: "search_structured", provided: intent)
+        let access = try await resolveAccessMounts(toolName: "search_structured", action: "search", intent: validatedIntent)
         let mounts = access.mounts
         if let grant = access.grant {
             try await ensureIndexed(grant: grant, mounts: mounts)
@@ -1471,7 +1741,8 @@ public actor ManifoldBridge {
                     resourcePath: hit.handle.path,
                     text: snippet,
                     exposureType: "snippet",
-                    decisionID: access.decisionID
+                    decisionID: access.decisionID,
+                    intent: validatedIntent
                 )
             }
         }
@@ -1656,22 +1927,17 @@ public actor ManifoldBridge {
 
     // MARK: - Email Tools (reads from .eml-backed email index)
 
-    /// Check if a single email is accessible under the given sensitivity filter.
-    private func isEmailAccessible(email: EmailMessageRecord, grant: GrantRecord) throws -> Bool {
-        if grant.explicitSelection {
-            return try emailStore.isEmailInGrant(grantID: grant.grantID, emailID: email.emailID)
-        }
-        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
-        if filter.level == .strict {
-            return try emailStore.isEmailShared(emailID: email.emailID)
-        }
-        return filter.isVisible(email: email)
-    }
-
-    public func listEmails() async throws -> [EmailSummary] {
+    public func listEmails(intent: AccessIntent? = nil) async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
-        let (grant, _, decisionID) = try await requireGrantForTool(toolName: "list_emails", action: "list")
-        let emails = try accessibleEmails(grant: grant, limit: 200)
+        let validatedIntent = try await validatedAccessIntent(for: "list_emails", provided: intent)
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "list_emails", action: "list", intent: validatedIntent)
+        let emails: [EmailMessageRecord]
+        switch context {
+        case .standing(let policy, _):
+            emails = try await accessibleEmails(policy: policy, limit: 200)
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            emails = try await accessibleEmails(grant: grant, limit: 200)
+        }
         let summaries = emails.map {
             EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
@@ -1681,56 +1947,57 @@ public actor ManifoldBridge {
                 resourcePath: summary.id,
                 text: "\(summary.from)\n\(summary.subject)\n\(summary.date)",
                 exposureType: "email_preview",
-                decisionID: decisionID
+                decisionID: decisionID,
+                intent: validatedIntent
             )
         }
         return summaries
     }
 
-    public func readEmail(id: String) async throws -> String {
+    public func readEmail(id: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
-        let (grant, _, decisionID) = try await requireGrantForTool(toolName: "read_email", action: "read", resourcePath: id)
+        let validatedIntent = try await validatedAccessIntent(for: "read_email", provided: intent)
+        let (context, decisionID) = try await resolveAccessForTool(
+            toolName: "read_email",
+            action: "read",
+            resourcePath: id,
+            intent: validatedIntent
+        )
 
         guard let email = try emailStore.emailMessage(id: id) else {
             throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
         }
 
-        guard try isEmailAccessible(email: email, grant: grant) else {
-            throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
+        let grantID: String?
+        let emailDecision: EmailRuleDecision
+        switch context {
+        case .standing(let policy, _):
+            let decision = try await emailRuleDecision(for: email, policy: policy)
+            guard decision.allowed else {
+                throw ManifoldMCPError.fileNotFound("Email not accessible with current standing access rules")
+            }
+            emailDecision = decision
+            grantID = nil
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            let decision = try await emailRuleDecision(for: email, grant: grant)
+            guard decision.allowed else {
+                throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
+            }
+            emailDecision = decision
+            grantID = grant.grantID
         }
 
         // Read from .eml file on disk
         if let emlPath = email.emlPath,
            FileManager.default.fileExists(atPath: emlPath),
            let content = try? String(contentsOfFile: emlPath, encoding: .utf8) {
-            try? await auditStore.log(
-                action: .fileRead,
-                runID: grant.grantID,
-                agent: agentName,
-                filePath: emlPath,
-                metadata: mergedMetadata([
-                    "type": "email",
-                    "messageID": id,
-                    "grant_id": grant.grantID,
-                ]),
-                grantID: grant.grantID
-            )
-            await recordExposure(toolName: "read_email", resourcePath: id, text: content, exposureType: "email_body", decisionID: decisionID)
+            await auditEmailRead(email: email, grantID: grantID, decision: emailDecision)
+            await recordExposure(toolName: "read_email", resourcePath: id, text: content, exposureType: "email_body", decisionID: decisionID, intent: validatedIntent)
             return content
         }
 
         // Fallback: return metadata summary
-        try? await auditStore.log(
-            action: .fileRead,
-            runID: grant.grantID,
-            agent: agentName,
-            metadata: mergedMetadata([
-                "type": "email",
-                "messageID": id,
-                "grant_id": grant.grantID,
-            ]),
-            grantID: grant.grantID
-        )
+        await auditEmailRead(email: email, grantID: grantID, decision: emailDecision)
 
         let preview = """
         From: \(email.sender)
@@ -1740,7 +2007,148 @@ public actor ManifoldBridge {
 
         \(email.preview ?? "(no preview available)")
         """
-        await recordExposure(toolName: "read_email", resourcePath: id, text: preview, exposureType: "email_preview", decisionID: decisionID)
+        await recordExposure(toolName: "read_email", resourcePath: id, text: preview, exposureType: "email_preview", decisionID: decisionID, intent: validatedIntent)
         return preview
+    }
+
+    public func searchEmails(query: String, intent: AccessIntent? = nil) async throws -> [EmailMessageRecord] {
+        await logToolCall(tool: "search_emails", arguments: ["query": query])
+        let validatedIntent = try await validatedAccessIntent(for: "search_emails", provided: intent)
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "search_emails", action: "search", resourcePath: query, intent: validatedIntent)
+        let results = try emailStore.searchEmailMessages(freeText: query, limit: 200)
+        let visible: [EmailMessageRecord]
+        switch context {
+        case .standing(let policy, _):
+            var allowed: [EmailMessageRecord] = []
+            for email in results {
+                if try await isEmailAccessible(email: email, policy: policy) {
+                    allowed.append(email)
+                }
+            }
+            visible = allowed
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            var allowed: [EmailMessageRecord] = []
+            for email in results {
+                if try await isEmailAccessible(email: email, grant: grant) {
+                    allowed.append(email)
+                }
+            }
+            visible = allowed
+        }
+        for email in visible {
+            let preview = [email.sender, email.subject, email.preview ?? ""]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            await recordExposure(
+                toolName: "search_emails",
+                resourcePath: email.emailID,
+                text: preview,
+                exposureType: "email_preview",
+                decisionID: decisionID,
+                intent: validatedIntent
+            )
+        }
+        return visible
+    }
+
+    public func fileHistoryContext(filePath: String, limit: Int = 20) async throws -> FileHistoryContext {
+        await logToolCall(tool: "get_file_history_context", arguments: ["file_path": filePath, "limit": limit])
+        let (_, decisionID) = try await resolveAccessForTool(
+            toolName: "get_file_history_context",
+            action: "read",
+            resourcePath: filePath
+        )
+        let snapshots = (try await snapshotStore.fileHistory(filePath: filePath)).prefix(limit).map { $0 }
+        let activity = (try await auditStore.recentEntries(limit: max(limit * 10, 100)))
+            .filter { $0.filePath == filePath }
+            .prefix(limit)
+            .map { $0 }
+        let exposures = (try? await exposureStore?.exposures(resourcePath: filePath, limit: limit)) ?? []
+        let sessionIDs = Array(Set(activity.compactMap(\.sessionID))).sorted()
+        let context = FileHistoryContext(
+            filePath: filePath,
+            snapshots: snapshots,
+            relatedActivity: activity,
+            recentExposures: exposures,
+            relatedSessionIDs: sessionIDs
+        )
+        let exposureText = """
+        File: \(filePath)
+        Snapshots: \(snapshots.count)
+        Related activity: \(activity.count)
+        Related sessions: \(sessionIDs.joined(separator: ", "))
+        """
+        await recordExposure(
+            toolName: "get_file_history_context",
+            resourcePath: filePath,
+            text: exposureText,
+            exposureType: "history_context",
+            decisionID: decisionID
+        )
+        return context
+    }
+
+    public func sessionContext(sessionID: String) async throws -> SessionContextDetail {
+        await logToolCall(tool: "get_session_context", arguments: ["session_id": sessionID])
+        let (_, decisionID) = try await resolveAccessForTool(
+            toolName: "get_session_context",
+            action: "read",
+            resourcePath: sessionID
+        )
+        let entries = try await auditStore.entries(sessionID: sessionID, limit: 200)
+        let events = try await auditStore.sessionEvents(sessionID: sessionID)
+        let recentSessions = try await auditStore.recentSessions(limit: 200)
+        let session = recentSessions.first { $0.id == sessionID }
+        let grantID = entries.compactMap(\.grantID).first
+        let notes: [SessionSummaryRecord]
+        if let grantID {
+            notes = (try? await grantStore.summaries(grantID: grantID)) ?? []
+        } else {
+            notes = []
+        }
+        let filePaths = Array(Set(entries.compactMap(\.filePath))).sorted()
+        let emailIDs = messageIDs(from: entries)
+        let emails = (try? emailStore.emailMessages(ids: emailIDs)) ?? []
+        let viewerPolicy = try? await policyStore?.policy(for: targetApp)
+        let emailSummaries = try await HistoryVisibilityFilter.relatedEmails(
+            emails,
+            viewerPolicy: viewerPolicy,
+            decisionResolver: { [weak self] email, policy in
+                guard let self else {
+                    return EmailRuleDecision(
+                        agent: policy.agent,
+                        emailID: email.emailID,
+                        allowed: false,
+                        kind: .defaultPolicy,
+                        message: "Email history is unavailable because the bridge is no longer active."
+                    )
+                }
+                return try await self.emailRuleDecision(for: email, policy: policy)
+            }
+        )
+        let context = SessionContextDetail(
+            session: session,
+            grantID: grantID,
+            entries: entries,
+            events: events,
+            filePaths: filePaths,
+            emails: emailSummaries,
+            notes: notes
+        )
+        let exposureText = """
+        Session: \(sessionID)
+        Grant: \(grantID ?? "none")
+        Files: \(filePaths.count)
+        Emails: \(emailSummaries.count)
+        Events: \(events.count)
+        """
+        await recordExposure(
+            toolName: "get_session_context",
+            resourcePath: sessionID,
+            text: exposureText,
+            exposureType: "history_context",
+            decisionID: decisionID
+        )
+        return context
     }
 }

@@ -500,14 +500,7 @@ public struct EmailStore: Sendable {
     }
 
     public func messagesInMailbox(accountID: String, mailbox: String, limit: Int = 500) throws -> [EmailMessageRecord] {
-        let rows = try db.queryAll("""
-            SELECT em.* FROM email_messages em
-            JOIN email_mailbox_membership emm ON em.email_id = emm.email_id
-            WHERE emm.account_id = ? AND emm.mailbox = ?
-            ORDER BY em.received_at DESC
-            LIMIT ?
-        """, params: [accountID, mailbox, "\(limit)"])
-        return rows.compactMap { EmailMessageRecord(row: $0) }
+        try emailMessages(accountID: accountID, mailbox: mailbox, limit: limit)
     }
 
     public func replaceGrantEmails(grantID: String, emailIDs: [String]) throws {

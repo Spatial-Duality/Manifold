@@ -11,6 +11,11 @@ public struct ExposureRecord: Sendable, Codable {
     public let exposureType: String
     public let timestamp: Double
     public let accessDecisionID: String
+    public let payloadPreview: String?
+    public let payloadPreviewTruncated: Bool
+    public let clientIdentity: String?
+    public let intentSummary: String?
+    public let intentDetails: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -22,7 +27,12 @@ public struct ExposureRecord: Sendable, Codable {
         contentHash: String,
         exposureType: String,
         timestamp: Double = Date().timeIntervalSince1970,
-        accessDecisionID: String
+        accessDecisionID: String,
+        payloadPreview: String? = nil,
+        payloadPreviewTruncated: Bool = false,
+        clientIdentity: String? = nil,
+        intentSummary: String? = nil,
+        intentDetails: String? = nil
     ) {
         self.id = id
         self.connectionID = connectionID
@@ -34,5 +44,10 @@ public struct ExposureRecord: Sendable, Codable {
         self.exposureType = exposureType
         self.timestamp = timestamp
         self.accessDecisionID = accessDecisionID
+        self.payloadPreview = payloadPreview
+        self.payloadPreviewTruncated = payloadPreviewTruncated
+        self.clientIdentity = clientIdentity
+        self.intentSummary = intentSummary
+        self.intentDetails = intentDetails
     }
 }

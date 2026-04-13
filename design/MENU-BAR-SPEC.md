@@ -2,9 +2,9 @@
 
 > **Purpose**: Turn Manifold's menu bar extra from a legacy session-model stub into the fastest way to answer "what can AI see right now?" and the fastest way to change that answer.
 >
-> **Model alignment**: This spec uses the v4.1 Standing Access + Optional Tracked Work Blocks model throughout. No "session" language. The menu bar reflects the same model as the main app.
+> **Model alignment**: This spec follows the April 13, 2026 product spec throughout. No "session" language. The menu bar reflects the same per-agent access, tracked workspace, and coverage model as the main app.
 >
-> **Companion to**: LAYOUT-SPEC-v4.md (v4.1), APPLE-DESIGN-EXCELLENCE-GUIDE.md (v2), REDESIGN-PLAN-v5.2.md.
+> **Companion to**: PRODUCT-SPEC.md, APPLE-DESIGN-EXCELLENCE-GUIDE.md, and DESIGN-STANDARDS.md.
 >
 > **Three phases**: Phase 1 (status + control), Phase 2 (approval queue + activity), Phase 3 (system extensions + App Intents).
 
@@ -26,7 +26,7 @@ Five questions, instantly:
 
 `ManifoldApp.swift` already has a `MenuBarExtra` (lines 87–89) using the pull-down menu style. It contains three zones: session section (old model), connection section, and sources section. It references `store.hasActiveSession`, `store.startSession()`, `store.endSession()` — all from the legacy `SessionModel`.
 
-**What needs to change**: Replace the entire menu bar content with a window-style panel built on the v4.1 model (`PolicyModel`, `AgentAccessPolicy`, `WorkBlockRecord`), not `SessionModel`.
+**Current direction**: The window-style panel already exists on `main`. This document now serves as the behavioral spec for keeping that panel aligned with the current policy, coverage, and tracked workspace model rather than the retired session model.
 
 ---
 
@@ -467,7 +467,7 @@ func triggerFinishWorkBlock() {
 
 **Should Manifold add an approval queue?**
 
-The v4.1 model is user-initiated: the user configures policy proactively, and the MCP bridge enforces it fail-closed. An agent that tries to access a file outside its policy gets denied silently. The user never finds out unless they check the audit trail.
+The current model is user-initiated: the user configures policy proactively, and the MCP bridge enforces it fail-closed. An agent that tries to access a file outside its policy gets denied silently. The user never finds out unless they check the audit trail.
 
 This creates a real usability gap. The agent fails, retries, fails again, and eventually works around the limitation or tells the user "I can't access that file." The user then has to: open Manifold, navigate to Files, find the source, check the box (which opens the Review sheet), confirm, go back to the agent. That's 6+ steps for what should be a 1-step decision.
 
@@ -670,7 +670,7 @@ struct MenuBarApprovalRow: View {
 }
 ```
 
-**Critical design decision**: The "Allow" action in the menu bar does NOT directly modify the policy. It opens the Review & Update Access sheet in the main app, pre-populated with the requested resource. This preserves the v4.1 rule: **all broadening goes through the Review sheet.** The menu bar is a notification surface and entry point, not a policy editor.
+**Critical design decision**: The "Allow" action in the menu bar does NOT directly modify the policy. It opens the Review & Update Access sheet in the main app, pre-populated with the requested resource. This preserves the product rule that **all broadening goes through the Review sheet.** The menu bar is a notification surface and entry point, not a policy editor.
 
 The only inline action is "Deny" (the × button), which is narrowing and therefore safe to do immediately.
 
@@ -926,7 +926,7 @@ DistributedNotificationCenter.default().addObserver(
 }
 ```
 
-**The Finder action always opens the Review sheet.** This preserves the v4.1 rule: all broadening goes through the Review & Update Access sheet. The Finder extension is a convenient entry point, not a policy bypass.
+**The Finder action always opens the Review sheet.** This preserves the product rule that all broadening goes through the Review & Update Access sheet. The Finder extension is a convenient entry point, not a policy bypass.
 
 ### 3.3 Finder Sync — Badge Overlays
 
@@ -1160,7 +1160,7 @@ struct ManifoldShortcuts: AppShortcutsProvider {
 | Start Tracked Work Block | Yes | Yes |
 | Open Audit Trail | Yes | No |
 
-Note: There is no "Grant access to X" intent. Broadening always requires the Review sheet, which requires visual confirmation. You can't grant access via voice command or Shortcut automation — that would violate the v4.1 intentionality rule.
+Note: There is no "Grant access to X" intent. Broadening always requires the Review sheet, which requires visual confirmation. You can't grant access via voice command or Shortcut automation because that would violate the intentionality rule in the current product model.
 
 ### 3.6 Phase 3 Implementation Notes
 
@@ -1181,7 +1181,7 @@ Note: There is no "Grant access to X" intent. Broadening always requires the Rev
 ```
 Phase 1    →  6 hours   →  Menu bar panel: icon, header, agent cards, work block strip,
                             quick actions, empty states. Replace legacy session-model
-                            menu bar with v4.1 model.
+                            menu bar with the current product model.
 
 Phase 2    →  12 hours  →  Approval queue: AccessRequest model, RequestStore, bridge
                             integration, batching, menu bar UI, system notifications,
@@ -1195,7 +1195,7 @@ Phase 3    →  16 hours  →  Finder Sync Extension (context menu + badge overl
 
 Total: ~34 hours across all three phases.
 
-**Phase 1 is self-contained** and can ship independently. It replaces the broken legacy menu bar with a useful v4.1-aligned status panel.
+**Phase 1 is self-contained** and can ship independently. It replaces the broken legacy menu bar with a useful status panel aligned to the current product model.
 
 **Phase 2 depends on Phase 1** (the queue renders in the menu bar panel) and requires MCP bridge changes.
 
@@ -1223,8 +1223,8 @@ From v2 APPLE-DESIGN-EXCELLENCE-GUIDE:
 4. ✅ No backgroundExtensionEffect
 5. ✅ Accessibility labels on all controls
 
-From v4.1 LAYOUT-SPEC:
-1. ✅ v4.1 model: Standing Access + Optional Tracked Work Blocks
+From the April 13 product spec:
+1. ✅ Current model: Standing Access + Optional Tracked Work Blocks
 2. ✅ No "session" language
 3. ✅ All broadening through Review & Update Access sheet
 4. ✅ Pause Access as button, not toggle

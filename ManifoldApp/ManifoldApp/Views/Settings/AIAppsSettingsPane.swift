@@ -16,6 +16,14 @@ struct AIAppsSettingsPane: View {
                     onSetup: { showClaudeSheet = true }
                 )
             }
+            if let policy = store.policy.claudePolicy {
+                Section("Claude Access Recording") {
+                    AccessRecordingLevelPicker(
+                        agent: .cowork,
+                        selection: policy.accessRecordingLevel
+                    )
+                }
+            }
             Section {
                 AgentHealthCard(
                     agentName: "Codex",
@@ -24,9 +32,20 @@ struct AIAppsSettingsPane: View {
                     onSetup: { showCodexSheet = true }
                 )
             }
+            if let policy = store.policy.codexPolicy {
+                Section("Codex Access Recording") {
+                    AccessRecordingLevelPicker(
+                        agent: .codex,
+                        selection: policy.accessRecordingLevel
+                    )
+                }
+            }
         }
         .formStyle(.grouped)
-        .task { await store.integrationHealth.checkAll() }
+        .task {
+            await store.integrationHealth.checkAll()
+            await store.policy.loadPolicies()
+        }
         .sheet(isPresented: $showClaudeSheet) {
             ConnectClaudeSheet()
                 .environment(store)
@@ -35,6 +54,40 @@ struct AIAppsSettingsPane: View {
             ConnectCodexSheet()
                 .environment(store)
         }
+    }
+}
+
+private struct AccessRecordingLevelPicker: View {
+    @Environment(ManifoldStore.self) var store
+    let agent: TargetApp
+    let selection: AccessRecordingLevel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Recording Level", selection: binding) {
+                ForEach(AccessRecordingLevel.allCases, id: \.self) { level in
+                    Text(level.displayName).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(currentLevel.guidance)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var binding: Binding<AccessRecordingLevel> {
+        Binding(
+            get: { currentLevel },
+            set: { newValue in
+                Task { await store.policy.updateAccessRecordingLevel(newValue, for: agent) }
+            }
+        )
+    }
+
+    private var currentLevel: AccessRecordingLevel {
+        store.policy.policy(for: agent)?.accessRecordingLevel ?? selection
     }
 }
 
@@ -66,8 +119,9 @@ private struct AgentHealthCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 switch state.id {
                 case .cowork:
-                    CheckRow("App installed", status: state.appInstalled)
-                    CheckRow("MCP configured", status: state.mcpConfigured)
+                    CheckRow("Claude Desktop installed", status: state.appInstalled)
+                    CheckRow("Claude Desktop configured", status: state.mcpConfigured)
+                    CheckRow("Claude Code configured", status: state.claudeCodeConfigured)
                     CheckRow("Connection verified", status: state.connectionVerified)
                 case .codex:
                     CheckRow("CLI installed", status: state.cliInstalled)

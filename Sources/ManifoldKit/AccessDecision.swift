@@ -12,6 +12,9 @@ public struct AccessDecision: Sendable, Codable {
     public let accessMode: String
     public let timestamp: Double
     public let policySnapshot: String?
+    public let clientIdentity: String?
+    public let intentSummary: String?
+    public let intentDetails: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -24,7 +27,10 @@ public struct AccessDecision: Sendable, Codable {
         reason: String,
         accessMode: String,
         timestamp: Double = Date().timeIntervalSince1970,
-        policySnapshot: String? = nil
+        policySnapshot: String? = nil,
+        clientIdentity: String? = nil,
+        intentSummary: String? = nil,
+        intentDetails: String? = nil
     ) {
         self.id = id
         self.connectionID = connectionID
@@ -37,5 +43,8 @@ public struct AccessDecision: Sendable, Codable {
         self.accessMode = accessMode
         self.timestamp = timestamp
         self.policySnapshot = policySnapshot
+        self.clientIdentity = clientIdentity
+        self.intentSummary = intentSummary
+        self.intentDetails = intentDetails
     }
 }

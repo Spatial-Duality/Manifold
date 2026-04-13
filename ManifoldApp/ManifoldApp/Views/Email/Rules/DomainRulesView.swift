@@ -4,14 +4,14 @@ import ManifoldKit
 /// Domain rules list with inline creation form.
 struct DomainRulesView: View {
     @Bindable var rulesModel: EmailRulesModel
-    @Environment(ManifoldStore.self) var store
+    let selectedAgent: TargetApp
     @State private var showAddForm = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Inline creation form (expands above table)
             if showAddForm {
-                AddDomainRuleForm(isPresented: $showAddForm, rulesModel: rulesModel)
+                AddDomainRuleForm(isPresented: $showAddForm, rulesModel: rulesModel, selectedAgent: selectedAgent)
                 Divider()
             }
 
@@ -51,26 +51,23 @@ struct DomainRulesView: View {
                     }
                     .width(60)
 
+                    TableColumn("Hits") { rule in
+                        Text("\(rule.matchedCount)").monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .width(60)
+
                     TableColumn("Rule") { rule in
                         StatusBadge(text: rule.action.rawValue.capitalized,
                                     color: rule.action == .allow ? .statusActive : .statusDanger)
                     }
                     .width(70)
 
-                    TableColumn("Agents") { rule in
-                        HStack(spacing: 4) {
-                            ForEach(rule.agents, id: \.self) { agent in
-                                Circle().fill(Color.agent(agent)).frame(width: 8, height: 8)
-                            }
-                        }
-                    }
-                    .width(60)
                 }
                 .tableStyle(.inset)
-                .contextMenu(forSelectionType: DomainRule.ID.self) { ids in
+                .contextMenu(forSelectionType: String.self) { ids in
                     if let id = ids.first {
                         Button("Delete Rule", role: .destructive) {
-                            rulesModel.removeDomainRule(id: id)
+                            Task { await rulesModel.removeDomainRule(id: id) }
                         }
                     }
                 }
@@ -99,11 +96,11 @@ struct DomainRulesView: View {
 private struct AddDomainRuleForm: View {
     @Binding var isPresented: Bool
     @Bindable var rulesModel: EmailRulesModel
+    let selectedAgent: TargetApp
 
     @State private var domain = ""
     @State private var action: RuleAction = .block
     @State private var category = "Work"
-    @State private var selectedAgents: Set<TargetApp> = [.cowork, .codex]
     @FocusState private var domainFieldFocused: Bool
 
     private var cleanDomain: String {
@@ -113,8 +110,7 @@ private struct AddDomainRuleForm: View {
 
     private var previewText: String? {
         guard isValid else { return nil }
-        let agentLabel = selectedAgents.count == 2 ? "both agents" :
-            selectedAgents.contains(.cowork) ? "Claude" : "Codex"
+        let agentLabel = selectedAgent == .codex ? "Codex" : "Claude"
         return action == .block
             ? "Block \(agentLabel) from seeing emails from @\(cleanDomain)"
             : "Allow \(agentLabel) to see emails from @\(cleanDomain)"
@@ -164,11 +160,6 @@ private struct AddDomainRuleForm: View {
                     Text("Action").font(.caption).fontWeight(.semibold)
                     ActionSegmented(action: $action)
                 }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Applies to").font(.caption).fontWeight(.semibold)
-                    AgentCheckboxSelector(selectedAgents: $selectedAgents)
-                }
             }
 
             RulePreviewStrip(text: previewText)
@@ -190,10 +181,13 @@ private struct AddDomainRuleForm: View {
     }
 
     private func addRule() {
-        rulesModel.addDomainRule(
-            domain: cleanDomain, action: action,
-            category: category, agents: Array(selectedAgents)
-        )
+        Task {
+            await rulesModel.addDomainRule(
+                domain: cleanDomain,
+                action: action,
+                category: category
+            )
+        }
         withAnimation(Anim.structural) { isPresented = false }
     }
 }

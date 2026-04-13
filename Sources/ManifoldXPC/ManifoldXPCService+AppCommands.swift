@@ -5,14 +5,8 @@ import os
 
 private let appCommandLogger = Logger(subsystem: "com.spatialduality.manifold", category: "xpc-app")
 
-private struct MailboxCount: Codable, Sendable {
-    let name: String
-    let count: Int
-}
-
 private struct StorageStatsPayload: Codable, Sendable {
     let storageUsed: Int64
-    let blobCount: Int
 }
 
 private struct EmailBackupInfoPayload: Codable, Sendable {
@@ -55,8 +49,7 @@ extension ManifoldXPCService {
             return [
                 "stats": try XPCJSON.object(
                     from: StorageStatsPayload(
-                        storageUsed: await runtime.contentStore.totalSize(),
-                        blobCount: await runtime.contentStore.blobCount()
+                        storageUsed: await runtime.contentStore.totalSize()
                     )
                 )
             ]
@@ -67,6 +60,58 @@ extension ManifoldXPCService {
             }
             return ["snapshots": try XPCJSON.object(from: await runtime.snapshotStore.fileHistory(filePath: filePath))]
 
+        case "fileHistoryContext":
+            guard let filePath = payload["filePath"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let limit = payload["limit"] as? Int ?? 20
+            return ["context": try XPCJSON.object(from: await runtime.fileHistoryContext(filePath: filePath, limit: limit))]
+
+        case "sessionContext":
+            guard let sessionID = payload["sessionID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let viewerAgent: TargetApp?
+            if let agentRaw = payload["agent"] as? String {
+                viewerAgent = TargetApp(rawValue: agentRaw)
+            } else {
+                viewerAgent = nil
+            }
+            return ["context": try XPCJSON.object(from: await runtime.sessionContext(sessionID: sessionID, viewingAs: viewerAgent))]
+
+        case "getEmailRuleSet":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["ruleSet": try XPCJSON.object(from: await runtime.emailRuleStore.ruleSet(for: agent))]
+
+        case "updateEmailRuleSet":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw),
+                  let ruleSetObject = payload["ruleSet"] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            var ruleSet = try XPCJSON.decode(EmailRuleSet.self, from: ruleSetObject)
+            ruleSet = EmailRuleSet(
+                agent: agent,
+                shields: ruleSet.shields,
+                domainRules: ruleSet.domainRules,
+                contactRules: ruleSet.contactRules,
+                keywordRules: ruleSet.keywordRules,
+                defaultPolicy: ruleSet.defaultPolicy,
+                emailSensitivity: ruleSet.emailSensitivity
+            )
+            try await runtime.emailRuleStore.updateRuleSet(ruleSet)
+            return ["ok": true]
+
+        case "getEmailRuleActivitySummary":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["summary": try XPCJSON.object(from: await runtime.emailRuleActivitySummary(for: agent))]
+
         case "snapshotData":
             guard let hash = payload["hash"] as? String else {
                 throw ManifoldXPCError.invalidPayload
@@ -76,16 +121,19 @@ extension ManifoldXPCService {
         case "runGarbageCollection":
             return ["count": try await runtime.contentStore.garbageCollect()]
 
-        case "pruneOldRuns":
-            let keepLast = payload["keepLast"] as? Int ?? 10
-            return ["count": try await runtime.snapshotStore.pruneOldRuns(keepLast: keepLast)]
-
         case "runIntegrityCheck":
             return ["ok": try runtime.db.integrityCheck()]
 
         case "recentSessions":
             let limit = payload["limit"] as? Int ?? 20
             return ["sessions": try XPCJSON.object(from: await runtime.auditStore.recentSessions(limit: limit))]
+
+        case "getCoverageStatus":
+            return ["agentCoverages": try XPCJSON.object(from: await runtime.connectedClientSnapshots())]
+
+        case "listCoverageEvents":
+            let limit = payload["limit"] as? Int ?? 20
+            return ["events": try XPCJSON.object(from: await runtime.coverageEvents(limit: limit))]
 
         case "sessionEvents":
             guard let sessionID = payload["sessionID"] as? String else {
@@ -244,13 +292,6 @@ extension ManifoldXPCService {
         case "emailMessages":
             return ["messages": try XPCJSON.object(from: try emailMessages(payload: payload))]
 
-        case "mailboxes":
-            guard let accountID = payload["accountID"] as? String else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            let mailboxes = try runtime.emailStore.mailboxes(accountID: accountID).map(MailboxCount.init)
-            return ["mailboxes": try XPCJSON.object(from: mailboxes)]
-
         case "domainCounts":
             let counts = Dictionary(uniqueKeysWithValues: try runtime.emailStore.domainCounts().map { ($0.domain, $0.count) })
             return ["counts": try XPCJSON.object(from: counts)]
@@ -391,21 +432,6 @@ extension ManifoldXPCService {
             }
             try runtime.emailStore.deleteSmartMailbox(mailboxID: mailboxID)
             return ["ok": true]
-
-        case "smartMailboxCount":
-            guard let rulesJSON = payload["rulesJSON"] as? String,
-                  let rules = try? JSONDecoder().decode(SmartMailboxRules.self, from: Data(rulesJSON.utf8)) else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            return ["count": try runtime.emailStore.smartMailboxCount(rules: rules)]
-
-        case "smartMailboxMessages":
-            guard let rulesJSON = payload["rulesJSON"] as? String,
-                  let rules = try? JSONDecoder().decode(SmartMailboxRules.self, from: Data(rulesJSON.utf8)) else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            let sortKey = try decodeOptionalPayload(EmailSortKey.self, key: "sortKey", from: payload) ?? .date
-            return ["messages": try XPCJSON.object(from: runtime.emailStore.smartMailboxMessages(rules: rules, sortKey: sortKey))]
 
         case "emailBackupInfo":
             return ["info": try XPCJSON.object(from: EmailBackupInfoPayload(path: EmailSyncEngine.backupRoot.path, diskUsage: backupDiskUsage()))]
@@ -895,7 +921,7 @@ extension ManifoldXPCService {
             return try runtime.emailStore.emailMessages(ids: ids)
         }
         if let accountID = payload["accountID"] as? String, let mailbox = payload["mailbox"] as? String {
-            return try runtime.emailStore.messagesInMailbox(accountID: accountID, mailbox: mailbox, limit: payload["limit"] as? Int ?? 500)
+            return try runtime.emailStore.emailMessages(accountID: accountID, mailbox: mailbox, limit: payload["limit"] as? Int ?? 500)
         }
         if let accountID = payload["accountID"] as? String {
             return try runtime.emailStore.emailMessages(accountID: accountID, limit: payload["limit"] as? Int ?? 200)

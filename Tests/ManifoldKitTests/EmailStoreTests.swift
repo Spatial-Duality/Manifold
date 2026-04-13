@@ -27,6 +27,25 @@ struct EmailStoreTests {
 
     func cleanup(_ url: URL) { try? FileManager.default.removeItem(at: url) }
 
+    func mailboxRecord(
+        accountID: String = EmailStoreTests.testAccountID,
+        mailboxName: String,
+        flags: [String] = [],
+        isSelectable: Bool = true,
+        sortOrder: Int = 0
+    ) -> IMAPMailboxRecord {
+        IMAPMailboxRecord(row: [
+            "account_id": accountID,
+            "mailbox_name": mailboxName,
+            "flags": (try? String(
+                data: JSONSerialization.data(withJSONObject: flags),
+                encoding: .utf8
+            )) ?? "[]",
+            "is_selectable": isSelectable ? "1" : "0",
+            "sort_order": "\(sortOrder)",
+        ])!
+    }
+
     /// Insert a test message and return its ID.
     func insertTestMessage(
         store: EmailStore,
@@ -373,6 +392,34 @@ struct EmailStoreTests {
         let archiveMessages = try await store.emailMessages(accountID: Self.testAccountID, mailbox: "Archive")
         #expect(archiveMessages.count == 1)
         #expect(archiveMessages[0].emailID == "msg-1")
+    }
+
+    @Test("Mailbox queries fall back to email_messages mailbox when membership rows are missing")
+    func mailboxQueriesFallbackWithoutMembership() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        _ = try await insertTestMessage(store: store, emailID: "msg-1", mailbox: "Sent Messages")
+        _ = try await insertTestMessage(store: store, emailID: "msg-2", mailbox: "INBOX")
+
+        let sentMessages = try await store.messagesInMailbox(accountID: Self.testAccountID, mailbox: "Sent Messages")
+        #expect(sentMessages.count == 1)
+        #expect(sentMessages[0].emailID == "msg-1")
+    }
+
+    @Test("Mailbox resolver maps iCloud-style aliases to typed mailboxes")
+    func mailboxResolverMapsICLoudAliases() {
+        let mailboxes = [
+            mailboxRecord(mailboxName: "INBOX", flags: ["\\\\Inbox"], sortOrder: 0),
+            mailboxRecord(mailboxName: "Sent Messages", flags: ["\\\\Sent"], sortOrder: 1),
+            mailboxRecord(mailboxName: "Deleted Messages", flags: ["\\\\Trash"], sortOrder: 2),
+            mailboxRecord(mailboxName: "Archive", flags: ["\\\\Archive"], sortOrder: 3),
+        ]
+
+        #expect(MailboxResolver.resolve(requestedName: "INBOX", imapMailboxes: mailboxes) == "INBOX")
+        #expect(MailboxResolver.resolve(requestedName: "Sent", imapMailboxes: mailboxes) == "Sent Messages")
+        #expect(MailboxResolver.resolve(requestedName: "Trash", imapMailboxes: mailboxes) == "Deleted Messages")
+        #expect(MailboxResolver.resolve(requestedName: "Archive", imapMailboxes: mailboxes) == "Archive")
     }
 
     @Test("markMissingFromMailbox sets missing_from timestamp")

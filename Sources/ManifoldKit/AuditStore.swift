@@ -198,6 +198,19 @@ public actor AuditStore {
         return rows.compactMap { AuditEntry(row: $0) }
     }
 
+    /// Query audit entries by session ID.
+    public func entries(sessionID: String, limit: Int = 200) throws -> [AuditEntry] {
+        let rows = try db.queryAll("""
+            SELECT id, timestamp, run_id, workspace_id, agent, action, file_path, before_hash, after_hash, metadata, session_id, grant_id
+            FROM audit_log
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        """, params: [sessionID, "\(limit)"])
+
+        return rows.compactMap { AuditEntry(row: $0) }
+    }
+
     /// Query audit entries by grant ID (uses indexed column from migration v5).
     public func entriesByGrant(grantID: String, limit: Int = 50) throws -> [AuditEntry] {
         let rows = try db.queryAll("""
@@ -265,6 +278,8 @@ public enum AuditAction: String, Sendable, Codable {
     case fileRead = "file_read"
     case mcpConnection = "mcp_connection"
     case toolCall = "tool_call"
+    case contentDrift = "content_drift"
+    case coverageWarning = "coverage_warning"
 }
 
 public struct AuditEntry: Sendable, Identifiable, Codable {

@@ -724,5 +724,146 @@ public struct DatabaseMigrator {
             try db.execute("CREATE INDEX IF NOT EXISTS idx_er_decision ON exposure_records(access_decision_id)")
             logger.info("Migration 17: access decisions and exposure records")
         },
+
+        Migration(version: 18, name: "governance_identity_and_exposure_previews") { db in
+            try db.execute("ALTER TABLE access_decisions ADD COLUMN client_identity TEXT")
+            try db.execute("ALTER TABLE exposure_records ADD COLUMN payload_preview TEXT")
+            try db.execute("ALTER TABLE exposure_records ADD COLUMN payload_preview_truncated INTEGER NOT NULL DEFAULT 0")
+            try db.execute("ALTER TABLE exposure_records ADD COLUMN client_identity TEXT")
+            logger.info("Migration 18: verification metadata and exposure previews")
+        },
+
+        Migration(version: 19, name: "access_recording_levels_and_intents") { db in
+            let policyColumns = try db.queryAll("PRAGMA table_info(agent_access_policies)")
+            let policyColumnNames = Set(policyColumns.compactMap { $0["name"] })
+            if !policyColumnNames.contains("access_recording_level") {
+                try db.execute("ALTER TABLE agent_access_policies ADD COLUMN access_recording_level TEXT NOT NULL DEFAULT 'lightweight'")
+            }
+
+            let accessDecisionColumns = try db.queryAll("PRAGMA table_info(access_decisions)")
+            let accessDecisionColumnNames = Set(accessDecisionColumns.compactMap { $0["name"] })
+            if !accessDecisionColumnNames.contains("intent_summary") {
+                try db.execute("ALTER TABLE access_decisions ADD COLUMN intent_summary TEXT")
+            }
+            if !accessDecisionColumnNames.contains("intent_details") {
+                try db.execute("ALTER TABLE access_decisions ADD COLUMN intent_details TEXT")
+            }
+
+            let exposureColumns = try db.queryAll("PRAGMA table_info(exposure_records)")
+            let exposureColumnNames = Set(exposureColumns.compactMap { $0["name"] })
+            if !exposureColumnNames.contains("intent_summary") {
+                try db.execute("ALTER TABLE exposure_records ADD COLUMN intent_summary TEXT")
+            }
+            if !exposureColumnNames.contains("intent_details") {
+                try db.execute("ALTER TABLE exposure_records ADD COLUMN intent_details TEXT")
+            }
+
+            logger.info("Migration 19: access recording levels and intent metadata")
+        },
+
+        Migration(version: 20, name: "email_rules_runtimeization") { db in
+            let policyColumns = try db.queryAll("PRAGMA table_info(agent_access_policies)")
+            let policyColumnNames = Set(policyColumns.compactMap { $0["name"] })
+            if !policyColumnNames.contains("default_email_policy") {
+                try db.execute("ALTER TABLE agent_access_policies ADD COLUMN default_email_policy TEXT NOT NULL DEFAULT 'allow_unless_blocked'")
+                try db.execute(
+                    """
+                    UPDATE agent_access_policies
+                    SET default_email_policy = CASE
+                        WHEN agent = 'codex' THEN 'block_unless_allowed'
+                        ELSE 'allow_unless_blocked'
+                    END
+                    """
+                )
+            }
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_shield_states (
+                    agent TEXT NOT NULL,
+                    shield_id TEXT NOT NULL,
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(agent, shield_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_email_shield_states_agent ON email_shield_states(agent)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_domain_rules (
+                    rule_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    domain TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_domain_rules_agent_domain ON email_domain_rules(agent, domain)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_contact_rules (
+                    rule_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    email TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_contact_rules_agent_email ON email_contact_rules(agent, email)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS email_keyword_rules (
+                    rule_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    pattern TEXT NOT NULL,
+                    match_location TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    is_regex INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_keyword_rules_unique ON email_keyword_rules(agent, pattern, match_location, is_regex)"
+            )
+
+            let now = ISO8601DateFormatter.shared.string(from: Date())
+            let policies = try db.queryAll("SELECT agent, allowed_email_domains FROM agent_access_policies")
+            for row in policies {
+                guard let agent = row["agent"],
+                      let domainsJSON = row["allowed_email_domains"],
+                      let data = domainsJSON.data(using: .utf8),
+                      let domains = try? JSONDecoder().decode([String].self, from: data) else {
+                    continue
+                }
+                for domain in Set(domains.map { $0.lowercased() }) where !domain.isEmpty {
+                    let ruleID = "email-domain-migrated-\(agent)-\(domain.replacingOccurrences(of: ".", with: "-"))"
+                    try db.execute(
+                        """
+                        INSERT OR IGNORE INTO email_domain_rules (
+                            rule_id, agent, domain, action, created_at, updated_at
+                        ) VALUES (?, ?, ?, 'allow', ?, ?)
+                        """,
+                        params: [ruleID, agent, domain, now, now]
+                    )
+                }
+            }
+
+            for agent in ["cowork", "codex"] {
+                for shield in EmailShieldCatalog.defaults(enabledByDefault: true) {
+                    try db.execute(
+                        """
+                        INSERT OR IGNORE INTO email_shield_states (agent, shield_id, is_enabled, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        params: [agent, shield.shieldID, shield.isEnabled ? "1" : "0", now]
+                    )
+                }
+            }
+
+            logger.info("Migration 20: runtime-owned email rule tables and defaults")
+        },
     ]
 }

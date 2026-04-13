@@ -1,5 +1,4 @@
 import Foundation
-import ServiceManagement
 import SwiftUI
 import UserNotifications
 import os
@@ -57,6 +56,7 @@ final class ManifoldStore {
     var isRuntimeConnected = false
     var connectedAgent: String?
     var connectedAgents: [String] = []
+    var runtimeLaunchError: String?
 
     /// Whether Claude (cowork) has an active MCP bridge connection to the runtime.
     var isClaudeConnected: Bool { connectedAgents.contains(TargetApp.cowork.rawValue) }
@@ -121,10 +121,12 @@ final class ManifoldStore {
             connectedAgent = nil
             connectedAgents = []
             if force {
-                lastError = "Unable to connect to the Manifold runtime."
+                lastError = runtimeLaunchError ?? "Unable to connect to the Manifold runtime."
             }
             return
         }
+
+        runtimeLaunchError = nil
 
         // XPC version check: auto-restart agent on mismatch (once per app launch)
         let appVersion = Bundle.main.shortVersionString
@@ -137,7 +139,10 @@ final class ManifoldStore {
             let retry = await runtime.ping()
             isRuntimeConnected = retry.ok
             isConnected = retry.ok
-            guard retry.ok else { return }
+            guard retry.ok else {
+                lastError = runtimeLaunchError ?? "Unable to reconnect to the Manifold runtime after restarting it."
+                return
+            }
         }
 
         do {
@@ -145,7 +150,12 @@ final class ManifoldStore {
             sources = dashboard.sources
             policy.claudePolicy = dashboard.claudePolicy
             policy.codexPolicy = dashboard.codexPolicy
+            policy.claudeEmailGovernance = dashboard.claudeEmailGovernance
+            policy.codexEmailGovernance = dashboard.codexEmailGovernance
             policy.activeWorkBlock = dashboard.activeWorkBlock
+            policy.claudeCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
+            policy.codexCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
+            policy.coverageEvents = dashboard.coverageEvents
             connectedAgents = dashboard.connectedAgents
             // Derive connectedAgent from actual runtime data, not heuristics
             connectedAgent = dashboard.connectedAgents.first
@@ -179,6 +189,9 @@ final class ManifoldStore {
                     if !connected {
                         self.connectedAgent = nil
                         self.connectedAgents = []
+                        if self.lastError == nil, let runtimeLaunchError = self.runtimeLaunchError {
+                            self.lastError = runtimeLaunchError
+                        }
                     }
                 }
 
@@ -287,7 +300,6 @@ final class ManifoldStore {
             sources = try await runtime.listSources()
         } catch {
             logger.error("Failed to load sources: \(error.localizedDescription)")
-            sources = []
         }
     }
 
@@ -492,14 +504,18 @@ final class ManifoldStore {
     }
     var allTrackedFiles: [String] { storage.allTrackedFiles }
     var storageUsed: Int64 { storage.storageUsed }
-    var blobCount: Int { storage.blobCount }
-    var mcpInstalled: Bool { integrationHealth.claude.mcpConfigured == .installed }
+    var mcpInstalled: Bool {
+        integrationHealth.claude.mcpConfigured.isPassingCheck
+            || integrationHealth.claude.claudeCodeConfigured.isPassingCheck
+            || integrationHealth.codex.mcpAdded.isPassingCheck
+    }
     var installError: String? {
         get { integrationHealth.claude.errorDetail }
         set { integrationHealth.claude.errorDetail = newValue }
     }
-    var claudeDesktopConfigured: Bool { integrationHealth.claude.mcpConfigured == .installed }
-    var codexConfigured: Bool { integrationHealth.codex.mcpAdded == .installed }
+    var claudeDesktopConfigured: Bool { integrationHealth.claude.mcpConfigured.isPassingCheck }
+    var claudeCodeConfigured: Bool { integrationHealth.claude.claudeCodeConfigured.isPassingCheck }
+    var codexConfigured: Bool { integrationHealth.codex.mcpAdded.isPassingCheck }
     var launchAtLogin: Bool {
         get { setup.launchAtLogin }
         set { setup.launchAtLogin = newValue }
@@ -528,13 +544,9 @@ final class ManifoldStore {
     func fileHistory(filePath: String) async -> [SnapshotRecord] { await storage.fileHistory(filePath: filePath) }
     func snapshotData(hash: String) async -> Data? { await storage.snapshotData(hash: hash) }
     func runGarbageCollection() async -> Int { await storage.runGarbageCollection() }
-    func pruneOldRuns() async -> Int { await storage.pruneOldRuns() }
     func runIntegrityCheck() async -> Bool { await storage.runIntegrityCheck() }
     func loadTrackedFiles() async { await storage.loadTrackedFiles() }
     func loadStorageStats() async { await storage.loadStorageStats() }
-
-    func checkMCPInstalled() { Task { await integrationHealth.checkClaude() } }
-    func checkAgentConfigs() { Task { await integrationHealth.checkAll() } }
 
     func installMCP() {
         do {
@@ -567,66 +579,111 @@ final class ManifoldStore {
     }
 
     func registerAgent() {
-        // Try SMAppService first (works when app is properly installed in /Applications)
-        do {
-            let service = SMAppService.agent(plistName: Self.agentPlistName)
-            try service.register()
-            logger.info("LaunchAgent registered via SMAppService")
-            return
-        } catch {
-            logger.notice("SMAppService registration failed: \(error.localizedDescription, privacy: .public)")
-        }
-
-        // Fallback: register via launchd plist directly (for dev builds from Xcode)
         let bundledAgent = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/LaunchServices/ManifoldAgent")
         guard FileManager.default.isExecutableFile(atPath: bundledAgent.path) else {
+            runtimeLaunchError = "ManifoldAgent is missing from the app bundle, so the runtime cannot start."
+            lastError = runtimeLaunchError
             logger.warning("ManifoldAgent not found at \(bundledAgent.path, privacy: .public)")
             return
         }
-        let plistURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/com.spatialduality.manifold.runtime.plist")
-        let plist: [String: Any] = [
-            "Label": "com.spatialduality.manifold.runtime",
-            "ProgramArguments": [bundledAgent.path],
-            "MachServices": ["com.spatialduality.manifold.runtime": true],
-            "KeepAlive": ["SuccessfulExit": false],
-            "ProcessType": "Interactive",
-        ]
+
         do {
-            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-            try data.write(to: plistURL, options: .atomic)
-            let load = Process()
-            load.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            load.arguments = ["bootout", "gui/\(getuid())/com.spatialduality.manifold.runtime"]
-            try? load.run()
-            load.waitUntilExit()
-            let bootstrap = Process()
-            bootstrap.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            bootstrap.arguments = ["bootstrap", "gui/\(getuid())", plistURL.path]
-            try bootstrap.run()
-            bootstrap.waitUntilExit()
-            logger.info("ManifoldAgent registered via launchd fallback")
+            try FileManager.default.createDirectory(
+                at: Self.launchAgentPlistURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try PropertyListSerialization.data(
+                fromPropertyList: Self.launchAgentPlist(executablePath: bundledAgent.path),
+                format: .xml,
+                options: 0
+            )
+            try data.write(to: Self.launchAgentPlistURL, options: .atomic)
+
+            _ = try? Self.runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(Self.agentLabel)"])
+            let bootstrap = try Self.runLaunchctl(arguments: ["bootstrap", "gui/\(getuid())", Self.launchAgentPlistURL.path])
+            if bootstrap.exitCode != 0 {
+                throw RuntimeRegistrationError(
+                    message: bootstrap.output.nilIfEmpty
+                    ?? "launchctl bootstrap exited with status \(bootstrap.exitCode)."
+                )
+            }
+
+            logger.info("ManifoldAgent registered via launchd")
+            Task { await verifyRuntimeLaunch() }
         } catch {
-            logger.error("Failed to register ManifoldAgent via launchd: \(error.localizedDescription, privacy: .public)")
+            let detail = (error as? RuntimeRegistrationError)?.message ?? error.localizedDescription
+            runtimeLaunchError = "Failed to register the Manifold runtime: \(detail)"
+            lastError = runtimeLaunchError
+            logger.error("Failed to register ManifoldAgent via launchd: \(detail, privacy: .public)")
         }
     }
 
     func unregisterAgent() {
-        do {
-            let service = SMAppService.agent(plistName: Self.agentPlistName)
-            try service.unregister()
-        } catch {
-            // Fallback: bootout via launchctl
-            let bootout = Process()
-            bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            bootout.arguments = ["bootout", "gui/\(getuid())/com.spatialduality.manifold.runtime"]
-            try? bootout.run()
-            bootout.waitUntilExit()
-        }
+        _ = try? Self.runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(Self.agentLabel)"])
     }
 
+    private func verifyRuntimeLaunch() async {
+        let attempts = 6
+        for attempt in 1...attempts {
+            let pingResult = await runtime.ping()
+            if pingResult.ok {
+                runtimeLaunchError = nil
+                if lastError?.contains("runtime") == true || lastError?.contains("ManifoldAgent") == true {
+                    lastError = nil
+                }
+                return
+            }
+            if attempt < attempts {
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+
+        runtimeLaunchError = "The Manifold runtime did not respond after launchd registration. Check the launch agent and bundled helper path."
+        lastError = runtimeLaunchError
+    }
+
+    private struct RuntimeRegistrationError: Error {
+        let message: String
+    }
+
+    private struct ProcessResult {
+        let exitCode: Int32
+        let output: String
+    }
+
+    static let agentLabel = "com.spatialduality.manifold.runtime"
     static let agentPlistName = "com.spatialduality.manifold.runtime.plist"
+    static let launchAgentPlistURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/LaunchAgents/\(agentPlistName)")
+
+    private static func launchAgentPlist(executablePath: String) -> [String: Any] {
+        [
+            "Label": agentLabel,
+            "ProgramArguments": [executablePath],
+            "MachServices": [agentLabel: true],
+            "KeepAlive": ["SuccessfulExit": false],
+            "ProcessType": "Interactive",
+        ]
+    }
+
+    @discardableResult
+    private static func runLaunchctl(arguments: [String]) throws -> ProcessResult {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        return ProcessResult(
+            exitCode: process.terminationStatus,
+            output: String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        )
+    }
 
     static var storeURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -637,5 +694,11 @@ final class ManifoldStore {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Manifold/bin/manifold-mcp")
             .path
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

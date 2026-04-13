@@ -30,8 +30,24 @@ struct ConnectClaudeSheet: View {
                 )
 
                 LiveCheckRow(
-                    label: "MCP configured",
+                    label: "Claude Desktop configured",
                     status: store.integrationHealth.claude.mcpConfigured,
+                    action: {
+                        installing = true
+                        store.installMCP()
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(500))
+                            await store.integrationHealth.checkClaude()
+                            installing = false
+                        }
+                    },
+                    actionLabel: installing ? "Installing\u{2026}" : "Install",
+                    onRefresh: { await store.integrationHealth.checkClaude() }
+                )
+
+                LiveCheckRow(
+                    label: "Claude Code configured",
+                    status: store.integrationHealth.claude.claudeCodeConfigured,
                     action: {
                         installing = true
                         store.installMCP()
@@ -54,7 +70,8 @@ struct ConnectClaudeSheet: View {
                 DisclosureGroup("Details") {
                     VStack(alignment: .leading, spacing: 4) {
                         DetailLine("Binary", value: ManifoldStore.mcpBinaryPath)
-                        DetailLine("Config", value: "~/Library/Application Support/Claude/claude_desktop_config.json")
+                        DetailLine("Claude Desktop", value: "~/Library/Application Support/Claude/claude_desktop_config.json")
+                        DetailLine("Claude Code", value: "~/.claude/settings.json")
                     }
                 }
                 .font(.caption)
@@ -69,7 +86,8 @@ struct ConnectClaudeSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                if store.integrationHealth.claude.mcpConfigured == .installed {
+                if store.integrationHealth.claude.mcpConfigured.isPassingCheck
+                    || store.integrationHealth.claude.claudeCodeConfigured.isPassingCheck {
                     Button("Done") { dismiss() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
