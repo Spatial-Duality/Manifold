@@ -1,4 +1,4 @@
-@AGENTS.md
+@.claude/rules/skill-routing.md
 
 ## Manifold
 
