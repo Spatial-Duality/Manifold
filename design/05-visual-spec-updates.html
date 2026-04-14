@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Manifold — Stage 5 visual updates</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --surface-2: #fbfbfd;
+    --surface-3: #f0f0f2;
+    --border: rgba(0,0,0,0.08);
+    --border-strong: rgba(0,0,0,0.14);
+    --text: #1d1d1f;
+    --text-2: #55555a;
+    --text-3: #8a8a8e;
+    --text-4: #b5b5b9;
+    --claude: #3B6DE6;
+    --claude-soft: rgba(59,109,230,0.10);
+    --codex: #7C46D6;
+    --codex-soft: rgba(124,70,214,0.10);
+    --active: #1fab5a;
+    --paused: #c8860b;
+    --attention: #d45e00;
+    --danger: #c8201e;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --t-caption: 11px/16px var(--sans);
+    --t-body: 13px/20px var(--sans);
+    --t-mono: 11px/16px var(--mono);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --surface: #2c2c2e; --surface-2: #242426; --surface-3: #343438;
+      --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.14);
+      --text: #f5f5f7; --text-2: #c5c5c8; --text-3: #8a8a8e; --text-4: #5a5a5e;
+      --claude: #6A94F5; --claude-soft: rgba(106,148,245,0.16);
+      --codex: #A67AE8; --codex-soft: rgba(166,122,232,0.16);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: var(--t-body); -webkit-font-smoothing: antialiased; }
+  body { padding: 40px; }
+  h1.deck-title { font: 600 22px/28px var(--sans); margin: 0 0 4px; letter-spacing: -0.01em; }
+  p.deck-sub { font: var(--t-body); color: var(--text-2); margin: 0 0 32px; }
+  h2.section { font: 600 16px/24px var(--sans); margin: 48px 0 8px; letter-spacing: -0.005em; }
+  p.section-note { font: var(--t-caption); color: var(--text-3); margin: 0 0 20px; max-width: 640px; }
+  .row { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+
+  .window {
+    width: 1120px; height: 680px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.08);
+    display: grid; grid-template-rows: 38px 1fr; overflow: hidden;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    background: linear-gradient(180deg, var(--surface-2), var(--surface));
+    border-bottom: 1px solid var(--border);
+  }
+  .traffic { display: flex; gap: 6px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; }
+  .traffic .c { background: #ff5f57; } .traffic .m { background: #febc2e; } .traffic .x { background: #28c840; }
+  .titlebar .title { flex: 1; text-align: center; font: 500 12px/16px var(--sans); color: var(--text-2); }
+  .titlebar .status { display: flex; align-items: center; gap: 6px; font: var(--t-caption); color: var(--text-3); }
+  .titlebar .status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--active); }
+  .window-body { display: grid; grid-template-columns: 180px 1fr 380px; min-height: 0; }
+
+  .sidebar { background: var(--surface-2); border-right: 1px solid var(--border); padding: 8px 6px; }
+  .sidebar-section { font: 600 10px/14px var(--sans); color: var(--text-4); text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 10px 4px; }
+  .sidebar-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font: var(--t-body); color: var(--text-2); cursor: pointer; }
+  .sidebar-item:hover { background: var(--surface-3); color: var(--text); }
+  .sidebar-item.active { background: var(--claude-soft); color: var(--text); font-weight: 500; }
+  .sidebar-item .badge { margin-left: auto; background: var(--attention); color: #fff; font: 600 10px/14px var(--sans); padding: 0 6px; border-radius: 7px; min-width: 14px; text-align: center; }
+
+  .content-area { display: grid; grid-template-rows: 44px 1fr; min-height: 0; }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; padding: 0 16px;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  .toolbar .title { font: 600 14px/18px var(--sans); letter-spacing: -0.005em; }
+  .toolbar .sub { font: var(--t-caption); color: var(--text-3); margin-left: 6px; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar .chip { font: var(--t-caption); padding: 3px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); cursor: pointer; }
+  .toolbar .chip.active { background: var(--text); color: var(--surface); border-color: var(--text); }
+
+  /* ───────────────────────────────────────────────
+     Access — with file tree inspector (Q1 answer)
+     ─────────────────────────────────────────────── */
+  .scope-grid { display: grid; grid-template-columns: 40px 1fr 120px 120px 80px; min-height: 0; overflow: hidden; }
+  .sg-cell { padding: 0 12px; height: 36px; display: flex; align-items: center; border-bottom: 1px solid var(--border); font: var(--t-body); }
+  .sg-cell.selected { background: var(--claude-soft); }
+  .sg-head { height: 32px; font: 600 11px/16px var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+  .sg-section { grid-column: 1 / -1; font: 600 10px/14px var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; padding: 16px 16px 6px; background: var(--surface); }
+  .sg-source { display: flex; align-items: center; gap: 10px; }
+  .sg-source .meta { font: var(--t-caption); color: var(--text-3); margin-left: 8px; }
+  .sg-toggle { width: 32px; height: 20px; border-radius: 10px; background: var(--surface-3); position: relative; cursor: pointer; border: 1px solid var(--border); }
+  .sg-toggle .knob { position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.2); transition: transform 180ms; }
+  .sg-toggle.on { background: var(--claude); border-color: var(--claude); }
+  .sg-toggle.on .knob { transform: translateX(12px); }
+  .sg-toggle.codex.on { background: var(--codex); border-color: var(--codex); }
+  .sg-toggle.mixed { background: var(--claude-soft); border-color: var(--claude); }
+  .sg-toggle.mixed .knob { transform: translateX(6px); background: var(--claude); }
+  .sg-denials { font: var(--t-mono); color: var(--attention); }
+
+  /* Inspector */
+  .inspector { border-left: 1px solid var(--border); background: var(--surface-2); overflow-y: auto; }
+  .ins-header { padding: 16px; border-bottom: 1px solid var(--border); }
+  .ins-header h3 { font: 600 14px/18px var(--sans); margin: 0 0 4px; }
+  .ins-header .path { font: var(--t-mono); color: var(--text-3); }
+  .ins-body { padding: 12px 16px; }
+  .ins-label { font: 600 10px/14px var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin: 14px 0 6px; }
+  .ins-label:first-child { margin-top: 0; }
+  .ins-meta { font: var(--t-body); color: var(--text-2); }
+
+  /* Running count banner */
+  .count-banner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font: 500 12px/16px var(--sans);
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 12px;
+  }
+  .count-banner strong { color: var(--text); font-weight: 600; }
+  .count-banner .agent-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude); }
+
+  /* Global rules banner (Q3 answer) */
+  .rules-banner {
+    background: rgba(212,94,0,0.08);
+    border: 1px solid rgba(212,94,0,0.24);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font: var(--t-caption);
+    color: var(--text-2);
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer;
+  }
+  .rules-banner .icon { color: var(--attention); }
+  .rules-banner .link { margin-left: auto; color: var(--claude); font-weight: 500; }
+
+  /* Inspector search field */
+  .ins-search {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 10px;
+    font: var(--t-body);
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  /* File tree */
+  .tree { font: var(--t-body); }
+  .tree-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 6px; border-radius: 4px;
+    cursor: default;
+  }
+  .tree-row:hover { background: var(--surface-3); }
+  .tree-row .caret { color: var(--text-3); width: 10px; font-size: 10px; }
+  .tree-row .name { flex: 1; display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-row .name .icon { color: var(--text-3); }
+  .tree-row .size { font: var(--t-mono); color: var(--text-3); }
+  .tree-row .trace { font: var(--t-caption); color: var(--text-3); }
+  .tree-row.excluded .name { color: var(--text-4); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .tree-row.excluded .size { color: var(--text-4); }
+
+  /* Tri-state checkbox */
+  .check {
+    width: 14px; height: 14px; border-radius: 3px;
+    border: 1.5px solid var(--border-strong);
+    background: var(--surface); position: relative;
+    flex-shrink: 0; cursor: pointer;
+  }
+  .check.on { background: var(--claude); border-color: var(--claude); }
+  .check.on::after {
+    content: ""; position: absolute; left: 3px; top: 0px;
+    width: 4px; height: 8px; border-right: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+    transform: rotate(45deg);
+  }
+  .check.mixed { background: var(--claude-soft); border-color: var(--claude); }
+  .check.mixed::after {
+    content: ""; position: absolute; left: 2px; top: 5px;
+    width: 7px; height: 2px; background: var(--claude);
+  }
+  .check.overridden::before {
+    content: ""; position: absolute; right: -3px; top: -3px;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--attention); border: 1.5px solid var(--surface);
+  }
+
+  /* Exclusions list */
+  .excl-list {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 6px;
+  }
+  .excl-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font: var(--t-caption); color: var(--text-2); }
+  .excl-row code { font: var(--t-mono); background: var(--surface-3); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  .excl-row .reason { color: var(--text-3); margin-left: auto; }
+
+  /* ───────────────────────────────────────────────
+     Rules surface (Q3 answer)
+     ─────────────────────────────────────────────── */
+  .rules-body { padding: 24px 28px; overflow-y: auto; }
+  .rules-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+  .rules-tab {
+    padding: 6px 14px; border-radius: 6px;
+    font: 500 12px/16px var(--sans); cursor: pointer;
+    color: var(--text-2);
+    border: 1px solid transparent;
+  }
+  .rules-tab.active {
+    background: var(--surface-3); color: var(--text);
+    border-color: var(--border);
+  }
+  .rules-group-title {
+    font: 600 13px/20px var(--sans); color: var(--text);
+    margin: 20px 0 4px;
+  }
+  .rules-group-title:first-child { margin-top: 0; }
+  .rules-group-desc {
+    font: var(--t-caption); color: var(--text-3); margin-bottom: 10px;
+  }
+  .rule-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: grid; grid-template-columns: 1fr auto; gap: 6px 16px;
+    align-items: center;
+  }
+  .rule-card .sentence { font: var(--t-body); color: var(--text); }
+  .rule-card .sentence code { font: var(--t-mono); background: var(--surface-3); padding: 1px 5px; border-radius: 3px; }
+  .rule-card .meta { font: var(--t-caption); color: var(--text-3); grid-column: 1 / -1; }
+  .rule-card .toggle {
+    width: 32px; height: 20px; border-radius: 10px; background: var(--active); border: 1px solid var(--active); position: relative; cursor: pointer;
+  }
+  .rule-card .toggle .knob { position: absolute; top: 1px; left: 13px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+  .rule-card.off .toggle { background: var(--surface-3); border-color: var(--border); }
+  .rule-card.off .toggle .knob { left: 1px; }
+  .rule-card .blast { font: var(--t-caption); color: var(--text-3); }
+  .rule-card .blast strong { color: var(--text-2); }
+  .rule-seeded {
+    font: 500 10px/14px var(--sans); color: var(--active);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 1px 6px; border-radius: 3px;
+    background: rgba(31,171,90,0.1);
+  }
+
+  .add-rule-btn {
+    width: 100%;
+    border: 1px dashed var(--border-strong);
+    background: transparent;
+    color: var(--text-2);
+    padding: 10px;
+    border-radius: 6px;
+    font: 500 12px/16px var(--sans);
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .add-rule-btn:hover { background: var(--surface-2); color: var(--text); }
+
+</style>
+</head>
+<body>
+
+<h1 class="deck-title">Manifold — Stage 5 visual updates</h1>
+<p class="deck-sub">Three additions answering Amar's Stage 4 review: (1) file-tree inspector inside Access, (2) global Rules surface, (3) renamed nav using product-spec language. For the menu bar panel + Ledger (now Activity) see Stage 4; their structure is unchanged, only names and status copy differ.</p>
+
+<!-- ================================================================
+     ACCESS — with file-tree inspector
+     ================================================================ -->
+
+<h2 class="section">Q1 + Q4 + Q5 — Access view, with per-file drill-down</h2>
+<p class="section-note">Matrix unchanged. Renamed from "Scope" to "Access" — same word as the product spec. Selecting a source row opens the inspector with a tri-state file tree. Default is everything-included; exclusions are explicit. Global rules that apply show as a banner at the top of the inspector.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic"><span class="c"></span><span class="m"></span><span class="x"></span></div>
+    <div class="title">Manifold — Access</div>
+    <div class="status"><span class="dot"></span>You've shared 4 folders with Claude</div>
+  </div>
+  <div class="window-body">
+    <div class="sidebar">
+      <div class="sidebar-section">Manifold</div>
+      <div class="sidebar-item">📊 Activity</div>
+      <div class="sidebar-item active">🗺 Access</div>
+      <div class="sidebar-item">⏳ Requests <span class="badge">2</span></div>
+      <div class="sidebar-item">🛡 Rules</div>
+    </div>
+
+    <div class="content-area">
+      <div class="toolbar">
+        <div class="title">Access</div>
+        <div class="sub">· 6 sources · what you've shared with each agent</div>
+        <div class="spacer"></div>
+        <div class="chip">+ Add folder</div>
+        <div class="chip">+ Add mailbox</div>
+      </div>
+      <div class="scope-grid">
+        <div class="sg-cell sg-head"></div>
+        <div class="sg-cell sg-head">Source</div>
+        <div class="sg-cell sg-head">Claude</div>
+        <div class="sg-cell sg-head">Codex</div>
+        <div class="sg-cell sg-head" style="text-align:right;justify-content:flex-end">Denials 7d</div>
+
+        <div class="sg-section">Folders</div>
+
+        <div class="sg-cell selected"></div>
+        <div class="sg-cell selected sg-source">
+          <span style="color:var(--claude)">📁</span>
+          <span>Projects/Acme</span>
+          <span class="meta">428 files · 15 excluded</span>
+        </div>
+        <div class="sg-cell selected"><div class="sg-toggle mixed"><div class="knob"></div></div></div>
+        <div class="sg-cell selected"><div class="sg-toggle codex"><div class="knob"></div></div></div>
+        <div class="sg-cell selected" style="justify-content:flex-end"><span class="sg-denials">—</span></div>
+
+        <div class="sg-cell"></div>
+        <div class="sg-cell sg-source">
+          <span style="color:var(--claude)">📁</span>
+          <span>Projects/Manifold</span>
+          <span class="meta">1,284 files</span>
+        </div>
+        <div class="sg-cell"><div class="sg-toggle on"><div class="knob"></div></div></div>
+        <div class="sg-cell"><div class="sg-toggle codex on"><div class="knob"></div></div></div>
+        <div class="sg-cell" style="justify-content:flex-end"><span class="sg-denials">—</span></div>
+
+        <div class="sg-cell"></div>
+        <div class="sg-cell sg-source">
+          <span style="color:var(--claude)">📁</span>
+          <span>Documents/Writing</span>
+          <span class="meta">28 files</span>
+        </div>
+        <div class="sg-cell"><div class="sg-toggle on"><div class="knob"></div></div></div>
+        <div class="sg-cell"><div class="sg-toggle codex"><div class="knob"></div></div></div>
+        <div class="sg-cell" style="justify-content:flex-end"><span class="sg-denials">—</span></div>
+
+        <div class="sg-cell"></div>
+        <div class="sg-cell sg-source">
+          <span style="color:var(--text-3)">📁</span>
+          <span>Finances</span>
+          <span class="meta">not shared</span>
+        </div>
+        <div class="sg-cell"><div class="sg-toggle"><div class="knob"></div></div></div>
+        <div class="sg-cell"><div class="sg-toggle codex"><div class="knob"></div></div></div>
+        <div class="sg-cell" style="justify-content:flex-end"><span class="sg-denials">3</span></div>
+
+        <div class="sg-section">Mailboxes</div>
+
+        <div class="sg-cell"></div>
+        <div class="sg-cell sg-source">
+          <span style="color:var(--claude)">✉️</span>
+          <span>amar@spatialduality.com</span>
+          <span class="meta">subjects only · 2 rules</span>
+        </div>
+        <div class="sg-cell"><div class="sg-toggle on"><div class="knob"></div></div></div>
+        <div class="sg-cell"><div class="sg-toggle codex"><div class="knob"></div></div></div>
+        <div class="sg-cell" style="justify-content:flex-end"><span class="sg-denials">—</span></div>
+      </div>
+    </div>
+
+    <div class="inspector">
+      <div class="ins-header">
+        <h3>Projects/Acme</h3>
+        <div class="path">~/Projects/Acme · 428 files · 14 MB</div>
+      </div>
+      <div class="ins-body">
+
+        <div class="count-banner">
+          <span class="agent-dot"></span>
+          <span><strong>413 of 428 files</strong> visible to Claude · <strong>15 excluded</strong></span>
+        </div>
+
+        <div class="rules-banner">
+          <span class="icon">🛡</span>
+          <span>2 global rules also exclude files from this folder</span>
+          <span class="link">View →</span>
+        </div>
+
+        <input class="ins-search" placeholder="Find a file or folder…" value=".env" />
+
+        <div class="ins-label">Files</div>
+
+        <div class="tree">
+          <div class="tree-row">
+            <span class="caret">▾</span>
+            <span class="check mixed"></span>
+            <span class="name"><span class="icon">📁</span>Projects/Acme</span>
+            <span class="size">428</span>
+          </div>
+          <div class="tree-row" style="padding-left:26px">
+            <span class="caret">▸</span>
+            <span class="check on"></span>
+            <span class="name"><span class="icon">📁</span>src</span>
+            <span class="size">312</span>
+          </div>
+          <div class="tree-row" style="padding-left:26px">
+            <span class="caret">▾</span>
+            <span class="check mixed"></span>
+            <span class="name"><span class="icon">📁</span>lib</span>
+            <span class="size">48</span>
+          </div>
+          <div class="tree-row excluded" style="padding-left:50px">
+            <span class="caret"></span>
+            <span class="check"></span>
+            <span class="name"><span class="icon">📄</span>.env</span>
+            <span class="size">412 B</span>
+            <span class="trace" style="margin-left:8px">excluded · rule <code style="font-family:var(--mono)">*.env</code></span>
+          </div>
+          <div class="tree-row excluded" style="padding-left:50px">
+            <span class="caret"></span>
+            <span class="check"></span>
+            <span class="name"><span class="icon">📄</span>.env.production</span>
+            <span class="size">318 B</span>
+            <span class="trace" style="margin-left:8px">excluded · rule <code style="font-family:var(--mono)">*.env</code></span>
+          </div>
+          <div class="tree-row" style="padding-left:50px">
+            <span class="caret"></span>
+            <span class="check on"></span>
+            <span class="name"><span class="icon">📄</span>auth.ts</span>
+            <span class="size">3.1 KB</span>
+            <span class="trace" style="margin-left:8px">Claude read 2×</span>
+          </div>
+          <div class="tree-row" style="padding-left:50px">
+            <span class="caret"></span>
+            <span class="check on"></span>
+            <span class="name"><span class="icon">📄</span>session.ts</span>
+            <span class="size">1.8 KB</span>
+            <span class="trace" style="margin-left:8px">Claude read 1×</span>
+          </div>
+          <div class="tree-row excluded" style="padding-left:26px">
+            <span class="caret">▸</span>
+            <span class="check"></span>
+            <span class="name"><span class="icon">📁</span>secrets</span>
+            <span class="size">4</span>
+            <span class="trace" style="margin-left:8px">excluded manually</span>
+          </div>
+          <div class="tree-row excluded" style="padding-left:26px">
+            <span class="caret">▸</span>
+            <span class="check"></span>
+            <span class="name"><span class="icon">📁</span>node_modules</span>
+            <span class="size">9,217</span>
+            <span class="trace" style="margin-left:8px">excluded · smart default</span>
+          </div>
+          <div class="tree-row" style="padding-left:26px">
+            <span class="caret">▸</span>
+            <span class="check on overridden"></span>
+            <span class="name"><span class="icon">📁</span>test</span>
+            <span class="size">68</span>
+            <span class="trace" style="margin-left:8px">override</span>
+          </div>
+        </div>
+
+        <div class="ins-label">Exclusion rules (this folder only)</div>
+        <div class="excl-list">
+          <div class="excl-row">
+            <code>*.env</code>
+            <span class="reason">2 files match · added Apr 4</span>
+          </div>
+          <div class="excl-row">
+            <code>node_modules/</code>
+            <span class="reason">9,217 files · smart default</span>
+          </div>
+          <div class="excl-row">
+            <code>files &gt; 10 MB</code>
+            <span class="reason">0 files currently · smart default</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="section-note" style="margin-top:12px">
+  Tri-state checkbox: empty = excluded, checked = included, dash = mixed children. The orange dot on the test/ checkbox indicates it overrides an ancestor rule. <code>.env</code> files show the rule that excluded them, not just the exclusion — Principle 10 (honesty outranks confidence).
+</p>
+
+<!-- ================================================================
+     RULES — global policies
+     ================================================================ -->
+
+<h2 class="section">Q3 — Rules: global policies across every source</h2>
+<p class="section-note">Separate surface because global rules have different blast radius, different lifecycle, and different authoring than per-source rules. Seeded with safe defaults (<code>.env</code>, <code>.pem</code>, credit-card redaction, <code>.git/</code> never-write). Plain-English sentences with live blast-radius preview. Per-source inspectors link here via the "N global rules also apply" banner.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic"><span class="c"></span><span class="m"></span><span class="x"></span></div>
+    <div class="title">Manifold — Rules</div>
+    <div class="status"><span class="dot"></span>7 rules active</div>
+  </div>
+  <div class="window-body" style="grid-template-columns: 180px 1fr;">
+    <div class="sidebar">
+      <div class="sidebar-section">Manifold</div>
+      <div class="sidebar-item">📊 Activity</div>
+      <div class="sidebar-item">🗺 Access</div>
+      <div class="sidebar-item">⏳ Requests <span class="badge">2</span></div>
+      <div class="sidebar-item active">🛡 Rules</div>
+    </div>
+    <div class="content-area">
+      <div class="toolbar">
+        <div class="title">Rules</div>
+        <div class="sub">· 7 active · global across all sources</div>
+        <div class="spacer"></div>
+        <div class="chip">+ New rule</div>
+      </div>
+      <div class="rules-body">
+
+        <div class="rules-tabs">
+          <div class="rules-tab">Email</div>
+          <div class="rules-tab active">Files</div>
+          <div class="rules-tab">Agents</div>
+        </div>
+
+        <div class="rules-group-title">Exclude from all agents</div>
+        <div class="rules-group-desc">These files are never visible to any agent, even when their folder is shared.</div>
+
+        <div class="rule-card">
+          <div class="sentence">Never share files matching <code>*.env</code>, <code>*.env.*</code></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="rule-seeded">seeded</span><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">Currently matches <strong>4 files</strong> across shared folders</span></div>
+        </div>
+
+        <div class="rule-card">
+          <div class="sentence">Never share files matching <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="rule-seeded">seeded</span><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">Currently matches <strong>0 files</strong></span></div>
+        </div>
+
+        <div class="rule-card">
+          <div class="sentence">Never share contents of <code>.ssh/</code>, <code>.aws/</code>, <code>.gnupg/</code> anywhere</div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="rule-seeded">seeded</span><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">Currently matches <strong>0 files</strong> in shared folders</span></div>
+        </div>
+
+        <div class="rule-card">
+          <div class="sentence">Never share files larger than <code>10 MB</code></div>
+          <div style="display:flex;gap:8px;align-items:center"><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">Currently matches <strong>6 files</strong> · mostly PDFs in Documents/Writing</span></div>
+        </div>
+
+        <div class="rules-group-title">Redact before sharing</div>
+        <div class="rules-group-desc">These patterns are masked in file contents before any agent sees them.</div>
+
+        <div class="rule-card">
+          <div class="sentence">Redact credit-card numbers (13–19 digits, Luhn-valid) with <code>[card]</code></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="rule-seeded">seeded</span><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">Would redact <strong>2 files</strong> if read today</span></div>
+        </div>
+
+        <div class="rule-card">
+          <div class="sentence">Redact US SSNs (<code>999-99-9999</code>) with <code>[ssn]</code></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="rule-seeded">seeded</span><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">No matches in shared folders</span></div>
+        </div>
+
+        <div class="rules-group-title">Never write</div>
+        <div class="rules-group-desc">Agents can read these paths but cannot modify them.</div>
+
+        <div class="rule-card">
+          <div class="sentence">Never write to <code>.git/</code>, <code>.svn/</code>, <code>.hg/</code></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="rule-seeded">seeded</span><div class="toggle"><div class="knob"></div></div></div>
+          <div class="meta"><span class="blast">Applies to <strong>3 shared folders</strong></span></div>
+        </div>
+
+        <button class="add-rule-btn">+ Add a new rule</button>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="section-note" style="margin-top:12px">
+  Sentences are plain English. Blast-radius preview ("Currently matches 4 files") makes the rule auditable before commit — you see what a rule does without having to test it. Seeded rules have a visible badge so the user knows what Manifold shipped them vs. what they added. Every rule is a single on/off toggle — no fine-grained per-agent variants at this tier (that's per-source).
+</p>
+
+<!-- ================================================================
+     COPY UPDATE NOTE
+     ================================================================ -->
+
+<h2 class="section">Q5 — Status sentences, user as subject</h2>
+<p class="section-note">Every status sentence in the app was rewritten. User is subject when describing choices you made; agent is subject when describing what it did. Two voices, used on purpose.</p>
+
+<div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px 28px; max-width: 840px;">
+  <table style="width: 100%; border-collapse: collapse; font: var(--t-body);">
+    <thead>
+      <tr style="border-bottom: 1px solid var(--border);">
+        <th style="text-align:left; padding: 8px 12px 12px 0; font: 600 11px/16px var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em;">Context</th>
+        <th style="text-align:left; padding: 8px 12px 12px; font: 600 11px/16px var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em;">Before (Stage 3)</th>
+        <th style="text-align:left; padding: 8px 0 12px 12px; font: 600 11px/16px var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em;">After (Stage 5)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding: 12px 12px 12px 0; color: var(--text-3);">Menu bar idle</td>
+        <td style="padding: 12px; color: var(--text-2);">No governed sessions yet</td>
+        <td style="padding: 12px 0 12px 12px;">You haven't shared anything yet.</td>
+      </tr>
+      <tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding: 12px 12px 12px 0; color: var(--text-3);">Menu bar active</td>
+        <td style="padding: 12px; color: var(--text-2);">Claude can see 4 folders</td>
+        <td style="padding: 12px 0 12px 12px;">You've shared 4 folders with Claude. It read README.md 12 min ago.</td>
+      </tr>
+      <tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding: 12px 12px 12px 0; color: var(--text-3);">Tracked edit</td>
+        <td style="padding: 12px; color: var(--text-2);">Tracked edit in progress</td>
+        <td style="padding: 12px 0 12px 12px;">Claude is editing 3 files in your Acme folder. You can undo any of it.</td>
+      </tr>
+      <tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding: 12px 12px 12px 0; color: var(--text-3);">Denial</td>
+        <td style="padding: 12px; color: var(--text-2);">coverage_warning</td>
+        <td style="padding: 12px 0 12px 12px;">Claude tried to read ~/Finances/returns-2025.pdf. Blocked — not in what you've shared.</td>
+      </tr>
+      <tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding: 12px 12px 12px 0; color: var(--text-3);">Error</td>
+        <td style="padding: 12px; color: var(--text-2);">Runtime not connected</td>
+        <td style="padding: 12px 0 12px 12px;">Manifold isn't recording right now. Nothing is being shared until this reconnects.</td>
+      </tr>
+      <tr>
+        <td style="padding: 12px 12px 12px 0; color: var(--text-3);">Approve</td>
+        <td style="padding: 12px; color: var(--text-2);">Allow Access / Update Access</td>
+        <td style="padding: 12px 0 12px 12px;">Not this time · Allow once · Add to shared</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<p class="section-note" style="margin-top:12px">
+  Full strings catalog lives in <code>/design/strings.yaml</code> (Stage 6). Every user-visible phrase sourced there; no ad-hoc strings in Swift. Every phrase reviewed against Yifrah, Podmajersky, and Nicely Said.
+</p>
+
+</body>
+</html>

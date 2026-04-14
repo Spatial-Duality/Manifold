@@ -1,0 +1,3022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Manifold — Mail (app design, all views)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   MANIFOLD — MAIL (five views)
+   ═══════════════════════════════════════════════════════════════════
+   1. Mailboxes  — coverage matrix + sensitivity + senders inspector
+   2. Threads    — Active Backup style dense thread table (Stage 8)
+   3. Session    — live overlay diff
+   4. History    — past mail sessions
+   5. Empty      — no mailboxes connected
+
+   NOT Apple Mail. Operator chrome. No reading pane. Borrows mail-native
+   row content (subject, sender disc, thread collapse, mail-convention
+   dates) — rejects reading-client posture.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: dark;
+  --sans: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --display: -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --claude: #3F7CFF; --claude-2: #6A9BFF; --claude-glow: rgba(63,124,255,0.45);
+  --claude-soft: rgba(63,124,255,0.18); --claude-xsoft: rgba(63,124,255,0.08);
+  --codex: #9756F0; --codex-2: #B681F4; --codex-glow: rgba(151,86,240,0.45);
+  --codex-soft: rgba(151,86,240,0.18); --codex-xsoft: rgba(151,86,240,0.08);
+  --session: #2ECB7F; --session-2: #3FE395; --session-glow: rgba(46,203,127,0.45);
+  --session-soft: rgba(46,203,127,0.18); --session-xsoft: rgba(46,203,127,0.07);
+  --attention: #FF8A3D; --attention-2: #FFA866; --attention-glow: rgba(255,138,61,0.45);
+  --attention-soft: rgba(255,138,61,0.16); --attention-xsoft: rgba(255,138,61,0.06);
+  --danger: #FF5F56; --remove: #FF8079; --remove-soft: rgba(255,128,121,0.14);
+
+  --win-bg: rgba(28,28,34,0.72); --win-border: rgba(255,255,255,0.10);
+  --win-hl-top: rgba(255,255,255,0.14);
+  --tb-bg: rgba(42,42,50,0.56); --tb-border: rgba(255,255,255,0.08);
+  --sb-bg: rgba(36,36,42,0.48); --sb-border: rgba(255,255,255,0.06);
+  --rail-bg: rgba(32,32,38,0.62); --rail-border: rgba(255,255,255,0.06);
+  --content-bg: rgba(24,24,28,0.92); --content-border: rgba(255,255,255,0.06);
+  --section-bg: rgba(255,255,255,0.02);
+  --insp-bg: rgba(30,30,36,0.76); --insp-border: rgba(255,255,255,0.08);
+
+  --text: #F3F4F8; --text-2: #B9BCC6; --text-3: #7C7F8A; --text-4: #52545C;
+  --hairline: rgba(255,255,255,0.08); --hairline-2: rgba(255,255,255,0.04);
+
+  --selection: var(--claude-soft);
+  --selection-glow: 0 0 0 0.5px rgba(63,124,255,0.35), 0 0 24px rgba(63,124,255,0.12) inset;
+
+  --sh-window:
+    0 48px 128px rgba(0,0,0,0.6),
+    0 16px 48px rgba(0,0,0,0.4),
+    0 0 0 0.5px rgba(0,0,0,0.3);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --win-bg: rgba(252,252,254,0.78); --win-border: rgba(0,0,0,0.08);
+    --win-hl-top: rgba(255,255,255,0.8);
+    --tb-bg: rgba(248,248,252,0.78); --tb-border: rgba(0,0,0,0.06);
+    --sb-bg: rgba(244,244,248,0.70); --sb-border: rgba(0,0,0,0.06);
+    --rail-bg: rgba(240,240,246,0.80); --rail-border: rgba(0,0,0,0.06);
+    --content-bg: rgba(255,255,255,0.97); --content-border: rgba(0,0,0,0.06);
+    --section-bg: rgba(0,0,0,0.02);
+    --insp-bg: rgba(246,246,250,0.84); --insp-border: rgba(0,0,0,0.07);
+    --text: #0D0E12; --text-2: #3C3F46; --text-3: #6D7079; --text-4: #A3A6AE;
+    --hairline: rgba(0,0,0,0.08); --hairline-2: rgba(0,0,0,0.04);
+    --claude-soft: rgba(63,124,255,0.10); --claude-xsoft: rgba(63,124,255,0.04);
+    --codex-soft: rgba(151,86,240,0.10); --codex-xsoft: rgba(151,86,240,0.04);
+    --session-soft: rgba(46,203,127,0.12); --session-xsoft: rgba(46,203,127,0.04);
+    --attention-soft: rgba(255,138,61,0.12); --attention-xsoft: rgba(255,138,61,0.04);
+    --remove-soft: rgba(255,65,54,0.10); --remove: #D32027;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--sans);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(1000px 800px at 10% 8%,  #4B6AA8 0%, transparent 55%),
+    radial-gradient(1200px 900px at 90% 12%, #6B3F90 0%, transparent 55%),
+    radial-gradient(900px  800px at 15% 85%, #1F3A68 0%, transparent 55%),
+    radial-gradient(1100px 900px at 85% 90%, #2E2A5A 0%, transparent 55%),
+    linear-gradient(180deg, #0B1022 0%, #05070F 100%);
+  background-attachment: fixed;
+}
+
+/* ─── Mac menu bar ─── */
+.mac-menubar {
+  position: sticky; top: 0;
+  height: 26px;
+  background: linear-gradient(180deg, rgba(18,18,22,0.88), rgba(14,14,18,0.84));
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+  display: flex; align-items: center;
+  padding: 0 14px; gap: 18px;
+  color: rgba(255,255,255,0.86);
+  font: 500 13px/26px var(--sans);
+  z-index: 100;
+}
+.mac-menubar .apple { color: #fff; font-size: 14px; filter: drop-shadow(0 0 2px rgba(255,255,255,0.3)); }
+.mac-menubar .app { font-weight: 600; color: #fff; }
+.mac-menubar .menus { display: flex; gap: 18px; color: rgba(255,255,255,0.76); }
+.mac-menubar .right {
+  margin-left: auto; display: flex; gap: 14px; align-items: center;
+  color: rgba(255,255,255,0.72); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mac-menubar .right .status-item {
+  width: 18px; height: 18px; border-radius: 5px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  box-shadow: 0 0 10px rgba(120,150,255,0.55), 0 1px 0 rgba(255,255,255,0.3) inset;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.mac-menubar .right .status-item::after {
+  content: ""; position: absolute; top: -1px; right: -1px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--session-2);
+  box-shadow: 0 0 6px var(--session-glow), 0 0 0 2px rgba(18,18,22,0.88);
+}
+.mac-menubar .right .status-item svg { width: 11px; height: 11px; color: #fff; }
+
+/* ─── View labels ─── */
+.view-label {
+  max-width: 1440px; margin: 40px auto 16px; padding: 0 40px;
+  display: flex; align-items: baseline; gap: 14px; color: #fff;
+}
+.view-label .num {
+  font: 600 10px/16px var(--sans);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 4px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  color: #fff; box-shadow: 0 2px 8px var(--claude-glow);
+}
+.view-label h2 {
+  font: 600 24px/28px var(--display);
+  letter-spacing: -0.015em; margin: 0; color: #fff;
+}
+.view-label .sub {
+  font: 400 13px/20px var(--sans);
+  color: rgba(255,255,255,0.56);
+  margin-left: auto; max-width: 500px; text-align: right;
+}
+
+/* ─── Stage + Window ─── */
+.stage { display: flex; align-items: center; justify-content: center; padding: 0 40px 48px; }
+.window {
+  width: 1440px; height: 880px; max-width: 100%;
+  background: var(--win-bg);
+  backdrop-filter: blur(64px) saturate(200%);
+  -webkit-backdrop-filter: blur(64px) saturate(200%);
+  border: 0.5px solid var(--win-border);
+  border-radius: 12px;
+  box-shadow: var(--sh-window);
+  display: grid;
+  grid-template-rows: 52px 1fr 28px;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+.window::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--win-hl-top) 30%, var(--win-hl-top) 70%, transparent);
+  z-index: 5; pointer-events: none;
+}
+
+/* ─── Toolbar ─── */
+.toolbar {
+  background: var(--tb-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-bottom: 0.5px solid var(--tb-border);
+  display: grid;
+  grid-template-columns: 200px 1fr auto;
+  align-items: center;
+  z-index: 4;
+}
+.tb-left { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: 100%; border-right: 0.5px solid var(--tb-border); }
+.traffic { display: flex; gap: 8px; }
+.traffic button {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 0.5px solid rgba(0,0,0,0.2); cursor: default; padding: 0;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.traffic .c { background: radial-gradient(circle at 30% 30%, #FF7B74, #FF5F57 70%); }
+.traffic .m { background: radial-gradient(circle at 30% 30%, #FFC948, #FEBC2E 70%); }
+.traffic .x { background: radial-gradient(circle at 30% 30%, #4CD964, #28C840 70%); }
+.tb-toggle { width: 28px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-2); cursor: default; }
+.tb-toggle:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.tb-toggle svg { width: 16px; height: 16px; }
+
+.tb-center { display: flex; align-items: center; gap: 18px; padding: 0 16px; height: 100%; min-width: 0; }
+.tb-title { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.tb-title h1 { font: 600 14px/18px var(--sans); letter-spacing: -0.005em; margin: 0; color: var(--text); }
+.tb-title .sub { font: 400 11px/14px var(--sans); color: var(--text-3); margin-top: 1px; font-variant-numeric: tabular-nums; }
+
+.seg {
+  display: inline-flex;
+  background: rgba(0,0,0,0.18);
+  border: 0.5px solid var(--hairline);
+  border-radius: 7px; padding: 2px; gap: 1px;
+}
+@media (prefers-color-scheme: light) { .seg { background: rgba(0,0,0,0.04); } }
+.seg .si {
+  padding: 3px 12px; font: 500 11px/14px var(--sans);
+  border-radius: 5px; color: var(--text-2); cursor: default;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.seg .si:hover { color: var(--text); }
+.seg .si.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  color: var(--text);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 0.5px 0 rgba(0,0,0,0.2);
+}
+@media (prefers-color-scheme: light) { .seg .si.on { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.08); } }
+.seg .si .count { font: 600 10px/14px var(--mono); opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+.tb-search {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.22);
+  border: 0.5px solid var(--hairline);
+  border-radius: 7px; padding: 4px 8px; width: 220px;
+}
+@media (prefers-color-scheme: light) { .tb-search { background: rgba(0,0,0,0.04); } }
+.tb-search svg { width: 12px; height: 12px; color: var(--text-3); }
+.tb-search input {
+  background: transparent; border: 0; outline: 0;
+  color: var(--text); font: 400 12px/16px var(--sans);
+  flex: 1; min-width: 0;
+}
+.tb-search input::placeholder { color: var(--text-3); }
+
+.tb-right { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 100%; border-left: 0.5px solid var(--tb-border); }
+
+.session-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 8px;
+  background: linear-gradient(180deg, rgba(46,203,127,0.22), rgba(46,203,127,0.10));
+  border: 0.5px solid rgba(46,203,127,0.4);
+  border-radius: 999px;
+  box-shadow: 0 0 0 0.5px rgba(46,203,127,0.15), 0 4px 12px rgba(46,203,127,0.18), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.session-chip .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--session-2), var(--session) 70%);
+  box-shadow: 0 0 8px var(--session-glow); position: relative;
+}
+.session-chip .dot::after {
+  content: ""; position: absolute; inset: -5px; border-radius: 50%;
+  background: radial-gradient(circle, var(--session-glow), transparent 60%);
+  animation: chipPulse 2.4s ease-out infinite;
+}
+@keyframes chipPulse { 0% { transform: scale(0.8); opacity: 0.9; } 100% { transform: scale(1.8); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .session-chip .dot::after { animation: none; opacity: 0; } }
+.session-chip .name { font: 600 12px/16px var(--sans); color: var(--session-2); letter-spacing: -0.005em; }
+@media (prefers-color-scheme: light) { .session-chip .name { color: #0F7F48; } }
+.session-chip .time { font: 500 11px/14px var(--mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+.tb-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  border: 0.5px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--text); font: 500 11px/14px var(--sans);
+  cursor: default;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+@media (prefers-color-scheme: light) {
+  .tb-btn { background: linear-gradient(180deg, #ffffff, #f2f2f5); box-shadow: 0 1px 2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9); }
+}
+.tb-btn:hover { filter: brightness(1.08); }
+.tb-btn svg { width: 12px; height: 12px; }
+.tb-btn.primary {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  color: #fff; border-color: rgba(63,124,255,0.5);
+  box-shadow: 0 4px 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* ─── Body layout variants ─── */
+.body { display: grid; min-height: 0; }
+.body.standard { grid-template-columns: 200px 1fr 380px; }
+.body.threads   { grid-template-columns: 200px 232px 1fr 340px; }
+.body.no-inspector { grid-template-columns: 200px 1fr; }
+
+/* ─── Nav sidebar (shared) ─── */
+.sidebar {
+  background: var(--sb-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-right: 0.5px solid var(--sb-border);
+  display: flex; flex-direction: column;
+  padding: 8px 8px 12px;
+  min-height: 0;
+}
+.sb-head { font: 600 10px/14px var(--sans); color: var(--text-3); letter-spacing: 0.08em; text-transform: uppercase; padding: 10px 10px 6px; }
+.sb-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: 7px;
+  font: 500 13px/17px var(--sans); color: var(--text-2);
+  cursor: default; position: relative;
+}
+.sb-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+@media (prefers-color-scheme: light) { .sb-item:hover { background: rgba(0,0,0,0.04); } }
+.sb-item.active {
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+  color: var(--text);
+  box-shadow: var(--selection-glow);
+}
+.sb-item.active::before {
+  content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--claude), var(--claude-2));
+  box-shadow: 0 0 8px var(--claude-glow);
+}
+.sb-item .ico { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); flex-shrink: 0; }
+.sb-item.active .ico { color: var(--claude); }
+.sb-item .ico svg { width: 14px; height: 14px; }
+.sb-item .count { margin-left: auto; font: 500 10px/14px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sb-item .badge {
+  margin-left: auto; font: 700 10px/14px var(--sans);
+  background: linear-gradient(180deg, var(--attention-2), var(--attention));
+  color: #fff; padding: 0 6px; border-radius: 8px; min-width: 18px; text-align: center;
+  box-shadow: 0 1px 3px var(--attention-glow);
+}
+.sb-spacer { flex: 1; }
+.sb-divider { height: 0.5px; background: var(--hairline); margin: 8px 10px; }
+.sb-profile { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; }
+.sb-profile:hover { background: rgba(255,255,255,0.04); }
+@media (prefers-color-scheme: light) { .sb-profile:hover { background: rgba(0,0,0,0.04); } }
+.sb-profile .avatar {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.sb-profile .avatar svg { width: 12px; height: 12px; color: #fff; }
+.sb-profile .who { font: 600 12px/15px var(--sans); color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-profile .state { font: 400 10px/13px var(--sans); color: var(--text-3); }
+.sb-profile .chev { color: var(--text-3); margin-left: auto; opacity: 0.6; }
+.sb-profile .chev svg { width: 10px; height: 10px; }
+
+/* ─── Status bar ─── */
+.statusbar {
+  background: var(--tb-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-top: 0.5px solid var(--tb-border);
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 16px;
+  font: 400 11px/14px var(--sans);
+  color: var(--text-3);
+}
+.statusbar .stat { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .stat strong { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.statusbar .stat .dot { width: 6px; height: 6px; border-radius: 50%; }
+.statusbar .stat .dot.ok { background: var(--session); box-shadow: 0 0 6px var(--session-glow); }
+.statusbar .spacer { flex: 1; }
+.statusbar kbd { font: 500 10px/13px var(--mono); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; color: var(--text-2); }
+@media (prefers-color-scheme: light) { .statusbar kbd { background: rgba(0,0,0,0.06); } }
+
+/* ═══════════════════════════════════════════════════════
+   COMMON: row-check, tgl, bulk-bar, content, inspector
+   ═══════════════════════════════════════════════════════ */
+.row-check {
+  width: 16px; height: 16px; border-radius: 4px;
+  border: 1.5px solid rgba(255,255,255,0.22);
+  background: rgba(0,0,0,0.24);
+  position: relative; flex-shrink: 0; cursor: default;
+  transition: all 120ms;
+}
+@media (prefers-color-scheme: light) { .row-check { border-color: rgba(0,0,0,0.22); background: rgba(255,255,255,0.8); } }
+.row-check:hover { border-color: var(--claude); }
+.row-check.on {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  border-color: var(--claude);
+  box-shadow: 0 0 8px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.row-check.on::after {
+  content: ""; position: absolute;
+  left: 3px; top: 0px; width: 5px; height: 9px;
+  border-right: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+  transform: rotate(45deg);
+}
+.row-check.session {
+  background: linear-gradient(180deg, var(--session-2), var(--session));
+  border-color: var(--session);
+  box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.row-check.session::after {
+  content: ""; position: absolute;
+  left: 3px; top: 0px; width: 5px; height: 9px;
+  border-right: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+  transform: rotate(45deg);
+}
+
+.tgl {
+  width: 34px; height: 20px; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.22), rgba(0,0,0,0.12));
+  border: 0.5px solid rgba(255,255,255,0.08);
+  position: relative; cursor: default;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+@media (prefers-color-scheme: light) {
+  .tgl { background: linear-gradient(180deg, #e6e6ea, #d8d8dc); border-color: rgba(0,0,0,0.1); box-shadow: inset 0 1px 2px rgba(0,0,0,0.06); }
+}
+.tgl .knob {
+  position: absolute; top: 1px; left: 1px;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: linear-gradient(180deg, #fff, #eaeaef);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3), inset 0 0.5px 0 rgba(255,255,255,0.6);
+  transition: transform 180ms cubic-bezier(0.2,0.7,0.3,1);
+}
+.tgl.on .knob { transform: translateX(14px); }
+.tgl.on.claude { background: linear-gradient(180deg, var(--claude-2), var(--claude)); border-color: rgba(63,124,255,0.5); box-shadow: 0 0 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.2); }
+.tgl.on.codex  { background: linear-gradient(180deg, var(--codex-2), var(--codex));   border-color: rgba(151,86,240,0.5); box-shadow: 0 0 12px var(--codex-glow), inset 0 1px 0 rgba(255,255,255,0.2); }
+
+.content {
+  background: var(--content-bg);
+  display: flex; flex-direction: column;
+  min-height: 0; min-width: 0;
+  border-right: 0.5px solid var(--content-border);
+}
+
+.inspector {
+  background: var(--insp-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-left: 0.5px solid var(--insp-border);
+  display: flex; flex-direction: column;
+  overflow-y: auto; min-height: 0;
+}
+.insp-head { padding: 18px 20px 14px; border-bottom: 0.5px solid var(--hairline); }
+.insp-head .kicker { font: 600 9px/13px var(--sans); color: var(--claude); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+.insp-head .kicker.session { color: var(--session-2); }
+@media (prefers-color-scheme: light) { .insp-head .kicker.session { color: #0F7F48; } }
+.insp-head h2 { font: 600 16px/20px var(--display); margin: 0 0 4px; letter-spacing: -0.01em; color: var(--text); }
+.insp-head .path { font: 500 11px/15px var(--mono); color: var(--text-3); word-break: break-all; }
+.insp-head .stats { display: flex; gap: 14px; margin-top: 8px; font: 400 11px/14px var(--sans); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.insp-head .stats strong { color: var(--text-2); font-weight: 600; }
+.insp-body { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
+.insp-label { font: 600 9px/12px var(--sans); color: var(--text-3); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+
+.insp-actions { display: flex; gap: 8px; padding-top: 10px; border-top: 0.5px solid var(--hairline); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 12px; border-radius: 7px;
+  font: 600 12px/16px var(--sans); cursor: default;
+  letter-spacing: -0.005em;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn.flex { flex: 1; }
+.btn.primary {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  color: #fff; border: 0.5px solid rgba(63,124,255,0.5);
+  box-shadow: 0 4px 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.btn.primary.session {
+  background: linear-gradient(180deg, var(--session-2), var(--session));
+  border-color: rgba(46,203,127,0.5);
+  box-shadow: 0 4px 12px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.btn.secondary {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+  color: var(--text); border: 0.5px solid var(--hairline);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+@media (prefers-color-scheme: light) {
+  .btn.secondary { background: linear-gradient(180deg, #fff, #f1f1f4); box-shadow: 0 1px 2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9); }
+}
+.btn.danger { color: var(--danger); }
+.btn svg { width: 12px; height: 12px; }
+
+/* ═══════════════════════════════════════════════════════
+   MAILBOX MATRIX (View 1)
+   ═══════════════════════════════════════════════════════ */
+.mb-head, .mb-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 96px 96px 130px 92px 72px 24px;
+  align-items: center;
+  padding: 0 20px;
+  gap: 10px;
+}
+.mb-head {
+  height: 34px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  border-bottom: 0.5px solid var(--hairline);
+  position: sticky; top: 0; z-index: 2;
+  font: 600 10px/14px var(--sans); color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+@media (prefers-color-scheme: light) { .mb-head { background: linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01)); } }
+.mb-head .agent-col {
+  display: inline-flex; align-items: center; gap: 6px; justify-content: center;
+  color: var(--text-2); font: 600 11px/14px var(--sans);
+  letter-spacing: -0.005em; text-transform: none;
+}
+.mb-head .agent-col .avatar {
+  width: 18px; height: 18px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.mb-head .agent-col .avatar.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 6px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.mb-head .agent-col .avatar.codex  { background: linear-gradient(135deg, var(--codex), var(--codex-2));  box-shadow: 0 0 6px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.mb-head .agent-col .avatar svg { width: 10px; height: 10px; color: #fff; }
+.mb-head .r-col { text-align: right; }
+
+.mb-section {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 20px 8px;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  background: var(--section-bg);
+}
+.mb-section .count {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-scroll { overflow-y: auto; flex: 1; position: relative; }
+
+.mb-row {
+  height: 54px;
+  border-bottom: 0.5px solid var(--hairline-2);
+  font: 400 13px/18px var(--sans);
+  cursor: default;
+  position: relative;
+}
+.mb-row:hover { background: rgba(255,255,255,0.03); }
+@media (prefers-color-scheme: light) { .mb-row:hover { background: rgba(0,0,0,0.02); } }
+.mb-row.selected {
+  background: var(--selection);
+  box-shadow: inset 2px 0 0 var(--claude), inset 0 0 32px rgba(63,124,255,0.05);
+}
+.mb-row.bulk-selected {
+  background: linear-gradient(90deg, var(--claude-soft), var(--claude-xsoft));
+  box-shadow: inset 3px 0 0 var(--claude);
+}
+
+.mb-mailbox { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mb-mailbox .ico {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(120,150,255,0.35), inset 0 0.5px 0 rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.mb-mailbox .ico.unshared { background: linear-gradient(135deg, #484850, #3c3c44); box-shadow: none; }
+.mb-mailbox .ico svg { width: 15px; height: 15px; color: #fff; }
+.mb-mailbox .body { min-width: 0; }
+.mb-mailbox .addr {
+  font: 600 13px/17px var(--sans);
+  color: var(--text); letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mb-mailbox .meta {
+  font: 400 11px/14px var(--sans);
+  color: var(--text-3);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.mb-mailbox .meta code { font: 500 10px/13px var(--mono); color: var(--text-2); }
+
+.tgl-cell { display: flex; justify-content: center; }
+
+.sens-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 600 11px/14px var(--sans);
+  border: 0.5px solid var(--hairline);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-2);
+  justify-self: center;
+}
+@media (prefers-color-scheme: light) { .sens-pill { background: rgba(0,0,0,0.04); } }
+.sens-pill .ind {
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.sens-pill .ind .b {
+  width: 3px; height: 10px; border-radius: 1px;
+  background: var(--text-4);
+}
+.sens-pill.subjects .ind .b:nth-child(1) { background: var(--attention); }
+.sens-pill.trusted .ind .b:nth-child(1),
+.sens-pill.trusted .ind .b:nth-child(2) { background: var(--claude); }
+.sens-pill.full .ind .b { background: var(--session); }
+.sens-pill.subjects { color: var(--attention-2); border-color: rgba(255,138,61,0.3); background: var(--attention-xsoft); }
+.sens-pill.trusted { color: var(--claude-2); border-color: rgba(63,124,255,0.3); background: var(--claude-xsoft); }
+.sens-pill.full { color: var(--session-2); border-color: rgba(46,203,127,0.3); background: var(--session-xsoft); }
+@media (prefers-color-scheme: light) {
+  .sens-pill.subjects { color: #C24800; }
+  .sens-pill.trusted { color: #1A4BB8; }
+  .sens-pill.full { color: #0F7F48; }
+}
+
+.mb-count {
+  font: 600 12px/16px var(--mono);
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mb-count .sub { display: block; font: 400 10px/13px var(--sans); color: var(--text-3); margin-top: 1px; font-weight: 400; }
+
+.mb-denials {
+  font: 600 12px/16px var(--mono);
+  color: var(--attention);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mb-denials.none { color: var(--text-4); font-weight: 400; }
+
+.mb-menu { text-align: center; color: var(--text-4); font-size: 14px; letter-spacing: -2px; cursor: default; }
+
+.mx-footer {
+  padding: 10px 20px;
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,0.15));
+  border-top: 0.5px solid var(--hairline);
+  font: 400 11px/15px var(--sans);
+  color: var(--text-3);
+  display: flex; align-items: center; gap: 14px;
+}
+@media (prefers-color-scheme: light) { .mx-footer { background: linear-gradient(180deg, transparent, rgba(0,0,0,0.02)); } }
+.mx-footer strong { color: var(--text); font: 600 12px/16px var(--sans); font-variant-numeric: tabular-nums; }
+.mx-footer .sep { color: var(--text-4); }
+.mx-footer .spacer { flex: 1; }
+
+/* Sensitivity selector (inspector) — segmented three-way */
+.sens-seg {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+  padding: 4px;
+  background: rgba(0,0,0,0.22);
+  border: 0.5px solid var(--hairline);
+  border-radius: 9px;
+}
+@media (prefers-color-scheme: light) { .sens-seg { background: rgba(0,0,0,0.04); } }
+.sens-seg .opt {
+  padding: 10px 8px 8px;
+  border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  cursor: default;
+  transition: all 120ms;
+  text-align: center;
+}
+.sens-seg .opt:hover { background: rgba(255,255,255,0.04); }
+.sens-seg .opt .ind {
+  display: inline-flex; align-items: flex-end; gap: 2px; height: 14px;
+}
+.sens-seg .opt .ind .b {
+  width: 4px; border-radius: 1px; background: var(--text-4);
+}
+.sens-seg .opt .ind .b:nth-child(1) { height: 6px; }
+.sens-seg .opt .ind .b:nth-child(2) { height: 10px; }
+.sens-seg .opt .ind .b:nth-child(3) { height: 14px; }
+.sens-seg .opt .l {
+  font: 600 11px/14px var(--sans);
+  color: var(--text-2); letter-spacing: -0.005em;
+}
+.sens-seg .opt .d {
+  font: 400 9px/12px var(--sans); color: var(--text-3);
+}
+.sens-seg .opt.on {
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+  box-shadow: 0 0 0 1px var(--claude), 0 2px 8px var(--claude-glow) inset;
+}
+.sens-seg .opt.on .l { color: var(--text); }
+.sens-seg .opt.on.subjects { background: var(--attention-xsoft); box-shadow: 0 0 0 1px var(--attention); }
+.sens-seg .opt.on.subjects .ind .b:nth-child(1) { background: var(--attention); }
+.sens-seg .opt.on.trusted .ind .b:nth-child(1),
+.sens-seg .opt.on.trusted .ind .b:nth-child(2) { background: var(--claude); }
+.sens-seg .opt.on.full .ind .b { background: var(--session); }
+.sens-seg .opt.on.full { background: var(--session-xsoft); box-shadow: 0 0 0 1px var(--session); }
+
+/* Senders list (inspector) */
+.senders-list { display: flex; flex-direction: column; gap: 3px; }
+.sender-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center; gap: 10px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: default;
+}
+.sender-row:hover { background: rgba(255,255,255,0.04); }
+@media (prefers-color-scheme: light) { .sender-row:hover { background: rgba(0,0,0,0.04); } }
+.sender-row .av {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 10px/14px var(--sans); color: #fff;
+  flex-shrink: 0;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.sender-row .who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sender-row .nm { font: 600 12px/16px var(--sans); color: var(--text); letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sender-row .addr { font: 400 10px/13px var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sender-row .ct { font: 600 11px/14px var(--mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.sender-row .ct .sub { display: block; font: 400 9px/11px var(--sans); color: var(--text-3); text-align: right; }
+
+/* ═══════════════════════════════════════════════════════
+   THREADS VIEW (Active Backup style, Stage 8)
+   ═══════════════════════════════════════════════════════ */
+
+/* Sender rail — second sidebar in Threads view */
+.rail {
+  background: var(--rail-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-right: 0.5px solid var(--rail-border);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  padding: 8px 6px;
+}
+.rail-head {
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 10px 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.rail-head .count { margin-left: auto; font: 500 10px/14px var(--mono); color: var(--text-4); font-variant-numeric: tabular-nums; }
+
+.rail-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center; gap: 8px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font: 500 12px/16px var(--sans);
+  color: var(--text-2);
+  cursor: default;
+  position: relative;
+}
+.rail-row:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+@media (prefers-color-scheme: light) { .rail-row:hover { background: rgba(0,0,0,0.04); } }
+.rail-row.active {
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+  color: var(--text); font-weight: 600;
+}
+.rail-row.active::before {
+  content: ""; position: absolute; left: -6px; top: 50%; transform: translateY(-50%);
+  width: 2px; height: 14px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--claude), var(--claude-2));
+  box-shadow: 0 0 6px var(--claude-glow);
+}
+.rail-row .disc {
+  width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 8px/14px var(--sans); color: #fff;
+  flex-shrink: 0;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.25);
+}
+.rail-row .nm {
+  min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rail-row .c {
+  font: 500 10px/14px var(--mono);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.rail-row .c.orange { color: var(--attention); }
+.rail-row .ico-small {
+  width: 18px; height: 18px; border-radius: 5px;
+  background: rgba(255,255,255,0.06);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+@media (prefers-color-scheme: light) { .rail-row .ico-small { background: rgba(0,0,0,0.05); } }
+.rail-row .ico-small svg { width: 10px; height: 10px; }
+
+/* Thread table */
+.th-head, .th-row {
+  display: grid;
+  grid-template-columns: 28px 28px 1fr 120px 104px 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+}
+.th-head {
+  height: 32px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  border-bottom: 0.5px solid var(--hairline);
+  position: sticky; top: 0; z-index: 2;
+  font: 600 10px/14px var(--sans); color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+@media (prefers-color-scheme: light) { .th-head { background: linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01)); } }
+.th-head .r-col { text-align: right; }
+
+.th-scroll { overflow-y: auto; flex: 1; position: relative; }
+
+.th-row {
+  min-height: 56px;
+  border-bottom: 0.5px solid var(--hairline-2);
+  cursor: default;
+  font: 400 13px/17px var(--sans);
+  padding-top: 8px; padding-bottom: 8px;
+}
+.th-row:hover { background: rgba(255,255,255,0.03); }
+@media (prefers-color-scheme: light) { .th-row:hover { background: rgba(0,0,0,0.02); } }
+.th-row.selected {
+  background: var(--selection);
+  box-shadow: inset 2px 0 0 var(--claude), inset 0 0 32px rgba(63,124,255,0.05);
+}
+.th-row.excluded-rule {
+  opacity: 0.62;
+  box-shadow: inset 2px 0 0 var(--attention);
+}
+
+.th-disc {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 10px/14px var(--sans); color: #fff;
+  flex-shrink: 0;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+
+.th-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.th-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.th-sender {
+  font: 600 13px/16px var(--sans);
+  color: var(--text);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.th-sender .more {
+  font-weight: 400;
+  color: var(--text-3);
+  margin-left: 3px;
+}
+.th-subject {
+  font: 400 13px/16px var(--sans);
+  color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.th-row.selected .th-subject { color: var(--text); }
+.th-meta {
+  display: flex; align-items: center; gap: 8px;
+  font: 400 11px/14px var(--sans);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.th-meta .msg-count {
+  font: 600 10px/14px var(--mono);
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-2);
+}
+@media (prefers-color-scheme: light) { .th-meta .msg-count { background: rgba(0,0,0,0.06); } }
+
+.th-state {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: 600 10px/14px var(--sans);
+  padding: 1px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+.th-state.default { background: var(--claude-soft); color: var(--claude-2); }
+.th-state.session { background: var(--session-soft); color: var(--session-2); }
+.th-state.rule { background: var(--attention-soft); color: var(--attention-2); }
+@media (prefers-color-scheme: light) {
+  .th-state.default { color: #1A4BB8; }
+  .th-state.session { color: #0F7F48; }
+  .th-state.rule { color: #C24800; }
+}
+.th-state.none { background: rgba(255,255,255,0.04); color: var(--text-4); }
+
+.th-date {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.th-agents {
+  display: flex; align-items: center; gap: 4px;
+  justify-content: flex-end;
+}
+.th-agents .av {
+  width: 18px; height: 18px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.th-agents .av.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 4px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.th-agents .av.codex  { background: linear-gradient(135deg, var(--codex),  var(--codex-2));  box-shadow: 0 0 4px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.th-agents .av.muted { background: rgba(255,255,255,0.06); opacity: 0.3; }
+.th-agents .av svg { width: 10px; height: 10px; color: #fff; }
+.th-menu { text-align: center; color: var(--text-4); font-size: 14px; letter-spacing: -2px; }
+
+.th-section-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px 6px;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  background: var(--section-bg);
+}
+.th-section-head .count { font: 500 11px/14px var(--mono); color: var(--text-4); font-variant-numeric: tabular-nums; }
+.th-section-head svg { width: 12px; height: 12px; color: var(--text-3); }
+
+/* Threads inspector — minimal, no reading pane */
+.first-line {
+  background: rgba(0,0,0,0.28);
+  border: 0.5px solid var(--hairline);
+  border-left: 2px solid var(--text-3);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font: italic 400 12px/18px var(--sans);
+  color: var(--text-2);
+  position: relative;
+}
+@media (prefers-color-scheme: light) { .first-line { background: rgba(0,0,0,0.03); } }
+.first-line::after {
+  content: "first line preview";
+  position: absolute; top: 8px; right: 10px;
+  font: 600 8px/11px var(--sans); color: var(--text-4);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  font-style: normal;
+}
+
+.msg-list { display: flex; flex-direction: column; gap: 1px; }
+.msg-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 10px; align-items: center;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font: 400 12px/16px var(--sans);
+}
+.msg-row:hover { background: rgba(255,255,255,0.04); }
+@media (prefers-color-scheme: light) { .msg-row:hover { background: rgba(0,0,0,0.03); } }
+.msg-row .dot-sm {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-3); flex-shrink: 0;
+}
+.msg-row.sent .dot-sm { background: var(--session); box-shadow: 0 0 4px var(--session-glow); }
+.msg-row .text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.msg-row .when {
+  font: 500 10px/14px var(--mono);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Meta-info row for thread inspector (from/to/participants) */
+.meta-line {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  font: 400 11px/15px var(--sans);
+  border-bottom: 0.5px solid var(--hairline-2);
+}
+.meta-line:last-child { border-bottom: 0; }
+.meta-line .l { color: var(--text-3); letter-spacing: 0.02em; text-transform: uppercase; font-weight: 600; font-size: 10px; letter-spacing: 0.08em; }
+.meta-line .v { color: var(--text); }
+.meta-line .v code { font: 500 11px/14px var(--mono); color: var(--text-2); }
+
+/* Thread footer running count bar */
+.th-footer {
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,0.18));
+  border-top: 0.5px solid var(--hairline);
+  padding: 10px 20px;
+  display: flex; align-items: center; gap: 14px;
+  font: 400 11px/15px var(--sans);
+  color: var(--text-3);
+}
+@media (prefers-color-scheme: light) { .th-footer { background: linear-gradient(180deg, transparent, rgba(0,0,0,0.02)); } }
+.th-footer strong { color: var(--text); font: 600 12px/16px var(--sans); font-variant-numeric: tabular-nums; }
+.th-footer .sep { color: var(--text-4); }
+.th-footer .meter {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--session-xsoft);
+  border: 0.5px solid rgba(46,203,127,0.3);
+  color: var(--session-2);
+  font: 600 11px/15px var(--sans);
+}
+@media (prefers-color-scheme: light) { .th-footer .meter { color: #0F7F48; } }
+.th-footer .meter .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--session); box-shadow: 0 0 6px var(--session-glow); }
+.th-footer .spacer { flex: 1; }
+
+/* Global rules banner in inspector */
+.rules-banner {
+  background: linear-gradient(180deg, var(--attention-soft), var(--attention-xsoft));
+  border: 0.5px solid rgba(255,138,61,0.35);
+  border-left: 3px solid var(--attention);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.rules-banner .icon-wrap {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--attention); flex-shrink: 0;
+}
+.rules-banner .icon-wrap svg { width: 16px; height: 16px; }
+.rules-banner .text { font: 400 12px/16px var(--sans); color: var(--text-2); flex: 1; }
+.rules-banner .text strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rules-banner .link { display: inline-flex; align-items: center; gap: 3px; font: 600 12px/16px var(--sans); color: var(--claude); cursor: default; }
+.rules-banner .link svg { width: 10px; height: 10px; }
+</style>
+</head>
+<body>
+
+<!-- SVG icons -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="i-mark" viewBox="0 0 16 16"><path fill="currentColor" d="M5.2 2.4 9.6 7l-4.4 4.6L0.8 7 5.2 2.4Zm5.6 2L15.2 9l-4.4 4.6L6.4 9l4.4-4.6Z"/></symbol>
+<symbol id="i-pulse" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M1.5 8h3l1.6-4.5 3 9 1.5-4.5h4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M1.5 5a1 1 0 0 1 1-1h3.4l1.2 1.5h7.4a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1zM2 4.5l6 4 6-4"/></symbol>
+<symbol id="i-mail-filled" viewBox="0 0 16 16"><path fill="currentColor" d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v.2L8 8.6 2 4.7ZM2 6.5l6 3.9 6-3.9V11.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-mail-plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1V9M2 4.5l6 4 6-4M10 12h4M12 10v4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 4.5V8l2.5 1.5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M8 1.5 2.5 3.5v5C2.5 11 4.8 13.4 8 14.5c3.2-1.1 5.5-3.5 5.5-6V3.5Z"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="m5.8 7.8 1.8 1.8L11 6"/></symbol>
+<symbol id="i-sparkle" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0.5c.3 2.9 1.6 4.2 4.5 4.5-2.9.3-4.2 1.6-4.5 4.5-.3-2.9-1.6-4.2-4.5-4.5C6.4 4.7 7.7 3.4 8 0.5ZM13.5 7.5c.2 1.7.9 2.4 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5ZM4 10c.15 1.35.65 1.85 2 2-1.35.15-1.85.65-2 2-.15-1.35-.65-1.85-2-2 1.35-.15 1.85-.65 2-2Z"/></symbol>
+<symbol id="i-code" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M5 4 1.5 8 5 12M11 4l3.5 4-3.5 4M9.5 3l-3 10"/></symbol>
+<symbol id="i-sidebar" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6 2.5v11" stroke="currentColor" stroke-width="1.4"/><path d="M3 5.5h1.5M3 7.5h1.5M3 9.5h1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+<symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="m10.5 10.5 3 3"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8 3v10M3 8h10"/></symbol>
+<symbol id="i-minus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10"/></symbol>
+<symbol id="i-chev-right" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 4 4 4-4 4"/></symbol>
+<symbol id="i-chev-down" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m4 6 4 4 4-4"/></symbol>
+<symbol id="i-chev-up" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m4 10 4-4 4 4"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="m4 4 8 8M12 4l-8 8"/></symbol>
+<symbol id="i-resume" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8a5 5 0 1 1 1.5 3.5M3 2v3h3"/></symbol>
+<symbol id="i-eye" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="i-tag" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2 2h5l7 7-5 5-7-7z"/><circle cx="5" cy="5" r="1" fill="currentColor"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2 8.5 3 3h10l1 5.5v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1zM2 8.5h4l1 2h2l1-2h4"/></symbol>
+<symbol id="i-sent" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M14 2 2 7.5l5 1.5M14 2 9 14l-2-5M14 2 7 9"/></symbol>
+<symbol id="i-archive" viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="2.5" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M3 5.5v7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-7M6.5 8.5h3"/></symbol>
+<symbol id="i-filter" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M2 3h12l-4.5 5.5V13l-3 1V8.5z"/></symbol>
+<symbol id="i-finder" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 2.5h11v11h-11z M7 6v4M5 7.5h4M10 7.5h1.5"/></symbol>
+<symbol id="i-export" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M8 2v8.5M5 4.5 8 1.5l3 3M3 10v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3"/></symbol>
+<symbol id="i-check-seal" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="m8 1 2 1.4 2.4-.2.2 2.4 1.4 2-1.4 2 .2 2.4H10.2L8 13.4 5.8 12.6H3.4l-.2-2.4-1.4-2 1.4-2-.2-2.4L6 2.4z"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="m5.6 7.8 1.8 1.8L11 6"/></symbol>
+<symbol id="i-reply" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M6 4 2 8l4 4M2 8h7a4 4 0 0 1 4 4v1"/></symbol>
+<symbol id="i-ellipsis" viewBox="0 0 16 16"><circle cx="4" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12" cy="8" r="1.3" fill="currentColor"/></symbol>
+<symbol id="i-at" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M11 8v1.5a1.5 1.5 0 0 0 3 0V8a6 6 0 1 0-2.5 4.87"/></symbol>
+</defs>
+</svg>
+
+<!-- Mac menu bar -->
+<div class="mac-menubar">
+  <span class="apple">●</span>
+  <span class="app">Manifold</span>
+  <div class="menus"><span>File</span><span>Edit</span><span>View</span><span>Session</span><span>Window</span><span>Help</span></div>
+  <div class="right">
+    <span class="status-item" title="Manifold"><svg><use href="#i-mark"/></svg></span>
+    <span>Tue 4:37 PM</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     VIEW 1 — MAILBOXES (matrix + sensitivity + senders inspector)
+     ═══════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 1</span>
+  <h2>Mailboxes — what accounts an agent can reach</h2>
+  <div class="sub">Coverage matrix of mailbox sources × agents. Each mailbox has a sensitivity level (Subjects only · Trusted senders · Full content). Drill into a mailbox to pick senders, labels, and see applied rules.</div>
+</div>
+
+<div class="stage"><div class="window">
+
+  <div class="toolbar">
+    <div class="tb-left">
+      <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+      <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-title">
+        <h1>Mail</h1>
+        <div class="sub">2 mailboxes connected · 59 threads visible · 3 excluded by rule</div>
+      </div>
+      <div class="seg">
+        <div class="si on">Mailboxes <span class="count">2</span></div>
+        <div class="si">Threads <span class="count">59</span></div>
+        <div class="si">Session <span class="count">+3</span></div>
+        <div class="si">History <span class="count">12</span></div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="tb-search">
+        <svg><use href="#i-search"/></svg>
+        <input placeholder="Filter mailboxes…" />
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="session-chip">
+        <span class="dot"></span>
+        <span class="name">Jane follow-up</span>
+        <span class="time">1:42:08</span>
+      </div>
+      <div class="tb-btn primary">
+        <svg><use href="#i-mail-plus"/></svg>
+        Connect mailbox
+      </div>
+    </div>
+  </div>
+
+  <div class="body standard">
+
+    <div class="sidebar">
+      <div class="sb-head">Manifold</div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">6</span></div>
+      <div class="sb-item active"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+      <div class="sb-spacer"></div>
+      <div class="sb-divider"></div>
+      <div class="sb-head">Session</div>
+      <div class="sb-item" style="padding: 8px 10px;">
+        <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+          <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+        </div>
+      </div>
+      <div class="sb-divider"></div>
+      <div class="sb-profile">
+        <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+        <div style="min-width: 0;">
+          <div class="who">Amar Gandhi</div>
+          <div class="state">Runtime connected</div>
+        </div>
+        <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="mb-head">
+        <div><div class="row-check"></div></div>
+        <div>Mailbox</div>
+        <div class="agent-col"><span class="avatar claude"><svg><use href="#i-sparkle"/></svg></span>Claude</div>
+        <div class="agent-col"><span class="avatar codex"><svg><use href="#i-code"/></svg></span>Codex</div>
+        <div style="text-align:center">Sensitivity</div>
+        <div class="r-col">Threads</div>
+        <div class="r-col">Denials</div>
+        <div></div>
+      </div>
+
+      <div class="mb-scroll">
+
+        <div class="mb-section">Shared mailboxes <span class="count">·  2</span></div>
+
+        <div class="mb-row selected">
+          <div><div class="row-check on"></div></div>
+          <div class="mb-mailbox">
+            <div class="ico"><svg><use href="#i-mail-filled"/></svg></div>
+            <div class="body">
+              <div class="addr">amar@spatialduality.com</div>
+              <div class="meta">Work · IMAP · <code>fastmail</code> · 2,418 total</div>
+            </div>
+          </div>
+          <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+          <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+          <div class="sens-pill trusted">
+            <span class="ind"><span class="b"></span><span class="b"></span><span class="b"></span></span>
+            Trusted senders
+          </div>
+          <div class="mb-count">47<span class="sub">of 2,418</span></div>
+          <div class="mb-denials none">—</div>
+          <div class="mb-menu">⋯</div>
+        </div>
+
+        <div class="mb-row">
+          <div><div class="row-check"></div></div>
+          <div class="mb-mailbox">
+            <div class="ico"><svg><use href="#i-mail-filled"/></svg></div>
+            <div class="body">
+              <div class="addr">amar.gandhi@me.com</div>
+              <div class="meta">Personal · iCloud · 12,940 total · <code>@me.com</code></div>
+            </div>
+          </div>
+          <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+          <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+          <div class="sens-pill subjects">
+            <span class="ind"><span class="b"></span><span class="b"></span><span class="b"></span></span>
+            Subjects only
+          </div>
+          <div class="mb-count">12<span class="sub">of 12,940</span></div>
+          <div class="mb-denials">1</div>
+          <div class="mb-menu">⋯</div>
+        </div>
+
+        <div class="mb-section">Connected · not shared <span class="count">·  1</span></div>
+
+        <div class="mb-row">
+          <div><div class="row-check"></div></div>
+          <div class="mb-mailbox">
+            <div class="ico unshared"><svg><use href="#i-mail-filled"/></svg></div>
+            <div class="body">
+              <div class="addr" style="color: var(--text-2)">boards@mystartup.co</div>
+              <div class="meta">Board · Google Workspace · 488 total · <code>read-only</code></div>
+            </div>
+          </div>
+          <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+          <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+          <div class="sens-pill">— not shared —</div>
+          <div class="mb-count" style="color: var(--text-3); font-weight: 400;">0<span class="sub">unshared</span></div>
+          <div class="mb-denials">2</div>
+          <div class="mb-menu">⋯</div>
+        </div>
+
+      </div>
+
+      <div class="mx-footer">
+        <span><strong>59</strong> threads visible to Claude</span>
+        <span class="sep">·</span>
+        <span><strong>0</strong> to Codex</span>
+        <span class="sep">·</span>
+        <span><strong>3</strong> excluded by global rules (legal, credit-card)</span>
+        <span class="spacer"></span>
+        <span>Last activity <strong>12 min ago</strong></span>
+      </div>
+    </div>
+
+    <!-- Inspector for selected mailbox: work account -->
+    <div class="inspector">
+      <div class="insp-head">
+        <div class="kicker">Selected · Mailbox</div>
+        <h2>amar@spatialduality.com</h2>
+        <div class="path">Work · IMAP · fastmail.com</div>
+        <div class="stats">
+          <span><strong>2,418</strong> total</span>
+          <span>·</span>
+          <span><strong>47</strong> shared</span>
+          <span>·</span>
+          <span><strong>14</strong> senders</span>
+        </div>
+      </div>
+
+      <div class="insp-body">
+
+        <div>
+          <div class="insp-label">Sensitivity · what agents see</div>
+          <div class="sens-seg">
+            <div class="opt subjects">
+              <span class="ind"><span class="b"></span><span class="b"></span><span class="b"></span></span>
+              <span class="l">Subjects only</span>
+              <span class="d">sender + subject</span>
+            </div>
+            <div class="opt trusted on">
+              <span class="ind"><span class="b"></span><span class="b"></span><span class="b"></span></span>
+              <span class="l">Trusted senders</span>
+              <span class="d">full for shared</span>
+            </div>
+            <div class="opt full">
+              <span class="ind"><span class="b"></span><span class="b"></span><span class="b"></span></span>
+              <span class="l">Full content</span>
+              <span class="d">every message</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rules-banner">
+          <div class="icon-wrap"><svg><use href="#i-shield"/></svg></div>
+          <div class="text"><strong>3 global rules</strong> affect this mailbox<br/><span style="color: var(--text-3);">legal@ exclusion · credit-card redaction · confidential label</span></div>
+          <div class="link">View<svg><use href="#i-chev-right"/></svg></div>
+        </div>
+
+        <div>
+          <div class="insp-label">Top senders · 14 total</div>
+          <div class="senders-list">
+            <div class="sender-row">
+              <div class="av" style="background: #E8825A;">JD</div>
+              <div class="who">
+                <span class="nm">Jane Doe</span>
+                <span class="addr">jane@acme.com · trusted</span>
+              </div>
+              <div class="ct">47<span class="sub">threads</span></div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: #4EA65A;">MK</div>
+              <div class="who">
+                <span class="nm">Mark K.</span>
+                <span class="addr">mark@acme.com · trusted</span>
+              </div>
+              <div class="ct">28<span class="sub">threads</span></div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: #8E6CD6;">EN</div>
+              <div class="who">
+                <span class="nm">Eng team list</span>
+                <span class="addr">eng@spatialduality.com</span>
+              </div>
+              <div class="ct">19<span class="sub">threads</span></div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: #D6A040;">LE</div>
+              <div class="who">
+                <span class="nm">legal@acme.com</span>
+                <span class="addr" style="color: var(--attention)">excluded · global rule</span>
+              </div>
+              <div class="ct" style="color: var(--attention)">14<span class="sub">hidden</span></div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: #4A93B0;">CL</div>
+              <div class="who">
+                <span class="nm">clients@…</span>
+                <span class="addr">7 senders · subjects only</span>
+              </div>
+              <div class="ct">11<span class="sub">threads</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Labels / folders</div>
+          <div class="senders-list">
+            <div class="sender-row">
+              <div class="av" style="background: linear-gradient(135deg, var(--claude), var(--claude-2)); border-radius: 5px;"><svg style="width: 10px; height: 10px; color: #fff;"><use href="#i-inbox"/></svg></div>
+              <div class="who">
+                <span class="nm">Inbox</span>
+                <span class="addr">included</span>
+              </div>
+              <div class="ct">42<span class="sub">shared</span></div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: linear-gradient(135deg, var(--claude), var(--claude-2)); border-radius: 5px;"><svg style="width: 10px; height: 10px; color: #fff;"><use href="#i-sent"/></svg></div>
+              <div class="who">
+                <span class="nm">Sent</span>
+                <span class="addr">included</span>
+              </div>
+              <div class="ct">5<span class="sub">shared</span></div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: rgba(255,255,255,0.06); border-radius: 5px;"><svg style="width: 10px; height: 10px; color: var(--text-3);"><use href="#i-archive"/></svg></div>
+              <div class="who">
+                <span class="nm" style="color: var(--text-2)">Archive</span>
+                <span class="addr">excluded</span>
+              </div>
+              <div class="ct" style="color: var(--text-4)">0</div>
+            </div>
+            <div class="sender-row">
+              <div class="av" style="background: rgba(255,138,61,0.16); border-radius: 5px;"><svg style="width: 10px; height: 10px; color: var(--attention);"><use href="#i-tag"/></svg></div>
+              <div class="who">
+                <span class="nm" style="color: var(--text-2)">Confidential</span>
+                <span class="addr" style="color: var(--attention)">global rule · always excluded</span>
+              </div>
+              <div class="ct" style="color: var(--attention)">32<span class="sub">hidden</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="insp-actions">
+          <div class="btn secondary flex"><svg><use href="#i-filter"/></svg>Edit filters</div>
+          <div class="btn secondary flex"><svg><use href="#i-at"/></svg>Disconnect</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+    <span class="stat">2 mailboxes · <strong>59</strong> threads shared</span>
+    <span class="stat">Sensitivity: <strong>trusted / subjects</strong></span>
+    <span class="spacer"></span>
+    <span class="stat">⌘⇧M <kbd>connect</kbd></span>
+    <span class="stat">⌘F <kbd>filter</kbd></span>
+    <span class="stat">Space <kbd>toggle inspector</kbd></span>
+  </div>
+
+</div></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     VIEW 2 — THREADS (Active Backup style — Stage 8 canonical)
+     ═══════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 2</span>
+  <h2>Threads — Active Backup style</h2>
+  <div class="sub">Sender rail · dense thread table · minimal inspector · running count footer. No reading pane. Per-thread checkboxes (default blue, session green) plus rule-excluded rows dimmed with orange accent.</div>
+</div>
+
+<div class="stage"><div class="window">
+
+  <div class="toolbar">
+    <div class="tb-left">
+      <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+      <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-title">
+        <h1>Mail · Threads</h1>
+        <div class="sub">Jane Doe · last 30 days · 6 threads · 3 in session · 2 excluded by rule</div>
+      </div>
+      <div class="seg">
+        <div class="si">Mailboxes <span class="count">2</span></div>
+        <div class="si on">Threads <span class="count">59</span></div>
+        <div class="si">Session <span class="count">+3</span></div>
+        <div class="si">History <span class="count">12</span></div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="tb-search">
+        <svg><use href="#i-search"/></svg>
+        <input value="jane@acme.com" />
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="session-chip">
+        <span class="dot"></span>
+        <span class="name">Jane follow-up</span>
+        <span class="time">1:42:08</span>
+      </div>
+      <div class="tb-btn primary" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: rgba(46,203,127,0.5); box-shadow: 0 4px 12px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);">
+        <svg><use href="#i-plus"/></svg>
+        Add to session
+      </div>
+    </div>
+  </div>
+
+  <div class="body threads">
+
+    <div class="sidebar">
+      <div class="sb-head">Manifold</div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">6</span></div>
+      <div class="sb-item active"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+      <div class="sb-spacer"></div>
+      <div class="sb-divider"></div>
+      <div class="sb-head">Session</div>
+      <div class="sb-item" style="padding: 8px 10px;">
+        <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+          <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+        </div>
+      </div>
+      <div class="sb-divider"></div>
+      <div class="sb-profile">
+        <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+        <div style="min-width: 0;">
+          <div class="who">Amar Gandhi</div>
+          <div class="state">Runtime connected</div>
+        </div>
+        <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+      </div>
+    </div>
+
+    <!-- Sender rail (second sidebar) -->
+    <div class="rail">
+      <div class="rail-head">Accounts <span class="count">2</span></div>
+      <div class="rail-row active">
+        <div class="disc" style="background: linear-gradient(135deg, var(--claude), var(--claude-2));"><svg style="width: 10px; height: 10px; color: #fff;"><use href="#i-mail-filled"/></svg></div>
+        <span class="nm">work · @spatialduality</span>
+        <span class="c">47</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: linear-gradient(135deg, #5c5c68, #42424a);"><svg style="width: 10px; height: 10px; color: rgba(255,255,255,0.7);"><use href="#i-mail-filled"/></svg></div>
+        <span class="nm">personal · @me.com</span>
+        <span class="c">12</span>
+      </div>
+
+      <div class="rail-head">Top senders <span class="count">14</span></div>
+      <div class="rail-row active">
+        <div class="disc" style="background: #E8825A;">JD</div>
+        <span class="nm">Jane Doe</span>
+        <span class="c">47</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #4EA65A;">MK</div>
+        <span class="nm">Mark K.</span>
+        <span class="c">28</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #8E6CD6;">EN</div>
+        <span class="nm">Eng team</span>
+        <span class="c">19</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #D6A040; opacity: 0.55;">LE</div>
+        <span class="nm" style="color: var(--attention); opacity: 0.85;">legal@acme</span>
+        <span class="c orange">14</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #4A93B0;">CL</div>
+        <span class="nm">clients@…</span>
+        <span class="c">11</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #C74F7A;">RP</div>
+        <span class="nm">Rachel P.</span>
+        <span class="c">8</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #5DA4A0;">TM</div>
+        <span class="nm">tom@yc</span>
+        <span class="c">6</span>
+      </div>
+      <div class="rail-row">
+        <div class="disc" style="background: #AF7442;">SE</div>
+        <span class="nm">stripe@</span>
+        <span class="c">5</span>
+      </div>
+
+      <div class="rail-head">Folders <span class="count">6</span></div>
+      <div class="rail-row"><div class="ico-small"><svg><use href="#i-inbox"/></svg></div><span class="nm">Inbox</span><span class="c">42</span></div>
+      <div class="rail-row"><div class="ico-small"><svg><use href="#i-sent"/></svg></div><span class="nm">Sent</span><span class="c">21</span></div>
+      <div class="rail-row"><div class="ico-small"><svg><use href="#i-archive"/></svg></div><span class="nm">Archive</span><span class="c">2,355</span></div>
+      <div class="rail-row"><div class="ico-small" style="background: rgba(255,138,61,0.16); color: var(--attention);"><svg><use href="#i-tag"/></svg></div><span class="nm" style="color: var(--attention); opacity: 0.85;">Confidential</span><span class="c orange">32</span></div>
+
+      <div class="rail-head">Smart filters <span class="count">4</span></div>
+      <div class="rail-row"><div class="ico-small"><svg><use href="#i-clock"/></svg></div><span class="nm">Last 7 days</span><span class="c">61</span></div>
+      <div class="rail-row"><div class="ico-small" style="background: var(--session-soft); color: var(--session);"><svg><use href="#i-check-seal"/></svg></div><span class="nm">In current session</span><span class="c" style="color: var(--session-2)">3</span></div>
+      <div class="rail-row"><div class="ico-small" style="background: var(--attention-soft); color: var(--attention);"><svg><use href="#i-shield"/></svg></div><span class="nm">Excluded by rule</span><span class="c orange">46</span></div>
+    </div>
+
+    <!-- Thread table -->
+    <div class="content">
+      <div class="th-head">
+        <div><div class="row-check"></div></div>
+        <div></div>
+        <div>Thread</div>
+        <div class="r-col">Date</div>
+        <div class="r-col">Agents</div>
+        <div></div>
+      </div>
+
+      <div class="th-scroll">
+
+        <div class="th-section-head">
+          <svg><use href="#i-check-seal"/></svg>
+          In current session · Jane follow-up <span class="count">·  3</span>
+        </div>
+
+        <div class="th-row">
+          <div><div class="row-check session"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Board deck v2</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">3 msgs</span>
+              <span>last reply Today</span>
+              <span>·</span>
+              <span class="th-state session">In session</span>
+            </div>
+          </div>
+          <div class="th-date">Today 4:12 PM</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row selected">
+          <div><div class="row-check session"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Re: pricing pages — quick thoughts on tier 3</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">2 msgs</span>
+              <span>last reply Yesterday 11:42</span>
+              <span>·</span>
+              <span class="th-state session">In session</span>
+            </div>
+          </div>
+          <div class="th-date">Yesterday</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row">
+          <div><div class="row-check session"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Quick q on specs</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">1 msg</span>
+              <span>·</span>
+              <span class="th-state session">In session</span>
+            </div>
+          </div>
+          <div class="th-date">Mar 8</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-section-head">
+          <svg><use href="#i-mail"/></svg>
+          Default scope · shared by baseline <span class="count">·  12</span>
+        </div>
+
+        <div class="th-row">
+          <div><div class="row-check on"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane, Mark <span class="more">+ 2 others</span></span>
+              <span class="th-subject">Re: launch comms timeline</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">5 msgs</span>
+              <span>last reply Mar 10</span>
+              <span>·</span>
+              <span class="th-state default">Default</span>
+            </div>
+          </div>
+          <div class="th-date">Mar 10</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row">
+          <div><div class="row-check on"></div></div>
+          <div class="th-disc" style="background: #4EA65A;">MK</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Mark K.</span>
+              <span class="th-subject">Roadmap review · push-back on Q3 scope</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">4 msgs</span>
+              <span>last reply Mar 9</span>
+              <span>·</span>
+              <span class="th-state default">Default</span>
+            </div>
+          </div>
+          <div class="th-date">Mar 9</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row">
+          <div><div class="row-check on"></div></div>
+          <div class="th-disc" style="background: #8E6CD6;">EN</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Eng team</span>
+              <span class="th-subject">Weekly sync · infra migration blockers</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">8 msgs</span>
+              <span>last reply Mar 5</span>
+              <span>·</span>
+              <span class="th-state default">Default</span>
+            </div>
+          </div>
+          <div class="th-date">Mar 5</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row">
+          <div><div class="row-check"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Intro</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">1 msg</span>
+              <span>·</span>
+              <span class="th-state none">Not in scope</span>
+            </div>
+          </div>
+          <div class="th-date">Feb 28</div>
+          <div class="th-agents"><span class="av muted"></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-section-head">
+          <svg><use href="#i-shield"/></svg>
+          Excluded by global rule <span class="count">·  2 of 46</span>
+        </div>
+
+        <div class="th-row excluded-rule">
+          <div><div class="row-check"></div></div>
+          <div class="th-disc" style="background: #D6A040; opacity: 0.7;">LE</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">legal@acme.com</span>
+              <span class="th-subject">NDA — countersigned copy attached</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">1 msg</span>
+              <span>·</span>
+              <span class="th-state rule">Rule: legal@</span>
+            </div>
+          </div>
+          <div class="th-date">Feb 24</div>
+          <div class="th-agents"><span class="av muted"></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row excluded-rule">
+          <div><div class="row-check"></div></div>
+          <div class="th-disc" style="background: #E8825A; opacity: 0.7;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Re: Q4 numbers · <span style="opacity: 0.7;">[card redacted]</span></span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">4 msgs</span>
+              <span>·</span>
+              <span class="th-state rule">Rule: credit-card pattern</span>
+            </div>
+          </div>
+          <div class="th-date">Feb 20</div>
+          <div class="th-agents"><span class="av muted"></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+      </div>
+
+      <div class="th-footer">
+        <span class="meter"><span class="dot"></span>3 threads · 6 messages in session</span>
+        <span class="sep">+</span>
+        <span><strong>12 threads</strong> visible by default</span>
+        <span class="spacer"></span>
+        <span><strong>46</strong> excluded by rule (legal, credit-card, confidential label)</span>
+      </div>
+    </div>
+
+    <!-- Thread inspector — minimal, no reading pane -->
+    <div class="inspector">
+      <div class="insp-head">
+        <div class="kicker session">Selected thread · in session</div>
+        <h2>Re: pricing pages — quick thoughts on tier 3</h2>
+        <div class="path">From Jane Doe &lt;jane@acme.com&gt;</div>
+        <div class="stats">
+          <span><strong>2</strong> messages</span>
+          <span>·</span>
+          <span>last reply <strong>Yesterday 11:42</strong></span>
+        </div>
+      </div>
+
+      <div class="insp-body">
+
+        <div>
+          <div class="insp-label">State</div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;">
+            <span class="th-state session" style="padding: 3px 9px; font-size: 11px; line-height: 15px;">In session: Jane follow-up</span>
+            <span class="th-state default" style="padding: 3px 9px; font-size: 11px; line-height: 15px;">Also in default</span>
+          </div>
+          <div style="font: 400 11px/15px var(--sans); color: var(--text-3);">
+            Claude can see this thread until <strong style="color: var(--session-2); font-variant-numeric: tabular-nums;">5:48 PM</strong>, then session expires. Will remain in default after.
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Preview · first line</div>
+          <div class="first-line">
+            "Sharing the revised deck — can we get on a 15-minute call tomorrow to walk through the pricing tier changes? Also Mark wants in if possible, he had strong opinions in the last meeting…"
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Visible to Claude</div>
+          <div style="padding: 0 2px;">
+            <div class="meta-line"><span class="l">Sender</span><span class="v">Jane Doe &lt;jane@acme.com&gt;</span></div>
+            <div class="meta-line"><span class="l">Recipients</span><span class="v">you, mark@acme.com</span></div>
+            <div class="meta-line"><span class="l">Subject</span><span class="v">Re: pricing pages — quick thoughts on tier 3</span></div>
+            <div class="meta-line"><span class="l">Dates</span><span class="v">Yesterday 09:14, Yesterday 11:42</span></div>
+            <div class="meta-line"><span class="l">Body</span><span class="v">Full content <code>(trusted sender)</code></span></div>
+            <div class="meta-line"><span class="l">Attachments</span><span class="v" style="color: var(--text-3);">none</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Messages · 2</div>
+          <div class="msg-list">
+            <div class="msg-row">
+              <span class="dot-sm"></span>
+              <span class="text">Sharing the revised deck</span>
+              <span class="when">Yesterday 09:14</span>
+            </div>
+            <div class="msg-row sent">
+              <span class="dot-sm"></span>
+              <span class="text">One more nit on the anchor line</span>
+              <span class="when">Yesterday 11:42</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="insp-actions">
+          <div class="btn primary flex">
+            <svg><use href="#i-plus"/></svg>
+            Promote to default
+          </div>
+          <div class="btn secondary flex danger">
+            <svg><use href="#i-x"/></svg>
+            Remove
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+    <span class="stat">Filtered: <strong>Jane Doe · 30d</strong></span>
+    <span class="stat">Showing <strong>9</strong> of 47 threads</span>
+    <span class="spacer"></span>
+    <span class="stat">⌘A <kbd>select all</kbd></span>
+    <span class="stat">⌥⌘S <kbd>session</kbd></span>
+    <span class="stat">⌘↩ <kbd>promote</kbd></span>
+  </div>
+
+</div></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     VIEW 3 — SESSION (live overlay diff on threads)
+     ═══════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 3</span>
+  <h2>Session — what's temporarily added for this task</h2>
+  <div class="sub">Three threads added for this session only, one thread subtracted. Inherited default visible for context. Changes expire when the session ends — default never shifts.</div>
+</div>
+
+<style>
+.session-head-bar {
+  background: linear-gradient(90deg, var(--session-soft), var(--session-xsoft) 60%, transparent);
+  border-bottom: 0.5px solid rgba(46,203,127,0.25);
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 14px;
+}
+.session-head-bar .big-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--session-2), var(--session) 70%);
+  box-shadow: 0 0 10px var(--session-glow);
+  position: relative;
+}
+.session-head-bar .big-dot::after {
+  content: ""; position: absolute; inset: -6px; border-radius: 50%;
+  background: radial-gradient(circle, var(--session-glow), transparent 60%);
+  animation: chipPulse 2.4s ease-out infinite;
+}
+.session-head-bar .text { flex: 1; min-width: 0; }
+.session-head-bar .kicker { font: 600 10px/14px var(--sans); color: var(--session-2); letter-spacing: 0.1em; text-transform: uppercase; }
+@media (prefers-color-scheme: light) { .session-head-bar .kicker { color: #0F7F48; } }
+.session-head-bar h3 { font: 600 16px/20px var(--display); margin: 2px 0 0; letter-spacing: -0.01em; color: var(--text); }
+.session-head-bar .meta { font: 400 11px/15px var(--sans); color: var(--text-3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.session-head-bar .actions { display: flex; gap: 8px; margin-left: auto; }
+
+.th-row.session-add { background: var(--session-xsoft); box-shadow: inset 3px 0 0 var(--session); }
+.th-row.session-remove { background: var(--remove-soft); box-shadow: inset 3px 0 0 var(--remove); opacity: 0.88; }
+.th-row.session-remove .th-sender, .th-row.session-remove .th-subject { text-decoration: line-through; text-decoration-color: var(--remove); }
+.th-row.inherited-row { opacity: 0.7; }
+</style>
+
+<div class="stage"><div class="window">
+
+  <div class="toolbar">
+    <div class="tb-left">
+      <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+      <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-title">
+        <h1>Mail · Session</h1>
+        <div class="sub">Jane follow-up · 3 added · 1 removed · 12 inherited</div>
+      </div>
+      <div class="seg">
+        <div class="si">Mailboxes <span class="count">2</span></div>
+        <div class="si">Threads <span class="count">59</span></div>
+        <div class="si on">Session <span class="count">+3 −1</span></div>
+        <div class="si">History <span class="count">12</span></div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="tb-search">
+        <svg><use href="#i-search"/></svg>
+        <input placeholder="Filter session threads…" />
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="session-chip">
+        <span class="dot"></span>
+        <span class="name">Jane follow-up</span>
+        <span class="time">1:42:08</span>
+      </div>
+      <div class="tb-btn primary" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: rgba(46,203,127,0.5); box-shadow: 0 4px 12px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);">
+        <svg><use href="#i-plus"/></svg>
+        Add more threads
+      </div>
+    </div>
+  </div>
+
+  <div class="body standard">
+
+    <div class="sidebar">
+      <div class="sb-head">Manifold</div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">6</span></div>
+      <div class="sb-item active"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+      <div class="sb-spacer"></div>
+      <div class="sb-divider"></div>
+      <div class="sb-head">Session</div>
+      <div class="sb-item" style="padding: 8px 10px;">
+        <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+          <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+        </div>
+      </div>
+      <div class="sb-divider"></div>
+      <div class="sb-profile">
+        <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+        <div style="min-width: 0;">
+          <div class="who">Amar Gandhi</div>
+          <div class="state">Runtime connected</div>
+        </div>
+        <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="session-head-bar">
+        <div class="big-dot"></div>
+        <div class="text">
+          <div class="kicker">Live session · expires in 1h 42m</div>
+          <h3>Jane follow-up</h3>
+          <div class="meta">Started from <strong>default access</strong> · tracked writes · Claude only · started 3:55 PM</div>
+        </div>
+        <div class="actions">
+          <div class="btn secondary" style="padding: 5px 10px; font: 500 11px/14px var(--sans);"><svg><use href="#i-eye"/></svg>Review session</div>
+          <div class="btn" style="padding: 5px 10px; font: 600 11px/14px var(--sans); background: linear-gradient(180deg, var(--session-2), var(--session)); color: #fff; border: 0.5px solid rgba(46,203,127,0.5); box-shadow: 0 2px 6px var(--session-glow);"><svg><use href="#i-check-seal"/></svg>Finish session</div>
+        </div>
+      </div>
+
+      <div class="th-head" style="top: 72px;">
+        <div><div class="row-check"></div></div>
+        <div></div>
+        <div>Thread</div>
+        <div class="r-col">Date</div>
+        <div class="r-col">Agents</div>
+        <div></div>
+      </div>
+
+      <div class="th-scroll">
+
+        <div class="th-section-head" style="color: var(--session-2);">
+          <svg style="color: var(--session);"><use href="#i-plus"/></svg>
+          Added for this session <span class="count">·  3</span>
+        </div>
+
+        <div class="th-row session-add selected">
+          <div><div class="row-check session"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Board deck v2</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">3 msgs</span>
+              <span>·</span>
+              <span class="th-state session">In session</span>
+              <span>·</span>
+              <span>expires 5:48 PM</span>
+            </div>
+          </div>
+          <div class="th-date">Today 4:12 PM</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row session-add">
+          <div><div class="row-check session"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Re: pricing pages — quick thoughts on tier 3</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">2 msgs</span>
+              <span>·</span>
+              <span class="th-state session">In session</span>
+              <span>·</span>
+              <span>expires 5:48 PM</span>
+            </div>
+          </div>
+          <div class="th-date">Yesterday</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row session-add">
+          <div><div class="row-check session"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane Doe</span>
+              <span class="th-subject">Quick q on specs</span>
+            </div>
+            <div class="th-meta">
+              <span class="msg-count">1 msg</span>
+              <span>·</span>
+              <span class="th-state session">In session</span>
+            </div>
+          </div>
+          <div class="th-date">Mar 8</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-section-head" style="color: var(--remove);">
+          <svg style="color: var(--remove);"><use href="#i-minus"/></svg>
+          Removed for this session <span class="count">·  1</span>
+        </div>
+
+        <div class="th-row session-remove">
+          <div><div class="row-check" style="background: var(--remove-soft); border-color: var(--remove); position: relative;"><span style="position: absolute; top: 50%; left: 2px; right: 2px; height: 1.5px; background: var(--remove); transform: translateY(-50%); border-radius: 1px;"></span></div></div>
+          <div class="th-disc" style="background: #8E6CD6; opacity: 0.7;">EN</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Eng team</span>
+              <span class="th-subject">Weekly sync · infra migration blockers</span>
+            </div>
+            <div class="th-meta" style="text-decoration: none;">
+              <span class="msg-count">8 msgs</span>
+              <span>·</span>
+              <span class="th-state" style="background: var(--remove-soft); color: var(--remove);">Paused for session</span>
+              <span>·</span>
+              <span>resumes after 5:48 PM</span>
+            </div>
+          </div>
+          <div class="th-date">Mar 5</div>
+          <div class="th-agents"><span class="av muted"></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-section-head" style="color: var(--text-3);">
+          <svg><use href="#i-mail"/></svg>
+          Inherited from default <span class="count">·  12</span>
+        </div>
+
+        <div class="th-row inherited-row">
+          <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+          <div class="th-disc" style="background: #E8825A;">JD</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Jane, Mark <span class="more">+ 2</span></span>
+              <span class="th-subject">Re: launch comms timeline</span>
+            </div>
+            <div class="th-meta"><span class="msg-count">5 msgs</span><span>·</span><span>inherited</span></div>
+          </div>
+          <div class="th-date">Mar 10</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row inherited-row">
+          <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+          <div class="th-disc" style="background: #4EA65A;">MK</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Mark K.</span>
+              <span class="th-subject">Roadmap review · push-back on Q3 scope</span>
+            </div>
+            <div class="th-meta"><span class="msg-count">4 msgs</span><span>·</span><span>inherited</span></div>
+          </div>
+          <div class="th-date">Mar 9</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row inherited-row">
+          <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+          <div class="th-disc" style="background: #4A93B0;">CL</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">clients@…</span>
+              <span class="th-subject">11 threads · subjects only</span>
+            </div>
+            <div class="th-meta"><span class="msg-count">11 threads</span><span>·</span><span>inherited</span></div>
+          </div>
+          <div class="th-date">—</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+        <div class="th-row inherited-row">
+          <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+          <div class="th-disc" style="background: #C74F7A;">RP</div>
+          <div class="th-content">
+            <div class="th-top">
+              <span class="th-sender">Rachel P.</span>
+              <span class="th-subject">Q1 review feedback</span>
+            </div>
+            <div class="th-meta"><span class="msg-count">3 msgs</span><span>·</span><span>inherited</span></div>
+          </div>
+          <div class="th-date">Mar 2</div>
+          <div class="th-agents"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span><span class="av muted"></span></div>
+          <div class="th-menu">⋯</div>
+        </div>
+
+      </div>
+
+      <div class="th-footer">
+        <span class="meter"><span class="dot"></span>3 added · 1 removed</span>
+        <span class="sep">+</span>
+        <span><strong>12 threads</strong> inherited from default</span>
+        <span class="spacer"></span>
+        <span>Session ends in <strong style="color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m 08s</strong></span>
+      </div>
+    </div>
+
+    <!-- Inspector: session addition details -->
+    <div class="inspector">
+      <div class="insp-head">
+        <div class="kicker session">Session addition · Jane follow-up</div>
+        <h2>Re: pricing pages</h2>
+        <div class="path">From Jane Doe &lt;jane@acme.com&gt;</div>
+        <div class="stats">
+          <span>Added at <strong>3:58 PM</strong></span>
+          <span>·</span>
+          <span>Expires <strong>5:48 PM</strong></span>
+        </div>
+      </div>
+
+      <div class="insp-body">
+
+        <div>
+          <div class="insp-label">Why this is in the session</div>
+          <div style="background: linear-gradient(180deg, var(--session-soft), var(--session-xsoft)); border: 0.5px solid rgba(46,203,127,0.3); border-radius: 8px; padding: 10px 12px;">
+            <div style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--session), var(--session-2)); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); margin-bottom: 6px;"><svg style="width: 11px; height: 11px; color: #fff;"><use href="#i-clock"/></svg></div>
+            <div style="font: 400 12px/17px var(--sans); color: var(--text);">
+              This thread isn't in your default scope. You added it at session start to give Claude context for the pricing deck follow-up. Expires in <strong>1h 42m</strong>.
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Preview · first line</div>
+          <div class="first-line">
+            "Sharing the revised deck — can we get on a 15-minute call tomorrow to walk through the pricing tier changes? Also Mark wants in if possible…"
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Messages · 2</div>
+          <div class="msg-list">
+            <div class="msg-row">
+              <span class="dot-sm"></span>
+              <span class="text">Sharing the revised deck</span>
+              <span class="when">Yesterday 09:14</span>
+            </div>
+            <div class="msg-row sent">
+              <span class="dot-sm"></span>
+              <span class="text">One more nit</span>
+              <span class="when">Yesterday 11:42</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Access so far · this session</div>
+          <div style="padding: 8px 10px; background: rgba(0,0,0,0.2); border: 0.5px solid var(--hairline); border-radius: 6px; font: 400 11px/15px var(--sans); color: var(--text-2); font-variant-numeric: tabular-nums;">
+            Claude read this thread <strong style="color: var(--text);">2×</strong> — at 3:59 PM and 4:12 PM.
+          </div>
+        </div>
+
+        <div class="insp-actions">
+          <div class="btn primary session flex">
+            <svg><use href="#i-plus"/></svg>
+            Promote to default
+          </div>
+          <div class="btn secondary flex danger">
+            <svg><use href="#i-x"/></svg>
+            Remove
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+    <span class="stat">Session: <strong style="color: var(--session-2)">Jane follow-up</strong></span>
+    <span class="stat">Additions revert <strong>automatically</strong> at 5:48 PM</span>
+    <span class="spacer"></span>
+    <span class="stat">⌘⇧F <kbd>finish</kbd></span>
+    <span class="stat">⌘R <kbd>review</kbd></span>
+  </div>
+
+</div></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     VIEW 4 — HISTORY (past mail sessions)
+     ═══════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 4</span>
+  <h2>History — past mail sessions</h2>
+  <div class="sub">Every session that touched mail, recallable one-click. Reload applies the original thread selections against current mailbox state with a drift preview.</div>
+</div>
+
+<style>
+.hist-scroll { overflow-y: auto; flex: 1; }
+.hist-day {
+  padding: 14px 24px 8px;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--section-bg);
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 10px;
+}
+.hist-day .count { font: 500 11px/14px var(--mono); color: var(--text-4); font-variant-numeric: tabular-nums; }
+.hist-row {
+  display: grid;
+  grid-template-columns: 108px 1fr 220px 180px 100px;
+  gap: 16px; padding: 14px 24px;
+  align-items: center;
+  border-bottom: 0.5px solid var(--hairline-2);
+}
+.hist-row:hover { background: rgba(255,255,255,0.03); }
+@media (prefers-color-scheme: light) { .hist-row:hover { background: rgba(0,0,0,0.02); } }
+.hist-row.selected { background: var(--selection); box-shadow: inset 2px 0 0 var(--claude); }
+.hist-row.active-sess { background: linear-gradient(90deg, var(--session-xsoft), transparent 60%); box-shadow: inset 3px 0 0 var(--session); }
+.hist-time { font: 500 11px/14px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.hist-time .dur { color: var(--text-4); font-size: 10px; margin-top: 2px; display: block; }
+.hist-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hist-name .title { display: flex; align-items: center; gap: 8px; }
+.hist-name h3 { font: 600 14px/18px var(--sans); margin: 0; letter-spacing: -0.005em; color: var(--text); }
+.hist-kind { font: 600 9px/13px var(--sans); padding: 1px 6px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; flex-shrink: 0; }
+.hist-kind.session { background: var(--session-soft); color: var(--session-2); }
+.hist-kind.live { background: linear-gradient(180deg, var(--session-2), var(--session)); color: #fff; box-shadow: 0 0 8px var(--session-glow); }
+.hist-kind.minus { background: var(--remove-soft); color: var(--remove); }
+@media (prefers-color-scheme: light) { .hist-kind.session { color: #0F7F48; } }
+.hist-summary { font: 400 11px/14px var(--sans); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.hist-summary strong { color: var(--text-2); font-weight: 600; }
+.hist-senders { display: flex; align-items: center; gap: -4px; }
+.hist-senders .d {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 9px/14px var(--sans); color: #fff;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.3), 0 0 0 1.5px var(--content-bg);
+  margin-left: -6px;
+}
+.hist-senders .d:first-child { margin-left: 0; }
+.hist-senders .more {
+  margin-left: -6px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 600 9px/14px var(--sans); color: var(--text-3);
+  box-shadow: 0 0 0 1.5px var(--content-bg);
+}
+@media (prefers-color-scheme: light) { .hist-senders .more { background: rgba(0,0,0,0.06); } }
+
+.hist-metrics { display: flex; align-items: center; gap: 10px; font: 500 11px/14px var(--sans); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.hist-metrics .mini-spark { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 16px; }
+.hist-metrics .mini-spark .b { width: 3px; border-radius: 1px; min-height: 2px; background: var(--claude); opacity: 0.85; }
+.hist-metrics .mini-spark .b.session { background: var(--session); }
+.hist-metrics .mini-spark .b.dim { background: var(--text-3); opacity: 0.6; }
+.hist-resume-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 6px 12px;
+  background: linear-gradient(180deg, var(--session-2), var(--session));
+  color: #fff;
+  border: 0.5px solid rgba(46,203,127,0.5);
+  border-radius: 6px;
+  font: 600 11px/14px var(--sans);
+  box-shadow: 0 2px 6px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+  cursor: default;
+}
+.hist-resume-btn.live {
+  background: transparent;
+  border: 0.5px solid var(--session);
+  color: var(--session-2);
+  box-shadow: none;
+}
+@media (prefers-color-scheme: light) { .hist-resume-btn.live { color: #0F7F48; } }
+.hist-resume-btn svg { width: 10px; height: 10px; }
+
+.hist-insp-meta {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.2);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+}
+@media (prefers-color-scheme: light) { .hist-insp-meta { background: rgba(0,0,0,0.03); } }
+.hist-insp-meta .cell { display: flex; flex-direction: column; gap: 2px; }
+.hist-insp-meta .l { font: 600 9px/12px var(--sans); color: var(--text-3); letter-spacing: 0.08em; text-transform: uppercase; }
+.hist-insp-meta .v { font: 600 14px/18px var(--display); color: var(--text); letter-spacing: -0.005em; font-variant-numeric: tabular-nums; }
+.hist-insp-meta .v.small { font-size: 12px; font-weight: 500; color: var(--text-2); }
+
+.addrm-list { display: flex; flex-direction: column; gap: 4px; }
+.addrm-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 6px;
+  font: 500 12px/16px var(--sans);
+}
+.addrm-item.add { background: var(--session-xsoft); color: var(--text); }
+.addrm-item.rem { background: var(--remove-soft); color: var(--text); }
+.addrm-item .sign { font: 700 13px/16px var(--sans); width: 16px; text-align: center; flex-shrink: 0; }
+.addrm-item.add .sign { color: var(--session); }
+.addrm-item.rem .sign { color: var(--remove); }
+.addrm-item .disc-tiny {
+  width: 16px; height: 16px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 8px/12px var(--sans); color: #fff; flex-shrink: 0;
+}
+.addrm-item .name { font: 500 12px/16px var(--sans); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addrm-item .ct { font: 500 10px/14px var(--mono); color: var(--text-3); margin-left: auto; font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="stage"><div class="window">
+
+  <div class="toolbar">
+    <div class="tb-left">
+      <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+      <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-title">
+        <h1>Mail · History</h1>
+        <div class="sub">12 past sessions · 22 hours of tracked mail access</div>
+      </div>
+      <div class="seg">
+        <div class="si">Mailboxes <span class="count">2</span></div>
+        <div class="si">Threads <span class="count">59</span></div>
+        <div class="si">Session <span class="count">+3 −1</span></div>
+        <div class="si on">History <span class="count">12</span></div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="tb-search">
+        <svg><use href="#i-search"/></svg>
+        <input placeholder="Filter sessions…" />
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="session-chip"><span class="dot"></span><span class="name">Jane follow-up</span><span class="time">1:42:08</span></div>
+      <div class="tb-btn"><svg><use href="#i-export"/></svg>Export</div>
+    </div>
+  </div>
+
+  <div class="body standard">
+
+    <div class="sidebar">
+      <div class="sb-head">Manifold</div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">6</span></div>
+      <div class="sb-item active"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+      <div class="sb-spacer"></div>
+      <div class="sb-divider"></div>
+      <div class="sb-head">Session</div>
+      <div class="sb-item" style="padding: 8px 10px;">
+        <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+          <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+        </div>
+      </div>
+      <div class="sb-divider"></div>
+      <div class="sb-profile">
+        <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+        <div style="min-width: 0;">
+          <div class="who">Amar Gandhi</div>
+          <div class="state">Runtime connected</div>
+        </div>
+        <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="hist-scroll">
+
+        <div class="hist-day">Today <span class="count">·  1 active</span></div>
+
+        <div class="hist-row active-sess selected">
+          <div class="hist-time">15:55<span class="dur">active · 1h 42m left</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Jane follow-up</h3>
+              <span class="hist-kind live">Live</span>
+            </div>
+            <div class="hist-summary"><strong>+3 threads</strong> from Jane Doe, <strong>−1 thread</strong> from Eng team</div>
+          </div>
+          <div class="hist-senders">
+            <span class="d" style="background: #E8825A;">JD</span>
+            <span class="more" style="color: var(--attention);">−1</span>
+          </div>
+          <div class="hist-metrics">
+            <div class="mini-spark">
+              <div class="b session" style="height: 40%"></div>
+              <div class="b session" style="height: 55%"></div>
+              <div class="b" style="height: 30%"></div>
+              <div class="b session" style="height: 80%"></div>
+              <div class="b" style="height: 45%"></div>
+              <div class="b session" style="height: 65%"></div>
+              <div class="b" style="height: 20%"></div>
+            </div>
+            <span>6 reads</span>
+          </div>
+          <div class="hist-resume-btn live"><svg><use href="#i-eye"/></svg>Review</div>
+        </div>
+
+        <div class="hist-day">Last week <span class="count">·  3</span></div>
+
+        <div class="hist-row">
+          <div class="hist-time">Apr 10 · 09:22<span class="dur">2h 03m</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Jane follow-up</h3>
+              <span class="hist-kind session">Session</span>
+            </div>
+            <div class="hist-summary"><strong>+5 threads</strong> · Jane Doe · <span style="color: var(--attention);">drift: 1 message since removed</span></div>
+          </div>
+          <div class="hist-senders">
+            <span class="d" style="background: #E8825A;">JD</span>
+          </div>
+          <div class="hist-metrics">
+            <div class="mini-spark">
+              <div class="b session" style="height: 40%"></div>
+              <div class="b session" style="height: 50%"></div>
+              <div class="b" style="height: 60%"></div>
+              <div class="b session" style="height: 45%"></div>
+              <div class="b" style="height: 70%"></div>
+              <div class="b session" style="height: 35%"></div>
+            </div>
+            <span>14 reads</span>
+          </div>
+          <div class="hist-resume-btn"><svg><use href="#i-resume"/></svg>Resume</div>
+        </div>
+
+        <div class="hist-row">
+          <div class="hist-time">Apr 09 · 14:18<span class="dur">45m</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Sensitive call · board</h3>
+              <span class="hist-kind minus">Default minus…</span>
+            </div>
+            <div class="hist-summary"><strong>−all mail</strong> · agents paused during call</div>
+          </div>
+          <div class="hist-senders">
+            <span class="more" style="color: var(--remove);">∅</span>
+          </div>
+          <div class="hist-metrics">
+            <div class="mini-spark"><div class="b dim" style="height: 15%"></div></div>
+            <span style="color: var(--text-4)">0 reads</span>
+          </div>
+          <div class="hist-resume-btn"><svg><use href="#i-resume"/></svg>Resume</div>
+        </div>
+
+        <div class="hist-row">
+          <div class="hist-time">Apr 08 · 10:45<span class="dur">3h 12m</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Investor deck · Q2</h3>
+              <span class="hist-kind session">Session</span>
+            </div>
+            <div class="hist-summary"><strong>+8 threads</strong> from 3 senders · tracked</div>
+          </div>
+          <div class="hist-senders">
+            <span class="d" style="background: #E8825A;">JD</span>
+            <span class="d" style="background: #5DA4A0;">TM</span>
+            <span class="d" style="background: #4EA65A;">MK</span>
+          </div>
+          <div class="hist-metrics">
+            <div class="mini-spark">
+              <div class="b session" style="height: 50%"></div>
+              <div class="b" style="height: 70%"></div>
+              <div class="b session" style="height: 45%"></div>
+              <div class="b session" style="height: 60%"></div>
+              <div class="b" style="height: 35%"></div>
+              <div class="b session" style="height: 80%"></div>
+              <div class="b" style="height: 50%"></div>
+            </div>
+            <span>28 reads</span>
+          </div>
+          <div class="hist-resume-btn"><svg><use href="#i-resume"/></svg>Resume</div>
+        </div>
+
+        <div class="hist-day">March <span class="count">·  6</span></div>
+
+        <div class="hist-row">
+          <div class="hist-time">Mar 28 · 16:02<span class="dur">1h 12m</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Vendor onboarding</h3>
+              <span class="hist-kind session">Session</span>
+            </div>
+            <div class="hist-summary"><strong>+2 threads</strong> · stripe, aws</div>
+          </div>
+          <div class="hist-senders">
+            <span class="d" style="background: #AF7442;">SE</span>
+            <span class="d" style="background: #D6A040; opacity: 0.55;">LE</span>
+          </div>
+          <div class="hist-metrics">
+            <div class="mini-spark">
+              <div class="b session" style="height: 35%"></div>
+              <div class="b" style="height: 55%"></div>
+              <div class="b session" style="height: 40%"></div>
+              <div class="b" style="height: 60%"></div>
+            </div>
+            <span>8 reads</span>
+          </div>
+          <div class="hist-resume-btn"><svg><use href="#i-resume"/></svg>Resume</div>
+        </div>
+
+        <div class="hist-row">
+          <div class="hist-time">Mar 22 · 11:40<span class="dur">38m</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Hiring · senior eng</h3>
+              <span class="hist-kind session">Session</span>
+            </div>
+            <div class="hist-summary"><strong>+6 threads</strong> from candidates list</div>
+          </div>
+          <div class="hist-senders">
+            <span class="d" style="background: #8E6CD6;">EN</span>
+            <span class="d" style="background: #C74F7A;">RP</span>
+            <span class="more">+4</span>
+          </div>
+          <div class="hist-metrics">
+            <div class="mini-spark">
+              <div class="b session" style="height: 40%"></div>
+              <div class="b session" style="height: 45%"></div>
+              <div class="b" style="height: 30%"></div>
+              <div class="b session" style="height: 55%"></div>
+            </div>
+            <span>22 reads</span>
+          </div>
+          <div class="hist-resume-btn"><svg><use href="#i-resume"/></svg>Resume</div>
+        </div>
+
+        <div class="hist-row">
+          <div class="hist-time">Mar 15 · 09:18<span class="dur">25m</span></div>
+          <div class="hist-name">
+            <div class="title">
+              <h3>Therapist call prep</h3>
+              <span class="hist-kind minus">Default minus…</span>
+            </div>
+            <div class="hist-summary"><strong>−all mail</strong> · privacy</div>
+          </div>
+          <div class="hist-senders"><span class="more" style="color: var(--remove);">∅</span></div>
+          <div class="hist-metrics">
+            <div class="mini-spark"><div class="b dim" style="height: 10%"></div></div>
+            <span style="color: var(--text-4)">0 reads</span>
+          </div>
+          <div class="hist-resume-btn"><svg><use href="#i-resume"/></svg>Resume</div>
+        </div>
+
+      </div>
+
+      <div class="mx-footer">
+        <span><strong>12</strong> past sessions</span>
+        <span class="sep">·</span>
+        <span><strong>22h 18m</strong> tracked mail access</span>
+        <span class="sep">·</span>
+        <span><strong>8</strong> sessions used at least once again</span>
+        <span class="spacer"></span>
+        <span>Oldest: <strong>Mar 2</strong></span>
+      </div>
+    </div>
+
+    <div class="inspector">
+      <div class="insp-head">
+        <div class="kicker session">Past session · 1h 47m</div>
+        <h2>Jane follow-up</h2>
+        <div class="path">Apr 10 · 09:22 → 11:25 · session</div>
+        <div class="stats">
+          <span><strong>14</strong> reads</span>
+          <span>·</span>
+          <span><strong>0</strong> writes</span>
+          <span>·</span>
+          <span><strong>0</strong> denials</span>
+        </div>
+      </div>
+
+      <div class="insp-body">
+
+        <div class="hist-insp-meta">
+          <div class="cell"><div class="l">Base</div><div class="v small">Default + 5 additions</div></div>
+          <div class="cell"><div class="l">Agents</div><div class="v small">Claude only</div></div>
+          <div class="cell"><div class="l">Threads read</div><div class="v">5</div></div>
+          <div class="cell"><div class="l">Session used</div><div class="v">3×</div></div>
+        </div>
+
+        <div>
+          <div class="insp-label">Additions · 5 threads from Jane</div>
+          <div class="addrm-list">
+            <div class="addrm-item add">
+              <span class="sign">＋</span>
+              <span class="disc-tiny" style="background: #E8825A;">JD</span>
+              <span class="name">Re: pricing pages v1</span>
+              <span class="ct">2 msgs</span>
+            </div>
+            <div class="addrm-item add">
+              <span class="sign">＋</span>
+              <span class="disc-tiny" style="background: #E8825A;">JD</span>
+              <span class="name">Board deck v1</span>
+              <span class="ct">3 msgs</span>
+            </div>
+            <div class="addrm-item add">
+              <span class="sign">＋</span>
+              <span class="disc-tiny" style="background: #E8825A;">JD</span>
+              <span class="name">Quick q on specs</span>
+              <span class="ct">1 msg</span>
+            </div>
+            <div class="addrm-item add">
+              <span class="sign">＋</span>
+              <span class="disc-tiny" style="background: #E8825A;">JD</span>
+              <span class="name">Intro follow-up</span>
+              <span class="ct">2 msgs</span>
+            </div>
+            <div class="addrm-item add" style="opacity: 0.62;">
+              <span class="sign">＋</span>
+              <span class="disc-tiny" style="background: #E8825A;">JD</span>
+              <span class="name" style="text-decoration: line-through; text-decoration-color: var(--attention);">Re: onboarding</span>
+              <span class="ct" style="color: var(--attention);">deleted since</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="insp-label">Drift vs. now</div>
+          <div style="background: var(--attention-xsoft); border: 0.5px solid rgba(255,138,61,0.3); border-radius: 8px; padding: 10px 12px; font: 400 12px/17px var(--sans); color: var(--text-2);">
+            <strong style="color: var(--text);">4 of 5</strong> additions still exist. <strong>1 message</strong> was deleted from the mailbox since. 1 new global rule (<code style="font: 500 11px/14px var(--mono); color: var(--text);">@legal.com → exclude</code>) now applies.
+          </div>
+        </div>
+
+        <div class="insp-actions">
+          <div class="btn primary session flex"><svg><use href="#i-resume"/></svg>Resume session</div>
+          <div class="btn secondary flex"><svg><use href="#i-export"/></svg>Export</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+    <span class="stat"><strong>12</strong> mail sessions · <strong>22h 18m</strong> total</span>
+    <span class="spacer"></span>
+    <span class="stat">⌘R <kbd>resume</kbd></span>
+    <span class="stat">⌘E <kbd>export</kbd></span>
+  </div>
+
+</div></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     VIEW 5 — EMPTY (no mailboxes connected)
+     ═══════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 5</span>
+  <h2>Empty — no mailboxes connected</h2>
+  <div class="sub">First-run for Mail. No mailboxes connected, no sessions running, agents see nothing from mail. Single-hero connect flow; dashed drag-and-drop secondary.</div>
+</div>
+
+<style>
+.empty-stage {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 48px;
+  position: relative; overflow: hidden;
+}
+.empty-stage::before {
+  content: "";
+  position: absolute; inset: -20%;
+  background:
+    radial-gradient(40% 40% at 50% 40%, var(--claude-glow), transparent 70%),
+    radial-gradient(40% 40% at 80% 80%, var(--codex-glow), transparent 70%);
+  filter: blur(60px); opacity: 0.3; pointer-events: none;
+}
+.empty-illus {
+  position: relative;
+  width: 160px; height: 150px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 32px;
+}
+.empty-illus .env {
+  width: 140px; height: 100px;
+  background: linear-gradient(135deg, rgba(63,124,255,0.24), rgba(151,86,240,0.20));
+  border: 1px solid rgba(63,124,255,0.35);
+  border-radius: 10px;
+  position: relative;
+  box-shadow: 0 20px 48px rgba(0,0,0,0.35), 0 0 40px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.1);
+  transform: rotate(-4deg);
+}
+.empty-illus .env::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.1), transparent);
+  border-radius: 10px 10px 0 0;
+}
+.empty-illus .env::after {
+  content: "";
+  position: absolute; top: -1px; left: -1px; right: -1px; height: 100%;
+  background: linear-gradient(135deg, transparent 48%, rgba(63,124,255,0.22) 48%, rgba(151,86,240,0.22) 52%, transparent 52%);
+  clip-path: polygon(0 0, 100% 0, 50% 55%);
+  border-radius: 10px 10px 0 0;
+}
+.empty-illus .lock {
+  position: absolute; top: 58px; left: 50%; transform: translateX(-50%) rotate(-4deg);
+  width: 36px; height: 36px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 24px var(--claude-glow), 0 1px 0 rgba(255,255,255,0.3) inset;
+  z-index: 2;
+}
+.empty-illus .lock svg { width: 18px; height: 18px; color: #fff; }
+
+.empty-copy { text-align: center; max-width: 560px; position: relative; z-index: 1; }
+.empty-copy h1 { font: 600 28px/34px var(--display); letter-spacing: -0.02em; margin: 0 0 12px; color: var(--text); }
+.empty-copy p { font: 400 15px/23px var(--sans); color: var(--text-2); margin: 0 0 32px; }
+.empty-copy p strong { color: var(--text); font-weight: 600; }
+
+.empty-cta {
+  display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px;
+  width: 620px; max-width: 100%;
+  position: relative; z-index: 1;
+}
+.empty-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  border: 0.5px solid var(--hairline);
+  border-radius: 12px; padding: 22px;
+  text-align: left;
+  display: flex; flex-direction: column; gap: 8px;
+  cursor: default;
+  transition: transform 180ms, border-color 180ms, background 180ms;
+}
+@media (prefers-color-scheme: light) { .empty-card { background: linear-gradient(180deg, rgba(0,0,0,0.03), rgba(0,0,0,0.01)); } }
+.empty-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--claude);
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+}
+.empty-card .icon-wrap {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+}
+.empty-card .icon-wrap svg { width: 22px; height: 22px; color: #fff; }
+.empty-card h3 { font: 600 17px/22px var(--display); margin: 4px 0 0; letter-spacing: -0.005em; color: var(--text); }
+.empty-card p { font: 400 12px/17px var(--sans); color: var(--text-3); margin: 0; }
+.empty-card code { font: 500 11px/15px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2); }
+@media (prefers-color-scheme: light) { .empty-card code { background: rgba(0,0,0,0.06); } }
+.empty-card .hint {
+  margin-top: auto;
+  font: 600 10px/14px var(--sans);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--claude-2);
+  display: flex; align-items: center; gap: 6px;
+}
+.empty-card .hint svg { width: 10px; height: 10px; }
+.empty-card.alt {
+  border-style: dashed;
+  background: rgba(255,255,255,0.02);
+}
+.empty-card.alt .icon-wrap {
+  background: rgba(255,255,255,0.06);
+  box-shadow: none;
+}
+.empty-card.alt .icon-wrap svg { color: var(--text-3); }
+.empty-card.alt:hover { border-color: var(--text-3); background: rgba(255,255,255,0.04); }
+.empty-card.alt h3 { font-size: 14px; line-height: 18px; }
+
+.empty-note {
+  margin-top: 28px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+  font: 400 11px/15px var(--sans);
+  color: var(--text-3);
+  position: relative; z-index: 1;
+  max-width: 620px;
+}
+@media (prefers-color-scheme: light) { .empty-note { background: rgba(0,0,0,0.03); } }
+.empty-note strong { color: var(--text-2); font-weight: 600; }
+.empty-note svg { width: 14px; height: 14px; color: var(--session); flex-shrink: 0; }
+
+/* Provider list */
+.provider-list {
+  display: flex; gap: 8px; margin-top: 10px;
+}
+.provider-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid var(--hairline);
+  border-radius: 6px;
+  font: 500 11px/14px var(--sans);
+  color: var(--text-2);
+}
+@media (prefers-color-scheme: light) { .provider-chip { background: rgba(0,0,0,0.04); } }
+.provider-chip svg { width: 11px; height: 11px; color: var(--text-3); }
+.provider-chip.primary {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  color: #fff;
+  border-color: rgba(63,124,255,0.5);
+  box-shadow: 0 2px 6px var(--claude-glow);
+}
+.provider-chip.primary svg { color: #fff; }
+
+.teaser-panel { padding: 24px 20px; }
+.teaser-panel h4 { font: 600 13px/17px var(--sans); letter-spacing: -0.005em; margin: 0 0 10px; color: var(--text); }
+.teaser-panel p { font: 400 12px/18px var(--sans); color: var(--text-2); margin: 0 0 14px; }
+.teaser-step {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+@media (prefers-color-scheme: light) { .teaser-step { background: rgba(0,0,0,0.02); } }
+.teaser-step .n {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 11px/20px var(--sans); color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px var(--claude-glow);
+}
+.teaser-step .body-txt { flex: 1; min-width: 0; }
+.teaser-step h5 { font: 600 12px/16px var(--sans); margin: 0 0 2px; color: var(--text); letter-spacing: -0.005em; }
+.teaser-step p { font: 400 11px/15px var(--sans); color: var(--text-3); margin: 0; }
+</style>
+
+<div class="stage"><div class="window">
+
+  <div class="toolbar">
+    <div class="tb-left">
+      <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+      <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-title">
+        <h1>Mail</h1>
+        <div class="sub">No mailboxes connected — agents see nothing from mail</div>
+      </div>
+      <div class="seg">
+        <div class="si on">Mailboxes <span class="count">0</span></div>
+        <div class="si" style="opacity: 0.5;">Threads</div>
+        <div class="si" style="opacity: 0.5;">Session</div>
+        <div class="si" style="opacity: 0.5;">History</div>
+      </div>
+      <div style="flex:1"></div>
+    </div>
+    <div class="tb-right">
+      <div class="tb-btn primary">
+        <svg><use href="#i-mail-plus"/></svg>
+        Connect a mailbox…
+      </div>
+    </div>
+  </div>
+
+  <div class="body standard">
+
+    <div class="sidebar">
+      <div class="sb-head">Manifold</div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">12</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">4</span></div>
+      <div class="sb-item active"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">0</span></div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests</div>
+      <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+      <div class="sb-spacer"></div>
+      <div class="sb-divider"></div>
+      <div class="sb-head">Session</div>
+      <div style="padding: 10px 14px; font: 400 11px/15px var(--sans); color: var(--text-3);">
+        No session. Sessions appear here once you connect a mailbox.
+      </div>
+      <div class="sb-divider"></div>
+      <div class="sb-profile">
+        <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+        <div style="min-width: 0;">
+          <div class="who">Amar Gandhi</div>
+          <div class="state">Runtime connected</div>
+        </div>
+        <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="empty-stage">
+
+        <div class="empty-illus">
+          <div class="env"></div>
+          <div class="lock"><svg><use href="#i-at"/></svg></div>
+        </div>
+
+        <div class="empty-copy">
+          <h1>No mailboxes connected yet.</h1>
+          <p><strong>That's correct.</strong> Claude and Codex can't see any of your email until you connect a mailbox and pick which senders, threads, or messages they can read. You can remove access in one click later.</p>
+        </div>
+
+        <div class="empty-cta">
+          <div class="empty-card">
+            <div class="icon-wrap"><svg><use href="#i-mail-plus"/></svg></div>
+            <h3>Connect a mailbox</h3>
+            <p>Use system Mail's IMAP/OAuth bridge. You'll pick sensitivity (<code>subjects only</code>, <code>trusted senders</code>, <code>full content</code>) before any thread becomes visible to an agent.</p>
+            <div class="provider-list">
+              <span class="provider-chip primary"><svg><use href="#i-mail-filled"/></svg>Apple Mail</span>
+              <span class="provider-chip">Gmail · OAuth</span>
+              <span class="provider-chip">IMAP</span>
+              <span class="provider-chip">Fastmail</span>
+            </div>
+            <div class="hint">
+              <svg><use href="#i-chev-right"/></svg>
+              Start with Apple Mail
+              <span style="margin-left: auto; color: var(--text-4); font: 500 10px/14px var(--mono); text-transform: none; letter-spacing: 0;">⌘⇧M</span>
+            </div>
+          </div>
+          <div class="empty-card alt">
+            <div class="icon-wrap"><svg><use href="#i-mail"/></svg></div>
+            <h3>Drop an email here</h3>
+            <p>Drag an <code>.eml</code> or a message from Mail.app to share just that thread without connecting the full mailbox.</p>
+            <div class="hint" style="color: var(--text-4); margin-top: auto;">Hint · Mail.app → here</div>
+          </div>
+        </div>
+
+        <div class="empty-note">
+          <svg><use href="#i-shield"/></svg>
+          <div>
+            <strong>3 global email rules already active.</strong> <code style="font: 500 10px/14px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2);">legal@</code>, <code style="font: 500 10px/14px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2);">credit-card redaction</code>, and <code style="font: 500 10px/14px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2);">Confidential label</code> will exclude matching threads in whichever mailbox you connect.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="inspector">
+      <div class="insp-head">
+        <div class="kicker">Getting started</div>
+        <h2>What you'll see</h2>
+        <div class="path">after you connect your first mailbox</div>
+      </div>
+
+      <div class="insp-body">
+        <div class="teaser-panel">
+          <p>Once a mailbox is connected, this view fills in with:</p>
+
+          <div class="teaser-step">
+            <div class="n">1</div>
+            <div class="body-txt">
+              <h5>Coverage matrix</h5>
+              <p>One row per mailbox. Toggle each agent on or off. Set a sensitivity per mailbox — subjects only, trusted senders, or full content.</p>
+            </div>
+          </div>
+          <div class="teaser-step">
+            <div class="n">2</div>
+            <div class="body-txt">
+              <h5>Thread picker (Active Backup style)</h5>
+              <p>Sender rail on the left, dense thread table, checkboxes. Pick individual threads — not your whole inbox. Running count at the bottom keeps you oriented.</p>
+            </div>
+          </div>
+          <div class="teaser-step">
+            <div class="n">3</div>
+            <div class="body-txt">
+              <h5>Session overlays</h5>
+              <p>Spin up a time-boxed session with extra threads for a specific task. Expires automatically. Default never drifts.</p>
+            </div>
+          </div>
+          <div class="teaser-step">
+            <div class="n">4</div>
+            <div class="body-txt">
+              <h5>Denial counts</h5>
+              <p>If an agent tries to read a thread you haven't shared, Manifold blocks it and records the attempt. You decide whether to grant.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+    <span class="stat">Claude <strong>connected</strong> · nothing to read</span>
+    <span class="stat">Codex <strong>paused</strong></span>
+    <span class="stat">Global email rules: <strong>3 active</strong></span>
+    <span class="spacer"></span>
+    <span class="stat">⌘⇧M <kbd>connect</kbd></span>
+  </div>
+
+</div></div>
+
+</body>
+</html>
+

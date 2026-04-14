@@ -1,0 +1,196 @@
+/* =================================================================
+   Manifold — Design Tokens
+   =================================================================
+   Source of truth for color, type, spacing, motion, and state.
+   Every HTML mockup in this directory imports this file.
+
+   Principle traces:
+     - O (Stage 3): Fixed agent palette (not system accent)
+     - Principle 6: Color-as-identity / color-as-state separate channels
+     - Principle 7: 4pt vertical baseline, 8pt horizontal grid
+     - Principle 9: Every status conveyed with a second channel (icon/text)
+   ================================================================= */
+
+:root {
+  /* ── Surface & text — light mode ── */
+  --bg:          #f5f5f7;
+  --surface:     #ffffff;
+  --surface-2:   #fbfbfd;   /* sidebar, rail */
+  --surface-3:   #f0f0f2;   /* hover, chip */
+  --surface-4:   #e8e8ea;   /* table header */
+  --border:      rgba(0,0,0,0.08);
+  --border-2:    rgba(0,0,0,0.14);  /* stronger border, form fields */
+  --text:        #1d1d1f;
+  --text-2:      #55555a;   /* secondary */
+  --text-3:      #8a8a8e;   /* tertiary */
+  --text-4:      #b5b5b9;   /* quaternary, disabled */
+
+  /* ── Agent identity (fixed, not system accent) — Principle 6 ── */
+  --claude:        #3B6DE6;
+  --claude-soft:   rgba(59,109,230,0.10);
+  --claude-soft-2: rgba(59,109,230,0.18);
+  --codex:         #7C46D6;
+  --codex-soft:    rgba(124,70,214,0.10);
+  --codex-soft-2:  rgba(124,70,214,0.18);
+
+  /* ── Status (system semantic, reinforced by icon + text) ── */
+  --active:    #1fab5a;
+  --active-bg: rgba(31,171,90,0.10);
+  --paused:    #c8860b;
+  --paused-bg: rgba(200,134,11,0.10);
+  --attention: #d45e00;   /* denial leading edge, queue badge */
+  --attention-bg: rgba(212,94,0,0.10);
+  --danger:    #c8201e;   /* only for errors preventing product from working */
+  --danger-bg: rgba(200,32,30,0.10);
+
+  /* ── Type ── */
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* Type roles — every size a multiple of 4pt line height */
+  --t-tiny:      500 10px/14px var(--sans);   /* Uppercase labels, badges */
+  --t-caption:   400 11px/16px var(--sans);   /* Timestamps, counts, micro */
+  --t-caption-m: 500 11px/16px var(--sans);
+  --t-body:      400 13px/20px var(--sans);   /* Primary text */
+  --t-body-m:    500 13px/20px var(--sans);
+  --t-title:     600 14px/20px var(--sans);   /* Section titles in tight space */
+  --t-heading:   600 17px/24px var(--sans);   /* Window/section heading */
+  --t-display:   600 22px/28px var(--sans);   /* First-run, big states */
+
+  --t-mono:      400 11px/16px var(--mono);
+  --t-mono-body: 400 12px/20px var(--mono);
+
+  /* ── Spacing (4pt baseline, 8pt horizontal where possible) ── */
+  --s-1: 4px;   /* tight */
+  --s-2: 8px;   /* standard */
+  --s-3: 12px;  /* section */
+  --s-4: 16px;  /* card inner */
+  --s-5: 20px;
+  --s-6: 24px;  /* edge */
+  --s-7: 32px;
+  --s-8: 40px;
+  --s-9: 48px;
+
+  /* ── Radii ── */
+  --r-1: 3px;   /* small pills, chips */
+  --r-2: 5px;   /* buttons */
+  --r-3: 6px;   /* cards, rows */
+  --r-4: 8px;   /* inspector panels */
+  --r-5: 10px;  /* windows */
+  --r-6: 12px;  /* menu bar panel */
+
+  /* ── Elevation ── */
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-pop:    0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08);
+  --shadow-panel:  0 12px 32px rgba(0,0,0,0.16), 0 2px 6px rgba(0,0,0,0.08);
+  --shadow-window: 0 24px 64px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.08);
+
+  /* ── Motion ── */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-in:  cubic-bezier(0.5, 0, 0.75, 0);
+  --dur-micro: 150ms;
+  --dur-state: 200ms;
+  --dur-land:  300ms;
+}
+
+/* =================================================================
+   Dark mode — hand-picked variants (not auto-derived)
+   Agent colors brightened for contrast against darker surfaces.
+   ================================================================= */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:          #1c1c1e;
+    --surface:     #2c2c2e;
+    --surface-2:   #242426;
+    --surface-3:   #343438;
+    --surface-4:   #3a3a3c;
+    --border:      rgba(255,255,255,0.08);
+    --border-2:    rgba(255,255,255,0.14);
+    --text:        #f5f5f7;
+    --text-2:      #c5c5c8;
+    --text-3:      #8a8a8e;
+    --text-4:      #5a5a5e;
+
+    --claude:        #6A94F5;
+    --claude-soft:   rgba(106,148,245,0.16);
+    --claude-soft-2: rgba(106,148,245,0.26);
+    --codex:         #A67AE8;
+    --codex-soft:    rgba(166,122,232,0.16);
+    --codex-soft-2:  rgba(166,122,232,0.26);
+
+    --active:    #30c060;
+    --active-bg: rgba(48,192,96,0.15);
+    --paused:    #e0a030;
+    --paused-bg: rgba(224,160,48,0.15);
+    --attention: #ff8038;
+    --attention-bg: rgba(255,128,56,0.15);
+    --danger:    #e05450;
+    --danger-bg: rgba(224,84,80,0.15);
+  }
+}
+
+/* =================================================================
+   Reduce motion — Principle 9
+   ================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* =================================================================
+   Global reset
+   ================================================================= */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--t-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+code, pre { font-family: var(--mono); }
+
+/* Page container for standalone mockup files */
+.page {
+  padding: var(--s-8);
+  max-width: 1280px;
+}
+.page-title {
+  font: var(--t-display);
+  margin: 0 0 var(--s-1);
+  letter-spacing: -0.01em;
+}
+.page-sub {
+  font: var(--t-body);
+  color: var(--text-2);
+  margin: 0 0 var(--s-7);
+  max-width: 720px;
+}
+.section-title {
+  font: var(--t-title);
+  margin: var(--s-8) 0 var(--s-2);
+  letter-spacing: -0.005em;
+}
+.section-note {
+  font: var(--t-caption);
+  color: var(--text-3);
+  margin: 0 0 var(--s-5);
+  max-width: 720px;
+}
+
+/* Stage labels on sections */
+.stage-tag {
+  display: inline-block;
+  font: var(--t-tiny);
+  color: var(--claude);
+  background: var(--claude-soft);
+  padding: 1px var(--s-2);
+  border-radius: var(--r-1);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: var(--s-2);
+  vertical-align: middle;
+}

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Manifold — First run</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="chrome.css" />
+<style>
+  /* =================================================================
+     First run — installs a model, not a checklist
+     =================================================================
+     Three panels. Each standalone, leaveable.
+
+     1. "What Manifold does" — two sentences + motion loop
+     2. "You control what's shared" — the real empty Access view, stripped
+     3. "Try it" — guided first folder/mailbox add
+
+     Rationale:
+       - Norman: conceptual model before interface
+       - Principle 3 (Thaler/Sunstein): default is nothing; defaulting
+         otherwise would shift risk to the user while calling it convenience
+       - Nicely Said: warmth + clarity for this one surface, precise
+         everywhere else
+     ================================================================= */
+  body { padding: var(--s-8); display: flex; flex-direction: column; gap: var(--s-8); }
+
+  .panel-stack { display: flex; flex-direction: column; gap: var(--s-7); align-items: center; }
+
+  .fr-panel {
+    width: 780px;
+    height: 500px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-5);
+    box-shadow: var(--shadow-window);
+    padding: var(--s-8) var(--s-9);
+    display: flex; flex-direction: column;
+  }
+
+  .fr-header h1 {
+    font: var(--t-display);
+    font-size: 28px; line-height: 32px;
+    margin: 0 0 var(--s-3);
+    letter-spacing: -0.02em;
+  }
+  .fr-header p {
+    font: 400 15px/24px var(--sans);
+    color: var(--text-2);
+    margin: 0;
+    max-width: 560px;
+  }
+  .fr-header p strong { color: var(--text); font-weight: 600; }
+
+  .fr-illustration {
+    flex: 1; margin: var(--s-6) 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-4);
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Panel 1 illustration — cycle diagram */
+  .cycle {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: space-around;
+    padding: var(--s-6);
+  }
+  .cycle-node {
+    display: flex; flex-direction: column; align-items: center; gap: var(--s-2);
+    text-align: center;
+  }
+  .cycle-icon {
+    width: 56px; height: 56px; border-radius: var(--r-4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    color: var(--text-2);
+  }
+  .cycle-node.claude .cycle-icon { border-color: var(--claude); color: var(--claude); background: var(--claude-soft); }
+  .cycle-node.tracked .cycle-icon { border-color: var(--active); color: var(--active); background: var(--active-bg); }
+  .cycle-node.revert  .cycle-icon { border-color: var(--attention); color: var(--attention); background: var(--attention-bg); }
+
+  .cycle-label { font: var(--t-caption-m); color: var(--text); }
+  .cycle-sub { font: var(--t-caption); color: var(--text-3); max-width: 140px; }
+
+  .cycle-arrow {
+    flex: 0 0 40px; height: 2px;
+    background: linear-gradient(90deg, var(--text-4), var(--text-3));
+    border-radius: 2px;
+    position: relative;
+  }
+  .cycle-arrow::after {
+    content: ""; position: absolute; right: -3px; top: -3px;
+    width: 0; height: 0;
+    border: 4px solid transparent;
+    border-left-color: var(--text-3);
+  }
+
+  /* Panel 2 — empty Access illustration (scaled-down) */
+  .empty-access {
+    padding: var(--s-5);
+    display: flex; flex-direction: column; gap: var(--s-3);
+  }
+  .ea-toolbar {
+    display: flex; gap: var(--s-2); align-items: center;
+    font: var(--t-caption);
+    color: var(--text-3);
+    padding-bottom: var(--s-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .ea-col { font: var(--t-tiny); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+  .ea-empty {
+    flex: 1;
+    border: 1px dashed var(--border-2);
+    border-radius: var(--r-3);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: var(--s-2);
+    color: var(--text-3);
+    font: var(--t-caption);
+  }
+  .ea-empty .icon { font-size: 24px; opacity: 0.5; }
+  .ea-empty .msg { font: var(--t-body); color: var(--text-2); }
+
+  /* Panel 3 — add folder / mailbox choice */
+  .add-choice {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: var(--s-4);
+    padding: var(--s-4);
+  }
+  .choice-card {
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: var(--r-4);
+    padding: var(--s-5);
+    display: flex; flex-direction: column; gap: var(--s-2);
+    cursor: default;
+    transition: border-color var(--dur-state) var(--ease-out);
+  }
+  .choice-card:hover { border-color: var(--claude); }
+  .choice-card .icon { font-size: 28px; color: var(--claude); }
+  .choice-card h4 { font: var(--t-title); margin: 0; }
+  .choice-card p { font: var(--t-caption); color: var(--text-2); margin: 0; line-height: 1.55; }
+  .choice-card .hint { font: var(--t-tiny); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin-top: auto; }
+
+  /* Footer */
+  .fr-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: var(--s-5);
+  }
+  .fr-dots { display: flex; gap: 6px; }
+  .fr-dots span {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-4);
+    transition: background var(--dur-state) var(--ease-out);
+  }
+  .fr-dots span.on { background: var(--text); }
+  .fr-actions { display: flex; gap: var(--s-2); }
+  .fr-actions .btn { padding: 8px 16px; font: var(--t-body-m); border-radius: var(--r-3); }
+
+  .panel-caption {
+    font: var(--t-caption);
+    color: var(--text-3);
+    text-align: center;
+    margin-top: calc(var(--s-5) * -1 + var(--s-3));
+  }
+</style>
+</head>
+<body>
+
+<h1 class="page-title"><span class="stage-tag">A</span>First run</h1>
+<p class="page-sub">Three panels that install a conceptual model. First: what Manifold does (metaphor). Second: the default state is nothing shared — shown by rendering the real empty Access view. Third: a guided first add, with folder vs mailbox framed as equal-weight choices.</p>
+
+<div class="rationale">
+  <strong>Why this is not a checklist.</strong> The goal of first-run is a mental model the user carries forever, not a series of form submissions. Norman + Wendel: intent converts to action when the user has a clean concept. The second panel specifically makes "nothing shared" feel like the correct state, not a blocker.
+</div>
+
+<div class="panel-stack">
+
+  <!-- PANEL 1 -->
+  <div class="fr-panel">
+    <div class="fr-header">
+      <h1>Manifold watches what your AI tools can see.</h1>
+      <p>Every time Claude or Codex <strong>reads</strong> a file, <strong>sends</strong> an email, or <strong>changes</strong> something, Manifold records it. Writes are reversible. <strong>Nothing is shared until you share it.</strong></p>
+    </div>
+
+    <div class="fr-illustration">
+      <div class="cycle">
+        <div class="cycle-node claude">
+          <div class="cycle-icon">📄</div>
+          <div class="cycle-label">Agent reads</div>
+          <div class="cycle-sub">scoped to what you shared</div>
+        </div>
+        <div class="cycle-arrow"></div>
+        <div class="cycle-node tracked">
+          <div class="cycle-icon">⎇</div>
+          <div class="cycle-label">Tracked</div>
+          <div class="cycle-sub">every action recorded</div>
+        </div>
+        <div class="cycle-arrow"></div>
+        <div class="cycle-node revert">
+          <div class="cycle-icon">⟲</div>
+          <div class="cycle-label">Reversible</div>
+          <div class="cycle-sub">undo anything, anytime</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fr-footer">
+      <div class="fr-dots"><span class="on"></span><span></span><span></span></div>
+      <div class="fr-actions">
+        <button class="btn ghost">Skip intro</button>
+        <button class="btn primary">Next →</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel-caption">Panel 1 of 3 · Concept</div>
+
+  <!-- PANEL 2 -->
+  <div class="fr-panel">
+    <div class="fr-header">
+      <h1>Nothing is shared by default.</h1>
+      <p>Your Access view is empty right now. That's correct. <strong>You choose</strong> what an agent can see, one folder or mailbox at a time.</p>
+    </div>
+
+    <div class="fr-illustration">
+      <div class="empty-access">
+        <div class="ea-toolbar">
+          <span class="ea-col">Access</span>
+          <span>·</span>
+          <span>0 sources</span>
+          <span style="margin-left:auto">Claude</span>
+          <span>Codex</span>
+        </div>
+        <div class="ea-empty">
+          <div class="icon">🔒</div>
+          <div class="msg">You haven't shared anything yet.</div>
+          <div>This is how Manifold stays out of your way until you invite it in.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fr-footer">
+      <div class="fr-dots"><span></span><span class="on"></span><span></span></div>
+      <div class="fr-actions">
+        <button class="btn ghost">← Back</button>
+        <button class="btn primary">Next →</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel-caption">Panel 2 of 3 · Defaults</div>
+
+  <!-- PANEL 3 -->
+  <div class="fr-panel">
+    <div class="fr-header">
+      <h1>Let's share one thing.</h1>
+      <p>Start with whatever feels lowest-stakes. You can remove it in one click later. You'll see exactly what an agent does with it in <strong>Activity</strong>.</p>
+    </div>
+
+    <div class="fr-illustration">
+      <div class="add-choice">
+        <div class="choice-card">
+          <div class="icon">📁</div>
+          <h4>Share a folder</h4>
+          <p>Pick a project folder. You'll be able to exclude specific files, add smart defaults (like <code style="font-family:var(--mono); font-size:11px; background:var(--surface-3); padding:1px 4px; border-radius:3px;">*.env</code>), and undo any change.</p>
+          <div class="hint">Recommended for first-time users</div>
+        </div>
+        <div class="choice-card">
+          <div class="icon">✉</div>
+          <h4>Share a mailbox</h4>
+          <p>Connect an email account. You'll pick individual threads or senders — not your whole inbox — and choose how much the agent sees of each.</p>
+          <div class="hint">Connects via system Mail</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fr-footer">
+      <div class="fr-dots"><span></span><span></span><span class="on"></span></div>
+      <div class="fr-actions">
+        <button class="btn ghost">← Back</button>
+        <button class="btn">Skip for now</button>
+        <button class="btn primary">Continue →</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel-caption">Panel 3 of 3 · Guided first add</div>
+
+</div>
+
+<h2 class="section-title">Microcopy traces</h2>
+<div class="rationale">
+  <strong>"Nothing is shared until you share it"</strong> — the moral-weight sentence. Every downstream default derives from this framing. Thaler/Sunstein + Principle 3.
+</div>
+<div class="rationale">
+  <strong>"This is how Manifold stays out of your way until you invite it in."</strong> — addresses the user's likely unease with an empty product. Reframes emptiness as respect, not incompleteness. Nicely Said tone.
+</div>
+<div class="rationale">
+  <strong>Folder and mailbox get equal visual weight.</strong> No "recommended" arrow toward one. The user's first choice should reflect their life, not Manifold's convenience. Principle 3 again.
+</div>
+<div class="rationale">
+  <strong>"Skip for now" on panel 3 is acceptable.</strong> First-run should never trap. A user who skips arrives at the idle menu bar panel with clear affordances to add sources later.
+</div>
+
+</body>
+</html>

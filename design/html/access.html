@@ -1,0 +1,4019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Manifold — Access (app design, all views)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   MANIFOLD — ACCESS (four views)
+   ═══════════════════════════════════════════════════════════════════
+   1. Default — coverage matrix + file-tree inspector (primary)
+   2. Session — live overlay diff against default
+   3. History — past sessions with resume
+   4. Empty — first-run state
+
+   All windows share chrome, tokens, and icon set. macOS 26 Tahoe /
+   Liquid Glass aesthetic. SwiftUI NavigationSplitView equivalent.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: dark;
+
+  --sans: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --display: -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --claude:       #3F7CFF;
+  --claude-2:     #6A9BFF;
+  --claude-glow:  rgba(63,124,255,0.45);
+  --claude-soft:  rgba(63,124,255,0.18);
+  --claude-xsoft: rgba(63,124,255,0.08);
+
+  --codex:        #9756F0;
+  --codex-2:      #B681F4;
+  --codex-glow:   rgba(151,86,240,0.45);
+  --codex-soft:   rgba(151,86,240,0.18);
+  --codex-xsoft:  rgba(151,86,240,0.08);
+
+  --session:      #2ECB7F;
+  --session-2:    #3FE395;
+  --session-glow: rgba(46,203,127,0.45);
+  --session-soft: rgba(46,203,127,0.18);
+  --session-xsoft: rgba(46,203,127,0.07);
+
+  --attention:    #FF8A3D;
+  --attention-2:  #FFA866;
+  --attention-glow: rgba(255,138,61,0.45);
+  --attention-soft: rgba(255,138,61,0.16);
+  --attention-xsoft: rgba(255,138,61,0.06);
+
+  --danger:       #FF5F56;
+  --remove:       #FF8079;
+  --remove-soft:  rgba(255,128,121,0.14);
+
+  --win-bg:       rgba(28, 28, 34, 0.72);
+  --win-border:   rgba(255, 255, 255, 0.10);
+  --win-hl-top:   rgba(255, 255, 255, 0.14);
+
+  --tb-bg:        rgba(42, 42, 50, 0.56);
+  --tb-border:    rgba(255, 255, 255, 0.08);
+
+  --sb-bg:        rgba(36, 36, 42, 0.48);
+  --sb-border:    rgba(255, 255, 255, 0.06);
+
+  --content-bg:   rgba(24, 24, 28, 0.92);
+  --content-border: rgba(255, 255, 255, 0.06);
+  --section-bg:   rgba(255,255,255,0.02);
+
+  --insp-bg:      rgba(30, 30, 36, 0.76);
+  --insp-border:  rgba(255, 255, 255, 0.08);
+
+  --text:         #F3F4F8;
+  --text-2:       #B9BCC6;
+  --text-3:       #7C7F8A;
+  --text-4:       #52545C;
+  --hairline:     rgba(255,255,255,0.08);
+  --hairline-2:   rgba(255,255,255,0.04);
+
+  --selection:       var(--claude-soft);
+  --selection-glow:  0 0 0 0.5px rgba(63,124,255,0.35), 0 0 24px rgba(63,124,255,0.12) inset;
+
+  --sh-window:
+    0 48px 128px rgba(0,0,0,0.6),
+    0 16px 48px rgba(0,0,0,0.4),
+    0 0 0 0.5px rgba(0,0,0,0.3);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --win-bg:      rgba(252, 252, 254, 0.78);
+    --win-border:  rgba(0, 0, 0, 0.08);
+    --win-hl-top:  rgba(255, 255, 255, 0.8);
+    --tb-bg:       rgba(248, 248, 252, 0.78);
+    --tb-border:   rgba(0, 0, 0, 0.06);
+    --sb-bg:       rgba(244, 244, 248, 0.70);
+    --sb-border:   rgba(0, 0, 0, 0.06);
+    --content-bg:  rgba(255, 255, 255, 0.97);
+    --content-border: rgba(0, 0, 0, 0.06);
+    --section-bg:  rgba(0,0,0,0.02);
+    --insp-bg:     rgba(246, 246, 250, 0.84);
+    --insp-border: rgba(0, 0, 0, 0.07);
+    --text:        #0D0E12;
+    --text-2:      #3C3F46;
+    --text-3:      #6D7079;
+    --text-4:      #A3A6AE;
+    --hairline:    rgba(0,0,0,0.08);
+    --hairline-2:  rgba(0,0,0,0.04);
+    --claude-soft:  rgba(63,124,255,0.10);
+    --claude-xsoft: rgba(63,124,255,0.04);
+    --codex-soft:   rgba(151,86,240,0.10);
+    --codex-xsoft:  rgba(151,86,240,0.04);
+    --session-soft: rgba(46,203,127,0.12);
+    --session-xsoft: rgba(46,203,127,0.04);
+    --attention-soft:  rgba(255,138,61,0.12);
+    --attention-xsoft: rgba(255,138,61,0.04);
+    --remove-soft:  rgba(255,65,54,0.10);
+    --remove:       #D32027;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--sans);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+/* ─── Desktop ─── */
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(1000px 800px at 10% 8%,  #4B6AA8 0%, transparent 55%),
+    radial-gradient(1200px 900px at 90% 12%, #6B3F90 0%, transparent 55%),
+    radial-gradient(900px  800px at 15% 85%, #1F3A68 0%, transparent 55%),
+    radial-gradient(1100px 900px at 85% 90%, #2E2A5A 0%, transparent 55%),
+    linear-gradient(180deg, #0B1022 0%, #05070F 100%);
+  background-attachment: fixed;
+}
+
+/* ─── Mac menu bar ─── */
+.mac-menubar {
+  position: sticky; top: 0;
+  height: 26px;
+  background: linear-gradient(180deg, rgba(18,18,22,0.88), rgba(14,14,18,0.84));
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+  display: flex; align-items: center;
+  padding: 0 14px; gap: 18px;
+  color: rgba(255,255,255,0.86);
+  font: 500 13px/26px var(--sans);
+  z-index: 100;
+}
+.mac-menubar .apple { color: #fff; font-size: 14px; filter: drop-shadow(0 0 2px rgba(255,255,255,0.3)); }
+.mac-menubar .app { font-weight: 600; color: #fff; }
+.mac-menubar .menus { display: flex; gap: 18px; color: rgba(255,255,255,0.76); }
+.mac-menubar .right {
+  margin-left: auto; display: flex; gap: 14px; align-items: center;
+  color: rgba(255,255,255,0.72); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mac-menubar .right .status-item {
+  width: 18px; height: 18px; border-radius: 5px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  box-shadow: 0 0 10px rgba(120,150,255,0.55), 0 1px 0 rgba(255,255,255,0.3) inset;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.mac-menubar .right .status-item::after {
+  content: ""; position: absolute; top: -1px; right: -1px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--session-2);
+  box-shadow: 0 0 6px var(--session-glow), 0 0 0 2px rgba(18,18,22,0.88);
+}
+.mac-menubar .right .status-item svg { width: 11px; height: 11px; color: #fff; }
+
+/* ─── View label above each window ─── */
+.view-label {
+  max-width: 1440px;
+  margin: 40px auto 16px;
+  padding: 0 40px;
+  display: flex; align-items: baseline; gap: 14px;
+  color: #fff;
+}
+.view-label .num {
+  font: 600 10px/16px var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  color: #fff;
+  box-shadow: 0 2px 8px var(--claude-glow);
+}
+.view-label h2 {
+  font: 600 24px/28px var(--display);
+  letter-spacing: -0.015em;
+  margin: 0;
+  color: #fff;
+}
+.view-label .sub {
+  font: 400 13px/20px var(--sans);
+  color: rgba(255,255,255,0.56);
+  margin-left: auto;
+  max-width: 460px;
+  text-align: right;
+}
+
+/* ─── Window stage ─── */
+.stage {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 40px 48px;
+  position: relative;
+}
+
+.window {
+  width: 1440px;
+  height: 880px;
+  max-width: 100%;
+
+  background: var(--win-bg);
+  backdrop-filter: blur(64px) saturate(200%);
+  -webkit-backdrop-filter: blur(64px) saturate(200%);
+
+  border: 0.5px solid var(--win-border);
+  border-radius: 12px;
+  box-shadow: var(--sh-window);
+
+  display: grid;
+  grid-template-rows: 52px 1fr 28px;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+.window::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--win-hl-top) 30%, var(--win-hl-top) 70%, transparent);
+  z-index: 5; pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════
+   TOOLBAR
+   ═══════════════════════════════════════════ */
+.toolbar {
+  background: var(--tb-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-bottom: 0.5px solid var(--tb-border);
+  display: grid;
+  grid-template-columns: 200px 1fr auto;
+  align-items: center;
+  z-index: 4;
+}
+.tb-left {
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 16px; height: 100%;
+  border-right: 0.5px solid var(--tb-border);
+}
+.traffic { display: flex; gap: 8px; }
+.traffic button {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 0.5px solid rgba(0,0,0,0.2);
+  cursor: default; padding: 0;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.traffic .c { background: radial-gradient(circle at 30% 30%, #FF7B74, #FF5F57 70%); }
+.traffic .m { background: radial-gradient(circle at 30% 30%, #FFC948, #FEBC2E 70%); }
+.traffic .x { background: radial-gradient(circle at 30% 30%, #4CD964, #28C840 70%); }
+.tb-toggle {
+  width: 28px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: default;
+}
+.tb-toggle:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.tb-toggle svg { width: 16px; height: 16px; }
+
+.tb-center {
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 16px;
+  height: 100%;
+  min-width: 0;
+}
+.tb-title { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.tb-title h1 { font: 600 14px/18px var(--sans); letter-spacing: -0.005em; margin: 0; color: var(--text); }
+.tb-title .sub { font: 400 11px/14px var(--sans); color: var(--text-3); margin-top: 1px; font-variant-numeric: tabular-nums; }
+
+.seg {
+  display: inline-flex;
+  background: rgba(0,0,0,0.18);
+  border: 0.5px solid var(--hairline);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 1px;
+}
+@media (prefers-color-scheme: light) { .seg { background: rgba(0,0,0,0.04); } }
+.seg .si {
+  padding: 3px 12px;
+  font: 500 11px/14px var(--sans);
+  border-radius: 5px;
+  color: var(--text-2);
+  cursor: default;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.seg .si:hover { color: var(--text); }
+.seg .si.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  color: var(--text);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 0.5px 0 rgba(0,0,0,0.2);
+}
+@media (prefers-color-scheme: light) {
+  .seg .si.on { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+}
+.seg .si .count {
+  font: 600 10px/14px var(--mono);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-search {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.22);
+  border: 0.5px solid var(--hairline);
+  border-radius: 7px;
+  padding: 4px 8px;
+  width: 200px;
+}
+@media (prefers-color-scheme: light) { .tb-search { background: rgba(0,0,0,0.04); } }
+.tb-search svg { width: 12px; height: 12px; color: var(--text-3); }
+.tb-search input {
+  background: transparent; border: 0; outline: 0;
+  color: var(--text);
+  font: 400 12px/16px var(--sans);
+  flex: 1; min-width: 0;
+}
+.tb-search input::placeholder { color: var(--text-3); }
+
+.tb-right {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px;
+  height: 100%;
+  border-left: 0.5px solid var(--tb-border);
+}
+
+.session-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 8px;
+  background: linear-gradient(180deg, rgba(46,203,127,0.22), rgba(46,203,127,0.10));
+  border: 0.5px solid rgba(46,203,127,0.4);
+  border-radius: 999px;
+  box-shadow: 0 0 0 0.5px rgba(46,203,127,0.15), 0 4px 12px rgba(46,203,127,0.18), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.session-chip .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--session-2), var(--session) 70%);
+  box-shadow: 0 0 8px var(--session-glow);
+  position: relative;
+}
+.session-chip .dot::after {
+  content: ""; position: absolute; inset: -5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--session-glow), transparent 60%);
+  animation: chipPulse 2.4s ease-out infinite;
+}
+@keyframes chipPulse {
+  0% { transform: scale(0.8); opacity: 0.9; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .session-chip .dot::after { animation: none; opacity: 0; } }
+.session-chip .name { font: 600 12px/16px var(--sans); color: var(--session-2); letter-spacing: -0.005em; }
+@media (prefers-color-scheme: light) { .session-chip .name { color: #0F7F48; } }
+.session-chip .time { font: 500 11px/14px var(--mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+.tb-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  border: 0.5px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--text);
+  font: 500 11px/14px var(--sans);
+  cursor: default;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+@media (prefers-color-scheme: light) {
+  .tb-btn { background: linear-gradient(180deg, #ffffff, #f2f2f5); box-shadow: 0 1px 2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9); }
+}
+.tb-btn:hover { filter: brightness(1.08); }
+.tb-btn svg { width: 12px; height: 12px; }
+.tb-btn.primary {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  color: #fff;
+  border-color: rgba(63,124,255,0.5);
+  box-shadow: 0 4px 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* ═══════════════════════════════════════════
+   BODY LAYOUT
+   ═══════════════════════════════════════════ */
+.body {
+  display: grid;
+  grid-template-columns: 200px 1fr 380px;
+  min-height: 0;
+}
+.body.no-inspector { grid-template-columns: 200px 1fr; }
+.body.wide-nav { grid-template-columns: 200px 1fr 400px; }
+
+/* ─── Nav sidebar ─── */
+.sidebar {
+  background: var(--sb-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-right: 0.5px solid var(--sb-border);
+  display: flex; flex-direction: column;
+  padding: 8px 8px 12px;
+  min-height: 0;
+}
+.sb-head {
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 10px 6px;
+}
+.sb-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font: 500 13px/17px var(--sans);
+  color: var(--text-2);
+  cursor: default;
+  position: relative;
+}
+.sb-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+@media (prefers-color-scheme: light) { .sb-item:hover { background: rgba(0,0,0,0.04); } }
+.sb-item.active {
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+  color: var(--text);
+  box-shadow: var(--selection-glow);
+}
+.sb-item.active::before {
+  content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--claude), var(--claude-2));
+  box-shadow: 0 0 8px var(--claude-glow);
+}
+.sb-item .ico {
+  width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3); flex-shrink: 0;
+}
+.sb-item.active .ico { color: var(--claude); }
+.sb-item .ico svg { width: 14px; height: 14px; }
+.sb-item .count {
+  margin-left: auto; font: 500 10px/14px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.sb-item .badge {
+  margin-left: auto; font: 700 10px/14px var(--sans);
+  background: linear-gradient(180deg, var(--attention-2), var(--attention));
+  color: #fff; padding: 0 6px; border-radius: 8px; min-width: 18px; text-align: center;
+  box-shadow: 0 1px 3px var(--attention-glow);
+}
+.sb-spacer { flex: 1; }
+.sb-divider { height: 0.5px; background: var(--hairline); margin: 8px 10px; }
+.sb-profile {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 8px;
+}
+.sb-profile:hover { background: rgba(255,255,255,0.04); }
+@media (prefers-color-scheme: light) { .sb-profile:hover { background: rgba(0,0,0,0.04); } }
+.sb-profile .avatar {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.sb-profile .avatar svg { width: 12px; height: 12px; color: #fff; }
+.sb-profile .who { font: 600 12px/15px var(--sans); color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-profile .state { font: 400 10px/13px var(--sans); color: var(--text-3); }
+.sb-profile .chev { color: var(--text-3); margin-left: auto; opacity: 0.6; }
+.sb-profile .chev svg { width: 10px; height: 10px; }
+
+/* ═══════════════════════════════════════════
+   CONTENT: MATRIX
+   ═══════════════════════════════════════════ */
+.content {
+  background: var(--content-bg);
+  display: flex; flex-direction: column;
+  min-height: 0; min-width: 0;
+  border-right: 0.5px solid var(--content-border);
+}
+
+.mx-head {
+  display: grid;
+  grid-template-columns: 28px 1fr 110px 110px 92px 28px;
+  align-items: center;
+  padding: 0 20px;
+  height: 34px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  border-bottom: 0.5px solid var(--hairline);
+  position: sticky; top: 0; z-index: 2;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  gap: 8px;
+}
+@media (prefers-color-scheme: light) {
+  .mx-head { background: linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01)); }
+}
+.mx-head .agent-col {
+  display: inline-flex; align-items: center; gap: 6px;
+  justify-content: center;
+  color: var(--text-2);
+  font: 600 11px/14px var(--sans);
+  letter-spacing: -0.005em;
+  text-transform: none;
+}
+.mx-head .agent-col .avatar {
+  width: 18px; height: 18px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.mx-head .agent-col .avatar.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 6px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.mx-head .agent-col .avatar.codex { background: linear-gradient(135deg, var(--codex), var(--codex-2)); box-shadow: 0 0 6px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.mx-head .agent-col .avatar svg { width: 10px; height: 10px; color: #fff; }
+.mx-head .r-col { text-align: right; }
+
+.mx-scroll { overflow-y: auto; flex: 1; }
+
+.mx-section {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 20px 8px;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: var(--section-bg);
+  position: sticky; top: 34px; z-index: 1;
+}
+.mx-section .count {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.mx-section.added { color: var(--session-2); }
+.mx-section.removed { color: var(--remove); }
+.mx-section.inherited { color: var(--text-3); }
+@media (prefers-color-scheme: light) {
+  .mx-section.added { color: #0F7F48; }
+}
+
+.mx-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 110px 110px 92px 28px;
+  align-items: center;
+  padding: 0 20px;
+  height: 44px;
+  border-bottom: 0.5px solid var(--hairline-2);
+  gap: 8px;
+  font: 400 13px/18px var(--sans);
+  position: relative;
+}
+.mx-row:hover { background: rgba(255,255,255,0.03); }
+@media (prefers-color-scheme: light) { .mx-row:hover { background: rgba(0,0,0,0.02); } }
+.mx-row.selected {
+  background: var(--selection);
+  box-shadow: inset 2px 0 0 var(--claude), inset 0 0 32px rgba(63,124,255,0.05);
+}
+
+.mx-row.session-add {
+  background: var(--session-xsoft);
+  box-shadow: inset 3px 0 0 var(--session);
+}
+.mx-row.session-remove {
+  background: var(--remove-soft);
+  box-shadow: inset 3px 0 0 var(--remove);
+  opacity: 0.86;
+}
+.mx-row.inherited-row { opacity: 0.72; }
+
+.mx-source {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 0;
+}
+.mx-source .fldr {
+  width: 28px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.mx-source .fldr svg { width: 18px; height: 18px; color: var(--claude); filter: drop-shadow(0 1px 2px var(--claude-glow)); }
+.mx-source.unshared .fldr svg { color: var(--text-3); filter: none; }
+.mx-source.session-add .fldr svg { color: var(--session); filter: drop-shadow(0 1px 2px var(--session-glow)); }
+.mx-source .body { min-width: 0; }
+.mx-source .name {
+  font: 600 13px/17px var(--sans);
+  color: var(--text);
+  letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mx-source.unshared .name { color: var(--text-2); font-weight: 500; }
+.mx-source .meta {
+  font: 400 11px/14px var(--sans);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+.mx-source .meta code { font: 500 10px/13px var(--mono); color: var(--text-2); }
+.mx-source .meta .chip-inline {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 5px; border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  font: 500 9px/13px var(--sans);
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+@media (prefers-color-scheme: light) { .mx-source .meta .chip-inline { background: rgba(0,0,0,0.05); } }
+.mx-source .meta .chip-inline.s { background: var(--session-soft); color: var(--session-2); }
+@media (prefers-color-scheme: light) { .mx-source .meta .chip-inline.s { color: #0F7F48; } }
+
+.tgl-cell { display: flex; justify-content: center; }
+.tgl {
+  width: 34px; height: 20px; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.22), rgba(0,0,0,0.12));
+  border: 0.5px solid rgba(255,255,255,0.08);
+  position: relative;
+  cursor: default;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+@media (prefers-color-scheme: light) {
+  .tgl { background: linear-gradient(180deg, #e6e6ea, #d8d8dc); border-color: rgba(0,0,0,0.1); box-shadow: inset 0 1px 2px rgba(0,0,0,0.06); }
+}
+.tgl .knob {
+  position: absolute; top: 1px; left: 1px;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: linear-gradient(180deg, #fff, #eaeaef);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3), inset 0 0.5px 0 rgba(255,255,255,0.6);
+  transition: transform 180ms cubic-bezier(0.2,0.7,0.3,1);
+}
+.tgl.on .knob { transform: translateX(14px); }
+.tgl.on.claude {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  border-color: rgba(63,124,255,0.5);
+  box-shadow: 0 0 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.tgl.on.codex {
+  background: linear-gradient(180deg, var(--codex-2), var(--codex));
+  border-color: rgba(151,86,240,0.5);
+  box-shadow: 0 0 12px var(--codex-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.tgl.on.session {
+  background: linear-gradient(180deg, var(--session-2), var(--session));
+  border-color: rgba(46,203,127,0.5);
+  box-shadow: 0 0 12px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.tgl.session-remove {
+  background: linear-gradient(180deg, rgba(255,128,121,0.3), rgba(255,128,121,0.18));
+  border-color: rgba(255,128,121,0.5);
+  position: relative;
+}
+.tgl.session-remove::after {
+  content: ""; position: absolute; top: 50%; left: 6px; right: 6px; height: 1.5px;
+  background: var(--remove);
+  transform: translateY(-50%);
+  border-radius: 1px;
+}
+.tgl.session-remove .knob { background: linear-gradient(180deg, #ffbab5, #ff8c82); transform: translateX(14px); }
+
+.mx-denials {
+  font: 600 12px/16px var(--mono);
+  color: var(--attention);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mx-denials.none { color: var(--text-4); font-weight: 400; }
+
+.mx-menu {
+  text-align: center;
+  color: var(--text-4);
+  font-size: 14px;
+  letter-spacing: -2px;
+  cursor: default;
+}
+
+/* Bottom summary bar */
+.mx-footer {
+  padding: 10px 20px;
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,0.15));
+  border-top: 0.5px solid var(--hairline);
+  font: 400 11px/15px var(--sans);
+  color: var(--text-3);
+  display: flex; align-items: center; gap: 14px;
+}
+@media (prefers-color-scheme: light) { .mx-footer { background: linear-gradient(180deg, transparent, rgba(0,0,0,0.02)); } }
+.mx-footer strong { color: var(--text); font: 600 12px/16px var(--sans); font-variant-numeric: tabular-nums; }
+.mx-footer .sep { color: var(--text-4); }
+.mx-footer .spacer { flex: 1; }
+
+/* ═══════════════════════════════════════════
+   INSPECTOR (file tree)
+   ═══════════════════════════════════════════ */
+.inspector {
+  background: var(--insp-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-left: 0.5px solid var(--insp-border);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+}
+.insp-head {
+  padding: 18px 20px 14px;
+  border-bottom: 0.5px solid var(--hairline);
+}
+.insp-head .kicker {
+  font: 600 9px/13px var(--sans);
+  color: var(--claude);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.insp-head .kicker.session { color: var(--session-2); }
+@media (prefers-color-scheme: light) { .insp-head .kicker.session { color: #0F7F48; } }
+.insp-head h2 {
+  font: 600 18px/22px var(--display);
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.insp-head .path {
+  font: 500 11px/15px var(--mono);
+  color: var(--text-3);
+  word-break: break-all;
+}
+.insp-head .stats {
+  display: flex; gap: 14px; margin-top: 8px;
+  font: 400 11px/14px var(--sans);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.insp-head .stats strong { color: var(--text-2); font-weight: 600; }
+
+.insp-body {
+  padding: 14px 18px 18px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.insp-label {
+  font: 600 9px/12px var(--sans);
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+/* Running count banner */
+.count-banner {
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+  border: 0.5px solid rgba(63,124,255,0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.count-banner .avatar {
+  width: 22px; height: 22px; border-radius: 6px;
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.count-banner .avatar svg { width: 11px; height: 11px; color: #fff; }
+.count-banner .text {
+  font: 400 12px/17px var(--sans);
+  color: var(--text);
+  flex: 1;
+}
+.count-banner .text strong { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.count-banner .text .muted { color: var(--text-3); }
+
+/* Global rules banner */
+.rules-banner {
+  background: linear-gradient(180deg, var(--attention-soft), var(--attention-xsoft));
+  border: 0.5px solid rgba(255,138,61,0.35);
+  border-left: 3px solid var(--attention);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.rules-banner .icon-wrap {
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--attention);
+  flex-shrink: 0;
+}
+.rules-banner .icon-wrap svg { width: 14px; height: 14px; }
+.rules-banner .text {
+  font: 400 11px/15px var(--sans);
+  color: var(--text-2);
+  flex: 1;
+}
+.rules-banner .text strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rules-banner .link {
+  display: inline-flex; align-items: center; gap: 3px;
+  font: 600 11px/15px var(--sans);
+  color: var(--claude);
+  cursor: default;
+}
+.rules-banner .link svg { width: 10px; height: 10px; }
+
+/* Inspector search */
+.insp-search {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(0,0,0,0.22);
+  border: 0.5px solid var(--hairline);
+  border-radius: 7px;
+  padding: 6px 10px;
+}
+@media (prefers-color-scheme: light) { .insp-search { background: rgba(0,0,0,0.04); } }
+.insp-search svg { width: 12px; height: 12px; color: var(--text-3); }
+.insp-search input {
+  background: transparent; border: 0; outline: 0;
+  color: var(--text);
+  font: 400 12px/16px var(--sans);
+  flex: 1; min-width: 0;
+}
+.insp-search .clear {
+  color: var(--text-3); cursor: default; font-size: 14px;
+}
+
+/* File tree */
+.tree { display: flex; flex-direction: column; }
+.tree-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  position: relative;
+  cursor: default;
+}
+.tree-row:hover { background: rgba(255,255,255,0.04); }
+@media (prefers-color-scheme: light) { .tree-row:hover { background: rgba(0,0,0,0.04); } }
+.tree-row .indent { width: 16px; flex-shrink: 0; position: relative; }
+.tree-row .indent.guide::before {
+  content: ""; position: absolute; top: -3px; bottom: -3px; left: 7px;
+  width: 0.5px; background: var(--hairline);
+}
+.tree-row .caret {
+  width: 12px; height: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  font-size: 9px;
+  flex-shrink: 0;
+  cursor: default;
+}
+.tree-row .caret svg { width: 8px; height: 8px; }
+
+/* Tri-state checkbox */
+.check {
+  width: 14px; height: 14px;
+  border-radius: 3px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  background: transparent;
+  position: relative;
+  flex-shrink: 0;
+  cursor: default;
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.15);
+}
+@media (prefers-color-scheme: light) {
+  .check { border-color: rgba(0,0,0,0.25); box-shadow: inset 0 1px 0 rgba(0,0,0,0.04); }
+}
+.check.on {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  border-color: var(--claude);
+  box-shadow: 0 0 8px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.check.on::after {
+  content: ""; position: absolute;
+  left: 2px; top: -0.5px;
+  width: 4px; height: 8px;
+  border-right: 1.5px solid #fff;
+  border-bottom: 1.5px solid #fff;
+  transform: rotate(45deg);
+}
+.check.mixed {
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+  border-color: var(--claude);
+}
+.check.mixed::after {
+  content: ""; position: absolute;
+  left: 2px; top: 5px;
+  width: 7px; height: 2px;
+  background: var(--claude);
+  border-radius: 1px;
+}
+.check.override::before {
+  content: "";
+  position: absolute; top: -3px; right: -3px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--attention);
+  border: 1.5px solid var(--insp-bg);
+  box-shadow: 0 0 4px var(--attention-glow);
+}
+
+.tree-row .t-icon {
+  color: var(--text-3);
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.tree-row .t-icon svg { width: 12px; height: 12px; }
+.tree-row .t-icon.folder { color: var(--claude); }
+.tree-row .t-icon.code { color: #FF9C73; }
+.tree-row .t-icon.config { color: #E3C969; }
+
+.tree-row .t-name {
+  font: 500 12px/16px var(--sans);
+  color: var(--text);
+  letter-spacing: -0.005em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex-shrink: 0;
+}
+.tree-row .t-size {
+  font: 500 10px/14px var(--mono);
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.tree-row .t-trace {
+  font: 400 10px/13px var(--sans);
+  color: var(--text-3);
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+@media (prefers-color-scheme: light) { .tree-row .t-trace { background: rgba(0,0,0,0.04); } }
+.tree-row .t-trace code { font: 500 10px/13px var(--mono); color: var(--text-2); }
+.tree-row .t-trace.override { color: var(--attention); background: var(--attention-soft); }
+@media (prefers-color-scheme: light) { .tree-row .t-trace.override { color: #C04D00; } }
+.tree-row .t-trace.read { color: var(--text-2); }
+
+.tree-row.excluded .t-name {
+  color: var(--text-4);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--text-4);
+}
+.tree-row.excluded .t-size { color: var(--text-4); }
+.tree-row.excluded .t-icon { color: var(--text-4); opacity: 0.5; }
+.tree-row.excluded .t-icon.folder { color: var(--text-4); }
+
+/* Exclusion rules list */
+.excl-list {
+  background: rgba(0,0,0,0.18);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex; flex-direction: column;
+  gap: 2px;
+}
+@media (prefers-color-scheme: light) { .excl-list { background: rgba(0,0,0,0.03); } }
+.excl-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font: 400 11px/14px var(--sans);
+  color: var(--text-2);
+}
+.excl-row:hover { background: rgba(255,255,255,0.04); }
+@media (prefers-color-scheme: light) { .excl-row:hover { background: rgba(0,0,0,0.04); } }
+.excl-row code {
+  font: 500 11px/15px var(--mono);
+  background: rgba(255,255,255,0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+@media (prefers-color-scheme: light) { .excl-row code { background: rgba(0,0,0,0.06); } }
+.excl-row .reason {
+  color: var(--text-3);
+  margin-left: auto;
+  font: 400 10px/14px var(--sans);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.excl-row .reason strong { color: var(--text-2); font-weight: 600; }
+.excl-row .remove {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-4); cursor: default;
+}
+.excl-row .remove:hover { color: var(--danger); }
+.excl-row .remove svg { width: 10px; height: 10px; }
+
+/* Inspector actions */
+.insp-actions {
+  display: flex; gap: 8px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--hairline);
+}
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  font: 600 12px/16px var(--sans);
+  cursor: default;
+  letter-spacing: -0.005em;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn.flex { flex: 1; }
+.btn.primary {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  color: #fff;
+  border: 0.5px solid rgba(63,124,255,0.5);
+  box-shadow: 0 4px 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.btn.primary.session {
+  background: linear-gradient(180deg, var(--session-2), var(--session));
+  border-color: rgba(46,203,127,0.5);
+  box-shadow: 0 4px 12px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.btn.secondary {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+  color: var(--text);
+  border: 0.5px solid var(--hairline);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+@media (prefers-color-scheme: light) {
+  .btn.secondary { background: linear-gradient(180deg, #fff, #f1f1f4); box-shadow: 0 1px 2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9); }
+}
+.btn.danger { color: var(--danger); }
+.btn svg { width: 12px; height: 12px; }
+
+/* ═══════════════════════════════════════════
+   STATUS BAR
+   ═══════════════════════════════════════════ */
+.statusbar {
+  background: var(--tb-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-top: 0.5px solid var(--tb-border);
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 16px;
+  font: 400 11px/14px var(--sans);
+  color: var(--text-3);
+}
+.statusbar .stat { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .stat strong { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.statusbar .stat .dot { width: 6px; height: 6px; border-radius: 50%; }
+.statusbar .stat .dot.ok { background: var(--session); box-shadow: 0 0 6px var(--session-glow); }
+.statusbar .spacer { flex: 1; }
+.statusbar kbd { font: 500 10px/13px var(--mono); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; color: var(--text-2); }
+@media (prefers-color-scheme: light) { .statusbar kbd { background: rgba(0,0,0,0.06); } }
+
+/* ═══════════════════════════════════════════
+   VIEW 3 — HISTORY (session list)
+   ═══════════════════════════════════════════ */
+.hist-scroll { overflow-y: auto; flex: 1; }
+.hist-day {
+  padding: 14px 24px 8px;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--section-bg);
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 10px;
+}
+.hist-day .count {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.hist-row {
+  display: grid;
+  grid-template-columns: 108px 1fr 90px 180px 220px 90px;
+  gap: 16px;
+  padding: 14px 24px;
+  align-items: center;
+  border-bottom: 0.5px solid var(--hairline-2);
+  position: relative;
+}
+.hist-row:hover { background: rgba(255,255,255,0.03); }
+@media (prefers-color-scheme: light) { .hist-row:hover { background: rgba(0,0,0,0.02); } }
+.hist-row.selected {
+  background: var(--selection);
+  box-shadow: inset 2px 0 0 var(--claude);
+}
+.hist-row.active-sess {
+  background: linear-gradient(90deg, var(--session-xsoft), transparent 60%);
+  box-shadow: inset 3px 0 0 var(--session);
+}
+.hist-time { font: 500 11px/14px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.hist-time .dur { color: var(--text-4); font-size: 10px; margin-top: 2px; display: block; }
+.hist-name {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.hist-name .title {
+  display: flex; align-items: center; gap: 8px;
+}
+.hist-name .title h3 {
+  font: 600 14px/18px var(--sans);
+  margin: 0;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.hist-kind {
+  font: 600 9px/13px var(--sans);
+  padding: 1px 6px; border-radius: 3px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.hist-kind.session { background: var(--session-soft); color: var(--session-2); }
+.hist-kind.tracked { background: var(--claude-soft); color: var(--claude-2); }
+.hist-kind.minus { background: var(--remove-soft); color: var(--remove); }
+.hist-kind.live { background: linear-gradient(180deg, var(--session-2), var(--session)); color: #fff; box-shadow: 0 0 8px var(--session-glow); }
+@media (prefers-color-scheme: light) {
+  .hist-kind.session { color: #0F7F48; }
+  .hist-kind.tracked { color: #1A4BB8; }
+}
+.hist-summary { font: 400 11px/14px var(--sans); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.hist-summary strong { color: var(--text-2); font-weight: 600; }
+.hist-agents { display: flex; align-items: center; gap: 4px; }
+.hist-agents .av {
+  width: 18px; height: 18px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.hist-agents .av.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 6px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.hist-agents .av.codex { background: linear-gradient(135deg, var(--codex), var(--codex-2)); box-shadow: 0 0 6px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.hist-agents .av svg { width: 10px; height: 10px; color: #fff; }
+.hist-agents .av.empty { background: rgba(255,255,255,0.06); opacity: 0.3; }
+.hist-events {
+  display: flex; align-items: center; gap: 8px;
+  font: 500 11px/14px var(--sans);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.hist-events .sparkline {
+  display: inline-flex; align-items: flex-end; gap: 1.5px;
+  height: 18px;
+}
+.hist-events .sparkline .b { width: 3px; border-radius: 1px; min-height: 2px; }
+.hist-events .sparkline .read { background: var(--text-3); opacity: 0.7; }
+.hist-events .sparkline .write { background: var(--claude); box-shadow: 0 0 2px var(--claude-glow); }
+.hist-events .sparkline .deny { background: var(--attention); }
+
+.hist-row .resume-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 6px 10px;
+  background: linear-gradient(180deg, var(--session-2), var(--session));
+  color: #fff;
+  border: 0.5px solid rgba(46,203,127,0.5);
+  border-radius: 6px;
+  font: 600 11px/14px var(--sans);
+  box-shadow: 0 2px 6px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+  cursor: default;
+}
+.hist-row .resume-btn:hover { filter: brightness(1.08); }
+.hist-row .resume-btn svg { width: 10px; height: 10px; }
+.hist-row .resume-btn.live {
+  background: transparent;
+  border: 0.5px solid var(--session);
+  color: var(--session-2);
+}
+@media (prefers-color-scheme: light) { .hist-row .resume-btn.live { color: #0F7F48; } }
+
+/* History inspector: session details */
+.hist-insp-meta {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.2);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+}
+@media (prefers-color-scheme: light) { .hist-insp-meta { background: rgba(0,0,0,0.03); } }
+.hist-insp-meta .stat-cell {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.hist-insp-meta .stat-cell .label {
+  font: 600 9px/12px var(--sans);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hist-insp-meta .stat-cell .val {
+  font: 600 14px/18px var(--display);
+  color: var(--text);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.hist-insp-meta .stat-cell .val.small { font-size: 12px; font-weight: 500; }
+
+.addrm-list { display: flex; flex-direction: column; gap: 4px; }
+.addrm-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font: 500 12px/16px var(--sans);
+}
+.addrm-item.add { background: var(--session-xsoft); color: var(--text); }
+.addrm-item.rem { background: var(--remove-soft); color: var(--text); }
+.addrm-item .sign {
+  font: 700 13px/16px var(--sans);
+  width: 16px; text-align: center; flex-shrink: 0;
+}
+.addrm-item.add .sign { color: var(--session); }
+.addrm-item.rem .sign { color: var(--remove); }
+.addrm-item .icon {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.addrm-item .icon svg { width: 12px; height: 12px; }
+.addrm-item.add .icon { color: var(--session); }
+.addrm-item.rem .icon { color: var(--remove); }
+.addrm-item .name {
+  font: 500 12px/16px var(--mono);
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════
+   VIEW 4 — EMPTY STATE
+   ═══════════════════════════════════════════ */
+.empty-stage {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 48px;
+  position: relative;
+  overflow: hidden;
+}
+.empty-stage::before {
+  content: "";
+  position: absolute; inset: -20%;
+  background:
+    radial-gradient(40% 40% at 50% 40%, var(--claude-glow), transparent 70%),
+    radial-gradient(40% 40% at 80% 80%, var(--codex-glow), transparent 70%);
+  filter: blur(60px);
+  opacity: 0.3;
+  pointer-events: none;
+}
+.empty-illus {
+  position: relative;
+  width: 140px; height: 140px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 32px;
+}
+.empty-illus .folder {
+  width: 120px; height: 96px;
+  background: linear-gradient(135deg, rgba(63,124,255,0.22), rgba(151,86,240,0.18));
+  border: 1px solid rgba(63,124,255,0.35);
+  border-radius: 14px;
+  position: relative;
+  box-shadow: 0 20px 48px rgba(0,0,0,0.35), 0 0 40px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.1);
+  transform: rotate(-4deg);
+}
+.empty-illus .folder::before {
+  content: "";
+  position: absolute;
+  top: -12px; left: 14px;
+  width: 44px; height: 14px;
+  background: linear-gradient(135deg, rgba(63,124,255,0.35), rgba(151,86,240,0.25));
+  border-radius: 8px 8px 0 0;
+  border: 1px solid rgba(63,124,255,0.35);
+  border-bottom: 0;
+}
+.empty-illus .folder::after {
+  /* inner shine */
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.1), transparent);
+  border-radius: 14px 14px 0 0;
+}
+.empty-illus .lock {
+  position: absolute; top: 38px; left: 50%; transform: translateX(-50%) rotate(-4deg);
+  width: 36px; height: 36px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--claude), var(--codex));
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 24px var(--claude-glow), 0 1px 0 rgba(255,255,255,0.3) inset;
+  z-index: 2;
+}
+.empty-illus .lock svg { width: 18px; height: 18px; color: #fff; }
+
+.empty-copy { text-align: center; max-width: 520px; position: relative; z-index: 1; }
+.empty-copy h1 {
+  font: 600 28px/34px var(--display);
+  letter-spacing: -0.02em;
+  margin: 0 0 12px;
+  color: var(--text);
+}
+.empty-copy p {
+  font: 400 15px/23px var(--sans);
+  color: var(--text-2);
+  margin: 0 0 32px;
+}
+.empty-copy p strong { color: var(--text); font-weight: 600; }
+
+.empty-cta {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  width: 560px; max-width: 100%;
+  position: relative; z-index: 1;
+}
+.empty-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  border: 0.5px solid var(--hairline);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: left;
+  display: flex; flex-direction: column; gap: 8px;
+  cursor: default;
+  transition: transform 180ms, border-color 180ms, background 180ms;
+}
+@media (prefers-color-scheme: light) {
+  .empty-card { background: linear-gradient(180deg, rgba(0,0,0,0.03), rgba(0,0,0,0.01)); }
+}
+.empty-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--claude);
+  background: linear-gradient(180deg, var(--claude-soft), var(--claude-xsoft));
+}
+.empty-card .icon-wrap {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px var(--claude-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+}
+.empty-card.mail .icon-wrap {
+  background: linear-gradient(135deg, var(--codex), var(--codex-2));
+  box-shadow: 0 4px 12px var(--codex-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+}
+.empty-card .icon-wrap svg { width: 18px; height: 18px; color: #fff; }
+.empty-card h3 {
+  font: 600 15px/20px var(--display);
+  margin: 4px 0 0;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.empty-card p {
+  font: 400 12px/17px var(--sans);
+  color: var(--text-3);
+  margin: 0;
+}
+.empty-card code { font: 500 11px/15px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2); }
+@media (prefers-color-scheme: light) { .empty-card code { background: rgba(0,0,0,0.06); } }
+.empty-card .hint {
+  margin-top: auto;
+  font: 600 10px/14px var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--claude-2);
+}
+.empty-card.mail .hint { color: var(--codex-2); }
+
+.empty-note {
+  margin-top: 28px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+  font: 400 11px/15px var(--sans);
+  color: var(--text-3);
+  position: relative; z-index: 1;
+}
+@media (prefers-color-scheme: light) { .empty-note { background: rgba(0,0,0,0.03); } }
+.empty-note strong { color: var(--text-2); font-weight: 600; }
+.empty-note svg { width: 14px; height: 14px; color: var(--session); flex-shrink: 0; }
+
+/* Empty state right panel: what-you'll-see teaser */
+.empty-teaser { padding: 24px 20px; }
+.empty-teaser h4 {
+  font: 600 13px/17px var(--sans);
+  letter-spacing: -0.005em;
+  margin: 0 0 10px;
+  color: var(--text);
+}
+.empty-teaser p {
+  font: 400 12px/18px var(--sans);
+  color: var(--text-2);
+  margin: 0 0 16px;
+}
+.empty-teaser-step {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+@media (prefers-color-scheme: light) { .empty-teaser-step { background: rgba(0,0,0,0.02); } }
+.empty-teaser-step .n {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 11px/20px var(--sans); color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px var(--claude-glow);
+}
+.empty-teaser-step .body-txt { flex: 1; min-width: 0; }
+.empty-teaser-step h5 { font: 600 12px/16px var(--sans); margin: 0 0 2px; color: var(--text); letter-spacing: -0.005em; }
+.empty-teaser-step p { font: 400 11px/15px var(--sans); color: var(--text-3); margin: 0; }
+
+/* Session view dedicated callouts */
+.session-head-bar {
+  background: linear-gradient(90deg, var(--session-soft), var(--session-xsoft) 60%, transparent);
+  border-bottom: 0.5px solid rgba(46,203,127,0.25);
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 14px;
+}
+.session-head-bar .big-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--session-2), var(--session) 70%);
+  box-shadow: 0 0 10px var(--session-glow);
+  position: relative;
+}
+.session-head-bar .big-dot::after {
+  content: ""; position: absolute; inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--session-glow), transparent 60%);
+  animation: chipPulse 2.4s ease-out infinite;
+}
+.session-head-bar .text { flex: 1; min-width: 0; }
+.session-head-bar .kicker {
+  font: 600 10px/14px var(--sans);
+  color: var(--session-2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+@media (prefers-color-scheme: light) { .session-head-bar .kicker { color: #0F7F48; } }
+.session-head-bar h3 {
+  font: 600 16px/20px var(--display);
+  margin: 2px 0 0;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.session-head-bar .meta {
+  font: 400 11px/15px var(--sans);
+  color: var(--text-3);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.session-head-bar .actions {
+  display: flex; gap: 8px;
+  margin-left: auto;
+}
+
+/* ═══════════════════════════════════════════
+   BULK SELECT
+   ═══════════════════════════════════════════ */
+.row-check {
+  width: 16px; height: 16px; border-radius: 4px;
+  border: 1.5px solid rgba(255,255,255,0.22);
+  background: rgba(0,0,0,0.24);
+  position: relative;
+  flex-shrink: 0;
+  cursor: default;
+  transition: all 120ms;
+}
+@media (prefers-color-scheme: light) {
+  .row-check { border-color: rgba(0,0,0,0.22); background: rgba(255,255,255,0.8); }
+}
+.row-check:hover { border-color: var(--claude); }
+.row-check.on {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  border-color: var(--claude);
+  box-shadow: 0 0 8px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.row-check.on::after {
+  content: ""; position: absolute;
+  left: 3px; top: 0px;
+  width: 5px; height: 9px;
+  border-right: 1.5px solid #fff;
+  border-bottom: 1.5px solid #fff;
+  transform: rotate(45deg);
+}
+.row-check.all-on {
+  background: linear-gradient(180deg, var(--claude-2), var(--claude));
+  border-color: var(--claude);
+  box-shadow: 0 0 8px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+}
+.row-check.all-on::after {
+  content: ""; position: absolute;
+  left: 2.5px; top: 6px;
+  width: 8px; height: 2px;
+  background: #fff;
+  border-radius: 1px;
+}
+.mx-row.bulk-selected {
+  background: linear-gradient(90deg, var(--claude-soft) 0%, var(--claude-xsoft) 100%);
+  box-shadow: inset 3px 0 0 var(--claude);
+}
+.mx-row.bulk-selected:hover { background: linear-gradient(90deg, var(--claude-soft) 0%, var(--claude-soft) 60%, var(--claude-xsoft) 100%); }
+
+/* Floating bulk action bar */
+.bulk-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px 8px 16px;
+  background: linear-gradient(180deg, rgba(40,40,48,0.95), rgba(28,28,34,0.92));
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.15);
+  border-radius: 12px;
+  box-shadow:
+    0 24px 56px rgba(0,0,0,0.5),
+    0 8px 20px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  z-index: 10;
+}
+@media (prefers-color-scheme: light) {
+  .bulk-bar {
+    background: linear-gradient(180deg, #fafafc, #f0f0f4);
+    border-color: rgba(0,0,0,0.1);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.9);
+  }
+}
+.bulk-bar .count {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  border-radius: 6px;
+  font: 700 12px/16px var(--sans);
+  color: #fff;
+  box-shadow: 0 2px 6px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);
+  font-variant-numeric: tabular-nums;
+}
+.bulk-bar .count svg { width: 10px; height: 10px; }
+.bulk-bar .sep-v { width: 0.5px; height: 20px; background: rgba(255,255,255,0.1); }
+@media (prefers-color-scheme: light) { .bulk-bar .sep-v { background: rgba(0,0,0,0.1); } }
+.bulk-bar .bact {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  font: 600 12px/16px var(--sans);
+  color: var(--text);
+  cursor: default;
+  border: 0.5px solid transparent;
+  letter-spacing: -0.005em;
+}
+.bulk-bar .bact:hover { background: rgba(255,255,255,0.06); }
+@media (prefers-color-scheme: light) { .bulk-bar .bact:hover { background: rgba(0,0,0,0.04); } }
+.bulk-bar .bact svg { width: 11px; height: 11px; }
+.bulk-bar .bact.claude { color: var(--claude-2); }
+.bulk-bar .bact.claude:hover { background: var(--claude-soft); color: var(--text); }
+.bulk-bar .bact.codex { color: var(--codex-2); }
+.bulk-bar .bact.codex:hover { background: var(--codex-soft); color: var(--text); }
+.bulk-bar .bact.session { color: var(--session-2); }
+.bulk-bar .bact.session:hover { background: var(--session-soft); color: var(--text); }
+.bulk-bar .bact.danger { color: var(--danger); }
+.bulk-bar .bact.danger:hover { background: rgba(255,95,86,0.14); }
+.bulk-bar .bact.dismiss { color: var(--text-3); padding: 6px 8px; }
+.bulk-bar .bact .av {
+  width: 14px; height: 14px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.bulk-bar .bact .av.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 4px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.bulk-bar .bact .av.codex { background: linear-gradient(135deg, var(--codex), var(--codex-2)); box-shadow: 0 0 4px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.bulk-bar .bact .av svg { width: 8px; height: 8px; color: #fff; }
+
+/* ═══════════════════════════════════════════
+   FILES VIEW (flat file list + version timeline)
+   ═══════════════════════════════════════════ */
+
+.ft-head, .ft-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 160px 100px 80px 90px 76px 28px;
+  align-items: center;
+  padding: 0 20px;
+  gap: 10px;
+}
+.ft-head {
+  height: 30px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  border-bottom: 0.5px solid var(--hairline);
+  position: sticky; top: 0; z-index: 2;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+@media (prefers-color-scheme: light) {
+  .ft-head { background: linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01)); }
+}
+.ft-head .r-col { text-align: right; }
+
+.ft-section-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 20px 6px;
+  font: 600 10px/14px var(--sans);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: var(--section-bg);
+}
+.ft-section-header .count {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.ft-section-header svg { width: 12px; height: 12px; color: var(--text-3); }
+
+.ft-row {
+  height: 38px;
+  border-bottom: 0.5px solid var(--hairline-2);
+  font: 400 12px/16px var(--sans);
+  cursor: default;
+  position: relative;
+}
+.ft-row:hover { background: rgba(255,255,255,0.03); }
+@media (prefers-color-scheme: light) { .ft-row:hover { background: rgba(0,0,0,0.02); } }
+.ft-row.selected {
+  background: var(--selection);
+  box-shadow: inset 2px 0 0 var(--claude), inset 0 0 24px rgba(63,124,255,0.05);
+}
+.ft-row.bulk-selected {
+  background: linear-gradient(90deg, var(--claude-soft) 0%, var(--claude-xsoft) 100%);
+  box-shadow: inset 3px 0 0 var(--claude);
+}
+.ft-row .file-info {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0;
+}
+.ft-row .file-info .ic {
+  width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ft-row .file-info .ic svg { width: 14px; height: 14px; }
+.ft-row .file-info .ic.swift { color: #FF9C73; }
+.ft-row .file-info .ic.json { color: #E3C969; }
+.ft-row .file-info .ic.md { color: var(--text-2); }
+.ft-row .file-info .ic.folder { color: var(--claude); }
+.ft-row .file-info .name {
+  font: 500 13px/16px var(--sans);
+  color: var(--text);
+  letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ft-row .file-info .hot {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 5px; height: 14px; border-radius: 3px;
+  background: var(--session-soft);
+  color: var(--session-2);
+  font: 600 9px/14px var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+@media (prefers-color-scheme: light) { .ft-row .file-info .hot { color: #0F7F48; } }
+.ft-row .path-cell {
+  font: 400 11px/14px var(--mono);
+  color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ft-row .agents-cell {
+  display: flex; align-items: center; gap: 3px;
+}
+.ft-row .agents-cell .av {
+  width: 18px; height: 18px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ft-row .agents-cell .av.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 4px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.ft-row .agents-cell .av.codex { background: linear-gradient(135deg, var(--codex), var(--codex-2)); box-shadow: 0 0 4px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.ft-row .agents-cell .av.muted { background: rgba(255,255,255,0.06); opacity: 0.35; box-shadow: none; }
+.ft-row .agents-cell .av svg { width: 10px; height: 10px; color: #fff; }
+.ft-row .size-cell {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ft-row .mod-cell {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.ft-row .versions-cell {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: 500 11px/14px var(--sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.ft-row .versions-cell .chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-2);
+  font: 600 10px/13px var(--sans);
+}
+@media (prefers-color-scheme: light) { .ft-row .versions-cell .chip { background: rgba(0,0,0,0.06); } }
+.ft-row .versions-cell .chip.write {
+  background: var(--claude-soft);
+  color: var(--claude-2);
+}
+@media (prefers-color-scheme: light) { .ft-row .versions-cell .chip.write { color: #1A4BB8; } }
+.ft-row .versions-cell .chip.revert {
+  background: var(--session-soft);
+  color: var(--session-2);
+}
+@media (prefers-color-scheme: light) { .ft-row .versions-cell .chip.revert { color: #0F7F48; } }
+.ft-row .versions-cell .chip.none { color: var(--text-4); opacity: 0.6; }
+.ft-row .menu-cell { text-align: center; color: var(--text-4); font-size: 14px; letter-spacing: -2px; }
+
+/* Version timeline (inspector) */
+.vtimeline {
+  position: relative;
+  padding-left: 18px;
+}
+.vtimeline::before {
+  content: "";
+  position: absolute;
+  left: 7px; top: 12px; bottom: 8px;
+  width: 1.5px;
+  background: linear-gradient(180deg, var(--claude), var(--claude-2) 40%, var(--session) 70%, var(--text-4));
+  opacity: 0.5;
+  border-radius: 1px;
+}
+.vnode {
+  position: relative;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  border: 0.5px solid transparent;
+  cursor: default;
+  transition: all 120ms;
+}
+.vnode::before {
+  content: "";
+  position: absolute;
+  left: -14px; top: 14px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--claude);
+  box-shadow: 0 0 0 2px var(--insp-bg), 0 0 6px var(--claude-glow);
+}
+.vnode.current::before {
+  width: 11px; height: 11px;
+  left: -15px; top: 13px;
+  background: linear-gradient(135deg, var(--claude-2), var(--claude));
+  box-shadow: 0 0 0 3px var(--insp-bg), 0 0 10px var(--claude-glow);
+}
+.vnode.revert::before {
+  background: var(--session);
+  box-shadow: 0 0 0 2px var(--insp-bg), 0 0 6px var(--session-glow);
+}
+.vnode.reverted::before {
+  background: var(--text-4);
+  box-shadow: 0 0 0 2px var(--insp-bg);
+}
+.vnode.selected {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--claude);
+  box-shadow: 0 0 0 2px rgba(63,124,255,0.18);
+}
+@media (prefers-color-scheme: light) { .vnode.selected { background: rgba(0,0,0,0.03); } }
+.vnode .vrow-top {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 4px;
+}
+.vnode .vtime {
+  font: 500 11px/14px var(--mono);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.vnode .vagent {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: 600 11px/14px var(--sans);
+  color: var(--text);
+}
+.vnode .vagent .av {
+  width: 14px; height: 14px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.vnode .vagent .av.claude { background: linear-gradient(135deg, var(--claude), var(--claude-2)); box-shadow: 0 0 4px var(--claude-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.vnode .vagent .av.codex { background: linear-gradient(135deg, var(--codex), var(--codex-2)); box-shadow: 0 0 4px var(--codex-glow), inset 0 0.5px 0 rgba(255,255,255,0.3); }
+.vnode .vagent .av svg { width: 8px; height: 8px; color: #fff; }
+.vnode .vsize {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(63,124,255,0.14);
+  color: var(--claude-2);
+  font: 600 10px/14px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-color-scheme: light) { .vnode .vsize { color: #1A4BB8; } }
+.vnode .vsize.neg { background: rgba(46,203,127,0.14); color: var(--session-2); }
+@media (prefers-color-scheme: light) { .vnode .vsize.neg { color: #0F7F48; } }
+.vnode .vtag {
+  font: 600 10px/13px var(--sans);
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.vnode.current .vtag {
+  background: linear-gradient(135deg, var(--claude), var(--claude-2));
+  color: #fff;
+  box-shadow: 0 1px 3px var(--claude-glow);
+}
+.vnode.revert .vtag { background: var(--session-soft); color: var(--session-2); }
+@media (prefers-color-scheme: light) { .vnode.revert .vtag { color: #0F7F48; } }
+.vnode.reverted .vtag { background: rgba(255,255,255,0.06); color: var(--text-4); }
+@media (prefers-color-scheme: light) { .vnode.reverted .vtag { background: rgba(0,0,0,0.05); } }
+
+.vnode .vmeta {
+  display: flex; align-items: center; gap: 10px;
+  font: 400 10px/14px var(--sans);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.vnode .vmeta code {
+  font: 500 10px/14px var(--mono);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
+@media (prefers-color-scheme: light) { .vnode .vmeta code { background: rgba(0,0,0,0.05); } }
+.vnode .vmeta .session-tag { color: var(--session-2); font-weight: 500; }
+@media (prefers-color-scheme: light) { .vnode .vmeta .session-tag { color: #0F7F48; } }
+
+.vnode .vexpand {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--hairline);
+  display: flex; gap: 6px;
+}
+.vnode .vexpand .btn {
+  font: 600 11px/14px var(--sans);
+  padding: 5px 10px;
+  flex: none;
+}
+.vnode.reverted .vexpand {
+  color: var(--text-3);
+  font: italic 400 11px/14px var(--sans);
+  border-top: 0.5px dashed var(--hairline);
+}
+
+/* Diff block for version preview */
+.vdiff {
+  margin-top: 10px;
+  font: 400 11px/17px var(--mono);
+  background: rgba(0,0,0,0.3);
+  border: 0.5px solid var(--hairline);
+  border-radius: 6px;
+  padding: 8px 10px;
+  max-height: 140px;
+  overflow: hidden;
+}
+@media (prefers-color-scheme: light) { .vdiff { background: #f7f7fa; } }
+.vdiff .line { display: block; padding: 0 5px; border-radius: 2px; }
+.vdiff .ctx { color: var(--text-3); }
+.vdiff .rem { color: #FF9C96; background: rgba(255,95,86,0.12); }
+.vdiff .add { color: var(--session-2); background: rgba(46,203,127,0.12); }
+@media (prefers-color-scheme: light) {
+  .vdiff .rem { color: #A71A12; background: #FDECEB; }
+  .vdiff .add { color: #0E7B44; background: #E7F8EE; }
+}
+
+/* File inspector header */
+.fi-stat-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.2);
+  border: 0.5px solid var(--hairline);
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+@media (prefers-color-scheme: light) { .fi-stat-grid { background: rgba(0,0,0,0.03); } }
+.fi-stat-grid .cell { display: flex; flex-direction: column; gap: 2px; }
+.fi-stat-grid .l { font: 600 9px/12px var(--sans); color: var(--text-3); letter-spacing: 0.08em; text-transform: uppercase; }
+.fi-stat-grid .v { font: 600 13px/17px var(--sans); color: var(--text); letter-spacing: -0.005em; font-variant-numeric: tabular-nums; }
+.fi-stat-grid .v.small { font-size: 11px; font-weight: 500; color: var(--text-2); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     SVG ICON LIBRARY
+     ═══════════════════════════════════════════ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-mark" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M5.2 2.4 9.6 7l-4.4 4.6L0.8 7 5.2 2.4Zm5.6 2L15.2 9l-4.4 4.6L6.4 9l4.4-4.6Z"/>
+    </symbol>
+    <symbol id="i-pulse" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M1.5 8h3l1.6-4.5 3 9 1.5-4.5h4"/>
+    </symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M1.5 5a1 1 0 0 1 1-1h3.4l1.2 1.5h7.4a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>
+    </symbol>
+    <symbol id="i-folder-filled" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M1.5 5a1 1 0 0 1 1-1h3.4l1.2 1.5h7.4a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>
+    </symbol>
+    <symbol id="i-mail" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1zM2 4.5l6 4 6-4"/>
+    </symbol>
+    <symbol id="i-clock" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 4.5V8l2.5 1.5"/>
+    </symbol>
+    <symbol id="i-shield" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M8 1.5 2.5 3.5v5C2.5 11 4.8 13.4 8 14.5c3.2-1.1 5.5-3.5 5.5-6V3.5Z"/>
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="m5.8 7.8 1.8 1.8L11 6"/>
+    </symbol>
+    <symbol id="i-sparkle" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M8 0.5c.3 2.9 1.6 4.2 4.5 4.5-2.9.3-4.2 1.6-4.5 4.5-.3-2.9-1.6-4.2-4.5-4.5C6.4 4.7 7.7 3.4 8 0.5ZM13.5 7.5c.2 1.7.9 2.4 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5ZM4 10c.15 1.35.65 1.85 2 2-1.35.15-1.85.65-2 2-.15-1.35-.65-1.85-2-2 1.35-.15 1.85-.65 2-2Z"/>
+    </symbol>
+    <symbol id="i-code" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M5 4 1.5 8 5 12M11 4l3.5 4-3.5 4M9.5 3l-3 10"/>
+    </symbol>
+    <symbol id="i-sidebar" viewBox="0 0 16 16">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <path d="M6 2.5v11" stroke="currentColor" stroke-width="1.4"/>
+      <path d="M3 5.5h1.5M3 7.5h1.5M3 9.5h1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 16 16">
+      <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="m10.5 10.5 3 3"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8 3v10M3 8h10"/>
+    </symbol>
+    <symbol id="i-minus" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10"/>
+    </symbol>
+    <symbol id="i-chev-right" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 4 4 4-4 4"/>
+    </symbol>
+    <symbol id="i-chev-down" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m4 6 4 4 4-4"/>
+    </symbol>
+    <symbol id="i-chev-up" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m4 10 4-4 4 4"/>
+    </symbol>
+    <symbol id="i-doc" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M3.5 1.5h5.5L13 5v9a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/>
+      <path fill="none" stroke="currentColor" stroke-width="1.4" d="M9 1.5V5h4"/>
+    </symbol>
+    <symbol id="i-swift" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M13.5 11.7c1-2.3.4-5.6-1.3-7.8-.4-.5-.8-.9-1.3-1.2.4.8.7 1.7.9 2.6.2 1 .2 2 .1 2.9-.2-.2-.4-.3-.7-.5-1.4-.9-3.2-1.3-4.8-1.2-.7 0-1.5.2-2.2.4.7.1 1.3.3 2 .6 2 .8 3.7 2.3 5.2 4-.3.3-.7.5-1 .7-1.6.9-3.6 1-5.4.3l.4.2c1.9.8 4 .9 5.8.4.2.4.4.9.5 1.3.4.3.9.3 1.3 0 .2-.2.4-.4.5-.6.5-.2.9-.5 1.3-.8.4-.4.6-.8.7-1.3Z"/>
+    </symbol>
+    <symbol id="i-json" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M6 3H4a1 1 0 0 0-1 1v3c0 .6-.4 1-1 1 .6 0 1 .4 1 1v3a1 1 0 0 0 1 1h2M10 3h2a1 1 0 0 1 1 1v3c0 .6.4 1 1 1-.6 0-1 .4-1 1v3a1 1 0 0 1-1 1h-2"/>
+    </symbol>
+    <symbol id="i-md" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2 4h12v8H2zM4 10V6l1.5 2L7 6v4M10 6v4l2-2M10 10l2-2"/>
+    </symbol>
+    <symbol id="i-env" viewBox="0 0 16 16">
+      <rect x="2" y="3.5" width="12" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M4.5 7h2M4.5 9h5M4.5 11h3"/>
+    </symbol>
+    <symbol id="i-link" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M6.5 2H4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V9.5M9.5 2H14v4.5M7 9l7-7"/>
+    </symbol>
+    <symbol id="i-x" viewBox="0 0 16 16">
+      <path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="m4 4 8 8M12 4l-8 8"/>
+    </symbol>
+    <symbol id="i-resume" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8a5 5 0 1 1 1.5 3.5M3 2v3h3"/>
+    </symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2M3.5 7h9v7h-9z"/>
+      <circle cx="8" cy="10.5" r="1" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M1.5 5a1 1 0 0 1 1-1h3.4l1.2 1.5h7.4a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z M8 8.5v3M6.5 10h3"/>
+    </symbol>
+    <symbol id="i-mail-plus" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" d="M2 4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1V9M2 4.5l6 4 6-4M10 12h4M12 10v4"/>
+    </symbol>
+    <symbol id="i-check-seal" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="m8 1 2 1.4 2.4-.2.2 2.4 1.4 2-1.4 2 .2 2.4H10.2L8 13.4 5.8 12.6H3.4l-.2-2.4-1.4-2 1.4-2-.2-2.4L6 2.4z"/>
+      <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="m5.6 7.8 1.8 1.8L11 6"/>
+    </symbol>
+    <symbol id="i-eye" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/>
+      <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/>
+    </symbol>
+    <symbol id="i-finder" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 2.5h11v11h-11z M7 6v4M5 7.5h4M10 7.5h1.5"/>
+    </symbol>
+    <symbol id="i-export" viewBox="0 0 16 16">
+      <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M8 2v8.5M5 4.5 8 1.5l3 3M3 10v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- Mac menu bar -->
+<div class="mac-menubar">
+  <span class="apple">●</span>
+  <span class="app">Manifold</span>
+  <div class="menus"><span>File</span><span>Edit</span><span>View</span><span>Session</span><span>Window</span><span>Help</span></div>
+  <div class="right">
+    <span class="status-item" title="Manifold"><svg><use href="#i-mark"/></svg></span>
+    <span>Tue 4:37 PM</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════
+     VIEW 1 — DEFAULT (coverage matrix + file-tree inspector)
+     ═══════════════════════════════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 1</span>
+  <h2>Folders — coverage matrix</h2>
+  <div class="sub">Persistent baseline. Sources × agents with per-file drill-down. Multi-select for bulk share / unshare. File-tree inspector shows exclusions traced to their cause.</div>
+</div>
+
+<div class="stage">
+  <div class="window">
+
+    <!-- TOOLBAR -->
+    <div class="toolbar">
+      <div class="tb-left">
+        <div class="traffic">
+          <button class="c"></button><button class="m"></button><button class="x"></button>
+        </div>
+        <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+      </div>
+      <div class="tb-center">
+        <div class="tb-title">
+          <h1>Access</h1>
+          <div class="sub">6 folder sources · 2 agents connected</div>
+        </div>
+        <div class="seg">
+          <div class="si on">Folders <span class="count">6</span></div>
+          <div class="si">Files <span class="count">1,852</span></div>
+          <div class="si">Session <span class="count">+2 −1</span></div>
+          <div class="si">History <span class="count">47</span></div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="tb-search">
+          <svg><use href="#i-search"/></svg>
+          <input placeholder="Filter folders…" />
+        </div>
+      </div>
+      <div class="tb-right">
+        <div class="session-chip">
+          <span class="dot"></span>
+          <span class="name">Jane follow-up</span>
+          <span class="time">1:42:08</span>
+        </div>
+        <div class="tb-btn primary">
+          <svg><use href="#i-folder-plus"/></svg>
+          Add folder…
+        </div>
+      </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="body">
+
+      <!-- Nav sidebar -->
+      <div class="sidebar">
+        <div class="sb-head">Manifold</div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+        <div class="sb-item active"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">6</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+
+        <div class="sb-spacer"></div>
+        <div class="sb-divider"></div>
+        <div class="sb-head">Session</div>
+        <div class="sb-item" style="padding: 8px 10px;">
+          <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+          <div style="display: flex; flex-direction: column; min-width: 0;">
+            <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+            <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+          </div>
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-profile">
+          <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+          <div style="min-width: 0;">
+            <div class="who">Amar Gandhi</div>
+            <div class="state">Runtime connected</div>
+          </div>
+          <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+        </div>
+      </div>
+
+      <!-- Matrix content -->
+      <div class="content">
+        <div class="mx-head">
+          <div><div class="row-check"></div></div>
+          <div>Source</div>
+          <div class="agent-col"><span class="avatar claude"><svg><use href="#i-sparkle"/></svg></span>Claude</div>
+          <div class="agent-col"><span class="avatar codex"><svg><use href="#i-code"/></svg></span>Codex</div>
+          <div class="r-col">Denials 7d</div>
+          <div></div>
+        </div>
+
+        <div class="mx-scroll" style="position: relative;">
+
+          <div class="mx-section">Shared folders <span class="count">·  4</span></div>
+
+          <div class="mx-row bulk-selected">
+            <div><div class="row-check on"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Projects/Acme</div>
+                <div class="meta">428 files <span class="chip-inline">15 excluded</span></div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row bulk-selected">
+            <div><div class="row-check on"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Projects/Manifold</div>
+                <div class="meta">1,284 files · <code>swift</code></div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl on codex"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row bulk-selected">
+            <div><div class="row-check on"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Documents/Writing</div>
+                <div class="meta">28 files · last touched Mon 3:12 PM</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row">
+            <div><div class="row-check"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Projects/Spikes</div>
+                <div class="meta">112 files · prototype area</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-section">Not shared <span class="count">·  2 · 4 denials total</span></div>
+
+          <div class="mx-row">
+            <div><div class="row-check"></div></div>
+            <div class="mx-source unshared">
+              <div class="fldr"><svg><use href="#i-folder"/></svg></div>
+              <div class="body">
+                <div class="name">Finances</div>
+                <div class="meta">private · never shared</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials">3</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row">
+            <div><div class="row-check"></div></div>
+            <div class="mx-source unshared">
+              <div class="fldr"><svg><use href="#i-folder"/></svg></div>
+              <div class="body">
+                <div class="name">Documents/Personal</div>
+                <div class="meta">private · never shared</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials">1</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <!-- Floating bulk action bar when multiple rows selected -->
+          <div class="bulk-bar">
+            <span class="count">
+              <svg><use href="#i-check-seal"/></svg>
+              3 folders selected
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact claude">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              Share with Claude
+            </span>
+            <span class="bact codex">
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+              Share with Codex
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact session">
+              <svg><use href="#i-clock"/></svg>
+              Add to session
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact danger">
+              <svg><use href="#i-x"/></svg>
+              Unshare all
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact dismiss">
+              <svg><use href="#i-x"/></svg>
+            </span>
+          </div>
+
+        </div>
+
+        <div class="mx-footer">
+          <span><strong>4</strong> shared</span>
+          <span class="sep">·</span>
+          <span><strong>2</strong> private</span>
+          <span class="sep">·</span>
+          <span><strong>1,852</strong> files visible to Claude</span>
+          <span class="sep">·</span>
+          <span><strong>1,284</strong> files visible to Codex</span>
+          <span class="spacer"></span>
+          <span>Last edit <strong>12 min ago</strong></span>
+        </div>
+      </div>
+
+      <!-- File-tree inspector -->
+      <div class="inspector">
+        <div class="insp-head">
+          <div class="kicker">Selected · Folder</div>
+          <h2>Projects/Acme</h2>
+          <div class="path">~/Projects/Acme</div>
+          <div class="stats">
+            <span><strong>428</strong> files</span>
+            <span>·</span>
+            <span><strong>14 MB</strong></span>
+            <span>·</span>
+            <span>Modified <strong>2m</strong> ago</span>
+          </div>
+        </div>
+
+        <div class="insp-body">
+
+          <div class="count-banner">
+            <div class="avatar"><svg><use href="#i-sparkle"/></svg></div>
+            <div class="text">
+              <strong>413</strong> of <strong>428</strong> files visible to Claude<br/>
+              <span class="muted">15 excluded · 9,217 hidden in node_modules</span>
+            </div>
+          </div>
+
+          <div class="rules-banner">
+            <div class="icon-wrap"><svg><use href="#i-shield"/></svg></div>
+            <div class="text">
+              <strong>2 global rules</strong> also exclude files here
+            </div>
+            <div class="link">View<svg><use href="#i-chev-right"/></svg></div>
+          </div>
+
+          <div>
+            <div class="insp-label">Files · <span style="color: var(--text-4); letter-spacing: 0.02em; font-family: var(--mono);">filter: ".env"</span></div>
+            <div class="insp-search">
+              <svg><use href="#i-search"/></svg>
+              <input value=".env" placeholder="Find a file or folder…" />
+              <span class="clear">×</span>
+            </div>
+          </div>
+
+          <div class="tree">
+            <div class="tree-row">
+              <div class="caret"><svg><use href="#i-chev-down"/></svg></div>
+              <div class="check mixed"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">Projects/Acme</div>
+              <div class="t-size">428</div>
+            </div>
+            <div class="tree-row" style="padding-left: 18px;">
+              <div class="indent guide"></div>
+              <div class="caret"><svg><use href="#i-chev-right"/></svg></div>
+              <div class="check on"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">src</div>
+              <div class="t-size">312</div>
+            </div>
+            <div class="tree-row" style="padding-left: 18px;">
+              <div class="indent guide"></div>
+              <div class="caret"><svg><use href="#i-chev-down"/></svg></div>
+              <div class="check mixed"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">lib</div>
+              <div class="t-size">48</div>
+            </div>
+            <div class="tree-row excluded" style="padding-left: 40px;">
+              <div class="indent guide"></div>
+              <div class="caret"></div>
+              <div class="check"></div>
+              <div class="t-icon config" style="color: var(--text-4);"><svg><use href="#i-env"/></svg></div>
+              <div class="t-name">.env</div>
+              <div class="t-trace">rule <code>*.env</code></div>
+              <div class="t-size">412 B</div>
+            </div>
+            <div class="tree-row excluded" style="padding-left: 40px;">
+              <div class="indent guide"></div>
+              <div class="caret"></div>
+              <div class="check"></div>
+              <div class="t-icon config" style="color: var(--text-4);"><svg><use href="#i-env"/></svg></div>
+              <div class="t-name">.env.production</div>
+              <div class="t-trace">rule <code>*.env</code></div>
+              <div class="t-size">318 B</div>
+            </div>
+            <div class="tree-row" style="padding-left: 40px;">
+              <div class="indent guide"></div>
+              <div class="caret"></div>
+              <div class="check on"></div>
+              <div class="t-icon code"><svg><use href="#i-doc"/></svg></div>
+              <div class="t-name">auth.ts</div>
+              <div class="t-trace read">read 2×</div>
+              <div class="t-size">3.1 KB</div>
+            </div>
+            <div class="tree-row" style="padding-left: 40px;">
+              <div class="indent guide"></div>
+              <div class="caret"></div>
+              <div class="check on"></div>
+              <div class="t-icon code"><svg><use href="#i-doc"/></svg></div>
+              <div class="t-name">session.ts</div>
+              <div class="t-trace read">read 1×</div>
+              <div class="t-size">1.8 KB</div>
+            </div>
+            <div class="tree-row excluded" style="padding-left: 18px;">
+              <div class="indent guide"></div>
+              <div class="caret"><svg><use href="#i-chev-right"/></svg></div>
+              <div class="check"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">secrets</div>
+              <div class="t-trace">manual</div>
+              <div class="t-size">4</div>
+            </div>
+            <div class="tree-row excluded" style="padding-left: 18px;">
+              <div class="indent guide"></div>
+              <div class="caret"><svg><use href="#i-chev-right"/></svg></div>
+              <div class="check"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">node_modules</div>
+              <div class="t-trace">smart default</div>
+              <div class="t-size">9,217</div>
+            </div>
+            <div class="tree-row" style="padding-left: 18px;">
+              <div class="indent guide"></div>
+              <div class="caret"><svg><use href="#i-chev-right"/></svg></div>
+              <div class="check on override"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">test</div>
+              <div class="t-trace override">override</div>
+              <div class="t-size">68</div>
+            </div>
+            <div class="tree-row" style="padding-left: 18px;">
+              <div class="indent guide"></div>
+              <div class="caret"><svg><use href="#i-chev-right"/></svg></div>
+              <div class="check on"></div>
+              <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="t-name">docs</div>
+              <div class="t-size">12</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Exclusion rules · this folder only</div>
+            <div class="excl-list">
+              <div class="excl-row">
+                <code>*.env</code>
+                <span class="reason"><strong>2</strong> files · added Apr 4</span>
+                <span class="remove"><svg><use href="#i-x"/></svg></span>
+              </div>
+              <div class="excl-row">
+                <code>node_modules/</code>
+                <span class="reason"><strong>9,217</strong> files · smart default</span>
+                <span class="remove"><svg><use href="#i-x"/></svg></span>
+              </div>
+              <div class="excl-row">
+                <code>files &gt; 10 MB</code>
+                <span class="reason"><strong>0</strong> currently · smart default</span>
+                <span class="remove"><svg><use href="#i-x"/></svg></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="insp-actions">
+            <div class="btn secondary flex">
+              <svg><use href="#i-plus"/></svg>
+              Add rule
+            </div>
+            <div class="btn secondary flex">
+              <svg><use href="#i-finder"/></svg>
+              Reveal in Finder
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- STATUS BAR -->
+    <div class="statusbar">
+      <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+      <span class="stat">Claude <strong style="color: var(--claude-2)">active</strong></span>
+      <span class="stat">Codex <strong>paused</strong></span>
+      <span class="stat">Default scope: <strong>4 folders · 1 mailbox</strong></span>
+      <span class="spacer"></span>
+      <span class="stat">⌘⇧F <kbd>add folder</kbd></span>
+      <span class="stat">⌘F <kbd>filter</kbd></span>
+      <span class="stat">Space <kbd>toggle inspector</kbd></span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════
+     VIEW 2 — SESSION (live overlay diff)
+     ═══════════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════════════
+     VIEW 2 — FILES (flat list across all shared folders + version history)
+     ═══════════════════════════════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 2</span>
+  <h2>Files — every file currently visible to an agent</h2>
+  <div class="sub">Flat view across all shared folders. Sort, filter, bulk-select. Files with write history show a version count; selecting one opens the version timeline with per-version revert.</div>
+</div>
+
+<div class="stage">
+  <div class="window">
+
+    <div class="toolbar">
+      <div class="tb-left">
+        <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+        <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+      </div>
+      <div class="tb-center">
+        <div class="tb-title">
+          <h1>Access · Files</h1>
+          <div class="sub">1,852 files visible · 14 with write history · 2 recently reverted</div>
+        </div>
+        <div class="seg">
+          <div class="si">Folders <span class="count">6</span></div>
+          <div class="si on">Files <span class="count">1,852</span></div>
+          <div class="si">Session <span class="count">+2 −1</span></div>
+          <div class="si">History <span class="count">47</span></div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="tb-search">
+          <svg><use href="#i-search"/></svg>
+          <input placeholder="Filter by name, path, extension…" />
+        </div>
+      </div>
+      <div class="tb-right">
+        <div class="session-chip">
+          <span class="dot"></span>
+          <span class="name">Jane follow-up</span>
+          <span class="time">1:42:08</span>
+        </div>
+        <div class="tb-btn">
+          <svg><use href="#i-export"/></svg>
+          Export list
+        </div>
+      </div>
+    </div>
+
+    <div class="body">
+
+      <div class="sidebar">
+        <div class="sb-head">Manifold</div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+        <div class="sb-item active"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">6</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+        <div class="sb-spacer"></div>
+        <div class="sb-divider"></div>
+        <div class="sb-head">Session</div>
+        <div class="sb-item" style="padding: 8px 10px;">
+          <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+          <div style="display: flex; flex-direction: column; min-width: 0;">
+            <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+            <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+          </div>
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-profile">
+          <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+          <div style="min-width: 0;">
+            <div class="who">Amar Gandhi</div>
+            <div class="state">Runtime connected</div>
+          </div>
+          <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+        </div>
+      </div>
+
+      <div class="content">
+
+        <div class="ft-head">
+          <div><div class="row-check"></div></div>
+          <div>Name</div>
+          <div>Path</div>
+          <div>Agents</div>
+          <div class="r-col">Size</div>
+          <div>Modified</div>
+          <div>Versions</div>
+          <div></div>
+        </div>
+
+        <div class="mx-scroll" style="position: relative;">
+
+          <div class="ft-section-header">
+            <svg><use href="#i-pulse"/></svg>
+            Recently written <span class="count">·  5</span>
+          </div>
+
+          <div class="ft-row selected">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-doc"/></svg></span>
+              <span class="name">auth.ts</span>
+              <span class="hot">hot</span>
+            </div>
+            <div class="path-cell">Projects/Acme/lib</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av muted"></span>
+            </div>
+            <div class="size-cell">3.1 KB</div>
+            <div class="mod-cell">1m 48s</div>
+            <div class="versions-cell"><span class="chip write">7 versions</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic json"><svg><use href="#i-json"/></svg></span>
+              <span class="name">fixtures.json</span>
+            </div>
+            <div class="path-cell">Projects/Acme/test</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av muted"></span>
+            </div>
+            <div class="size-cell">1.2 KB</div>
+            <div class="mod-cell">17m</div>
+            <div class="versions-cell"><span class="chip revert">4 · reverted</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic md"><svg><use href="#i-md"/></svg></span>
+              <span class="name">CLAUDE.md</span>
+            </div>
+            <div class="path-cell">Projects/Manifold</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">3.4 KB</div>
+            <div class="mod-cell">2h 12m</div>
+            <div class="versions-cell"><span class="chip write">2 versions</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-swift"/></svg></span>
+              <span class="name">StoreTests.swift</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/ManifoldTests</div>
+            <div class="agents-cell">
+              <span class="av muted"></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">8.4 KB</div>
+            <div class="mod-cell">Yesterday</div>
+            <div class="versions-cell"><span class="chip write">3 versions</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check on"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-swift"/></svg></span>
+              <span class="name">MainView.swift</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/ManifoldApp/Views</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">12.4 KB</div>
+            <div class="mod-cell">Yesterday</div>
+            <div class="versions-cell"><span class="chip write">2 versions</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-section-header">
+            <svg><use href="#i-eye"/></svg>
+            Read this session <span class="count">·  4</span>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic md"><svg><use href="#i-md"/></svg></span>
+              <span class="name">README.md</span>
+            </div>
+            <div class="path-cell">Projects/Acme</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av muted"></span>
+            </div>
+            <div class="size-cell">2.4 KB</div>
+            <div class="mod-cell">Apr 8</div>
+            <div class="versions-cell"><span class="chip none">original</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-doc"/></svg></span>
+              <span class="name">session.ts</span>
+            </div>
+            <div class="path-cell">Projects/Acme/lib</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av muted"></span>
+            </div>
+            <div class="size-cell">1.8 KB</div>
+            <div class="mod-cell">Mar 28</div>
+            <div class="versions-cell"><span class="chip write">3 versions</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic json"><svg><use href="#i-json"/></svg></span>
+              <span class="name">package.json</span>
+            </div>
+            <div class="path-cell">Projects/Acme</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av muted"></span>
+            </div>
+            <div class="size-cell">612 B</div>
+            <div class="mod-cell">Apr 10</div>
+            <div class="versions-cell"><span class="chip write">2 versions</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-swift"/></svg></span>
+              <span class="name">ManifoldBridge.swift</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/ManifoldRuntime/Sources</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av muted"></span>
+            </div>
+            <div class="size-cell">4.3 KB</div>
+            <div class="mod-cell">Apr 12</div>
+            <div class="versions-cell"><span class="chip none">original</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-section-header">
+            <svg><use href="#i-folder"/></svg>
+            All other files <span class="count">·  1,843 · read-only to date</span>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-swift"/></svg></span>
+              <span class="name">ManifoldStore.swift</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/ManifoldApp/Models</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">21.8 KB</div>
+            <div class="mod-cell">Mar 12</div>
+            <div class="versions-cell"><span class="chip none">—</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-swift"/></svg></span>
+              <span class="name">AppRuntimeClient.swift</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/ManifoldApp/Models</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">8.9 KB</div>
+            <div class="mod-cell">Mar 14</div>
+            <div class="versions-cell"><span class="chip none">—</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic md"><svg><use href="#i-md"/></svg></span>
+              <span class="name">DESIGN.md</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/docs</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">14.2 KB</div>
+            <div class="mod-cell">Mar 22</div>
+            <div class="versions-cell"><span class="chip none">—</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <div class="ft-row">
+            <div><div class="row-check"></div></div>
+            <div class="file-info">
+              <span class="ic swift"><svg><use href="#i-doc"/></svg></span>
+              <span class="name">Package.swift</span>
+            </div>
+            <div class="path-cell">Projects/Manifold/ManifoldApp</div>
+            <div class="agents-cell">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="size-cell">1.8 KB</div>
+            <div class="mod-cell">Feb 28</div>
+            <div class="versions-cell"><span class="chip none">—</span></div>
+            <div class="menu-cell">⋯</div>
+          </div>
+
+          <!-- Bulk bar: one file selected (MainView.swift) -->
+          <div class="bulk-bar">
+            <span class="count">
+              <svg><use href="#i-check-seal"/></svg>
+              1 file selected
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact session">
+              <svg><use href="#i-clock"/></svg>
+              Add to session
+            </span>
+            <span class="bact">
+              <svg><use href="#i-uturn"/></svg>
+              View history
+            </span>
+            <span class="bact">
+              <svg><use href="#i-finder"/></svg>
+              Reveal in Finder
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact danger">
+              <svg><use href="#i-x"/></svg>
+              Exclude from scope
+            </span>
+            <span class="sep-v"></span>
+            <span class="bact dismiss">
+              <svg><use href="#i-x"/></svg>
+            </span>
+          </div>
+
+        </div>
+
+        <div class="mx-footer">
+          <span><strong>1,852</strong> files visible to at least one agent</span>
+          <span class="sep">·</span>
+          <span><strong>14</strong> with write history</span>
+          <span class="sep">·</span>
+          <span><strong>2</strong> reverts recorded</span>
+          <span class="spacer"></span>
+          <span>Sort: <strong>Modified ↓</strong></span>
+          <span class="sep">·</span>
+          <span>Group: <strong>Activity</strong></span>
+        </div>
+      </div>
+
+      <!-- Version-timeline inspector for auth.ts -->
+      <div class="inspector">
+        <div class="insp-head">
+          <div class="kicker">Selected file · 7 versions</div>
+          <h2>auth.ts</h2>
+          <div class="path">~/Projects/Acme/lib/auth.ts</div>
+          <div class="stats">
+            <span><strong>3.1 KB</strong></span>
+            <span>·</span>
+            <span>First seen <strong>Mar 28</strong></span>
+            <span>·</span>
+            <span>Visible to <strong>Claude</strong></span>
+          </div>
+        </div>
+
+        <div class="insp-body">
+
+          <div class="fi-stat-grid">
+            <div class="cell">
+              <div class="l">Last change</div>
+              <div class="v small">1m 48s ago</div>
+            </div>
+            <div class="cell">
+              <div class="l">Writes</div>
+              <div class="v">6</div>
+            </div>
+            <div class="cell">
+              <div class="l">Reverts</div>
+              <div class="v">1</div>
+            </div>
+            <div class="cell">
+              <div class="l">Reads</div>
+              <div class="v">14</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Version history · newest first</div>
+
+            <div class="vtimeline">
+
+              <div class="vnode current selected">
+                <div class="vrow-top">
+                  <span class="vtime">16:22:03</span>
+                  <span class="vagent"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span>Claude wrote</span>
+                  <span class="vsize">+418 B</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag">Current · v7</span>
+                  <code>sha256: a4f2…</code>
+                  <span class="session-tag">Jane follow-up</span>
+                </div>
+                <div class="vdiff">
+                  <span class="line ctx">  export function signIn(email, password) {</span>
+                  <span class="line rem">−   return api.post('/auth', { email, password })</span>
+                  <span class="line add">+   return api.post('/auth', {</span>
+                  <span class="line add">+     email, password, mfa: true,</span>
+                  <span class="line add">+   })</span>
+                  <span class="line ctx">  }</span>
+                </div>
+                <div class="vexpand">
+                  <div class="btn secondary">
+                    <svg><use href="#i-eye"/></svg>
+                    Compare to v6
+                  </div>
+                  <div class="btn secondary">
+                    <svg><use href="#i-open"/></svg>
+                    Open file
+                  </div>
+                </div>
+              </div>
+
+              <div class="vnode">
+                <div class="vrow-top">
+                  <span class="vtime">16:04:12</span>
+                  <span class="vagent"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span>Claude wrote</span>
+                  <span class="vsize">+212 B</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag">v6</span>
+                  <code>sha256: 7c81…</code>
+                  <span class="session-tag">Jane follow-up</span>
+                </div>
+              </div>
+
+              <div class="vnode revert">
+                <div class="vrow-top">
+                  <span class="vtime">Yesterday 22:38</span>
+                  <span class="vagent"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span>Claude reverted</span>
+                  <span class="vsize neg">−96 B</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag">Revert v5</span>
+                  <span>from v4 snapshot</span>
+                </div>
+                <div class="vexpand">
+                  <div class="btn secondary">
+                    <svg><use href="#i-uturn"/></svg>
+                    Restore to v5
+                  </div>
+                </div>
+              </div>
+
+              <div class="vnode reverted">
+                <div class="vrow-top">
+                  <span class="vtime">Yesterday 22:15</span>
+                  <span class="vagent"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span>Claude wrote</span>
+                  <span class="vsize">+96 B</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag">v4 · reverted</span>
+                  <code>sha256: e029…</code>
+                  <span>Writing sprint</span>
+                </div>
+                <div class="vexpand">
+                  This version was reverted on Apr 13 at 22:38. Content snapshot preserved.
+                </div>
+              </div>
+
+              <div class="vnode">
+                <div class="vrow-top">
+                  <span class="vtime">Apr 12 · 14:34</span>
+                  <span class="vagent"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span>Claude wrote</span>
+                  <span class="vsize">+340 B</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag">v3</span>
+                  <code>sha256: 1b54…</code>
+                  <span>default scope</span>
+                </div>
+              </div>
+
+              <div class="vnode">
+                <div class="vrow-top">
+                  <span class="vtime">Apr 10 · 09:41</span>
+                  <span class="vagent"><span class="av claude"><svg><use href="#i-sparkle"/></svg></span>Claude wrote</span>
+                  <span class="vsize">+128 B</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag">v2</span>
+                  <code>sha256: 3aa0…</code>
+                  <span>default scope</span>
+                </div>
+              </div>
+
+              <div class="vnode">
+                <div class="vrow-top">
+                  <span class="vtime">Mar 28 · 11:22</span>
+                  <span class="vagent"><span class="av" style="background: linear-gradient(135deg, #4a4a52, #3a3a40); box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.2);"><svg><use href="#i-mark"/></svg></span>Original</span>
+                  <span class="vsize" style="background: rgba(124,127,138,0.14); color: var(--text-3);">2.0 KB</span>
+                </div>
+                <div class="vmeta">
+                  <span class="vtag" style="background: rgba(255,255,255,0.06); color: var(--text-3);">v1 · created</span>
+                  <code>sha256: 8f1c…</code>
+                  <span>on disk</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="insp-actions">
+            <div class="btn primary flex">
+              <svg><use href="#i-uturn"/></svg>
+              Revert to v6
+            </div>
+            <div class="btn secondary flex">
+              <svg><use href="#i-finder"/></svg>
+              Reveal
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <div class="statusbar">
+      <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+      <span class="stat"><strong>1,852</strong> files · <strong>14</strong> tracked · <strong>2</strong> reverts</span>
+      <span class="spacer"></span>
+      <span class="stat">⌘A <kbd>select all</kbd></span>
+      <span class="stat">⌘R <kbd>revert</kbd></span>
+      <span class="stat">⌘⇧H <kbd>view history</kbd></span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════
+     VIEW 3 — SESSION (live overlay diff)
+     ═══════════════════════════════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 3</span>
+  <h2>Session — live overlay on default</h2>
+  <div class="sub">Visible only while a session is live. Shows what's added, removed, and inherited for this specific task. Expires when the session ends; changes don't touch your default.</div>
+</div>
+
+<div class="stage">
+  <div class="window">
+
+    <!-- TOOLBAR -->
+    <div class="toolbar">
+      <div class="tb-left">
+        <div class="traffic">
+          <button class="c"></button><button class="m"></button><button class="x"></button>
+        </div>
+        <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+      </div>
+      <div class="tb-center">
+        <div class="tb-title">
+          <h1>Access · Session</h1>
+          <div class="sub">Jane follow-up · 2 added · 1 removed · 4 inherited</div>
+        </div>
+        <div class="seg">
+          <div class="si">Folders <span class="count">6</span></div>
+          <div class="si">Files <span class="count">1,852</span></div>
+          <div class="si on">Session <span class="count">+2 −1</span></div>
+          <div class="si">History <span class="count">47</span></div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="tb-search">
+          <svg><use href="#i-search"/></svg>
+          <input placeholder="Filter folders…" />
+        </div>
+      </div>
+      <div class="tb-right">
+        <div class="session-chip">
+          <span class="dot"></span>
+          <span class="name">Jane follow-up</span>
+          <span class="time">1:42:08</span>
+        </div>
+        <div class="tb-btn primary" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: rgba(46,203,127,0.5); box-shadow: 0 4px 12px var(--session-glow), inset 0 1px 0 rgba(255,255,255,0.2);">
+          <svg><use href="#i-plus"/></svg>
+          Add for session
+        </div>
+      </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="body">
+
+      <!-- Nav sidebar -->
+      <div class="sidebar">
+        <div class="sb-head">Manifold</div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+        <div class="sb-item active"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">7</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+        <div class="sb-spacer"></div>
+        <div class="sb-divider"></div>
+        <div class="sb-head">Session</div>
+        <div class="sb-item" style="padding: 8px 10px;">
+          <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+          <div style="display: flex; flex-direction: column; min-width: 0;">
+            <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+            <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+          </div>
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-profile">
+          <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+          <div style="min-width: 0;">
+            <div class="who">Amar Gandhi</div>
+            <div class="state">Runtime connected</div>
+          </div>
+          <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+        </div>
+      </div>
+
+      <!-- Matrix diff content -->
+      <div class="content">
+
+        <!-- Session context header -->
+        <div class="session-head-bar">
+          <div class="big-dot"></div>
+          <div class="text">
+            <div class="kicker">Live session · expires in 1h 42m</div>
+            <h3>Jane follow-up</h3>
+            <div class="meta">Started from <strong>default access</strong> · tracked writes · Claude only · started 3:55 PM</div>
+          </div>
+          <div class="actions">
+            <div class="btn secondary" style="padding: 5px 10px; font: 500 11px/14px var(--sans);">
+              <svg><use href="#i-eye"/></svg>
+              Review session
+            </div>
+            <div class="btn" style="padding: 5px 10px; font: 600 11px/14px var(--sans); background: linear-gradient(180deg, var(--session-2), var(--session)); color: #fff; border: 0.5px solid rgba(46,203,127,0.5); box-shadow: 0 2px 6px var(--session-glow);">
+              <svg><use href="#i-check-seal"/></svg>
+              Finish session
+            </div>
+          </div>
+        </div>
+
+        <div class="mx-head" style="top: 72px;">
+          <div><div class="row-check"></div></div>
+          <div>Source</div>
+          <div class="agent-col"><span class="avatar claude"><svg><use href="#i-sparkle"/></svg></span>Claude</div>
+          <div class="agent-col"><span class="avatar codex"><svg><use href="#i-code"/></svg></span>Codex</div>
+          <div class="r-col">Denials 7d</div>
+          <div></div>
+        </div>
+
+        <div class="mx-scroll">
+
+          <div class="mx-section added">
+            <svg width="12" height="12" style="color: var(--session);"><use href="#i-plus"/></svg>
+            Added for this session <span class="count">·  2</span>
+          </div>
+
+          <div class="mx-row session-add selected">
+            <div><div class="row-check on session" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div></div>
+            <div class="mx-source session-add">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Projects/Acme/secrets</div>
+                <div class="meta">4 files · <code>docs only</code> <span class="chip-inline s">in session</span></div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on session"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row session-add">
+            <div><div class="row-check on session" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div></div>
+            <div class="mx-source session-add">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Desktop/draft-deck</div>
+                <div class="meta">8 files · ad-hoc folder <span class="chip-inline s">in session</span></div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on session"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-section removed">
+            <svg width="12" height="12" style="color: var(--remove);"><use href="#i-minus"/></svg>
+            Removed for this session <span class="count">·  1</span>
+          </div>
+
+          <div class="mx-row session-remove">
+            <div><div class="row-check" style="background: var(--remove-soft); border-color: var(--remove); position: relative;"><span style="position:absolute;top:50%;left:2px;right:2px;height:1.5px;background:var(--remove);transform:translateY(-50%);border-radius:1px;"></span></div></div>
+            <div class="mx-source">
+              <div class="fldr" style="color: var(--remove);"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name" style="text-decoration: line-through; text-decoration-color: var(--remove);">Projects/Manifold</div>
+                <div class="meta">1,284 files · normally shared <span class="chip-inline" style="background: var(--remove-soft); color: var(--remove);">paused for session</span></div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl session-remove"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl on codex"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-section inherited">Inherited from default <span class="count">·  4</span></div>
+
+          <div class="mx-row inherited-row">
+            <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Projects/Acme</div>
+                <div class="meta">428 files · inherited</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row inherited-row">
+            <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Documents/Writing</div>
+                <div class="meta">28 files · inherited</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row inherited-row">
+            <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+            <div class="mx-source">
+              <div class="fldr"><svg><use href="#i-folder-filled"/></svg></div>
+              <div class="body">
+                <div class="name">Projects/Spikes</div>
+                <div class="meta">112 files · inherited</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+          <div class="mx-row inherited-row">
+            <div><div class="row-check on" style="opacity: 0.5;"></div></div>
+            <div class="mx-source">
+              <div class="fldr" style="color: var(--codex);"><svg><use href="#i-mail"/></svg></div>
+              <div class="body">
+                <div class="name">amar@spatialduality.com</div>
+                <div class="meta">47 threads in session · inherited</div>
+              </div>
+            </div>
+            <div class="tgl-cell"><div class="tgl on claude"><div class="knob"></div></div></div>
+            <div class="tgl-cell"><div class="tgl"><div class="knob"></div></div></div>
+            <div class="mx-denials none">—</div>
+            <div class="mx-menu">⋯</div>
+          </div>
+
+        </div>
+
+        <div class="mx-footer">
+          <span class="stat" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--session); box-shadow: 0 0 6px var(--session-glow);"></span>
+            <strong>2 added</strong>
+          </span>
+          <span class="sep">·</span>
+          <span class="stat" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--remove);"></span>
+            <strong>1 removed</strong>
+          </span>
+          <span class="sep">·</span>
+          <span><strong>4</strong> inherited from default</span>
+          <span class="spacer"></span>
+          <span>Session ends in <strong style="color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m 08s</strong></span>
+        </div>
+      </div>
+
+      <!-- Session inspector -->
+      <div class="inspector">
+        <div class="insp-head">
+          <div class="kicker session">Session addition</div>
+          <h2>Projects/Acme/secrets</h2>
+          <div class="path">~/Projects/Acme/secrets · 4 files</div>
+          <div class="stats">
+            <span>Added at <strong>16:18</strong></span>
+            <span>·</span>
+            <span>Expires <strong>17:48</strong></span>
+            <span>·</span>
+            <span><strong>Claude</strong> only</span>
+          </div>
+        </div>
+
+        <div class="insp-body">
+
+          <div class="count-banner" style="background: linear-gradient(180deg, var(--session-soft), var(--session-xsoft)); border-color: rgba(46,203,127,0.3);">
+            <div class="avatar" style="background: linear-gradient(135deg, var(--session), var(--session-2)); box-shadow: 0 2px 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"><svg><use href="#i-clock"/></svg></div>
+            <div class="text">
+              Claude can read these files for <strong>1h 42m more</strong>, then access expires automatically.
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Files</div>
+            <div class="tree">
+              <div class="tree-row">
+                <div class="caret"><svg><use href="#i-chev-down"/></svg></div>
+                <div class="check on" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div>
+                <div class="t-icon folder"><svg><use href="#i-folder-filled"/></svg></div>
+                <div class="t-name">secrets</div>
+                <div class="t-size">4</div>
+              </div>
+              <div class="tree-row" style="padding-left: 18px;">
+                <div class="indent guide"></div>
+                <div class="caret"></div>
+                <div class="check on" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div>
+                <div class="t-icon config"><svg><use href="#i-doc"/></svg></div>
+                <div class="t-name">onboarding.md</div>
+                <div class="t-size">4.2 KB</div>
+              </div>
+              <div class="tree-row" style="padding-left: 18px;">
+                <div class="indent guide"></div>
+                <div class="caret"></div>
+                <div class="check on" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div>
+                <div class="t-icon code"><svg><use href="#i-doc"/></svg></div>
+                <div class="t-name">spec-v2.md</div>
+                <div class="t-size">8.1 KB</div>
+              </div>
+              <div class="tree-row" style="padding-left: 18px;">
+                <div class="indent guide"></div>
+                <div class="caret"></div>
+                <div class="check on" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div>
+                <div class="t-icon code"><svg><use href="#i-doc"/></svg></div>
+                <div class="t-name">notes.md</div>
+                <div class="t-size">2.8 KB</div>
+              </div>
+              <div class="tree-row" style="padding-left: 18px;">
+                <div class="indent guide"></div>
+                <div class="caret"></div>
+                <div class="check on" style="background: linear-gradient(180deg, var(--session-2), var(--session)); border-color: var(--session); box-shadow: 0 0 8px var(--session-glow), inset 0 0.5px 0 rgba(255,255,255,0.3);"></div>
+                <div class="t-icon config" style="color: #E3C969;"><svg><use href="#i-json"/></svg></div>
+                <div class="t-name">assignments.json</div>
+                <div class="t-size">1.4 KB</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Access so far · in this session</div>
+            <div class="excl-list">
+              <div class="excl-row">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex-shrink: 0;"></span>
+                <span style="font: 500 11px/15px var(--mono); color: var(--text);">onboarding.md</span>
+                <span class="reason">read <strong>2×</strong> · 16:22</span>
+              </div>
+              <div class="excl-row">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex-shrink: 0;"></span>
+                <span style="font: 500 11px/15px var(--mono); color: var(--text);">spec-v2.md</span>
+                <span class="reason">read <strong>1×</strong> · 16:23</span>
+              </div>
+              <div class="excl-row">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--text-4); flex-shrink: 0;"></span>
+                <span style="font: 500 11px/15px var(--mono); color: var(--text-3);">notes.md</span>
+                <span class="reason"><strong>not yet</strong> read</span>
+              </div>
+              <div class="excl-row">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--text-4); flex-shrink: 0;"></span>
+                <span style="font: 500 11px/15px var(--mono); color: var(--text-3);">assignments.json</span>
+                <span class="reason"><strong>not yet</strong> read</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="insp-actions">
+            <div class="btn primary session flex">
+              <svg><use href="#i-plus"/></svg>
+              Promote to default
+            </div>
+            <div class="btn secondary flex danger">
+              <svg><use href="#i-x"/></svg>
+              Remove from session
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- STATUS BAR -->
+    <div class="statusbar">
+      <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+      <span class="stat">Session: <strong style="color: var(--session-2)">Jane follow-up</strong> · 1h 42m left</span>
+      <span class="stat">Additions revert <strong>automatically</strong> at 17:48</span>
+      <span class="spacer"></span>
+      <span class="stat">⌘⇧F <kbd>finish</kbd></span>
+      <span class="stat">⌘R <kbd>review changes</kbd></span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════
+     VIEW 3 — HISTORY (past sessions + resume)
+     ═══════════════════════════════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 4</span>
+  <h2>History — recallable past sessions</h2>
+  <div class="sub">Every session is implicitly a preset. One-click resume spawns a new session with the same shape. Reload applies against current default with a drift preview.</div>
+</div>
+
+<div class="stage">
+  <div class="window">
+
+    <div class="toolbar">
+      <div class="tb-left">
+        <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+        <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+      </div>
+      <div class="tb-center">
+        <div class="tb-title">
+          <h1>Access · History</h1>
+          <div class="sub">47 past sessions · 89 hours of tracked access</div>
+        </div>
+        <div class="seg">
+          <div class="si">Folders <span class="count">6</span></div>
+          <div class="si">Files <span class="count">1,852</span></div>
+          <div class="si">Session <span class="count">+2 −1</span></div>
+          <div class="si on">History <span class="count">47</span></div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="tb-search">
+          <svg><use href="#i-search"/></svg>
+          <input placeholder="Filter sessions…" />
+        </div>
+      </div>
+      <div class="tb-right">
+        <div class="session-chip">
+          <span class="dot"></span>
+          <span class="name">Jane follow-up</span>
+          <span class="time">1:42:08</span>
+        </div>
+        <div class="tb-btn"><svg><use href="#i-export"/></svg>Export</div>
+      </div>
+    </div>
+
+    <div class="body">
+      <!-- Nav sidebar -->
+      <div class="sidebar">
+        <div class="sb-head">Manifold</div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">47</span></div>
+        <div class="sb-item active"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">7</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests<span class="badge">2</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">11</span></div>
+        <div class="sb-spacer"></div>
+        <div class="sb-divider"></div>
+        <div class="sb-head">Session</div>
+        <div class="sb-item" style="padding: 8px 10px;">
+          <span class="ico" style="color: var(--session)"><svg><use href="#i-clock"/></svg></span>
+          <div style="display: flex; flex-direction: column; min-width: 0;">
+            <span style="font: 600 12px/15px var(--sans); color: var(--text);">Jane follow-up</span>
+            <span style="font: 400 10px/13px var(--mono); color: var(--session-2); font-variant-numeric: tabular-nums;">1h 42m left · tracked</span>
+          </div>
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-profile">
+          <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+          <div style="min-width: 0;">
+            <div class="who">Amar Gandhi</div>
+            <div class="state">Runtime connected</div>
+          </div>
+          <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+        </div>
+      </div>
+
+      <!-- History list -->
+      <div class="content">
+        <div class="hist-scroll">
+
+          <div class="hist-day">Today <span class="count">·  1 active · 2 past</span></div>
+
+          <div class="hist-row active-sess selected">
+            <div class="hist-time">
+              15:55
+              <span class="dur">active · 1h 42m left</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Jane follow-up</h3>
+                <span class="hist-kind live">Live</span>
+              </div>
+              <div class="hist-summary"><strong>+2 folders</strong>, −1 folder · tracked writes</div>
+            </div>
+            <div class="hist-agents">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av empty"></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 40%"></div>
+                <div class="b read" style="height: 55%"></div>
+                <div class="b read" style="height: 30%"></div>
+                <div class="b write" style="height: 80%"></div>
+                <div class="b read" style="height: 45%"></div>
+                <div class="b write" style="height: 65%"></div>
+                <div class="b deny" style="height: 22%"></div>
+                <div class="b read" style="height: 35%"></div>
+              </div>
+              <span>8 events · 2 writes</span>
+            </div>
+            <div></div>
+            <div class="resume-btn live">
+              <svg><use href="#i-eye"/></svg>
+              Review
+            </div>
+          </div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              14:12 – 14:38
+              <span class="dur">26m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Codex · default access</h3>
+              </div>
+              <div class="hist-summary">no session · default-scope run</div>
+            </div>
+            <div class="hist-agents">
+              <span class="av empty"></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 35%"></div>
+                <div class="b read" style="height: 60%"></div>
+                <div class="b read" style="height: 45%"></div>
+                <div class="b read" style="height: 55%"></div>
+                <div class="b write" style="height: 75%"></div>
+                <div class="b read" style="height: 30%"></div>
+              </div>
+              <span>21 events · 4 writes</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              11:08 – 11:22
+              <span class="dur">14m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Codex pbxproj audit</h3>
+                <span class="hist-kind session">Session</span>
+              </div>
+              <div class="hist-summary">+0, −0 · <strong style="color: var(--attention)">2 denials</strong></div>
+            </div>
+            <div class="hist-agents">
+              <span class="av empty"></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 50%"></div>
+                <div class="b read" style="height: 70%"></div>
+                <div class="b read" style="height: 40%"></div>
+                <div class="b deny" style="height: 55%"></div>
+                <div class="b deny" style="height: 55%"></div>
+              </div>
+              <span>14 events</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+          <div class="hist-day">Yesterday <span class="count">·  2</span></div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              22:15 – 00:02
+              <span class="dur">1h 47m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Writing sprint</h3>
+                <span class="hist-kind tracked">Tracked edit</span>
+              </div>
+              <div class="hist-summary"><strong>+1 folder</strong> · 12 writes · all reversible</div>
+            </div>
+            <div class="hist-agents">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av empty"></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 30%"></div>
+                <div class="b read" style="height: 45%"></div>
+                <div class="b read" style="height: 55%"></div>
+                <div class="b write" style="height: 75%"></div>
+                <div class="b write" style="height: 60%"></div>
+                <div class="b read" style="height: 40%"></div>
+                <div class="b read" style="height: 35%"></div>
+                <div class="b write" style="height: 50%"></div>
+              </div>
+              <span>42 events · 12 writes</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              16:40 – 17:08
+              <span class="dur">28m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Board call prep</h3>
+                <span class="hist-kind minus">Default minus…</span>
+              </div>
+              <div class="hist-summary">+0, <strong style="color: var(--remove)">−2 folders</strong> · sensitive call mode</div>
+            </div>
+            <div class="hist-agents">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av empty"></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 25%"></div>
+                <div class="b read" style="height: 30%"></div>
+                <div class="b read" style="height: 45%"></div>
+                <div class="b read" style="height: 40%"></div>
+              </div>
+              <span>9 events</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+          <div class="hist-day">Last week <span class="count">·  12</span></div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              Apr 10 · 09:22
+              <span class="dur">2h 03m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Jane follow-up</h3>
+                <span class="hist-kind session">Session</span>
+              </div>
+              <div class="hist-summary"><strong>+5 messages</strong> from @jane@acme.com · <strong style="color: var(--attention-2)">drift</strong></div>
+            </div>
+            <div class="hist-agents">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av empty"></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 40%"></div>
+                <div class="b read" style="height: 50%"></div>
+                <div class="b read" style="height: 60%"></div>
+                <div class="b read" style="height: 45%"></div>
+                <div class="b write" style="height: 70%"></div>
+                <div class="b read" style="height: 35%"></div>
+              </div>
+              <span>26 events</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              Apr 09 · 14:18
+              <span class="dur">45m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Sensitive call</h3>
+                <span class="hist-kind minus">Default minus…</span>
+              </div>
+              <div class="hist-summary">blank start · agents paused</div>
+            </div>
+            <div class="hist-agents">
+              <span class="av empty"></span>
+              <span class="av empty"></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline" style="opacity: 0.5;">
+                <div class="b read" style="height: 20%"></div>
+              </div>
+              <span>0 events (paused)</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+          <div class="hist-row">
+            <div class="hist-time">
+              Apr 08 · 10:45
+              <span class="dur">3h 12m</span>
+            </div>
+            <div class="hist-name">
+              <div class="title">
+                <h3>Investor deck</h3>
+                <span class="hist-kind tracked">Tracked edit</span>
+              </div>
+              <div class="hist-summary"><strong>+3 folders</strong> · 24 writes · 2 reverts</div>
+            </div>
+            <div class="hist-agents">
+              <span class="av claude"><svg><use href="#i-sparkle"/></svg></span>
+              <span class="av codex"><svg><use href="#i-code"/></svg></span>
+            </div>
+            <div class="hist-events">
+              <div class="sparkline">
+                <div class="b read" style="height: 40%"></div>
+                <div class="b write" style="height: 55%"></div>
+                <div class="b read" style="height: 35%"></div>
+                <div class="b write" style="height: 75%"></div>
+                <div class="b write" style="height: 65%"></div>
+                <div class="b read" style="height: 30%"></div>
+                <div class="b write" style="height: 50%"></div>
+                <div class="b read" style="height: 45%"></div>
+              </div>
+              <span>89 events · 24 writes</span>
+            </div>
+            <div></div>
+            <div class="resume-btn">
+              <svg><use href="#i-resume"/></svg>
+              Resume
+            </div>
+          </div>
+
+        </div>
+
+        <div class="mx-footer">
+          <span><strong>47</strong> sessions this month</span>
+          <span class="sep">·</span>
+          <span><strong>89h 12m</strong> tracked access</span>
+          <span class="sep">·</span>
+          <span><strong>12</strong> reverts · <strong>4</strong> denials</span>
+          <span class="spacer"></span>
+          <span>Oldest session: <strong>Mar 20</strong></span>
+        </div>
+      </div>
+
+      <!-- History inspector (selected session: Writing sprint from yesterday) -->
+      <div class="inspector">
+        <div class="insp-head">
+          <div class="kicker session">Past session · 1h 47m</div>
+          <h2>Writing sprint</h2>
+          <div class="path">Apr 13 · 22:15 → 00:02 · tracked edit</div>
+          <div class="stats">
+            <span><strong>42</strong> events</span>
+            <span>·</span>
+            <span><strong>12</strong> writes</span>
+            <span>·</span>
+            <span><strong>0</strong> denials</span>
+          </div>
+        </div>
+
+        <div class="insp-body">
+
+          <div class="hist-insp-meta">
+            <div class="stat-cell">
+              <div class="label">Base</div>
+              <div class="val small">Default + 1 addition</div>
+            </div>
+            <div class="stat-cell">
+              <div class="label">Agents</div>
+              <div class="val small">Claude</div>
+            </div>
+            <div class="stat-cell">
+              <div class="label">Writes</div>
+              <div class="val">12</div>
+            </div>
+            <div class="stat-cell">
+              <div class="label">Reverts</div>
+              <div class="val">0</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Additions · 1</div>
+            <div class="addrm-list">
+              <div class="addrm-item add">
+                <span class="sign">＋</span>
+                <span class="icon"><svg><use href="#i-folder-filled"/></svg></span>
+                <span class="name">Documents/Writing/drafts-archive</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Subtractions · 0</div>
+            <div style="padding: 10px 12px; background: rgba(255,255,255,0.03); border: 0.5px dashed var(--hairline); border-radius: 6px; font: 400 11px/15px var(--sans); color: var(--text-3); text-align: center;">
+              No folders were removed for this session.
+            </div>
+          </div>
+
+          <div>
+            <div class="insp-label">Drift vs. now</div>
+            <div style="background: var(--attention-xsoft); border: 0.5px solid rgba(255,138,61,0.3); border-radius: 8px; padding: 10px 12px; font: 400 12px/17px var(--sans); color: var(--text-2);">
+              Your default has gained <strong style="color: var(--text);">2 folders</strong> since this session. If you resume, they'll be included in the baseline.
+            </div>
+          </div>
+
+          <div class="insp-actions">
+            <div class="btn primary session flex">
+              <svg><use href="#i-resume"/></svg>
+              Resume session
+            </div>
+            <div class="btn secondary flex">
+              <svg><use href="#i-export"/></svg>
+              Export
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <div class="statusbar">
+      <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+      <span class="stat"><strong>47</strong> sessions · <strong>89h 12m</strong> total</span>
+      <span class="spacer"></span>
+      <span class="stat">⌘R <kbd>resume</kbd></span>
+      <span class="stat">⌘E <kbd>export</kbd></span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════
+     VIEW 4 — EMPTY (first-run state)
+     ═══════════════════════════════════════════════════════════════════════════════ -->
+<div class="view-label">
+  <span class="num">View 5</span>
+  <h2>Empty — the first moment</h2>
+  <div class="sub">Nothing shared yet. No session running. The empty state is not a blocker — it's the product's correct default. Copy reframes emptiness as deliberate.</div>
+</div>
+
+<div class="stage">
+  <div class="window">
+
+    <div class="toolbar">
+      <div class="tb-left">
+        <div class="traffic"><button class="c"></button><button class="m"></button><button class="x"></button></div>
+        <div class="tb-toggle"><svg><use href="#i-sidebar"/></svg></div>
+      </div>
+      <div class="tb-center">
+        <div class="tb-title">
+          <h1>Access</h1>
+          <div class="sub">Nothing shared yet — you're fully private</div>
+        </div>
+        <div class="seg">
+          <div class="si on">Folders <span class="count">0</span></div>
+          <div class="si" style="opacity: 0.5;">Files</div>
+          <div class="si" style="opacity: 0.5;">Session</div>
+          <div class="si" style="opacity: 0.5;">History</div>
+        </div>
+        <div style="flex:1"></div>
+      </div>
+      <div class="tb-right">
+        <div class="tb-btn primary">
+          <svg><use href="#i-folder-plus"/></svg>
+          Share your first folder…
+        </div>
+      </div>
+    </div>
+
+    <div class="body">
+      <!-- Nav sidebar (same chrome, empty counts) -->
+      <div class="sidebar">
+        <div class="sb-head">Manifold</div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-pulse"/></svg></span>Activity<span class="count">0</span></div>
+        <div class="sb-item active"><span class="ico"><svg><use href="#i-folder"/></svg></span>Access<span class="count">0</span></div>
+        <div class="sb-item" style="opacity: 0.6;"><span class="ico"><svg><use href="#i-mail"/></svg></span>Mail<span class="count">0</span></div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-clock"/></svg></span>Requests</div>
+        <div class="sb-item"><span class="ico"><svg><use href="#i-shield"/></svg></span>Rules<span class="count">7</span></div>
+
+        <div class="sb-spacer"></div>
+        <div class="sb-divider"></div>
+        <div class="sb-head">Session</div>
+        <div style="padding: 10px 14px; font: 400 11px/15px var(--sans); color: var(--text-3);">
+          No session running. Sessions appear here once you share a folder.
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-profile">
+          <div class="avatar"><svg><use href="#i-mark"/></svg></div>
+          <div style="min-width: 0;">
+            <div class="who">Amar Gandhi</div>
+            <div class="state">Runtime connected</div>
+          </div>
+          <span class="chev"><svg><use href="#i-chev-up"/></svg></span>
+        </div>
+      </div>
+
+      <!-- Empty main content -->
+      <div class="content">
+        <div class="empty-stage">
+
+          <div class="empty-illus">
+            <div class="folder"></div>
+            <div class="lock"><svg><use href="#i-lock"/></svg></div>
+          </div>
+
+          <div class="empty-copy">
+            <h1>You haven't shared any folders yet.</h1>
+            <p><strong>That's correct.</strong> Manifold stays out of your way until you invite it in. Claude and Codex see nothing until you share a folder with them, one at a time.</p>
+          </div>
+
+          <div class="empty-cta" style="grid-template-columns: 1.2fr 1fr;">
+            <div class="empty-card" style="padding: 24px;">
+              <div class="icon-wrap" style="width: 44px; height: 44px; border-radius: 12px;"><svg style="width: 22px; height: 22px;"><use href="#i-folder-plus"/></svg></div>
+              <h3 style="font: 600 17px/22px var(--display); letter-spacing: -0.01em;">Share your first folder</h3>
+              <p>Pick any folder. You'll be able to exclude specific files (<code>*.env</code>, <code>secrets/</code>, <code>node_modules/</code>), set per-folder rules, and undo any change the agent makes — all from the file-tree inspector.</p>
+              <div class="hint" style="display: flex; align-items: center; gap: 6px;">
+                <svg style="width: 10px; height: 10px;"><use href="#i-chev-right"/></svg>
+                Pick a folder…
+                <span style="margin-left: auto; color: var(--text-4); font: 500 10px/14px var(--mono); text-transform: none; letter-spacing: 0;">⌘⇧F</span>
+              </div>
+            </div>
+            <div class="empty-card" style="border-style: dashed; background: rgba(255,255,255,0.02); cursor: default;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <svg style="width: 14px; height: 14px; color: var(--text-3);"><use href="#i-folder"/></svg>
+                <span style="font: 600 10px/14px var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3);">Or drag &amp; drop</span>
+              </div>
+              <h3 style="font: 600 14px/18px var(--sans); color: var(--text);">Drop a folder here</h3>
+              <p>Drag any folder from Finder into this window to add it as a source. Works with <code>⌥</code>-drag for symbolic links.</p>
+              <div class="hint" style="color: var(--text-4); margin-top: 10px;">Hint · Finder → here</div>
+            </div>
+          </div>
+
+          <div class="empty-note">
+            <svg><use href="#i-shield"/></svg>
+            <div>
+              <strong>Safe defaults already loaded.</strong> 7 global rules are active — <code style="font: 500 10px/14px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2);">*.env</code>, <code style="font: 500 10px/14px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2);">*.pem</code>, <code style="font: 500 10px/14px var(--mono); background: rgba(255,255,255,0.08); padding: 0 4px; border-radius: 3px; color: var(--text-2);">.ssh/</code>, credit-card redaction, and more. They'll apply to whatever you share.
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Getting started inspector -->
+      <div class="inspector">
+        <div class="insp-head">
+          <div class="kicker">Getting started</div>
+          <h2>What you'll see</h2>
+          <div class="path">after you share your first folder</div>
+        </div>
+
+        <div class="insp-body">
+          <div class="empty-teaser">
+            <p>Once a folder is shared, this view fills in with:</p>
+
+            <div class="empty-teaser-step">
+              <div class="n">1</div>
+              <div class="body-txt">
+                <h5>Coverage matrix</h5>
+                <p>One row per shared folder. Toggle each agent on or off. See how many files each can see, and how many are excluded.</p>
+              </div>
+            </div>
+
+            <div class="empty-teaser-step">
+              <div class="n">2</div>
+              <div class="body-txt">
+                <h5>File-tree inspector</h5>
+                <p>Drill into any folder. Exclude specific files or subfolders with tri-state checkboxes. Smart defaults pre-exclude sensitive patterns.</p>
+              </div>
+            </div>
+
+            <div class="empty-teaser-step">
+              <div class="n">3</div>
+              <div class="body-txt">
+                <h5>Session overlays</h5>
+                <p>Spin up a time-boxed session that adds or removes folders just for a task. Expires automatically.</p>
+              </div>
+            </div>
+
+            <div class="empty-teaser-step">
+              <div class="n">4</div>
+              <div class="body-txt">
+                <h5>Denial counts</h5>
+                <p>If an agent tries to reach a folder you haven't shared, Manifold blocks it and records the attempt — you decide whether to grant.</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="statusbar">
+      <span class="stat"><span class="dot ok"></span>Runtime <strong>connected</strong></span>
+      <span class="stat">Claude <strong>connected</strong> · waiting</span>
+      <span class="stat">Codex <strong>connected</strong> · waiting</span>
+      <span class="stat">Default scope: <strong>empty</strong></span>
+      <span class="spacer"></span>
+      <span class="stat">⌘⇧F <kbd>add folder</kbd></span>
+      <span class="stat">⌘⇧M <kbd>add mailbox</kbd></span>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
