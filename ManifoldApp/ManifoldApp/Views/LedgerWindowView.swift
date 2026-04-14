@@ -88,9 +88,7 @@ struct LedgerWindowView: View {
     private var content: some View {
         switch destination {
         case .activity:
-            LedgerPlaceholder(destination: .activity,
-                              stageTag: "PHASE 2",
-                              stageCopy: "Activity ledger ships next: three-pane session rail, dense event table, and evidence inspector.")
+            ActivityWindowView()
         case .access:
             LedgerPlaceholder(destination: .access,
                               stageTag: "PHASE 3",
