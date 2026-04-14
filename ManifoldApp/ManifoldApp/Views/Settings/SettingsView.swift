@@ -4,22 +4,23 @@
 import SwiftUI
 import ManifoldKit
 
-/// Settings window — 4 tabs: General, AI Apps, Mail, Storage.
-/// Uses SwiftUI Settings scene which auto-sizes per pane.
+/// Settings window — General / Agents / Storage / Mail / Advanced.
+/// Stage-3 structure: engineering-flavored controls migrate to Advanced
+/// in a subsequent minor pass; Phase 8 is the copy pass only.
 struct SettingsView: View {
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") {
                 GeneralSettingsPane()
             }
-            Tab("AI Apps", systemImage: "cpu") {
+            Tab("Agents", systemImage: "sparkle") {
                 AIAppsSettingsPane()
-            }
-            Tab("Mail", systemImage: "envelope") {
-                MailSettingsPane()
             }
             Tab("Storage", systemImage: "externaldrive") {
                 StorageSettingsPane()
+            }
+            Tab("Mail", systemImage: "envelope") {
+                MailSettingsPane()
             }
         }
         .frame(minWidth: 580, minHeight: 500)
