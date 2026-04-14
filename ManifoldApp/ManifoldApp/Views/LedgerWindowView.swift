@@ -94,9 +94,7 @@ struct LedgerWindowView: View {
         case .mail:
             MailWindowView()
         case .requests:
-            LedgerPlaceholder(destination: .requests,
-                              stageTag: "PHASE 5",
-                              stageCopy: "The approval queue replaces the modal sheet in Phase 5. Cards land here with the deny-focused commit ladder.")
+            RequestsWindowView()
         case .rules:
             LedgerPlaceholder(destination: .rules,
                               stageTag: "PHASE 6",
