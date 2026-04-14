@@ -96,9 +96,7 @@ struct LedgerWindowView: View {
         case .requests:
             RequestsWindowView()
         case .rules:
-            LedgerPlaceholder(destination: .rules,
-                              stageTag: "PHASE 6",
-                              stageCopy: "Global rules (files / email / agents) with live blast-radius previews land in Phase 6.")
+            RulesWindowView()
         }
     }
 }

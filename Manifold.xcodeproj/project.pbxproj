@@ -51,6 +51,7 @@
 		614FCE773F1241E5128C417B /* ActivityRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 460CFB782E1CF189B7E18034 /* ActivityRow.swift */; };
 		6264FE703CB49EC3348C20EB /* SnapshotRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15CE9C08174D45990E81D23B /* SnapshotRow.swift */; };
 		6371397EB71DD881F90840D1 /* RequestsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B4D4ECF3E7D4BFD1BBCDE5 /* RequestsWindowView.swift */; };
+		65B0852B9407199BF942D86D /* RulesWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFD63A340078590E7ADB928D /* RulesWindowView.swift */; };
 		68FCC85BA31E893213726EE0 /* GradientAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878E4074B13E7FE963568602 /* GradientAvatar.swift */; };
 		69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050CA6EEFB11452C92977C1 /* DiffView.swift */; };
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
@@ -77,6 +78,7 @@
 		8DA44CE1AF5BE22FE13B2133 /* SessionPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D1DEFECCD6E9DF9CC22D59F /* SessionPrimitivesTests.swift */; };
 		94D42B99BEDA9FC2D59382DC /* SharedEmailsRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D36E3F6A368CA83664D262 /* SharedEmailsRow.swift */; };
 		95AF5CBC574458C2D1C61AEC /* ActionFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E2BE87F3F8D6D82A5C661A /* ActionFormatting.swift */; };
+		98EE48CC64C556D48DC87C12 /* NewRuleSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28FEE6FEC0788693B40BA9B /* NewRuleSheet.swift */; };
 		991A3B57C30B08C98DF14F86 /* PolicyModel+Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FBEFDAD22CFD662B09CC62 /* PolicyModel+Session.swift */; };
 		99A490D882414CD0B5672D8C /* MenuBarPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 197B4B7352D14843A932C36A /* MenuBarPanelView.swift */; };
 		9B0FD781995F4F5A9B0D807E /* WorkBlockBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCB9862835E04FEDB04FA8B5 /* WorkBlockBannerView.swift */; };
@@ -259,6 +261,7 @@
 		BEFBC8B14873A0392D956D2F /* VersionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionsView.swift; sourceTree = "<group>"; };
 		C1F98624E0F332E367EEC45F /* StorageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageModel.swift; sourceTree = "<group>"; };
 		C25000DE1F68784E45812D2B /* ManifoldTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldTypes.swift; sourceTree = "<group>"; };
+		C28FEE6FEC0788693B40BA9B /* NewRuleSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NewRuleSheet.swift; sourceTree = "<group>"; };
 		C4648126DF072401BF3DE879 /* EventTable.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EventTable.swift; sourceTree = "<group>"; };
 		C5362DEFA0F55C0F4907B52D /* ReadingPaneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingPaneToolbar.swift; sourceTree = "<group>"; };
 		C8FB18E5540B4923A9D0FCE5 /* TrackChangesToolbarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackChangesToolbarContent.swift; sourceTree = "<group>"; };
@@ -273,6 +276,7 @@
 		DBA45B76E3E59D23B922D860 /* ColorIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorIndicator.swift; sourceTree = "<group>"; };
 		DDD10002 /* RuleFormComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RuleFormComponents.swift; path = ManifoldApp/ManifoldApp/Components/RuleFormComponents.swift; sourceTree = SOURCE_ROOT; };
 		DE3376AC9C43450C9456F8F5 /* AddMailAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/AddMailAccountSheet.swift; sourceTree = "<group>"; };
+		DFD63A340078590E7ADB928D /* RulesWindowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RulesWindowView.swift; sourceTree = "<group>"; };
 		E10000000000000000000011 /* DashboardStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000012 /* IntegrationHealthModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationHealthModelTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000013 /* EmailRulesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesModelTests.swift; sourceTree = "<group>"; };
@@ -429,6 +433,7 @@
 				C4DE9A12D9CAA85314747FE4 /* Access */,
 				D9F052A28089063810019429 /* Mail */,
 				ACC012C6F0D6A9B31DCD3B2F /* Requests */,
+				C25E75DAC205B9139DDD6A01 /* Rules */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -512,6 +517,16 @@
 				CC3F9569364E31B23C069E81 /* SmartMailbox */,
 			);
 			path = Email;
+			sourceTree = "<group>";
+		};
+		C25E75DAC205B9139DDD6A01 /* Rules */ = {
+			isa = PBXGroup;
+			children = (
+				DFD63A340078590E7ADB928D /* RulesWindowView.swift */,
+				C28FEE6FEC0788693B40BA9B /* NewRuleSheet.swift */,
+			);
+			name = Rules;
+			path = Rules;
 			sourceTree = "<group>";
 		};
 		C4DE9A12D9CAA85314747FE4 /* Access */ = {
@@ -917,6 +932,8 @@
 				BB98C6321936CEE860B90941 /* RecentAnswersView.swift in Sources */,
 				4177F22F12C24EA968C12DCC /* PatternDetectionInspector.swift in Sources */,
 				E7735B6D4719B5C789F89D42 /* EmptyRequestsView.swift in Sources */,
+				65B0852B9407199BF942D86D /* RulesWindowView.swift in Sources */,
+				98EE48CC64C556D48DC87C12 /* NewRuleSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
