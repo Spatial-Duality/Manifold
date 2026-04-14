@@ -90,9 +90,7 @@ struct LedgerWindowView: View {
         case .activity:
             ActivityWindowView()
         case .access:
-            LedgerPlaceholder(destination: .access,
-                              stageTag: "PHASE 3",
-                              stageCopy: "Access folders matrix, file tree inspector, and session-diff overlay land in Phase 3.")
+            AccessWindowView()
         case .mail:
             LedgerPlaceholder(destination: .mail,
                               stageTag: "PHASE 4",
