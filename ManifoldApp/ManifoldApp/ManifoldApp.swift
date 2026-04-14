@@ -15,23 +15,26 @@ struct ManifoldApp: App {
 
     var body: some Scene {
         Window("Manifold", id: "main") {
-            MainView()
+            RootWindowContent()
                 .environment(store)
                 .environment(commands)
-                .frame(minWidth: 780, minHeight: 520)
+                .frame(minWidth: 920, minHeight: 600)
         }
-        .defaultSize(width: 960, height: 640)
+        .defaultSize(width: 1100, height: 720)
         .windowStyle(.automatic)
         .commands {
-            // File menu
             CommandGroup(after: .newItem) {
+                Button("New Session\u{2026}") {
+                    NotificationCenter.default.post(name: .manifoldShowSessionStartSheet, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
                 Button("Add Folder\u{2026}") {
                     store.addSourceFromPicker()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
 
-            // View menu
             CommandGroup(after: .toolbar) {
                 Button("Command Palette") {
                     commands.isPresented.toggle()
@@ -40,63 +43,10 @@ struct ManifoldApp: App {
 
                 Divider()
 
-                Button("Overview") { store.selectedTab = .overview }
-                    .keyboardShortcut("1", modifiers: .command)
-                Button("Files") { store.selectedTab = .files }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("Emails") { store.selectedTab = .emails }
-                    .keyboardShortcut("3", modifiers: .command)
-            }
-
-            CommandMenu("Access") {
-                Button("Review Access\u{2026}") {
-                    store.reviewSheetTrigger = ReviewAccessChange(
-                        description: "Review access",
-                        kind: .explicit
-                    )
+                Button("Activity") {
+                    focusLedger()
                 }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-
-                Button("Track Changes") {
-                    store.reviewSheetTrigger = ReviewAccessChange(
-                        description: "Start tracking changes",
-                        kind: .startWorkBlock
-                    )
-                }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
-
-                Button(pauseLabel) {
-                    Task {
-                        let agent: TargetApp = store.agentFocus.targetApp
-                        let policy = store.policy.policy(for: agent)
-                        if policy?.isPaused == true {
-                            await store.policy.resumeAgent(agent)
-                        } else {
-                            await store.policy.pauseAgent(agent)
-                        }
-                    }
-                }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
-
-                Divider()
-
-                Button("Toggle Activity") {
-                    store.showActivityDrawer.toggle()
-                }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-
-                Button("Toggle Inspector") {
-                    if store.inspectedFilePath != nil {
-                        store.inspectedFilePath = nil
-                    }
-                }
-                .keyboardShortcut("i", modifiers: .command)
-
-                Divider()
-
-                Button("Add Source\u{2026}") {
-                    store.addSourceFromPicker()
-                }
+                .keyboardShortcut("1", modifiers: .command)
             }
 
             CommandGroup(replacing: .appTermination) {
@@ -119,10 +69,11 @@ struct ManifoldApp: App {
         }
     }
 
-    private var pauseLabel: String {
-        let agent: TargetApp = store.agentFocus.targetApp
-        let policy = store.policy.policy(for: agent)
-        return policy?.isPaused == true ? "Resume Access" : "Pause Access"
+    private func focusLedger() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 
     private static func bootstrapStore() -> ManifoldStore {
@@ -141,5 +92,4 @@ struct ManifoldApp: App {
             return store
         }
     }
-
 }

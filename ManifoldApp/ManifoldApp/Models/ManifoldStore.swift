@@ -54,10 +54,6 @@ final class ManifoldStore {
     var agentFocus: AgentFocus = .claude
     var emailRulesDestination: EmailRulesDestination? = nil
 
-    var showReviewSheet = false
-    var showActivityDrawer = false
-    var reviewSheetTrigger: ReviewAccessChange?
-
     var selectedSidebarItem: SidebarItem? = .home
     var inspectedFilePath: String?
 

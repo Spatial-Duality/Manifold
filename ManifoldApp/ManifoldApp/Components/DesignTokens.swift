@@ -1,47 +1,201 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
+//
+// DesignTokens — Manifold's source of truth for color, type, motion, elevation.
+//
+// Per design/02-posture-and-principles.md §6 (color-as-identity and
+// color-as-state on separate channels) and design/html/tokens.css, Manifold
+// uses a fixed palette that is NOT tied to the user's system accent.
+//
+// Legacy names (Color.claudeBlue, .statusActive, Typ.caption, Anim.micro, …)
+// are preserved so existing views continue to compile while Phase 1 ships.
+// New code should prefer ManifoldPalette / ManifoldType / ManifoldMotion /
+// ManifoldElevation — the names match the token layer.
 
 import SwiftUI
 import ManifoldKit
 
-// MARK: - DS-1: Semantic Colors
+// MARK: - ManifoldPalette (canonical, scheme-aware)
+//
+// Values mirror design/html/tokens.css. Light and dark variants are
+// hand-picked (Principle 6) so each agent reads the same in peripheral
+// vision across every macOS accent setting.
 
-extension Color {
-    /// Agent identity colors — system semantic tokens per DESIGN.md
-    static let claudeBlue: Color = .blue
-    static let codexPurple: Color = .purple
-    static let statusActive: Color = .green
-    static let statusPaused: Color = .orange
-    static let statusWarning: Color = .yellow
-    static let statusDanger: Color = .red
+enum ManifoldPalette {
 
-    /// Agent color by type
-    static func agent(_ agent: ManifoldKit.TargetApp) -> Color {
-        agent == .codex ? .purple : .blue
+    // Agent identity — fixed, reserved, never tied to system accent
+    static let claude       = dynamicColor(light: 0x3B6DE6, dark: 0x6A94F5)
+    static let claudeSoft   = dynamicColor(light: 0x3B6DE6, lightAlpha: 0.10,
+                                           dark: 0x6A94F5,  darkAlpha: 0.16)
+    static let claudeSoft2  = dynamicColor(light: 0x3B6DE6, lightAlpha: 0.18,
+                                           dark: 0x6A94F5,  darkAlpha: 0.26)
+
+    static let codex        = dynamicColor(light: 0x7C46D6, dark: 0xA67AE8)
+    static let codexSoft    = dynamicColor(light: 0x7C46D6, lightAlpha: 0.10,
+                                           dark: 0xA67AE8,  darkAlpha: 0.16)
+    static let codexSoft2   = dynamicColor(light: 0x7C46D6, lightAlpha: 0.18,
+                                           dark: 0xA67AE8,  darkAlpha: 0.26)
+
+    // Status — always reinforced by a second channel (icon/text)
+    static let active       = dynamicColor(light: 0x1FAB5A, dark: 0x30C060)
+    static let activeSoft   = dynamicColor(light: 0x1FAB5A, lightAlpha: 0.10,
+                                           dark: 0x30C060,  darkAlpha: 0.15)
+
+    static let paused       = dynamicColor(light: 0xC8860B, dark: 0xE0A030)
+    static let pausedSoft   = dynamicColor(light: 0xC8860B, lightAlpha: 0.10,
+                                           dark: 0xE0A030,  darkAlpha: 0.15)
+
+    static let attention    = dynamicColor(light: 0xD45E00, dark: 0xFF8038)
+    static let attentionSoft = dynamicColor(light: 0xD45E00, lightAlpha: 0.10,
+                                            dark: 0xFF8038,  darkAlpha: 0.15)
+
+    static let danger       = dynamicColor(light: 0xC8201E, dark: 0xE05450)
+    static let dangerSoft   = dynamicColor(light: 0xC8201E, lightAlpha: 0.10,
+                                           dark: 0xE05450,  darkAlpha: 0.15)
+
+    // Surfaces — used by chrome, inspectors, ledger rows
+    static let bg           = dynamicColor(light: 0xF5F5F7, dark: 0x1C1C1E)
+    static let surface      = dynamicColor(light: 0xFFFFFF, dark: 0x2C2C2E)
+    static let surface2     = dynamicColor(light: 0xFBFBFD, dark: 0x242426)
+    static let surface3     = dynamicColor(light: 0xF0F0F2, dark: 0x343438)
+    static let surface4     = dynamicColor(light: 0xE8E8EA, dark: 0x3A3A3C)
+
+    static let border       = dynamicColor(light: 0x000000, lightAlpha: 0.08,
+                                           dark: 0xFFFFFF,  darkAlpha: 0.08)
+    static let border2      = dynamicColor(light: 0x000000, lightAlpha: 0.14,
+                                           dark: 0xFFFFFF,  darkAlpha: 0.14)
+
+    // Text — four tiers
+    static let text         = dynamicColor(light: 0x1D1D1F, dark: 0xF5F5F7)
+    static let text2        = dynamicColor(light: 0x55555A, dark: 0xC5C5C8)
+    static let text3        = dynamicColor(light: 0x8A8A8E, dark: 0x8A8A8E)
+    static let text4        = dynamicColor(light: 0xB5B5B9, dark: 0x5A5A5E)
+
+    // Agent accessor
+    static func agent(_ agent: TargetApp) -> Color {
+        agent == .codex ? codex : claude
+    }
+
+    static func agentSoft(_ agent: TargetApp) -> Color {
+        agent == .codex ? codexSoft : claudeSoft
     }
 }
 
-// MARK: - DS-2: Typography Scale
+// MARK: - Dynamic Color helper
+//
+// Builds a scheme-aware SwiftUI `Color` from a light and dark hex pair,
+// respecting accessibility high-contrast appearances. Use this rather than
+// `Color(.sRGB, …)` so the palette snaps to dark mode without a second
+// definition.
 
-/// Named type roles — use these everywhere instead of ad-hoc .font() calls.
+private func dynamicColor(
+    light: UInt32,
+    lightAlpha: Double = 1.0,
+    dark: UInt32,
+    darkAlpha: Double = 1.0
+) -> Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+        switch appearance.name {
+        case .darkAqua,
+             .vibrantDark,
+             .accessibilityHighContrastDarkAqua,
+             .accessibilityHighContrastVibrantDark:
+            return NSColor(hex: dark, alpha: darkAlpha)
+        default:
+            return NSColor(hex: light, alpha: lightAlpha)
+        }
+    })
+}
+
+private extension NSColor {
+    convenience init(hex: UInt32, alpha: Double) {
+        self.init(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255.0,
+            green:   CGFloat((hex >>  8) & 0xFF) / 255.0,
+            blue:    CGFloat( hex        & 0xFF) / 255.0,
+            alpha:   CGFloat(alpha)
+        )
+    }
+}
+
+// MARK: - Legacy semantic color names (kept for back-compat)
+//
+// Existing views import `Color.claudeBlue` etc. We preserve the names but
+// route them through the fixed palette so the whole app picks up Principle 6
+// immediately — no more `.blue` / `.purple` following system accent.
+
+extension Color {
+    /// Claude identity. Fixed, not system accent.
+    static let claudeBlue: Color = ManifoldPalette.claude
+    /// Codex identity. Fixed, not system accent.
+    static let codexPurple: Color = ManifoldPalette.codex
+
+    /// Status: agent active, session live, tracked-edit healthy.
+    static let statusActive: Color = ManifoldPalette.active
+    /// Status: paused by user.
+    static let statusPaused: Color = ManifoldPalette.paused
+    /// Status: soft warning (kept for legacy).
+    static let statusWarning: Color = ManifoldPalette.paused
+    /// Status: denial, pending queue badge, attention-worthy.
+    static let statusAttention: Color = ManifoldPalette.attention
+    /// Status: error that prevents the product from working.
+    static let statusDanger: Color = ManifoldPalette.danger
+
+    /// Fixed agent color by `TargetApp`.
+    static func agent(_ agent: ManifoldKit.TargetApp) -> Color {
+        ManifoldPalette.agent(agent)
+    }
+}
+
+// MARK: - Typography
+
+/// Named type roles — use these everywhere instead of ad-hoc `.font()` calls.
+/// Sizes track `tokens.css` so Swift and mockups stay aligned.
 enum Typ {
-    /// .title3.weight(.semibold) — Tab headings, card group titles
-    static let sectionTitle: Font = .title3.weight(.semibold)
-    /// .headline — Card headers, dialog titles, sidebar section headers
-    static let heading: Font = .headline
-    /// .callout — Primary content text, descriptions
-    static let body: Font = .callout
-    /// .caption — Timestamps, counts, badge labels, footer text
-    static let caption: Font = .caption
-    /// .caption.monospaced() — File paths, code, version hashes
-    static let mono: Font = .caption.monospaced()
-    /// .callout.monospacedDigit() — File counts, byte sizes in body text
-    static let numericBody: Font = .callout.monospacedDigit()
-    /// .caption.monospacedDigit() — Counts in badges, timestamps, table numerics
+    /// 10/14 uppercase — kickers, stage tags, section labels in dense UI.
+    static let tiny: Font           = .system(size: 10, weight: .medium)
+    /// 11/16 — timestamps, counts, micro meta.
+    static let caption: Font        = .caption
+    static let captionMedium: Font  = .caption.weight(.medium)
+    /// 13/20 — primary body text.
+    static let body: Font           = .callout
+    static let bodyMedium: Font     = .callout.weight(.medium)
+    /// 14/20 — section titles in tight space (toolbars, inspectors).
+    static let title: Font          = .system(size: 14, weight: .semibold)
+    /// 17/24 — window / inspector heading.
+    static let heading: Font        = .system(size: 17, weight: .semibold)
+    /// 22/28 — display type for first-run and big empty states.
+    static let display: Font        = .system(size: 22, weight: .semibold)
+
+    /// Section title legacy alias (used by Settings, etc).
+    static let sectionTitle: Font   = .title3.weight(.semibold)
+    /// Mono body — file paths, code, version hashes.
+    static let mono: Font           = .caption.monospaced()
+    /// Mono primary body.
+    static let monoBody: Font       = .system(size: 12, weight: .regular, design: .monospaced)
+    /// Numeric body — counts, byte sizes.
+    static let numericBody: Font    = .callout.monospacedDigit()
+    /// Numeric caption — counts in badges, timestamps.
     static let numericCaption: Font = .caption.monospacedDigit()
 }
 
-// MARK: - DS-3: Opacity Scale
+/// Canonical new-world alias — prefer `ManifoldType` in new code.
+enum ManifoldType {
+    static let tiny           = Typ.tiny
+    static let caption        = Typ.caption
+    static let captionMedium  = Typ.captionMedium
+    static let body           = Typ.body
+    static let bodyMedium     = Typ.bodyMedium
+    static let title          = Typ.title
+    static let heading        = Typ.heading
+    static let display        = Typ.display
+    static let mono           = Typ.mono
+    static let monoBody       = Typ.monoBody
+    static let numericBody    = Typ.numericBody
+    static let numericCaption = Typ.numericCaption
+}
+
+// MARK: - Opacity scale
 
 enum Opacity {
     static let rowTint: Double = 0.04
@@ -51,45 +205,65 @@ enum Opacity {
     static let scrim: Double = 0.3
 }
 
-// MARK: - DS-4: Shadow Presets
+// MARK: - Elevation (shadows)
 
 extension View {
+    /// Low-elevation card (rows, chips, inline cards).
     func cardElevation() -> some View {
-        shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+        shadow(color: .black.opacity(0.06), radius: 3, y: 1)
     }
+    /// Card on hover.
     func cardHoverElevation() -> some View {
         shadow(color: .black.opacity(0.12), radius: 5, y: 2)
     }
+    /// Popover (menu bar panel, dropdowns).
     func popoverElevation() -> some View {
-        shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        shadow(color: .black.opacity(0.16), radius: 12, y: 4)
     }
+    /// Sheet / inspector panel.
+    func panelElevation() -> some View {
+        shadow(color: .black.opacity(0.18), radius: 24, y: 8)
+    }
+    /// Toast notification.
     func toastElevation() -> some View {
         shadow(color: .black.opacity(0.10), radius: 4, y: 2)
     }
 }
 
-// MARK: - DS-5: Animation Presets
+// MARK: - Motion
 
+/// Motion presets. Every animated state transition goes through these so
+/// reduce-motion can dampen them centrally.
+enum ManifoldMotion {
+    static let micro:      Animation = .easeOut(duration: 0.15)
+    static let state:      Animation = .easeOut(duration: 0.20)
+    static let landing:    Animation = .easeOut(duration: 0.30)
+    static let spring:     Animation = .spring(response: 0.32, dampingFraction: 0.82)
+    static let pulseEaseOut: Animation = .easeOut(duration: 2.0).repeatForever(autoreverses: false)
+
+    /// Use in views that already consume `@Environment(\.accessibilityReduceMotion)`
+    /// to guarantee the requested animation collapses under reduce-motion.
+    static func effective(_ animation: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+}
+
+/// Legacy alias — existing call sites use `Anim.micro`, `.stateChange`, etc.
 enum Anim {
-    /// Pause/resume, connect/disconnect
-    static let stateChange: Animation = .snappy
-    /// Layout changes, expand/collapse
-    static let structural: Animation = .spring
-    /// Sheet/popover/toast appearance
-    static let entrance: Animation = .spring(duration: 0.4)
-    /// Hover, selection, badge tick
-    static let micro: Animation = .spring(duration: 0.2)
+    static let stateChange: Animation = ManifoldMotion.state
+    static let structural:  Animation = ManifoldMotion.spring
+    static let entrance:    Animation = ManifoldMotion.landing
+    static let micro:       Animation = ManifoldMotion.micro
 
-    /// Respects reduce motion preference
     static func effective(_ animation: Animation, reduceMotion: Bool) -> Animation {
         reduceMotion ? .default : animation
     }
 }
 
-// MARK: - Path Utilities
+// MARK: - Path utilities
 
 extension String {
-    /// Shorten an absolute path by replacing the home directory with ~.
+    /// Shorten an absolute path by replacing the home directory with `~`.
     var shortenedPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return hasPrefix(home) ? "~" + dropFirst(home.count) : self
