@@ -17,10 +17,19 @@ extension ManifoldStore: ManifoldCommands {
     // MARK: - Approvals
 
     func answer(_ request: ApprovalRequest, with answer: ApprovalAnswer) async {
-        // Phase 1 stub — real wiring lands in Phase 5 with the Requests
-        // surface. Log the intent so manual tests can confirm call-site
-        // hookup before the queue is alive.
-        logger.info(#"answer(\#(request.id)): \#(String(describing: answer))"#)
+        let xpcAnswer: String
+        switch answer {
+        case .notThisTime:        xpcAnswer = "notThisTime"
+        case .once:               xpcAnswer = "once"
+        case .forSession:         xpcAnswer = "session"
+        case .addToDefault:       xpcAnswer = "default"
+        }
+        await policy.answerApproval(id: request.id, answer: xpcAnswer)
+        // Keep the ScopeEntry promotion separate — the runtime records
+        // the answer; promotion to default scope still needs a follow-up
+        // `addSource(..., to: agent)` once the runtime wires the
+        // answer→promotion bridge. For now the UI-level answer is
+        // truthful: we stored the user's choice.
     }
 
     // MARK: - Sessions

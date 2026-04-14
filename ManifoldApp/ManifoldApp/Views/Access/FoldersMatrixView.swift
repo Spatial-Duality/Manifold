@@ -78,10 +78,15 @@ struct FoldersMatrixView: View {
                 }
             }
             Divider()
-            FoldersInspector(selection: selectedIDs.first, store: store)
-                .frame(width: 280)
+            FileTreeInspector(source: selectedSource)
+                .frame(width: 320)
                 .background(ManifoldPalette.surface2)
         }
+    }
+
+    private var selectedSource: SourceRecord? {
+        guard let id = selectedIDs.first else { return nil }
+        return store.sources.first(where: { $0.sourceID == id })
     }
 }
 

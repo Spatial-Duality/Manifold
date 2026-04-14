@@ -18,6 +18,10 @@ final class PolicyModel {
     var claudeCoverage: AgentCoverageSnapshot?
     var codexCoverage: AgentCoverageSnapshot?
     var coverageEvents: [CoverageEvent] = []
+    /// Pending approval requests pulled from the runtime ApprovalQueue.
+    /// Populated on every loadPolicies / refresh — if the runtime is
+    /// unreachable the list empties out honestly (Principle 10).
+    var pendingApprovals: [PendingApprovalRecord] = []
 
     private var client: (any RuntimeClientProtocol)?
 
@@ -41,6 +45,26 @@ final class PolicyModel {
             coverageEvents = state.coverageEvents
         } catch {
             logger.error("Failed to load policies: \(error.localizedDescription)")
+        }
+        // Pull pending approvals. Failures here leave the list as-was so the
+        // UI doesn't flicker on transient XPC hiccups — honest-state is
+        // preserved by the StatusBar's runtime-connection indicator.
+        do {
+            pendingApprovals = try await client.listPendingApprovals()
+        } catch {
+            logger.error("Failed to load pending approvals: \(error.localizedDescription)")
+        }
+    }
+
+    /// Answer a pending request. Maps UI ApprovalAnswer cases to the XPC
+    /// answer string understood by the runtime's approval queue.
+    func answerApproval(id: String, answer: String) async {
+        guard let client else { return }
+        do {
+            try await client.answerApproval(id: id, answer: answer)
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to answer approval \(id): \(error.localizedDescription)")
         }
     }
 

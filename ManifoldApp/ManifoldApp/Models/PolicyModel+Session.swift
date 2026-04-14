@@ -25,9 +25,51 @@ extension PolicyModel {
         )
     }
 
-    /// Pending approval requests for the queue. Empty during Phase 1 —
-    /// wired in Phase 5 when the Requests surface lands.
-    var pendingRequests: [ApprovalRequest] { [] }
+    /// Pending approval requests for the queue. Derived from the real
+    /// runtime ApprovalQueue via `pendingApprovals` on every refresh.
+    var pendingRequests: [ApprovalRequest] {
+        pendingApprovals.compactMap { record in
+            guard let agent = TargetApp(rawValue: record.agent) else { return nil }
+            return ApprovalRequest(
+                id: record.id,
+                agent: agent,
+                operation: Self.mapOperation(record.action),
+                target: record.path,
+                headline: Self.headline(for: agent, action: record.action, target: record.path),
+                context: Self.context(for: agent, action: record.action),
+                createdAt: Date(timeIntervalSince1970: record.requestedAt)
+            )
+        }
+    }
+
+    // MARK: - Approval mapping helpers
+
+    private static func mapOperation(_ action: String) -> ApprovalRequest.Operation {
+        switch action {
+        case "read":      return .readFile
+        case "write":     return .write
+        case "list":      return .listDirectory
+        case "search":    return .searchContent
+        case "mail":      return .mailboxRead
+        case "read_folder": return .readFolder
+        default:          return .readFile
+        }
+    }
+
+    private static func headline(for agent: TargetApp, action: String, target: String) -> String {
+        let name = agent == .codex ? "Codex" : "Claude"
+        switch action {
+        case "write":  return "\(name) wants to write a file."
+        case "list":   return "\(name) wants to list a directory."
+        case "search": return "\(name) wants to search file contents."
+        case "mail":   return "\(name) wants to read mail."
+        default:       return "\(name) wants to read a file."
+        }
+    }
+
+    private static func context(for agent: TargetApp, action: String) -> String {
+        "Requested outside this \(agent == .codex ? "Codex" : "Claude") session's scope. Answer or ignore."
+    }
 
     /// Recent sessions, most recent first. Empty during Phase 1 — wired
     /// when SessionHistory ships in Phase 3.
