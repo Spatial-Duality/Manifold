@@ -92,9 +92,7 @@ struct LedgerWindowView: View {
         case .access:
             AccessWindowView()
         case .mail:
-            LedgerPlaceholder(destination: .mail,
-                              stageTag: "PHASE 4",
-                              stageCopy: "Mail's Active-Backup-style mailboxes matrix and thread table land in Phase 4.")
+            MailWindowView()
         case .requests:
             LedgerPlaceholder(destination: .requests,
                               stageTag: "PHASE 5",
