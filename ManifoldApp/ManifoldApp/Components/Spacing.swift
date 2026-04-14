@@ -1,37 +1,65 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
+//
+// Spacing — 4pt vertical baseline, 8pt horizontal grid.
+// Matches design/html/tokens.css (--s-1 .. --s-9, --r-1 .. --r-6).
+//
+// Legacy names (tight/standard/section/edge/large/xlarge,
+// cornerSmall/cornerMedium/cornerLarge) are preserved so existing views
+// compile. New code should prefer the numbered tokens (`s1` .. `s9`,
+// `r1` .. `r6`) that match the mockup CSS.
 
 import SwiftUI
 
-/// Consistent spacing scale used across all views.
-/// Base-4 scale inspired by Things 3 and Raycast.
 enum Spacing {
-    /// 4pt — tight inline spacing (icon-to-text gaps)
-    static let tight: CGFloat = 4
-    /// 8pt — standard list row internal padding
-    static let standard: CGFloat = 8
-    /// 12pt — section spacing within a view
-    static let section: CGFloat = 12
-    /// 16pt — standard view edge padding
-    static let edge: CGFloat = 16
-    /// 24pt — section separation, onboarding elements
-    static let large: CGFloat = 24
-    /// 32pt — large separation between major sections
-    static let xlarge: CGFloat = 32
+    // MARK: - 4pt baseline tokens (tokens.css --s-N)
+    static let s1: CGFloat = 4    // tight
+    static let s2: CGFloat = 8    // standard
+    static let s3: CGFloat = 12   // section
+    static let s4: CGFloat = 16   // card inner
+    static let s5: CGFloat = 20
+    static let s6: CGFloat = 24   // edge
+    static let s7: CGFloat = 32
+    static let s8: CGFloat = 40
+    static let s9: CGFloat = 48
 
-    // MARK: - Corner Radii
+    // MARK: - Legacy semantic names (kept)
+    /// 4pt — tight inline spacing (icon-to-text gaps).
+    static let tight: CGFloat = s1
+    /// 8pt — standard list row internal padding.
+    static let standard: CGFloat = s2
+    /// 12pt — section spacing within a view.
+    static let section: CGFloat = s3
+    /// 16pt — standard view edge padding.
+    static let edge: CGFloat = s4
+    /// 24pt — section separation.
+    static let large: CGFloat = s6
+    /// 32pt — large separation between major sections.
+    static let xlarge: CGFloat = s7
 
-    /// 6pt — inline pills, command row hover, small interactive elements
-    static let cornerSmall: CGFloat = 6
-    /// 10pt — cards, stat containers, medium interactive surfaces
-    static let cornerMedium: CGFloat = 10
-    /// 12pt — section cards, session cards, overlays
-    static let cornerLarge: CGFloat = 12
+    // MARK: - Radii (tokens.css --r-N)
+    static let r1: CGFloat = 3    // small pills, chips
+    static let r2: CGFloat = 5    // buttons
+    static let r3: CGFloat = 6    // cards, rows
+    static let r4: CGFloat = 8    // inspector panels
+    static let r5: CGFloat = 10   // windows
+    static let r6: CGFloat = 12   // menu bar panel
+
+    // MARK: - Legacy radii
+    /// 6pt — inline pills, command row hover.
+    static let cornerSmall: CGFloat = r3
+    /// 10pt — cards, stat containers.
+    static let cornerMedium: CGFloat = r5
+    /// 12pt — section cards, overlays.
+    static let cornerLarge: CGFloat = r6
 }
 
 // MARK: - Glass Helpers
+//
+// `glassBackground` is the chrome-only affordance (menu bar panel,
+// popovers, error banners). Content views get `contentCard(…)` — a calm,
+// non-glass fill. Principle 10: glass is the navigation layer.
 
-/// View modifier that applies `.glassEffect` on macOS 26+ with `.ultraThinMaterial` fallback.
 struct GlassBackground<S: Shape>: ViewModifier {
     let shape: S
     let tint: Color?
@@ -56,27 +84,27 @@ struct GlassBackground<S: Shape>: ViewModifier {
 
 extension View {
     /// Apply Liquid Glass on macOS 26+, `.ultraThinMaterial` on older.
-    /// Use ONLY on navigation chrome (overlays, command palette, error banners).
-    /// Content views should use `.contentCard()` instead.
+    /// Use on navigation chrome. Content views should use `.contentCard()`.
     func glassBackground(
-        in shape: some Shape = RoundedRectangle(cornerRadius: Spacing.cornerLarge),
+        in shape: some Shape = RoundedRectangle(cornerRadius: Spacing.r6),
         tint: Color? = nil
     ) -> some View {
         modifier(GlassBackground(in: shape, tint: tint))
     }
 
-    /// Subtle card background for content-area cards. NOT glass.
-    /// Per DESIGN.md: "Glass is the navigation layer. Content never uses glass."
+    /// Calm, non-glass card fill for content-area surfaces.
     @ViewBuilder
     func contentCard(tint: Color? = nil) -> some View {
         if let tint {
-            self.background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: Spacing.cornerLarge))
+            self.background(tint.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: Spacing.r5))
         } else {
-            self.background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Spacing.cornerLarge))
+            self.background(.quaternary.opacity(0.5),
+                            in: RoundedRectangle(cornerRadius: Spacing.r5))
         }
     }
 
-    /// Apply `.glassProminent` on macOS 26+, `.borderedProminent` on older.
+    /// `.glassProminent` on macOS 26+, `.borderedProminent` on older.
     @ViewBuilder
     func glassProminentButton() -> some View {
         if #available(macOS 26, *) {
@@ -86,7 +114,7 @@ extension View {
         }
     }
 
-    /// Apply `.glass` on macOS 26+, `.bordered` on older.
+    /// `.glass` on macOS 26+, `.bordered` on older.
     @ViewBuilder
     func glassButton() -> some View {
         if #available(macOS 26, *) {
@@ -96,4 +124,3 @@ extension View {
         }
     }
 }
-
