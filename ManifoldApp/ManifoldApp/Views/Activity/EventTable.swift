@@ -78,7 +78,7 @@ struct EventTable: View {
             TableColumn("Operation") { entry in
                 HStack(spacing: Spacing.s1) {
                     Image(systemName: operationSymbol(for: entry))
-                        .font(.caption2.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(operationColor(for: entry))
                     Text(entry.action.replacingOccurrences(of: "_", with: " "))
                         .font(ManifoldType.caption)

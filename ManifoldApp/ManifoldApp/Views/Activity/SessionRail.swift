@@ -38,12 +38,15 @@ struct SessionRail: View {
                 ForEach(grouped, id: \.date) { group in
                     Section {
                         ForEach(group.sessions) { session in
-                            SessionRailRow(
-                                session: session,
-                                isSelected: selection?.id == session.id
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture { selection = session }
+                            Button {
+                                selection = session
+                            } label: {
+                                SessionRailRow(
+                                    session: session,
+                                    isSelected: selection?.id == session.id
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     } header: {
                         Text(group.date)

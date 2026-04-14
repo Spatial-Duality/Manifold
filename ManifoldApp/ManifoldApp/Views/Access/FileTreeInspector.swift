@@ -175,7 +175,7 @@ private struct TreeRow: View {
                         withAnimation(ManifoldMotion.micro) { isExpanded.toggle() }
                     } label: {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption2.weight(.medium))
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                             .frame(width: 12)
                     }

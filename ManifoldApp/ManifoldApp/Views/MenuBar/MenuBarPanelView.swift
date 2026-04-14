@@ -256,7 +256,7 @@ private struct RequestsQueueSection: View {
                         .font(ManifoldType.body)
                     Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
@@ -293,7 +293,7 @@ private struct RequestCard: View {
             }
             HStack(spacing: Spacing.s1) {
                 Image(systemName: "folder.fill")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(request.target)
                     .font(ManifoldType.mono)
@@ -520,7 +520,7 @@ private struct FooterItem: View {
                 Spacer(minLength: Spacing.s2)
                 if let shortcut {
                     Text(shortcut)
-                        .font(.caption2.monospaced())
+                        .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
                 }
             }

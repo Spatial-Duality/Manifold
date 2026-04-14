@@ -50,15 +50,11 @@ struct RulesWindowView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.s3) {
-                    ForEach(rules.filter { $0.domain == tab.ruleDomain }) { rule in
-                        RuleCard(rule: rule) { updated in
-                            if let i = rules.firstIndex(where: { $0.id == updated.id }) {
-                                rules[i] = updated
-                            }
-                        }
+                    ForEach(visibleRules) { rule in
+                        RuleCard(rule: rule, isEnabled: enabledBinding(for: rule))
                     }
 
-                    if rules.filter({ $0.domain == tab.ruleDomain }).isEmpty {
+                    if visibleRules.isEmpty {
                         VStack(spacing: Spacing.s3) {
                             Image(systemName: "checklist")
                                 .font(.system(size: 32, weight: .light))
@@ -84,6 +80,22 @@ struct RulesWindowView: View {
                 showingNewRuleSheet = false
             }
         }
+    }
+
+    private var visibleRules: [Rule] {
+        rules.filter { $0.domain == tab.ruleDomain }
+    }
+
+    /// Stable binding to a rule's `enabled` flag. Avoids constructing
+    /// `Binding(get:set:)` inline inside the view body (references/data.md).
+    private func enabledBinding(for rule: Rule) -> Binding<Bool> {
+        Binding(
+            get: { rules.first(where: { $0.id == rule.id })?.enabled ?? false },
+            set: { newValue in
+                guard let index = rules.firstIndex(where: { $0.id == rule.id }) else { return }
+                rules[index].enabled = newValue
+            }
+        )
     }
 
     /// Seeds default safe rules per Stage-11 Phase 7 migration spec.
@@ -167,7 +179,7 @@ private struct RulesTabBar: View {
 
 struct RuleCard: View {
     let rule: Rule
-    let onToggle: (Rule) -> Void
+    @Binding var isEnabled: Bool
 
     private var verbColor: Color {
         switch rule.verb {
@@ -179,15 +191,9 @@ struct RuleCard: View {
 
     var body: some View {
         HStack(spacing: Spacing.s3) {
-            Toggle("", isOn: Binding(
-                get: { rule.enabled },
-                set: { on in
-                    var copy = rule
-                    copy.enabled = on
-                    onToggle(copy)
-                }
-            ))
-            .labelsHidden()
+            Toggle("Rule \(rule.subject) \(rule.object) enabled", isOn: $isEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
 
             VStack(alignment: .leading, spacing: Spacing.s1) {
                 HStack(spacing: Spacing.s1) {
@@ -228,6 +234,6 @@ struct RuleCard: View {
             RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
                 .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
         )
-        .opacity(rule.enabled ? 1 : 0.6)
+        .opacity(isEnabled ? 1 : 0.6)
     }
 }
