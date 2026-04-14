@@ -1,61 +1,77 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
+//
+// MenuBarPanelView — the primary Manifold surface.
+//
+// Per Stage 2, the menu bar panel is where ~95% of user contact happens.
+// It answers the only two questions a user ever has about a trust product:
+// "is it working?" and "what did it just do?". Four states, each matching
+// a concrete runtime condition (design/html/menubar.html):
+//
+//   1. idle — no scope shared
+//   2. idleWithRecent — scope shared, no session, recent sessions present
+//   3. activeWithQueue — session running, 0+ pending requests
+//   4. trackedEdit — session with writes being tracked
+//
+// Copy is user-as-subject (Principle 5). Pulse halo respects
+// reduce-motion (Principle 9). No emoji (Stage 3 §I).
 
 import SwiftUI
 import ManifoldKit
 
-/// Menu bar panel for fast status: who is connected, what is governed, and whether tracked work is running.
 struct MenuBarPanelView: View {
-    @Environment(ManifoldStore.self) var store
+    @Environment(ManifoldStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    enum PanelState {
+        case idle
+        case idleWithRecent
+        case activeWithQueue
+        case trackedEdit
+    }
+
+    private var panelState: PanelState {
+        if let session = store.activeSession {
+            return session.isTrackedEdit ? .trackedEdit : .activeWithQueue
+        }
+        if !store.recentSessionEntries.isEmpty || !store.sources.isEmpty {
+            return .idleWithRecent
+        }
+        return .idle
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            MenuBarHeaderView()
+            StatusHeader(store: store, state: panelState, reduceMotion: reduceMotion)
 
-            Divider()
-
-            // Work block strip (only when active)
-            if let block = store.policy.activeWorkBlock {
-                MenuBarWorkBlockStrip(block: block)
+            if let session = store.activeSession {
                 Divider()
-            }
-
-            // Agent cards
-            if let claude = store.policy.claudePolicy {
-                MenuBarAgentCard(
-                    agent: .cowork,
-                    policy: claude,
-                    emailGovernance: store.policy.emailGovernance(for: .cowork),
-                    isConnected: store.isClaudeConnected
-                )
-            }
-            if let codex = store.policy.codexPolicy {
-                MenuBarAgentCard(
-                    agent: .codex,
-                    policy: codex,
-                    emailGovernance: store.policy.emailGovernance(for: .codex),
-                    isConnected: store.isCodexConnected
-                )
-            }
-
-            // Empty state
-            if store.policy.claudePolicy == nil && store.policy.codexPolicy == nil {
-                VStack(spacing: Spacing.standard) {
-                    Text("No agents connected")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text("Open Settings to connect Claude or Codex.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                if session.isTrackedEdit {
+                    TrackedEditStrip(session: session, store: store)
+                } else {
+                    SessionChipStrip(session: session, store: store)
                 }
-                .padding(Spacing.edge)
+            }
+
+            if !store.pendingRequests.isEmpty {
+                Divider()
+                RequestsQueueSection(store: store)
+            }
+
+            if panelState != .idle {
+                Divider()
+                AgentSummaryBlock(store: store, state: panelState)
+            }
+
+            if panelState == .idleWithRecent, !store.recentSessionEntries.isEmpty {
+                Divider()
+                RecentSessionsBlock(sessions: store.recentSessionEntries, store: store)
             }
 
             Divider()
-
-            MenuBarQuickActions()
+            FooterActions(store: store, state: panelState)
         }
-        .frame(width: 380)
+        .frame(width: 360)
         .task {
             await store.policy.loadPolicies()
             await store.policy.loadActiveWorkBlock()
@@ -63,263 +79,478 @@ struct MenuBarPanelView: View {
     }
 }
 
-// MARK: - Header
+// MARK: - Status header
 
-struct MenuBarHeaderView: View {
-    @Environment(ManifoldStore.self) var store
+private struct StatusHeader: View {
+    let store: ManifoldStore
+    let state: MenuBarPanelView.PanelState
+    let reduceMotion: Bool
+    @State private var pulse = false
 
-    private var anyAgentActive: Bool {
-        let claude = store.policy.claudePolicy
-        let codex = store.policy.codexPolicy
-        return (claude != nil && claude?.isPaused != true) ||
-               (codex != nil && codex?.isPaused != true)
+    private var dotStatus: AgentStatusDot.Status {
+        if !store.isRuntimeConnected { return .offline }
+        switch state {
+        case .idle, .idleWithRecent:          return .paused
+        case .activeWithQueue, .trackedEdit:  return .active
+        }
     }
 
-    private var statusText: String {
-        if !store.isConnected && store.policy.claudePolicy == nil {
-            return "No governed sessions yet"
+    private var headlinePrimary: String {
+        if !store.isRuntimeConnected {
+            return "Manifold can't reach the runtime."
         }
-        var parts: [String] = []
-        if let claude = store.policy.claudePolicy, !claude.isPaused { parts.append("Claude active") }
-        if let codex = store.policy.codexPolicy, !codex.isPaused { parts.append("Codex active") }
-        if parts.isEmpty { return "All access paused" }
-        return parts.joined(separator: " \u{00B7} ")
+        let folderCount = store.sources.filter(\.isAccessible).count
+        switch state {
+        case .idle:
+            return "You haven't shared anything yet."
+        case .idleWithRecent:
+            return folderCount == 0
+                ? "No agents are running."
+                : "You've shared \(folderCount) folder\(folderCount == 1 ? "" : "s") by default."
+        case .activeWithQueue:
+            let session = store.activeSession
+            return "Session running: \(session?.name ?? "unnamed")."
+        case .trackedEdit:
+            return "Tracked edit in progress."
+        }
+    }
+
+    private var headlineSecondary: String {
+        if let error = store.runtimeLaunchError ?? store.lastError {
+            return error
+        }
+        switch state {
+        case .idle:
+            return "Manifold is running. Add a folder or mailbox to start."
+        case .idleWithRecent:
+            if let last = store.recentSessionEntries.first {
+                return "Last session: \(last.name), \(last.displayLastRun)."
+            }
+            return "No session running."
+        case .activeWithQueue:
+            let count = store.pendingRequests.count
+            if count > 0 { return "\(count) request\(count == 1 ? "" : "s") waiting on you." }
+            return "No requests right now. Working quietly."
+        case .trackedEdit:
+            return "All writes tracked — every change is reversible."
+        }
     }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: Spacing.s3) {
+            AgentStatusDot(status: dotStatus, size: 8, pulses: true)
+                .padding(.top, 6)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text("Manifold")
-                    .font(Typ.heading)
-                Text(statusText)
-                    .font(.caption)
+                Text(headlinePrimary)
+                    .font(ManifoldType.bodyMedium)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(headlineSecondary)
+                    .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
-
-            if anyAgentActive {
-                Button("Pause All") {
-                    Task { await store.policy.pauseAllAgents() }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.small)
-            }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.s4)
+        .padding(.top, Spacing.s4)
+        .padding(.bottom, Spacing.s3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(headlinePrimary). \(headlineSecondary)")
     }
 }
 
-// MARK: - Work Block Strip
+// MARK: - Session chip (non-tracked)
 
-struct MenuBarWorkBlockStrip: View {
-    let block: WorkBlockRecord
-    @Environment(ManifoldStore.self) var store
-
-    private static let isoFormatter = ISO8601DateFormatter()
+private struct SessionChipStrip: View {
+    let session: SessionRecord
+    let store: ManifoldStore
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.s2) {
             Circle()
-                .fill(block.agent == .codex ? Color.codexPurple : Color.claudeBlue)
-                .frame(width: 8, height: 8)
-
-            Text("Tracked edit in progress")
-                .font(Typ.caption.weight(.medium))
-
-            Text("\u{00B7}")
-                .foregroundStyle(.tertiary)
-
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                let elapsed = Self.isoFormatter.date(from: block.startedAt).map {
-                    context.date.timeIntervalSince($0)
-                } ?? 0
-                let min = Int(elapsed) / 60
-                Text("\(min)m")
-                    .font(Typ.numericCaption)
+                .fill(ManifoldPalette.active)
+                .frame(width: 7, height: 7)
+            Text("SESSION")
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.secondary)
+                .tracking(0.4)
+            Text(session.name)
+                .font(ManifoldType.bodyMedium)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Spacing.s2)
+            if let remaining = session.remainingSeconds {
+                Text(SessionChip.format(remaining))
+                    .font(ManifoldType.numericCaption)
                     .foregroundStyle(.secondary)
             }
-
-            Spacer()
-
             Button("Finish") {
-                NSApp.activate(ignoringOtherApps: true)
-                Task { await store.policy.finishWorkBlock() }
+                Task { try? await store.finishActiveSession() }
             }
-            .controlSize(.mini)
             .buttonStyle(.bordered)
+            .controlSize(.mini)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background((block.agent == .codex ? Color.codexPurple : Color.claudeBlue).opacity(0.06))
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s2)
+        .background(ManifoldPalette.activeSoft)
     }
 }
 
-// MARK: - Agent Card
+// MARK: - Tracked edit strip
 
-struct MenuBarAgentCard: View {
-    let agent: TargetApp
-    let policy: AgentAccessPolicy
-    let emailGovernance: AgentEmailGovernanceSummary?
-    let isConnected: Bool
-    @Environment(ManifoldStore.self) var store
+private struct TrackedEditStrip: View {
+    let session: SessionRecord
+    let store: ManifoldStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            let coverage = store.policy.coverage(for: agent)
-            HStack {
-                Circle()
-                    .fill(agent == .codex ? Color.codexPurple : Color.claudeBlue)
-                    .frame(width: 8, height: 8)
-                Text(agent == .codex ? "Codex" : "Claude")
-                    .font(Typ.body.weight(.medium))
-
-                if policy.isPaused {
-                    Text("Paused")
-                        .font(Typ.caption.weight(.medium))
-                        .foregroundStyle(Color.statusPaused)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.statusPaused.opacity(Opacity.badgeFill), in: Capsule())
-                } else if !isConnected {
-                    Text("Offline")
-                        .font(Typ.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button(policy.isPaused ? "Resume" : "Pause") {
-                    Task {
-                        if policy.isPaused {
-                            await store.policy.resumeAgent(agent)
-                        } else {
-                            await store.policy.pauseAgent(agent)
-                        }
-                    }
-                }
-                .controlSize(.mini)
-                .buttonStyle(.bordered)
-                .tint(policy.isPaused ? .statusActive : .statusPaused)
+        HStack(spacing: Spacing.s2) {
+            Image(systemName: "timeline.selection")
+                .font(ManifoldType.caption)
+                .foregroundStyle(ManifoldPalette.claude)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("TRACKED EDIT")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.primary)
+                    .tracking(0.5)
+                Text(session.name)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-
-            if !policy.isPaused {
-                HStack(spacing: 12) {
-                    if let coverage {
-                        Label(coverage.coverageState.displayName, systemImage: coverageIcon(coverage.coverageState))
-                            .font(.caption)
-                            .foregroundStyle(coverageColor(coverage.coverageState))
-                        Text(coverage.verificationStatus.displayName)
-                            .font(.caption)
-                            .foregroundStyle(coverage.verificationStatus == .verified ? Color.statusActive : .orange)
-                    }
-                    Label("\(policy.allowedSourceIDs.count) shared", systemImage: "folder")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let emailGovernance {
-                        Label("\(emailGovernance.totalRuleCount) rules", systemImage: "line.3.horizontal.decrease.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Label("\(emailGovernance.enabledShieldCount) shields", systemImage: "shield")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(emailGovernance.emailSensitivity.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(policy.accessRecordingLevel.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
+            Spacer(minLength: Spacing.s2)
+            Button("Finish") {
+                Task { try? await store.finishActiveSession() }
             }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .opacity(policy.isPaused ? 0.6 : 1.0)
-    }
-
-    private func coverageIcon(_ state: CoverageState) -> String {
-        switch state {
-        case .manifoldRouted:
-            return "shield"
-        case .trackedWorkspace:
-            return "square.stack.3d.up"
-        case .outsideCoverage:
-            return "exclamationmark.triangle"
-        }
-    }
-
-    private func coverageColor(_ state: CoverageState) -> Color {
-        switch state {
-        case .manifoldRouted:
-            return .blue
-        case .trackedWorkspace:
-            return agent == .codex ? .codexPurple : .claudeBlue
-        case .outsideCoverage:
-            return .orange
-        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s3)
+        .background(ManifoldPalette.claudeSoft)
     }
 }
 
-// MARK: - Quick Actions
+// MARK: - Requests queue
 
-struct MenuBarQuickActions: View {
-    @Environment(ManifoldStore.self) var store
+private struct RequestsQueueSection: View {
+    let store: ManifoldStore
+    @State private var expanded = true
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.policy.activeWorkBlock == nil && store.isConnected {
-                Button {
-                    NSApp.activate(ignoringOtherApps: true)
-                    store.reviewSheetTrigger = ReviewAccessChange(
-                        description: "Start tracking changes",
-                        kind: .startWorkBlock
-                    )
-                } label: {
-                    Label("Start Tracked Work Block", systemImage: "timeline.selection")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-            }
-
             Button {
-                NSApp.activate(ignoringOtherApps: true)
-                store.selectedTab = .overview
+                withAnimation(ManifoldMotion.state) { expanded.toggle() }
             } label: {
-                Label("Open Manifold", systemImage: "macwindow")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: Spacing.s2) {
+                    Text("\(store.pendingRequests.count)")
+                        .font(ManifoldType.numericCaption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(ManifoldPalette.attention))
+                    Text("pending \(store.pendingRequests.count == 1 ? "request" : "requests")")
+                        .font(ManifoldType.body)
+                    Spacer(minLength: 0)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("o")
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Spacing.s4)
+            .padding(.vertical, Spacing.s2)
 
-            Button {
+            if expanded {
+                VStack(spacing: Spacing.s2) {
+                    ForEach(store.pendingRequests) { request in
+                        RequestCard(request: request, store: store)
+                    }
+                }
+                .padding(.horizontal, Spacing.s3)
+                .padding(.bottom, Spacing.s2)
+            }
+        }
+        .background(Color.primary.opacity(0.02))
+    }
+}
+
+private struct RequestCard: View {
+    let request: ApprovalRequest
+    let store: ManifoldStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            HStack(spacing: Spacing.s2) {
+                GradientAvatar(agent: request.agent, size: .small)
+                Text(request.headline)
+                    .font(ManifoldType.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: Spacing.s1) {
+                Image(systemName: "folder.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(request.target)
+                    .font(ManifoldType.mono)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06)))
+            }
+            Text(request.context)
+                .font(ManifoldType.caption)
+                .foregroundStyle(.tertiary)
+                .italic()
+                .fixedSize(horizontal: false, vertical: true)
+
+            CommitLadder(
+                agent: request.agent,
+                sessionIsLive: store.activeSession != nil,
+                onNotThisTime: { Task { await store.answer(request, with: .notThisTime) } },
+                onOnce:        { Task { await store.answer(request, with: .once) } },
+                onSession:     { Task {
+                    guard let sid = store.activeSession?.id else { return }
+                    await store.answer(request, with: .forSession(sessionID: sid))
+                } },
+                onDefault:     { Task { await store.answer(request, with: .addToDefault) } }
+            )
+        }
+        .padding(Spacing.s3)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Agent summary
+
+private struct AgentSummaryBlock: View {
+    let store: ManifoldStore
+    let state: MenuBarPanelView.PanelState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let claude = store.policy.claudePolicy {
+                AgentRow(
+                    agent: .cowork,
+                    connected: store.isClaudeConnected,
+                    paused: claude.isPaused,
+                    statusText: agentStatusText(policy: claude, connected: store.isClaudeConnected),
+                    consequenceText: consequenceText(policy: claude, agent: .cowork)
+                )
+            }
+            if let codex = store.policy.codexPolicy {
+                AgentRow(
+                    agent: .codex,
+                    connected: store.isCodexConnected,
+                    paused: codex.isPaused,
+                    statusText: agentStatusText(policy: codex, connected: store.isCodexConnected),
+                    consequenceText: consequenceText(policy: codex, agent: .codex)
+                )
+            }
+        }
+    }
+
+    private func agentStatusText(policy: AgentAccessPolicy, connected: Bool) -> String {
+        if policy.isPaused { return "paused" }
+        if !connected { return "offline" }
+        return "active"
+    }
+
+    private func consequenceText(policy: AgentAccessPolicy, agent: TargetApp) -> String? {
+        let count = policy.allowedSourceIDs.count
+        if count == 0 { return nil }
+        return "\(count) folder\(count == 1 ? "" : "s") in default scope"
+    }
+}
+
+private struct AgentRow: View {
+    let agent: TargetApp
+    let connected: Bool
+    let paused: Bool
+    let statusText: String
+    let consequenceText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Spacing.s2) {
+                GradientAvatar(agent: agent, size: .small)
+                Text(agent == .codex ? "Codex" : "Claude")
+                    .font(ManifoldType.bodyMedium)
+                Spacer(minLength: Spacing.s2)
+                Text(statusText)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let consequenceText {
+                Text(consequenceText)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 26)
+            }
+        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s2)
+        .opacity(paused ? 0.55 : 1.0)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Recent sessions
+
+private struct RecentSessionsBlock: View {
+    let sessions: [SessionHistoryEntry]
+    let store: ManifoldStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Recent sessions")
+                .font(ManifoldType.tiny.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+                .padding(.horizontal, Spacing.s4)
+                .padding(.top, Spacing.s2)
+                .padding(.bottom, Spacing.s1)
+
+            ForEach(sessions) { session in
+                Button {
+                    Task { try? await store.reloadSession(historyID: session.id) }
+                } label: {
+                    HStack(spacing: Spacing.s2) {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .font(ManifoldType.body)
+                            .foregroundStyle(ManifoldPalette.active)
+                        Text(session.name)
+                            .font(ManifoldType.body)
+                        Spacer(minLength: Spacing.s2)
+                        Text("\(session.displayLastRun) · \(session.displayDuration)")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, Spacing.s4)
+                    .padding(.vertical, 5)
+                }
+                .buttonStyle(HoverRowStyle())
+            }
+            Spacer().frame(height: Spacing.s1)
+        }
+    }
+}
+
+// MARK: - Footer
+
+private struct FooterActions: View {
+    let store: ManifoldStore
+    let state: MenuBarPanelView.PanelState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if state == .trackedEdit {
+                FooterItem(icon: "arrow.uturn.backward", label: "Review changes\u{2026}", shortcut: "⌘R") {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                FooterItem(icon: "checkmark.seal", label: "Finish tracked edit", shortcut: "⌘⇧F") {
+                    Task { try? await store.finishActiveSession() }
+                }
+                FooterDivider()
+            } else if state == .idle || state == .idleWithRecent {
+                FooterItem(icon: "plus.circle", label: "Start new session\u{2026}", shortcut: "⌘N") {
+                    Task { try? await store.startSession(SessionDraft()) }
+                }
+                FooterItem(icon: "folder.badge.plus", label: "Add a folder\u{2026}", shortcut: "⌘⇧F") {
+                    store.addSourceFromPicker()
+                }
+                FooterDivider()
+            }
+
+            FooterItem(icon: "macwindow", label: "Open Manifold", shortcut: "⌘O") {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            FooterItem(icon: "gearshape", label: "Settings\u{2026}", shortcut: "⌘,") {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            } label: {
-                Label("Settings\u{2026}", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut(",")
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
 
-            Divider()
-                .padding(.vertical, 2)
+            if state == .activeWithQueue || state == .trackedEdit {
+                FooterDivider()
+                FooterItem(icon: "pause.circle", label: "Pause all agents", shortcut: "⌘⇧P", tone: .muted) {
+                    Task { await store.policy.pauseAllAgents() }
+                }
+            }
 
-            Button("Quit Manifold") {
+            FooterDivider()
+            FooterItem(icon: "power", label: "Quit Manifold", shortcut: "⌘Q", tone: .muted) {
                 store.quitManifold()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .keyboardShortcut("q")
         }
+        .padding(.vertical, Spacing.s1)
+        .padding(.horizontal, Spacing.s1)
+        .background(Color.primary.opacity(0.02))
+    }
+}
+
+private struct FooterItem: View {
+    enum Tone { case normal, muted }
+    let icon: String
+    let label: String
+    let shortcut: String?
+    var tone: Tone = .normal
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Spacing.s2) {
+                Image(systemName: icon)
+                    .font(ManifoldType.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(label)
+                    .font(ManifoldType.body)
+                    .foregroundStyle(tone == .muted ? .secondary : .primary)
+                Spacer(minLength: Spacing.s2)
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(HoverRowStyle())
+    }
+}
+
+private struct FooterDivider: View {
+    var body: some View {
+        Divider()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .opacity(0.5)
+    }
+}
+
+private struct HoverRowStyle: ButtonStyle {
+    @State private var hovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r2, style: .continuous)
+                    .fill(hovered ? Color.primary.opacity(0.08) : .clear)
+            )
+            .onHover { hovered = $0 }
+            .opacity(configuration.isPressed ? 0.65 : 1)
     }
 }
