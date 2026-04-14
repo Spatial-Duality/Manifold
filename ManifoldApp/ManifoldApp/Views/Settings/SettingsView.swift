@@ -5,8 +5,8 @@ import SwiftUI
 import ManifoldKit
 
 /// Settings window — General / Agents / Storage / Mail / Advanced.
-/// Stage-3 structure: engineering-flavored controls migrate to Advanced
-/// in a subsequent minor pass; Phase 8 is the copy pass only.
+/// Stage-3 structure. Normal users stay in the first four panes; the
+/// Advanced pane is a destination, never a gate.
 struct SettingsView: View {
     var body: some View {
         TabView {
@@ -21,6 +21,9 @@ struct SettingsView: View {
             }
             Tab("Mail", systemImage: "envelope") {
                 MailSettingsPane()
+            }
+            Tab("Advanced", systemImage: "slider.horizontal.3") {
+                AdvancedSettingsPane()
             }
         }
         .frame(minWidth: 580, minHeight: 500)

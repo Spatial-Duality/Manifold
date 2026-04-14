@@ -4,6 +4,7 @@
 import CryptoKit
 import Foundation
 import ManifoldKit
+import ManifoldRuntime
 import os
 
 private let appCommandLogger = Logger(subsystem: "com.spatialduality.manifold", category: "xpc-app")
@@ -439,8 +440,52 @@ extension ManifoldXPCService {
         case "emailBackupInfo":
             return ["info": try XPCJSON.object(from: EmailBackupInfoPayload(path: EmailSyncEngine.backupRoot.path, diskUsage: backupDiskUsage()))]
 
+        case "listPendingApprovals":
+            let pending = try await runtime.approvalQueue.pending()
+            let rows: [ApprovalRow] = pending.map(ApprovalRow.make(from:))
+            return ["requests": try XPCJSON.object(from: rows)]
+
+        case "answerApproval":
+            guard let id = payload["id"] as? String,
+                  let answer = payload["answer"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            switch answer {
+            case "approve", "once", "session", "default":
+                try await runtime.approvalQueue.approve(id: id)
+            case "deny", "notThisTime":
+                try await runtime.approvalQueue.deny(id: id)
+            default:
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["ok": true]
+
         default:
             return nil
+        }
+    }
+
+    /// Plain-JSON row used to ferry ApprovalQueue.PendingRequest across the
+    /// XPC boundary (the underlying type is actor-isolated, hence the copy).
+    private struct ApprovalRow: Codable, Sendable {
+        let id: String
+        let connectionID: String
+        let agent: String
+        let path: String
+        let action: String
+        let requestedAt: Double
+        let status: String
+
+        static func make(from request: ApprovalQueue.PendingRequest) -> ApprovalRow {
+            ApprovalRow(
+                id: request.id,
+                connectionID: request.connectionID,
+                agent: request.agent,
+                path: request.path,
+                action: request.action,
+                requestedAt: request.requestedAt,
+                status: request.status.rawValue
+            )
         }
     }
 

@@ -245,6 +245,43 @@ protocol RuntimeClientProtocol: Sendable {
     func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws
     func deleteSmartMailbox(mailboxID: String) async throws
     func emailBackupInfo() async throws -> EmailBackupInfo
+
+    // MARK: - Approval queue (Phase-5 wiring)
+
+    /// Pending approval requests from the runtime's ApprovalQueue.
+    func listPendingApprovals() async throws -> [PendingApprovalRecord]
+    /// Resolve a pending request. Accepted values for `answer`:
+    /// "notThisTime" / "once" / "session" / "default".
+    func answerApproval(id: String, answer: String) async throws
+}
+
+/// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.
+public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let connectionID: String
+    public let agent: String
+    public let path: String
+    public let action: String
+    public let requestedAt: Double
+    public let status: String
+
+    public init(
+        id: String,
+        connectionID: String,
+        agent: String,
+        path: String,
+        action: String,
+        requestedAt: Double,
+        status: String
+    ) {
+        self.id = id
+        self.connectionID = connectionID
+        self.agent = agent
+        self.path = path
+        self.action = action
+        self.requestedAt = requestedAt
+        self.status = status
+    }
 }
 
 extension RuntimeClientProtocol {
@@ -279,6 +316,8 @@ extension RuntimeClientProtocol {
     func applyTrackedRun(grantID: String) async throws -> ApplyTrackedRunResult { try await applyTrackedRun(grantID: grantID, endSession: false) }
     func recentActivity(limit: Int) async throws -> [AuditEntry] { [] }
     func recentSessions(limit: Int) async throws -> [Session] { [] }
+    func listPendingApprovals() async throws -> [PendingApprovalRecord] { [] }
+    func answerApproval(id: String, answer: String) async throws {}
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { [] }
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult { throw RuntimeClientStubError.unimplemented("revertSessionEvent") }
     func trackedFiles() async throws -> [String] { [] }
@@ -1158,6 +1197,14 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func emailBackupInfo() async throws -> EmailBackupInfo {
         try await command(name: "emailBackupInfo", field: "info", as: EmailBackupInfo.self)
+    }
+
+    func listPendingApprovals() async throws -> [PendingApprovalRecord] {
+        try await command(name: "listPendingApprovals", field: "requests", as: [PendingApprovalRecord].self)
+    }
+
+    func answerApproval(id: String, answer: String) async throws {
+        _ = try await xpc.command(name: "answerApproval", payload: ["id": id, "answer": answer])
     }
 
     private func command<T: Decodable>(
