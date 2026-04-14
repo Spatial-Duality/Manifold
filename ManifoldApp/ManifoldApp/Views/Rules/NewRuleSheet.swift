@@ -71,6 +71,7 @@ struct NewRuleSheet: View {
                 TextField("glob or predicate", text: $pattern)
                     .textFieldStyle(.roundedBorder)
                     .font(ManifoldType.mono)
+                    .autocorrectionDisabled()
             }
 
             // Live match preview

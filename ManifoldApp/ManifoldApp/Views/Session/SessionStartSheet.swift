@@ -35,9 +35,12 @@ struct SessionStartSheet: View {
             FormRow(label: "Duration") {
                 HStack {
                     Slider(value: $draft.durationHours, in: 0.5...8, step: 0.5)
-                    Text("\(String(format: "%.1f", draft.durationHours))h")
-                        .font(ManifoldType.numericBody)
-                        .frame(width: 44, alignment: .trailing)
+                    HStack(spacing: 0) {
+                        Text(draft.durationHours, format: .number.precision(.fractionLength(1)))
+                        Text("h")
+                    }
+                    .font(ManifoldType.numericBody)
+                    .frame(width: 44, alignment: .trailing)
                 }
             }
 
