@@ -42,32 +42,14 @@ final class CommandCenter {
 
     private func buildCommands(for store: ManifoldStore) -> [ManifoldCommand] {
         [
-            ManifoldCommand("Go to Overview", icon: "square.grid.2x2") {
-                store.selectedTab = .overview
+            ManifoldCommand("New Session\u{2026}", icon: "play.fill") {
+                NotificationCenter.default.post(name: .manifoldShowSessionStartSheet, object: nil)
             },
-            ManifoldCommand("Go to Files", icon: "doc.text.magnifyingglass") {
-                store.selectedTab = .files
-            },
-            ManifoldCommand("Go to Emails", icon: "envelope.badge.shield.half.filled") {
-                store.selectedTab = .emails
-            },
-            ManifoldCommand("Add Folder", icon: "folder.badge.plus") {
+            ManifoldCommand("Add Folder\u{2026}", icon: "folder.badge.plus") {
                 store.addSourceFromPicker()
             },
-            ManifoldCommand("Review Access", icon: "lock.shield") {
-                store.reviewSheetTrigger = ReviewAccessChange(
-                    description: "Review access",
-                    kind: .explicit
-                )
-            },
-            ManifoldCommand("Track Changes", icon: "timeline.selection") {
-                store.reviewSheetTrigger = ReviewAccessChange(
-                    description: "Start tracking changes",
-                    kind: .startWorkBlock
-                )
-            },
-            ManifoldCommand("Toggle Activity", icon: "list.bullet.rectangle") {
-                store.showActivityDrawer.toggle()
+            ManifoldCommand("Refresh Runtime", icon: "arrow.clockwise") {
+                await store.refreshAll(force: true)
             },
             ManifoldCommand("Open Settings", icon: "gearshape") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)

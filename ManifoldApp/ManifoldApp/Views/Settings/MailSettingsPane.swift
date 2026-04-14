@@ -64,7 +64,7 @@ struct MailSettingsPane: View {
         }
         .formStyle(.grouped)
         .sheet(isPresented: $showAddAccount) {
-            EmailAccountSetupView()
+            AddMailAccountSheet()
                 .environment(store)
         }
     }
