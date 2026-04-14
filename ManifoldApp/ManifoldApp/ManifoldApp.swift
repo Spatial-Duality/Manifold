@@ -15,7 +15,7 @@ struct ManifoldApp: App {
 
     var body: some Scene {
         Window("Manifold", id: "main") {
-            LedgerWindowView()
+            RootWindowContent()
                 .environment(store)
                 .environment(commands)
                 .frame(minWidth: 920, minHeight: 600)
@@ -25,7 +25,7 @@ struct ManifoldApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("New Session\u{2026}") {
-                    Task { try? await store.startSession(SessionDraft()) }
+                    NotificationCenter.default.post(name: .manifoldShowSessionStartSheet, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
 
