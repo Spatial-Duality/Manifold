@@ -1,5 +1,12 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
+//
+// AIAppsSettingsPane — the "Agents" settings pane.
+//
+// Stage-11 rebuild on the shared primitive AgentCard. Every visible
+// concept (identity, status, check rows, primary action) now draws
+// from Components/Primitives so this pane matches the rest of the
+// Ledger-window surface set.
 
 import SwiftUI
 import ManifoldKit
@@ -12,31 +19,28 @@ struct AIAppsSettingsPane: View {
     var body: some View {
         Form {
             Section {
-                AgentHealthCard(
-                    agentName: "Claude",
-                    agentColor: .blue,
-                    state: store.integrationHealth.claude,
-                    onSetup: { showClaudeSheet = true }
-                )
+                claudeCard
+            } header: {
+                Text("Claude").font(ManifoldType.title)
             }
+
             if let policy = store.policy.claudePolicy {
-                Section("Claude Access Recording") {
+                Section("Recording level · Claude") {
                     AccessRecordingLevelPicker(
                         agent: .cowork,
                         selection: policy.accessRecordingLevel
                     )
                 }
             }
+
             Section {
-                AgentHealthCard(
-                    agentName: "Codex",
-                    agentColor: .purple,
-                    state: store.integrationHealth.codex,
-                    onSetup: { showCodexSheet = true }
-                )
+                codexCard
+            } header: {
+                Text("Codex").font(ManifoldType.title)
             }
+
             if let policy = store.policy.codexPolicy {
-                Section("Codex Access Recording") {
+                Section("Recording level · Codex") {
                     AccessRecordingLevelPicker(
                         agent: .codex,
                         selection: policy.accessRecordingLevel
@@ -58,7 +62,103 @@ struct AIAppsSettingsPane: View {
                 .environment(store)
         }
     }
+
+    // MARK: - Claude card
+
+    private var claudeCard: some View {
+        let state = store.integrationHealth.claude
+        return AgentCard(
+            agent: .cowork,
+            displayName: "Claude",
+            consequenceText: claudeConsequence(),
+            status: mapStatus(state.overallStatus),
+            errorDetail: state.errorDetail,
+            primaryAction: AgentCardAction(
+                label: claudeActionLabel(for: state.overallStatus),
+                handler: { showClaudeSheet = true }
+            )
+        ) {
+            LiveCheckRow(label: "Claude Desktop installed",
+                         status: state.appInstalled,
+                         onRefresh: { await store.integrationHealth.checkClaude() })
+            LiveCheckRow(label: "Claude Desktop configured",
+                         status: state.mcpConfigured,
+                         onRefresh: { await store.integrationHealth.checkClaude() })
+            LiveCheckRow(label: "Claude Code configured",
+                         status: state.claudeCodeConfigured,
+                         onRefresh: { await store.integrationHealth.checkClaude() })
+            LiveCheckRow(label: "Connection verified",
+                         status: state.connectionVerified,
+                         onRefresh: { await store.integrationHealth.checkClaude() })
+        }
+    }
+
+    private func claudeConsequence() -> String? {
+        guard let policy = store.policy.claudePolicy else { return nil }
+        let folders = policy.allowedSourceIDs.count
+        return "\(folders) folder\(folders == 1 ? "" : "s") in default scope"
+    }
+
+    private func claudeActionLabel(for status: AgentConnectionStatus) -> String {
+        switch status {
+        case .connected:    return "Reconnect"
+        case .error:        return "Repair"
+        default:            return "Set up Claude"
+        }
+    }
+
+    // MARK: - Codex card
+
+    private var codexCard: some View {
+        let state = store.integrationHealth.codex
+        return AgentCard(
+            agent: .codex,
+            displayName: "Codex",
+            consequenceText: codexConsequence(),
+            status: mapStatus(state.overallStatus),
+            errorDetail: state.errorDetail,
+            primaryAction: AgentCardAction(
+                label: codexActionLabel(for: state.overallStatus),
+                handler: { showCodexSheet = true }
+            )
+        ) {
+            LiveCheckRow(label: "Codex app installed",
+                         status: state.codexAppInstalled,
+                         onRefresh: { await store.integrationHealth.checkCodex() })
+            LiveCheckRow(label: "Manifold added",
+                         status: state.mcpAdded,
+                         onRefresh: { await store.integrationHealth.checkCodex() })
+        }
+    }
+
+    private func codexConsequence() -> String? {
+        guard let policy = store.policy.codexPolicy else { return nil }
+        let folders = policy.allowedSourceIDs.count
+        return "\(folders) folder\(folders == 1 ? "" : "s") in default scope"
+    }
+
+    private func codexActionLabel(for status: AgentConnectionStatus) -> String {
+        switch status {
+        case .connected:    return "Reconnect"
+        case .error:        return "Repair"
+        default:            return "Set up Codex"
+        }
+    }
+
+    // MARK: - Status mapping
+
+    private func mapStatus(_ status: AgentConnectionStatus) -> AgentCardStatus {
+        switch status {
+        case .connected:                  return .ok
+        case .configured, .installed:     return .ok
+        case .error:                      return .error
+        case .notInstalled:               return .needsSetup
+        case .checking, .unknown:         return .offline
+        }
+    }
 }
+
+// MARK: - Access recording level
 
 private struct AccessRecordingLevelPicker: View {
     @Environment(ManifoldStore.self) var store
@@ -66,21 +166,24 @@ private struct AccessRecordingLevelPicker: View {
     let selection: AccessRecordingLevel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Recording Level", selection: binding) {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            Picker("Recording Level", selection: recordingLevelBinding) {
                 ForEach(AccessRecordingLevel.allCases, id: \.self) { level in
                     Text(level.displayName).tag(level)
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
 
             Text(currentLevel.guidance)
-                .font(.caption)
+                .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var binding: Binding<AccessRecordingLevel> {
+    /// Stable binding avoiding inline Binding(get:set:) in view body.
+    private var recordingLevelBinding: Binding<AccessRecordingLevel> {
         Binding(
             get: { currentLevel },
             set: { newValue in
@@ -91,152 +194,5 @@ private struct AccessRecordingLevelPicker: View {
 
     private var currentLevel: AccessRecordingLevel {
         store.policy.policy(for: agent)?.accessRecordingLevel ?? selection
-    }
-}
-
-// MARK: - Agent Health Card
-
-private struct AgentHealthCard: View {
-    let agentName: String
-    let agentColor: Color
-    let state: AgentConnectionState
-    var onSetup: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header with headline state chip
-            HStack {
-                Circle().fill(agentColor).frame(width: 10, height: 10)
-                Text(agentName).font(Typ.sectionTitle)
-                Spacer()
-                // Headline chip — the state the user sees first
-                Text(state.overallStatus.displayLabel)
-                    .font(Typ.caption.weight(.medium))
-                    .foregroundStyle(chipForeground)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(chipBackground, in: Capsule())
-            }
-
-            // Check rows — compact, secondary to the headline
-            VStack(alignment: .leading, spacing: 6) {
-                switch state.id {
-                case .cowork:
-                    CheckRow("Claude Desktop installed", status: state.appInstalled)
-                    CheckRow("Claude Desktop configured", status: state.mcpConfigured)
-                    CheckRow("Claude Code configured", status: state.claudeCodeConfigured)
-                    CheckRow("Connection verified", status: state.connectionVerified)
-                case .codex:
-                    CheckRow("Codex app installed", status: state.codexAppInstalled)
-                    CheckRow("Manifold added", status: state.mcpAdded)
-                }
-            }
-            .font(Typ.body)
-            .foregroundStyle(.secondary)
-
-            if let error = state.errorDetail {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            if let onSetup {
-                if state.overallStatus == .notInstalled {
-                    Button(setupLabel) { onSetup() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                } else {
-                    Button(setupLabel) { onSetup() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-            }
-        }
-    }
-
-    private var chipForeground: Color {
-        switch state.overallStatus {
-        case .connected: .green
-        case .error: .orange
-        case .notInstalled: .secondary
-        default: .blue
-        }
-    }
-
-    private var chipBackground: Color {
-        chipForeground.opacity(0.12)
-    }
-
-    private var setupLabel: String {
-        switch state.overallStatus {
-        case .connected: "Reconnect"
-        case .error: "Repair Connection"
-        default: "Set Up \(agentName)"
-        }
-    }
-}
-
-// MARK: - Overall Status Badge
-
-struct OverallStatusBadge: View {
-    let status: AgentConnectionStatus
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-            Text(status.displayLabel)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var statusColor: Color {
-        switch status {
-        case .connected: .green
-        case .configured, .installed: .blue
-        case .error: .orange
-        default: .gray
-        }
-    }
-}
-
-// MARK: - Check Row
-
-struct CheckRow: View {
-    let label: String
-    let status: AgentConnectionStatus
-
-    init(_ label: String, status: AgentConnectionStatus) {
-        self.label = label
-        self.status = status
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            statusIcon.frame(width: 16)
-            Text(label).font(Typ.body)
-            Spacer()
-            Text(status.displayLabel)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        switch status {
-        case .connected, .installed:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        case .checking:
-            ProgressView().controlSize(.small)
-        case .notInstalled:
-            Image(systemName: "circle").foregroundStyle(.secondary)
-        case .error:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-        case .unknown, .configured:
-            Image(systemName: "circle.dashed").foregroundStyle(.secondary)
-        }
     }
 }

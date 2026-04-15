@@ -15,11 +15,12 @@ struct ConnectCodexSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            VStack(spacing: 8) {
-                Circle().fill(Color.purple).frame(width: 12, height: 12)
-                Text("Connect Codex").font(.title3.weight(.semibold))
+            VStack(spacing: Spacing.s2) {
+                GradientAvatar(agent: .codex, size: .extraLarge)
+                Text("Connect Codex")
+                    .font(ManifoldType.heading)
             }
-            .padding(.top, 24)
+            .padding(.top, Spacing.s6)
 
             Spacer()
 

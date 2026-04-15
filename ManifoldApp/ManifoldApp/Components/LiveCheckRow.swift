@@ -27,7 +27,7 @@ struct LiveCheckRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(ManifoldType.body)
-                Text(status.isPassingCheck ? "OK" : "\(status)")
+                Text(status.displayLabel.isEmpty ? "Unknown" : status.displayLabel)
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
             }

@@ -14,17 +14,18 @@ struct AddMailAccountSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            VStack(spacing: 8) {
+            VStack(spacing: Spacing.s2) {
                 Image(systemName: "envelope.badge.shield.half.filled")
-                    .font(.title)
-                    .foregroundStyle(.blue)
-                Text("Add Email Account").font(.title3.weight(.semibold))
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(ManifoldPalette.codex)
+                Text("Connect a mailbox")
+                    .font(ManifoldType.heading)
                 Text("Choose your email provider to get started.")
-                    .font(.callout)
+                    .font(ManifoldType.body)
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 24)
-            .padding(.bottom, 16)
+            .padding(.top, Spacing.s6)
+            .padding(.bottom, Spacing.s4)
 
             Divider()
 
