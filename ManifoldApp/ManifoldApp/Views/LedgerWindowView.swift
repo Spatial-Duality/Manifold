@@ -74,7 +74,6 @@ struct LedgerWindowView: View {
     var body: some View {
         NavigationSplitView {
             NavSidebar(selection: $destination)
-                .navigationSplitViewColumnWidth(min: 184, ideal: 200, max: 240)
         } detail: {
             content
                 .navigationTitle(destination.title)
