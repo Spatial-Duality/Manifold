@@ -63,30 +63,45 @@ private struct MailTabBar: View {
     let hasSession: Bool
 
     var body: some View {
-        HStack(spacing: Spacing.s2) {
+        HStack(spacing: Spacing.s1) {
             ForEach(MailWindowView.Tab.allCases, id: \.self) { tab in
                 let enabled = (tab != .session || hasSession)
                 Button {
                     if enabled { selection = tab }
                 } label: {
-                    HStack(spacing: Spacing.s1) {
-                        Image(systemName: tab.systemImage)
-                            .font(.caption.weight(.medium))
-                        Text(tab.label)
-                            .font(ManifoldType.body)
-                    }
-                    .padding(.horizontal, Spacing.s3)
-                    .padding(.vertical, Spacing.s1)
-                    .background(Capsule().fill(selection == tab ? ManifoldPalette.claudeSoft : .clear))
-                    .foregroundStyle(selection == tab ? ManifoldPalette.claude : ManifoldPalette.text2)
-                    .opacity(enabled ? 1 : 0.45)
+                    Label(tab.label, systemImage: tab.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(ManifoldType.captionMedium)
+                        .padding(.horizontal, Spacing.s3)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(selection == tab
+                                      ? ManifoldPalette.claudeSoft
+                                      : ManifoldPalette.surface3)
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(
+                                    selection == tab
+                                        ? ManifoldPalette.claude.opacity(0.35)
+                                        : ManifoldPalette.border,
+                                    lineWidth: 0.6
+                                )
+                        )
+                        .foregroundStyle(selection == tab
+                                         ? ManifoldPalette.claude
+                                         : ManifoldPalette.text2)
+                        .opacity(enabled ? 1 : 0.45)
                 }
                 .buttonStyle(.plain)
                 .disabled(!enabled)
+                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
             Spacer()
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
+        .background(.regularMaterial)
     }
 }
