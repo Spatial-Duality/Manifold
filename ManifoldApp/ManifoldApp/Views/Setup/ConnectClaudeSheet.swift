@@ -15,11 +15,12 @@ struct ConnectClaudeSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            VStack(spacing: 8) {
-                Circle().fill(Color.blue).frame(width: 12, height: 12)
-                Text("Connect Claude").font(.title3.weight(.semibold))
+            VStack(spacing: Spacing.s2) {
+                GradientAvatar(agent: .cowork, size: .extraLarge)
+                Text("Connect Claude")
+                    .font(ManifoldType.heading)
             }
-            .padding(.top, 24)
+            .padding(.top, Spacing.s6)
 
             Spacer()
 

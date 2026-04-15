@@ -97,26 +97,4 @@ struct AdvancedSettingsPane: View {
     }
 }
 
-private struct PathLabel: View {
-    let path: String
-
-    init(_ path: String) { self.path = path }
-
-    var body: some View {
-        HStack(spacing: Spacing.s1) {
-            Text(path.shortenedPath)
-                .font(ManifoldType.mono)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-            Button {
-                NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
-            } label: {
-                Image(systemName: "folder")
-            }
-            .buttonStyle(.borderless)
-            .help("Reveal in Finder")
-        }
-    }
-}
+// PathLabel promoted to Components/Primitives/PathLabel.swift.
