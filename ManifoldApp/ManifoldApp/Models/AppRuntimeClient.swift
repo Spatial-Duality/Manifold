@@ -163,6 +163,14 @@ protocol RuntimeClientProtocol: Sendable {
     func resumeAgent(_ agent: TargetApp) async throws
     func addSource(_ sourceID: String, to agent: TargetApp) async throws
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws
+    func setNodeOverride(
+        sourceID: String,
+        relativePath: String,
+        agent: TargetApp,
+        state: NodeOverrideState
+    ) async throws
+    func listNodeOverrides(sourceID: String) async throws -> [NodeOverrideRecord]
+    func clearNodeOverrides(sourceID: String, agent: TargetApp) async throws
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws
@@ -253,6 +261,24 @@ protocol RuntimeClientProtocol: Sendable {
     /// Resolve a pending request. Accepted values for `answer`:
     /// "notThisTime" / "once" / "session" / "default".
     func answerApproval(id: String, answer: String) async throws
+
+    // MARK: - Undo
+
+    /// Ask the runtime to reverse the most recent user-initiated action
+    /// (grant/revoke/override). Returns the reversed action's summary, or
+    /// nil when the history stack is empty. The runtime is authoritative
+    /// — the app never attempts an undo locally.
+    func undoLastAction() async throws -> UndoActionSummary?
+}
+
+/// Minimal app-side reflection of a reversed action. Only the fields the
+/// UI needs to surface a toast ("Undid: shared MyDocs with Claude"). Kept
+/// separate from the runtime's ActionRecord to avoid exposing inverse
+/// JSON payloads across the XPC boundary.
+public struct UndoActionSummary: Codable, Sendable, Hashable {
+    public let actionID: String
+    public let kind: String
+    public let summary: String
 }
 
 /// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.
@@ -297,6 +323,9 @@ extension RuntimeClientProtocol {
     func resumeAgent(_ agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("resumeAgent") }
     func addSource(_ sourceID: String, to agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("addSource(_:to:)") }
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("removeSource(_:from:)") }
+    func setNodeOverride(sourceID: String, relativePath: String, agent: TargetApp, state: NodeOverrideState) async throws { throw RuntimeClientStubError.unimplemented("setNodeOverride") }
+    func listNodeOverrides(sourceID: String) async throws -> [NodeOverrideRecord] { [] }
+    func clearNodeOverrides(sourceID: String, agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("clearNodeOverrides") }
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("updateAccessRecordingLevel") }
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet { throw RuntimeClientStubError.unimplemented("getEmailRuleSet") }
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws { throw RuntimeClientStubError.unimplemented("updateEmailRuleSet") }
@@ -318,6 +347,7 @@ extension RuntimeClientProtocol {
     func recentSessions(limit: Int) async throws -> [Session] { [] }
     func listPendingApprovals() async throws -> [PendingApprovalRecord] { [] }
     func answerApproval(id: String, answer: String) async throws {}
+    func undoLastAction() async throws -> UndoActionSummary? { nil }
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { [] }
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult { throw RuntimeClientStubError.unimplemented("revertSessionEvent") }
     func trackedFiles() async throws -> [String] { [] }
@@ -837,6 +867,39 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         _ = try await xpc.command(name: "removeSourceFromPolicy", payload: ["sourceID": sourceID, "agent": agent.rawValue])
     }
 
+    func setNodeOverride(
+        sourceID: String,
+        relativePath: String,
+        agent: TargetApp,
+        state: NodeOverrideState
+    ) async throws {
+        _ = try await xpc.command(
+            name: "setNodeOverride",
+            payload: [
+                "sourceID": sourceID,
+                "relativePath": relativePath,
+                "agent": agent.rawValue,
+                "state": state.rawValue,
+            ]
+        )
+    }
+
+    func listNodeOverrides(sourceID: String) async throws -> [NodeOverrideRecord] {
+        try await command(
+            name: "listNodeOverrides",
+            payload: ["sourceID": sourceID],
+            field: "overrides",
+            as: [NodeOverrideRecord].self
+        )
+    }
+
+    func clearNodeOverrides(sourceID: String, agent: TargetApp) async throws {
+        _ = try await xpc.command(
+            name: "clearNodeOverrides",
+            payload: ["sourceID": sourceID, "agent": agent.rawValue]
+        )
+    }
+
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws {
         _ = try await xpc.command(name: "updateAccessRecordingLevel", payload: ["level": level.rawValue, "agent": agent.rawValue])
     }
@@ -1205,6 +1268,17 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func answerApproval(id: String, answer: String) async throws {
         _ = try await xpc.command(name: "answerApproval", payload: ["id": id, "answer": answer])
+    }
+
+    func undoLastAction() async throws -> UndoActionSummary? {
+        let response = try await xpc.command(name: "undoLastAction", payload: [:])
+        if response["empty"] as? Bool == true { return nil }
+        guard let actionID = response["actionID"] as? String,
+              let kind = response["kind"] as? String,
+              let summary = response["summary"] as? String else {
+            return nil
+        }
+        return UndoActionSummary(actionID: actionID, kind: kind, summary: summary)
     }
 
     private func command<T: Decodable>(

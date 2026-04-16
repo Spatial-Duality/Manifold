@@ -3,9 +3,14 @@
 //
 // AccessWindowView — the "who can see what" surface.
 //
-// Per design/html/access.html: 4-tab router — Folders / Files / Session
-// / History — plus an empty state when no sources exist. Each sub-view
-// is a dense matrix or list with its own inspector on the right.
+// After the Stage-11 redesign: one canonical Scope view (three columns)
+// with two secondary view modes — Files (flat listing) and History
+// (past grants). The old "Folders" matrix and "Session" sub-tab are
+// gone; Session state is surfaced on Scope as an overlay when live
+// (temporal axis, not a sibling destination).
+//
+// Mode switching uses the native segmented picker per
+// APPLE-DESIGN-EXCELLENCE-GUIDE §3 — no custom capsule bars.
 
 import SwiftUI
 import ManifoldKit
@@ -13,42 +18,35 @@ import ManifoldKit
 struct AccessWindowView: View {
     @Environment(ManifoldStore.self) private var store
 
-    enum Tab: String, Hashable, CaseIterable {
-        case folders, files, session, history
+    enum Mode: String, Hashable, CaseIterable, Identifiable {
+        case scope, files, history
+
+        var id: String { rawValue }
 
         var label: String {
             switch self {
-            case .folders: return "Folders"
+            case .scope:   return "Scope"
             case .files:   return "Files"
-            case .session: return "Session"
             case .history: return "History"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .folders: return "folder.fill"
-            case .files:   return "doc.on.doc"
-            case .session: return "play.fill"
-            case .history: return "clock.arrow.circlepath"
             }
         }
     }
 
-    @State private var tab: Tab = .folders
+    @State private var mode: Mode = .scope
 
     var body: some View {
         VStack(spacing: 0) {
-            AccessTabBar(selection: $tab, hasSession: store.activeSession != nil)
-            Divider()
+            if !store.sources.isEmpty {
+                ModeBar(mode: $mode)
+                Divider()
+            }
 
             if store.sources.isEmpty {
                 EmptyFoldersView()
             } else {
-                switch tab {
-                case .folders: FoldersMatrixView()
+                switch mode {
+                case .scope:   ScopeColumnsView()
                 case .files:   FilesFlatView()
-                case .session: SessionDiffView()
                 case .history: AccessHistoryView()
                 }
             }
@@ -57,46 +55,21 @@ struct AccessWindowView: View {
     }
 }
 
-private struct AccessTabBar: View {
-    @Binding var selection: AccessWindowView.Tab
-    let hasSession: Bool
+/// Native segmented picker, centered, with light vertical padding.
+/// Replaces the previous custom capsule tab bar.
+private struct ModeBar: View {
+    @Binding var mode: AccessWindowView.Mode
 
     var body: some View {
-        HStack(spacing: Spacing.s1) {
-            ForEach(AccessWindowView.Tab.allCases, id: \.self) { tab in
-                let enabled = (tab != .session || hasSession)
-                Button {
-                    if enabled { selection = tab }
-                } label: {
-                    Label(tab.label, systemImage: tab.systemImage)
-                        .labelStyle(.titleAndIcon)
-                        .font(ManifoldType.captionMedium)
-                        .padding(.horizontal, Spacing.s3)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(selection == tab
-                                      ? ManifoldPalette.claudeSoft
-                                      : ManifoldPalette.surface3)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(
-                                    selection == tab
-                                        ? ManifoldPalette.claude.opacity(0.35)
-                                        : ManifoldPalette.border,
-                                    lineWidth: 0.6
-                                )
-                        )
-                        .foregroundStyle(selection == tab
-                                         ? ManifoldPalette.claude
-                                         : ManifoldPalette.text2)
-                        .opacity(enabled ? 1 : 0.45)
+        HStack {
+            Picker("View", selection: $mode) {
+                ForEach(AccessWindowView.Mode.allCases) { m in
+                    Text(m.label).tag(m)
                 }
-                .buttonStyle(.plain)
-                .disabled(!enabled)
-                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             Spacer()
         }
         .padding(.horizontal, Spacing.s4)

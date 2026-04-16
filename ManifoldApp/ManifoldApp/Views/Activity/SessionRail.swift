@@ -80,9 +80,14 @@ private struct SessionRailRow: View {
     let session: Session
     let isSelected: Bool
 
-    // Build a stable pseudo-sparkline from the session's counts so the
-    // rail has visual signal even before runtime exposes per-interval
-    // event density.
+    /// A session earns the full-weight row (sparkline + counts) only when
+    /// it has activity. Empty sessions collapse to a compact header-only
+    /// row so the rail reads as evidence, not as a wall of zeros.
+    private var hasActivity: Bool { session.actionCount > 0 }
+
+    // Sparkline built from real counts. Reserved for sessions with
+    // activity — empty sessions suppress the bar entirely rather than
+    // render a decorative baseline.
     private var samples: [SparklineBar.Sample] {
         let total = max(1, session.actionCount)
         let reads = Double(session.readCount) / Double(total)
@@ -107,35 +112,40 @@ private struct SessionRailRow: View {
         return f.string(from: d)
     }
 
+    private var agentTint: Color {
+        session.agent == "codex" ? ManifoldPalette.codex : ManifoldPalette.claude
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s1) {
             HStack(spacing: Spacing.s2) {
                 Circle()
-                    .fill(session.agent == "codex" ? ManifoldPalette.codex : ManifoldPalette.claude)
+                    .fill(agentTint)
                     .frame(width: 7, height: 7)
+                    .opacity(hasActivity ? 1 : 0.55)
                 Text(session.agent.capitalized)
                     .font(ManifoldType.captionMedium)
+                    .foregroundStyle(hasActivity ? .primary : .secondary)
                 Spacer(minLength: Spacing.s1)
                 Text(timeText)
                     .font(ManifoldType.numericCaption)
                     .foregroundStyle(.tertiary)
             }
-            SparklineBar(
-                samples: samples,
-                height: 14,
-                tint: session.agent == "codex" ? ManifoldPalette.codex : ManifoldPalette.claude
-            )
-            HStack(spacing: Spacing.s2) {
-                Text("\(session.readCount) read\(session.readCount == 1 ? "" : "s")")
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text("\(session.writeCount) write\(session.writeCount == 1 ? "" : "s")")
+
+            if hasActivity {
+                SparklineBar(samples: samples, height: 14, tint: agentTint)
+                HStack(spacing: Spacing.s2) {
+                    Text("\(session.readCount) read\(session.readCount == 1 ? "" : "s")")
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Text("\(session.writeCount) write\(session.writeCount == 1 ? "" : "s")")
+                }
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.secondary)
             }
-            .font(ManifoldType.tiny)
-            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, Spacing.s3)
-        .padding(.vertical, Spacing.s2)
+        .padding(.vertical, hasActivity ? Spacing.s2 : Spacing.s1)
         .background(
             RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
                 .fill(isSelected ? ManifoldPalette.claudeSoft : .clear)
@@ -143,6 +153,13 @@ private struct SessionRailRow: View {
         .padding(.horizontal, Spacing.s1)
         .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.agent) session at \(timeText), \(session.readCount) reads, \(session.writeCount) writes")
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        if hasActivity {
+            return "\(session.agent) session at \(timeText), \(session.readCount) reads, \(session.writeCount) writes"
+        }
+        return "\(session.agent) session at \(timeText), no activity"
     }
 }

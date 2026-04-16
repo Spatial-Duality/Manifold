@@ -19,6 +19,13 @@ public actor GrantStore {
     // MARK: - Sources
 
     /// Register a new source folder. Returns the source ID.
+    ///
+    /// After the row is created, the caller should call
+    /// `refreshSourceSizeCache` so the app can honestly answer "how many
+    /// files does this source have?" without walking the filesystem on
+    /// every render. We do NOT do the walk inline here — it can take
+    /// hundreds of milliseconds for large folders and would block the XPC
+    /// response path.
     @discardableResult
     public func addSource(displayName: String, rootPath: String) throws -> String {
         let sourceID = "src-\(UUID().uuidString.prefix(8).lowercased())"
@@ -29,6 +36,48 @@ public actor GrantStore {
         """, params: [sourceID, displayName, rootPath, now, now])
         logger.info("Added source \(sourceID): \(displayName)")
         return sourceID
+    }
+
+    /// Persist a fresh file count + byte size estimate for a source.
+    /// Caller is responsible for running `MaterializationEngine.estimateSize`
+    /// off the main actor — this method only writes the numbers.
+    public func updateSourceSizeCache(
+        sourceID: String,
+        fileCount: Int,
+        sizeBytes: Int64
+    ) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute(
+            """
+            UPDATE sources
+               SET file_count = ?,
+                   cached_size_bytes = ?,
+                   size_cached_at = ?
+             WHERE source_id = ?
+            """,
+            params: ["\(fileCount)", "\(sizeBytes)", now, sourceID]
+        )
+    }
+
+    /// Walk a source and persist the resulting file count + byte size.
+    /// Uses `MaterializationEngine.estimateSize`, which respects
+    /// `.manifoldignore` and the standard skip list. This is a best-effort
+    /// operation — failures are logged and the cache stays whatever it
+    /// was (nil → still nil, which the UI renders honestly as "—").
+    public func refreshSourceSizeCache(sourceID: String) {
+        do {
+            guard let source = try source(id: sourceID) else { return }
+            let estimate = try MaterializationEngine.estimateSize(
+                sources: [(source: source, mountName: source.sourceID)]
+            )
+            try updateSourceSizeCache(
+                sourceID: sourceID,
+                fileCount: estimate.fileCount,
+                sizeBytes: estimate.totalBytes
+            )
+        } catch {
+            logger.warning("Failed to refresh size cache for \(sourceID): \(String(describing: error))")
+        }
     }
 
     /// Sources currently available to share with agents.

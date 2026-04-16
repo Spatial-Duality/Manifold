@@ -73,10 +73,9 @@ struct AIAppsSettingsPane: View {
             consequenceText: claudeConsequence(),
             status: mapStatus(state.overallStatus),
             errorDetail: state.errorDetail,
-            primaryAction: AgentCardAction(
-                label: claudeActionLabel(for: state.overallStatus),
-                handler: { showClaudeSheet = true }
-            )
+            primaryAction: primaryAction(for: state.overallStatus, displayName: "Claude") {
+                showClaudeSheet = true
+            }
         ) {
             LiveCheckRow(label: "Claude Desktop installed",
                          status: state.appInstalled,
@@ -99,11 +98,25 @@ struct AIAppsSettingsPane: View {
         return "\(folders) folder\(folders == 1 ? "" : "s") in default scope"
     }
 
-    private func claudeActionLabel(for status: AgentConnectionStatus) -> String {
+    /// Card-level primary action per agent-connection status.
+    ///
+    /// - `.connected`: no card-level button; the per-row refresh icons on
+    ///   each `LiveCheckRow` are the per-fault affordance (plan §6.9).
+    /// - `.error`: "Reconfigure\u{2026}" — name the action rather than
+    ///   the vague "Repair".
+    /// - Otherwise: "Set up <agent>\u{2026}" opens the connect sheet.
+    private func primaryAction(
+        for status: AgentConnectionStatus,
+        displayName: String,
+        handler: @escaping () -> Void
+    ) -> AgentCardAction? {
         switch status {
-        case .connected:    return "Reconnect"
-        case .error:        return "Repair"
-        default:            return "Set up Claude"
+        case .connected:
+            return nil
+        case .error:
+            return AgentCardAction(label: "Reconfigure\u{2026}", handler: handler)
+        default:
+            return AgentCardAction(label: "Set up \(displayName)\u{2026}", handler: handler)
         }
     }
 
@@ -117,10 +130,9 @@ struct AIAppsSettingsPane: View {
             consequenceText: codexConsequence(),
             status: mapStatus(state.overallStatus),
             errorDetail: state.errorDetail,
-            primaryAction: AgentCardAction(
-                label: codexActionLabel(for: state.overallStatus),
-                handler: { showCodexSheet = true }
-            )
+            primaryAction: primaryAction(for: state.overallStatus, displayName: "Codex") {
+                showCodexSheet = true
+            }
         ) {
             LiveCheckRow(label: "Codex app installed",
                          status: state.codexAppInstalled,
@@ -135,14 +147,6 @@ struct AIAppsSettingsPane: View {
         guard let policy = store.policy.codexPolicy else { return nil }
         let folders = policy.allowedSourceIDs.count
         return "\(folders) folder\(folders == 1 ? "" : "s") in default scope"
-    }
-
-    private func codexActionLabel(for status: AgentConnectionStatus) -> String {
-        switch status {
-        case .connected:    return "Reconnect"
-        case .error:        return "Repair"
-        default:            return "Set up Codex"
-        }
     }
 
     // MARK: - Status mapping

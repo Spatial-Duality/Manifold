@@ -46,11 +46,7 @@ struct MenuBarPanelView: View {
 
             if let session = store.activeSession {
                 Divider()
-                if session.isTrackedEdit {
-                    TrackedEditStrip(session: session, store: store)
-                } else {
-                    SessionChipStrip(session: session, store: store)
-                }
+                SessionChipStrip(session: session, store: store)
             }
 
             if !store.pendingRequests.isEmpty {
@@ -162,18 +158,26 @@ private struct StatusHeader: View {
     }
 }
 
-// MARK: - Session chip (non-tracked)
+// MARK: - Session strip (unified: live + tracked edit share one visual)
+//
+// Per §2.5.1 reduction — "two agent-row color treatments collapse to
+// one." Session-live and tracked-edit are both *something is happening
+// now*; the distinguishing information is in the label, not the fill.
 
 private struct SessionChipStrip: View {
     let session: SessionRecord
     let store: ManifoldStore
+
+    private var kindLabel: String {
+        session.isTrackedEdit ? "TRACKED EDIT" : "SESSION"
+    }
 
     var body: some View {
         HStack(spacing: Spacing.s2) {
             Circle()
                 .fill(ManifoldPalette.active)
                 .frame(width: 7, height: 7)
-            Text("SESSION")
+            Text(kindLabel)
                 .font(ManifoldType.tiny)
                 .foregroundStyle(.secondary)
                 .tracking(0.4)
@@ -199,135 +203,77 @@ private struct SessionChipStrip: View {
     }
 }
 
-// MARK: - Tracked edit strip
-
-private struct TrackedEditStrip: View {
-    let session: SessionRecord
-    let store: ManifoldStore
-
-    var body: some View {
-        HStack(spacing: Spacing.s2) {
-            Image(systemName: "timeline.selection")
-                .font(ManifoldType.caption)
-                .foregroundStyle(ManifoldPalette.claude)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("TRACKED EDIT")
-                    .font(ManifoldType.tiny)
-                    .foregroundStyle(.primary)
-                    .tracking(0.5)
-                Text(session.name)
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: Spacing.s2)
-            Button("Finish") {
-                Task { try? await store.finishActiveSession() }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-        }
-        .padding(.horizontal, Spacing.s4)
-        .padding(.vertical, Spacing.s3)
-        .background(ManifoldPalette.claudeSoft)
-    }
-}
-
-// MARK: - Requests queue
+// MARK: - Requests summary
+//
+// Per Stage 2 and the user's "quick access and data" framing, the menu
+// bar shows the count and a one-line preview of the next request —
+// never the full CommitLadder. The ladder is a consequential decision
+// and lives on the bigger Ledger surface (RequestsWindowView). ⌘R
+// brings that window forward and routes to Requests.
 
 private struct RequestsQueueSection: View {
     let store: ManifoldStore
-    @State private var expanded = true
 
-    var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(ManifoldMotion.state) { expanded.toggle() }
-            } label: {
-                HStack(spacing: Spacing.s2) {
-                    Text("\(store.pendingRequests.count)")
-                        .font(ManifoldType.numericCaption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(ManifoldPalette.attention))
-                    Text("pending \(store.pendingRequests.count == 1 ? "request" : "requests")")
-                        .font(ManifoldType.body)
-                    Spacer(minLength: 0)
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, Spacing.s4)
-            .padding(.vertical, Spacing.s2)
-
-            if expanded {
-                VStack(spacing: Spacing.s2) {
-                    ForEach(store.pendingRequests) { request in
-                        RequestCard(request: request, store: store)
-                    }
-                }
-                .padding(.horizontal, Spacing.s3)
-                .padding(.bottom, Spacing.s2)
-            }
-        }
-        .background(Color.primary.opacity(0.02))
-    }
-}
-
-private struct RequestCard: View {
-    let request: ApprovalRequest
-    let store: ManifoldStore
+    private var count: Int { store.pendingRequests.count }
+    private var next: ApprovalRequest? { store.pendingRequests.first }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s2) {
             HStack(spacing: Spacing.s2) {
-                GradientAvatar(agent: request.agent, size: .small)
-                Text(request.headline)
-                    .font(ManifoldType.body)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack(spacing: Spacing.s1) {
-                Image(systemName: "folder.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(request.target)
-                    .font(ManifoldType.mono)
-                    .padding(.horizontal, 5)
+                Text("\(count)")
+                    .font(ManifoldType.numericCaption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
                     .padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06)))
+                    .background(Capsule().fill(ManifoldPalette.attention))
+                Text("pending \(count == 1 ? "request" : "requests")")
+                    .font(ManifoldType.body)
+                Spacer(minLength: 0)
             }
-            Text(request.context)
-                .font(ManifoldType.caption)
-                .foregroundStyle(.tertiary)
-                .italic()
-                .fixedSize(horizontal: false, vertical: true)
 
-            CommitLadder(
-                agent: request.agent,
-                sessionIsLive: store.activeSession != nil,
-                onNotThisTime: { Task { await store.answer(request, with: .notThisTime) } },
-                onOnce:        { Task { await store.answer(request, with: .once) } },
-                onSession:     { Task {
-                    guard let sid = store.activeSession?.id else { return }
-                    await store.answer(request, with: .forSession(sessionID: sid))
-                } },
-                onDefault:     { Task { await store.answer(request, with: .addToDefault) } }
-            )
+            if let request = next {
+                HStack(spacing: Spacing.s2) {
+                    GradientAvatar(agent: request.agent, size: .small)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(request.headline)
+                            .font(ManifoldType.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(request.target)
+                            .font(ManifoldType.tiny)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 0)
+                }
+                if count > 1 {
+                    Text("\(count - 1) more waiting")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Answer in Ledger") { openRequestsInLedger() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .keyboardShortcut("r", modifiers: .command)
+            }
         }
-        .padding(Spacing.s3)
-        .background(
-            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
-        )
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s2)
+        .background(Color.primary.opacity(0.02))
+    }
+
+    /// Activate the app, surface the main window, and route to Requests.
+    private func openRequestsInLedger() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+        NotificationCenter.default.post(name: .manifoldOpenRequests, object: nil)
     }
 }
 
@@ -381,27 +327,44 @@ private struct AgentRow: View {
     let consequenceText: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: Spacing.s2) {
-                GradientAvatar(agent: agent, size: .small)
-                Text(agent == .codex ? "Codex" : "Claude")
-                    .font(ManifoldType.bodyMedium)
-                Spacer(minLength: Spacing.s2)
-                Text(statusText)
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
+        // Per Priority 6: agent rows are handles, not labels. Tapping an
+        // agent opens the Ledger and routes to Scope so the user can edit
+        // what the row describes (plan §6.1).
+        Button(action: openScopeForAgent) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: Spacing.s2) {
+                    GradientAvatar(agent: agent, size: .small)
+                    Text(agent == .codex ? "Codex" : "Claude")
+                        .font(ManifoldType.bodyMedium)
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: Spacing.s2)
+                    Text(statusText)
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let consequenceText {
+                    Text(consequenceText)
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 26)
+                }
             }
-            if let consequenceText {
-                Text(consequenceText)
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, 26)
-            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, Spacing.s4)
+            .padding(.vertical, Spacing.s2)
         }
-        .padding(.horizontal, Spacing.s4)
-        .padding(.vertical, Spacing.s2)
+        .buttonStyle(HoverRowStyle())
         .opacity(paused ? 0.55 : 1.0)
         .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens Scope for this agent")
+    }
+
+    private func openScopeForAgent() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+        NotificationCenter.default.post(name: .manifoldOpenScope, object: agent)
     }
 }
 
@@ -473,9 +436,6 @@ private struct FooterActions: View {
                 FooterDivider()
             }
 
-            FooterItem(icon: "macwindow", label: "Open Manifold", shortcut: "⌘O") {
-                NSApp.activate(ignoringOtherApps: true)
-            }
             FooterItem(icon: "gearshape", label: "Settings\u{2026}", shortcut: "⌘,") {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)

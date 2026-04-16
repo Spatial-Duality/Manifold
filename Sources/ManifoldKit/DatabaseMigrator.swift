@@ -868,5 +868,67 @@ public struct DatabaseMigrator {
 
             logger.info("Migration 20: runtime-owned email rule tables and defaults")
         },
+
+        // v21: Cache file count and byte size per source, so bulk-grant
+        // confirmation ("~2,143 files · 84 MB") can render without walking
+        // the filesystem at render time. Populated on source add and on
+        // demand via GrantStore.refreshSourceSizeCache.
+        Migration(version: 21, name: "source_size_cache") { db in
+            let columns = try db.queryAll("PRAGMA table_info(sources)")
+            let names = Set(columns.compactMap { $0["name"] })
+            if !names.contains("file_count") {
+                try db.execute("ALTER TABLE sources ADD COLUMN file_count INTEGER")
+            }
+            if !names.contains("cached_size_bytes") {
+                try db.execute("ALTER TABLE sources ADD COLUMN cached_size_bytes INTEGER")
+            }
+            if !names.contains("size_cached_at") {
+                try db.execute("ALTER TABLE sources ADD COLUMN size_cached_at TEXT")
+            }
+            logger.info("Migration 21: sources gained (file_count, cached_size_bytes, size_cached_at)")
+        },
+
+        // v22: Per-file scope overrides. Previously PolicyStore only knew
+        // sources at the root level; this table records include/exclude
+        // overrides for specific paths under a source, scoped per agent.
+        // Rollup semantics live in the runtime's access filter, not here.
+        Migration(version: 22, name: "node_overrides") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS node_overrides (
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (source_id, relative_path, agent)
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_node_overrides_source ON node_overrides(source_id, agent)"
+            )
+            logger.info("Migration 22: node_overrides table created")
+        },
+
+        // v23: Action history stack for universal undo. Each mutation that
+        // the app exposes (grant source, revoke source, per-file override,
+        // etc.) appends an Action row with an `inverse` payload. Undo pops
+        // and applies the inverse; redo goes the other way.
+        Migration(version: 23, name: "action_history") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS action_history (
+                    action_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    inverse_json TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    undone_at TEXT
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_action_history_created ON action_history(created_at DESC)"
+            )
+            logger.info("Migration 23: action_history table created")
+        },
     ]
 }

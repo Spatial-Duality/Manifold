@@ -54,7 +54,6 @@ private struct MailboxRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Pill(text: "trusted senders", variant: .defaultScope)
         }
         .padding(.vertical, Spacing.s1)
     }
@@ -102,7 +101,6 @@ struct SensitivitySelector: View {
 struct MailboxInspector: View {
     let selection: String?
     let store: ManifoldStore
-    @State private var level: SensitivitySelector.Level = .trusted
 
     private var account: EmailAccountRecord? {
         guard let selection else { return nil }
@@ -122,15 +120,34 @@ struct MailboxInspector: View {
 
                     Divider()
 
+                    // Sensitivity selector is NOT rendered until the
+                    // per-mailbox sensitivity state is backed by
+                    // PolicyStore. Showing a SegmentedToggle that
+                    // pretends to mutate runtime while silently doing
+                    // nothing is the §3.3 fake signal Priority 3 calls
+                    // out. Honest placeholder until the wiring lands.
                     Text("Sensitivity")
                         .font(ManifoldType.tiny.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .tracking(0.5)
-                    SensitivitySelector(level: $level)
-                    Text(copy(for: level))
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: Spacing.s2) {
+                        Image(systemName: "bolt.slash")
+                            .foregroundStyle(.tertiary)
+                        VStack(alignment: .leading, spacing: Spacing.s1) {
+                            Text("Configuration not wired yet")
+                                .font(ManifoldType.bodyMedium)
+                                .foregroundStyle(.secondary)
+                            Text("Per-mailbox sensitivity (subjects / trusted senders / full) will land here once the runtime exposes a per-mailbox policy surface. Until then, all mailboxes default to subjects-only.")
+                                .font(ManifoldType.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(Spacing.s3)
+                    .background(
+                        RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                            .fill(ManifoldPalette.surface3.opacity(0.5))
+                    )
                 }
                 .padding(Spacing.s4)
             } else {
@@ -138,7 +155,7 @@ struct MailboxInspector: View {
                     Image(systemName: "tray.2")
                         .font(.system(size: 24, weight: .light))
                         .foregroundStyle(.tertiary)
-                    Text("Select a mailbox to configure sensitivity.")
+                    Text("Select a mailbox to see its metadata.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -146,14 +163,6 @@ struct MailboxInspector: View {
                 .frame(maxWidth: .infinity)
                 .padding(Spacing.s8)
             }
-        }
-    }
-
-    private func copy(for level: SensitivitySelector.Level) -> String {
-        switch level {
-        case .subjects: return "Claude sees subject lines and sender addresses. Message bodies are never read."
-        case .trusted:  return "Claude sees bodies from senders you mark as trusted, and subjects for everyone else."
-        case .full:     return "Claude sees every message body in this mailbox. Use only for low-sensitivity inboxes."
         }
     }
 }

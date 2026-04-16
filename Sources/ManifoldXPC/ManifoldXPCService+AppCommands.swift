@@ -29,7 +29,14 @@ extension ManifoldXPCService {
                   let agentRaw = payload["agent"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try await runtime.policyStore.addSource(sourceID, to: TargetApp(rawValue: agentRaw) ?? .cowork)
+            let agent = TargetApp(rawValue: agentRaw) ?? .cowork
+            try await runtime.policyStore.addSource(sourceID, to: agent)
+            try await recordAction(
+                kind: "policy.grant.add",
+                payload: ["sourceID": sourceID, "agent": agent.rawValue],
+                inverse: ["sourceID": sourceID, "agent": agent.rawValue],
+                summary: "Shared a folder with \(agentLabel(agent))"
+            )
             return ["ok": true]
 
         case "removeSourceFromPolicy":
@@ -37,7 +44,70 @@ extension ManifoldXPCService {
                   let agentRaw = payload["agent"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try await runtime.policyStore.removeSource(sourceID, from: TargetApp(rawValue: agentRaw) ?? .cowork)
+            let agent = TargetApp(rawValue: agentRaw) ?? .cowork
+            try await runtime.policyStore.removeSource(sourceID, from: agent)
+            try await recordAction(
+                kind: "policy.grant.remove",
+                payload: ["sourceID": sourceID, "agent": agent.rawValue],
+                inverse: ["sourceID": sourceID, "agent": agent.rawValue],
+                summary: "Revoked a folder from \(agentLabel(agent))"
+            )
+            return ["ok": true]
+
+        case "setNodeOverride":
+            guard let sourceID = payload["sourceID"] as? String,
+                  let relativePath = payload["relativePath"] as? String,
+                  let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw),
+                  let stateRaw = payload["state"] as? String,
+                  let state = NodeOverrideState(rawValue: stateRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            // Capture prior state so undo restores it precisely (inherit
+            // resolves to "no override row" which is distinct from include/exclude).
+            let priorState = try await runtime.policyStore.nodeOverride(
+                sourceID: sourceID,
+                relativePath: relativePath,
+                agent: agent
+            ) ?? .inherit
+            try await runtime.policyStore.setNodeOverride(
+                sourceID: sourceID,
+                relativePath: relativePath,
+                agent: agent,
+                state: state
+            )
+            try await recordAction(
+                kind: "policy.nodeOverride.set",
+                payload: [
+                    "sourceID": sourceID,
+                    "relativePath": relativePath,
+                    "agent": agent.rawValue,
+                    "state": state.rawValue,
+                ],
+                inverse: [
+                    "sourceID": sourceID,
+                    "relativePath": relativePath,
+                    "agent": agent.rawValue,
+                    "state": priorState.rawValue,
+                ],
+                summary: overrideSummary(state: state, agent: agent, path: relativePath)
+            )
+            return ["ok": true]
+
+        case "listNodeOverrides":
+            guard let sourceID = payload["sourceID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let overrides = try await runtime.policyStore.nodeOverrides(sourceID: sourceID)
+            return ["overrides": try XPCJSON.object(from: overrides)]
+
+        case "clearNodeOverrides":
+            guard let sourceID = payload["sourceID"] as? String,
+                  let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.policyStore.clearNodeOverrides(sourceID: sourceID, agent: agent)
             return ["ok": true]
 
         case "sessionPreview":
@@ -460,8 +530,68 @@ extension ManifoldXPCService {
             }
             return ["ok": true]
 
+        case "undoLastAction":
+            let reversed = try await runtime.undoLastAction()
+            if let action = reversed {
+                return [
+                    "ok": true,
+                    "actionID": action.actionID,
+                    "kind": action.kind,
+                    "summary": action.summary,
+                ]
+            }
+            return ["ok": true, "empty": true]
+
         default:
             return nil
+        }
+    }
+
+    /// Append a user-initiated action to the undo stack. Payload + inverse
+    /// dicts are JSON-encoded; unknown kinds in undo just no-op (see
+    /// ManifoldRuntime.undoLastAction). Failures here are logged — they
+    /// must never block the forward mutation from succeeding.
+    fileprivate func recordAction(
+        kind: String,
+        payload: [String: String],
+        inverse: [String: String],
+        summary: String
+    ) async throws {
+        do {
+            let payloadJSON = String(
+                data: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+                encoding: .utf8
+            ) ?? "{}"
+            let inverseJSON = String(
+                data: try JSONSerialization.data(withJSONObject: inverse, options: [.sortedKeys]),
+                encoding: .utf8
+            ) ?? "{}"
+            try await runtime.actionHistoryStore.append(
+                kind: kind,
+                payloadJSON: payloadJSON,
+                inverseJSON: inverseJSON,
+                summary: summary
+            )
+        } catch {
+            appCommandLogger.error(
+                "Failed to record action \(kind, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    fileprivate func agentLabel(_ agent: TargetApp) -> String {
+        switch agent {
+        case .cowork: return "Claude"
+        case .codex:  return "Codex"
+        }
+    }
+
+    fileprivate func overrideSummary(state: NodeOverrideState, agent: TargetApp, path: String) -> String {
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        switch state {
+        case .include: return "Included \(name) for \(agentLabel(agent))"
+        case .exclude: return "Excluded \(name) from \(agentLabel(agent))"
+        case .inherit: return "Cleared override on \(name) for \(agentLabel(agent))"
         }
     }
 

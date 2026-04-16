@@ -25,6 +25,35 @@ extension PolicyModel {
         )
     }
 
+    /// Source IDs that the live session adds beyond the agent's default
+    /// policy (the session can see them, but they aren't in the default
+    /// scope). Empty when no session is live or all scope is already
+    /// default. Derived from the active workBlock — honest signal.
+    var sessionAdditionIDs: Set<String> {
+        guard let block = activeWorkBlock else { return [] }
+        let defaultIDs: Set<String> = {
+            switch block.agent {
+            case .cowork: return Set(claudePolicy?.allowedSourceIDs ?? [])
+            case .codex:  return Set(codexPolicy?.allowedSourceIDs ?? [])
+            }
+        }()
+        return Set(block.sourceIDs).subtracting(defaultIDs)
+    }
+
+    /// Source IDs in the agent's default scope that the live session has
+    /// removed. Empty when no session is live. Also derived from the
+    /// active workBlock.
+    var sessionRemovalIDs: Set<String> {
+        guard let block = activeWorkBlock else { return [] }
+        let defaultIDs: Set<String> = {
+            switch block.agent {
+            case .cowork: return Set(claudePolicy?.allowedSourceIDs ?? [])
+            case .codex:  return Set(codexPolicy?.allowedSourceIDs ?? [])
+            }
+        }()
+        return defaultIDs.subtracting(Set(block.sourceIDs))
+    }
+
     /// Pending approval requests for the queue. Derived from the real
     /// runtime ApprovalQueue via `pendingApprovals` on every refresh.
     var pendingRequests: [ApprovalRequest] {

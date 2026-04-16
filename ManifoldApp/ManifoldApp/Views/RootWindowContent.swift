@@ -14,6 +14,16 @@ import ManifoldKit
 
 extension Notification.Name {
     static let manifoldShowSessionStartSheet = Notification.Name("manifold.showSessionStartSheet")
+    /// Posted by the menu bar panel when the user taps "Answer in Ledger".
+    /// LedgerWindowView listens and routes to the Requests destination.
+    static let manifoldOpenRequests = Notification.Name("manifold.openRequests")
+    /// Posted by the menu bar panel when the user taps an agent row.
+    /// Today the receiver only switches the Ledger destination to `.access`;
+    /// the `object` payload (`TargetApp`) is reserved for the Priority-2
+    /// agent-centric Scope canvas, which will consume it to pre-focus the
+    /// matching agent column. Posting it now keeps the call sites
+    /// forward-compatible; a receiver-side TODO marks the gap.
+    static let manifoldOpenScope = Notification.Name("manifold.openScope")
 }
 
 struct RootWindowContent: View {
