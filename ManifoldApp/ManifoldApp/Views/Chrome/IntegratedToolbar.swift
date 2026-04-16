@@ -5,9 +5,10 @@
 //
 // The live `SessionChip` now lives only in `StatusBar` (Principle 10 —
 // one ambient home for runtime state). The toolbar keeps "Start
-// session" as the primary action when no session is live, and drops
-// the Refresh button entirely: the runtime pushes state, so a Refresh
-// affordance was an admission that live state wasn't trusted.
+// session" as the primary action when no session is live, and a
+// "Finish session" action when one is. An always-populated toolbar
+// keeps macOS from collapsing the title-bar area into an empty strip
+// (which looks broken alongside a collapsed sidebar).
 
 import SwiftUI
 import ManifoldKit
@@ -26,6 +27,13 @@ struct IntegratedToolbar: ToolbarContent {
                 }
                 .help("Start a new session (⌘N)")
                 .keyboardShortcut("n", modifiers: .command)
+            } else {
+                Button(role: .destructive) {
+                    Task { await store.endSession() }
+                } label: {
+                    Label("Finish session", systemImage: "stop.fill")
+                }
+                .help("Finish the active session")
             }
         }
     }

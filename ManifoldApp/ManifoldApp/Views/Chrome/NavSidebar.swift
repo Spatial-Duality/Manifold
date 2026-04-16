@@ -10,8 +10,11 @@
 // the traffic lights.
 //
 // Conventions followed (per swiftui-pro references):
-//   - .navigationTitle("Manifold") at the List level — macOS positions
-//     this in the title bar / source list header for us.
+//   - Flat `List { ForEach … }` instead of a single-`Section` wrapper.
+//     A one-section sidebar renders as a blank column on macOS 26 when
+//     the detail also sets `.navigationTitle`, because the section
+//     header and nav-title machinery can collide during relayout. A
+//     flat list always renders.
 //   - Label(title, systemImage:) for row content (references/design.md).
 //   - .badge(Int) for pending counts — the system handles position, type
 //     scaling, and accessibility ("N unread"-style reads).
@@ -31,11 +34,9 @@ struct NavSidebar: View {
         // Live `SessionChip` intentionally lives only in `StatusBar` —
         // one ambient home for runtime state (plan §6.3).
         List(selection: $selection) {
-            Section("Ledger") {
-                ForEach(LedgerDestination.allCases) { destination in
-                    NavRow(destination: destination, pendingCount: badgeCount(for: destination))
-                        .tag(destination)
-                }
+            ForEach(LedgerDestination.allCases) { destination in
+                NavRow(destination: destination, pendingCount: badgeCount(for: destination))
+                    .tag(destination)
             }
         }
         .listStyle(.sidebar)
