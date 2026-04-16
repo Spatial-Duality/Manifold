@@ -14,24 +14,19 @@ import ManifoldKit
 struct MailWindowView: View {
     @Environment(ManifoldStore.self) private var store
 
-    enum Tab: String, Hashable, CaseIterable {
-        case mailboxes, threads, session, history
+    /// Three modes. `.session` (disabled-when-no-session) was a posture
+    /// leak per plan §2.5.1 — dropped; session activity is visible via
+    /// the Activity ledger filtered on the live session.
+    enum Tab: String, Hashable, CaseIterable, Identifiable {
+        case mailboxes, threads, history
+
+        var id: String { rawValue }
 
         var label: String {
             switch self {
             case .mailboxes: return "Mailboxes"
             case .threads:   return "Threads"
-            case .session:   return "Session"
             case .history:   return "History"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .mailboxes: return "tray.2"
-            case .threads:   return "text.bubble"
-            case .session:   return "play.fill"
-            case .history:   return "clock.arrow.circlepath"
             }
         }
     }
@@ -40,7 +35,7 @@ struct MailWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MailTabBar(selection: $tab, hasSession: store.activeSession != nil)
+            MailTabBar(selection: $tab)
             Divider()
 
             if store.emailAccounts.accounts.isEmpty {
@@ -49,7 +44,6 @@ struct MailWindowView: View {
                 switch tab {
                 case .mailboxes: MailboxesMatrixView()
                 case .threads:   ThreadsView()
-                case .session:   MailSessionView()
                 case .history:   MailHistoryView()
                 }
             }
@@ -58,46 +52,21 @@ struct MailWindowView: View {
     }
 }
 
+/// Native segmented picker, replaces the previous custom capsule bar
+/// per APPLE-DESIGN-EXCELLENCE-GUIDE §3.
 private struct MailTabBar: View {
     @Binding var selection: MailWindowView.Tab
-    let hasSession: Bool
 
     var body: some View {
-        HStack(spacing: Spacing.s1) {
-            ForEach(MailWindowView.Tab.allCases, id: \.self) { tab in
-                let enabled = (tab != .session || hasSession)
-                Button {
-                    if enabled { selection = tab }
-                } label: {
-                    Label(tab.label, systemImage: tab.systemImage)
-                        .labelStyle(.titleAndIcon)
-                        .font(ManifoldType.captionMedium)
-                        .padding(.horizontal, Spacing.s3)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(selection == tab
-                                      ? ManifoldPalette.claudeSoft
-                                      : ManifoldPalette.surface3)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(
-                                    selection == tab
-                                        ? ManifoldPalette.claude.opacity(0.35)
-                                        : ManifoldPalette.border,
-                                    lineWidth: 0.6
-                                )
-                        )
-                        .foregroundStyle(selection == tab
-                                         ? ManifoldPalette.claude
-                                         : ManifoldPalette.text2)
-                        .opacity(enabled ? 1 : 0.45)
+        HStack {
+            Picker("View", selection: $selection) {
+                ForEach(MailWindowView.Tab.allCases) { tab in
+                    Text(tab.label).tag(tab)
                 }
-                .buttonStyle(.plain)
-                .disabled(!enabled)
-                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             Spacer()
         }
         .padding(.horizontal, Spacing.s4)

@@ -28,23 +28,13 @@ struct NavSidebar: View {
     @Environment(ManifoldStore.self) private var store
 
     var body: some View {
+        // Live `SessionChip` intentionally lives only in `StatusBar` —
+        // one ambient home for runtime state (plan §6.3).
         List(selection: $selection) {
             Section("Ledger") {
                 ForEach(LedgerDestination.allCases) { destination in
                     NavRow(destination: destination, pendingCount: badgeCount(for: destination))
                         .tag(destination)
-                }
-            }
-
-            if let session = store.activeSession {
-                Section("Session") {
-                    SessionChip(
-                        name: session.name,
-                        remainingSeconds: session.remainingSeconds,
-                        isTrackedEdit: session.isTrackedEdit
-                    )
-                    .padding(.vertical, 2)
-                    .listRowSeparator(.hidden)
                 }
             }
         }

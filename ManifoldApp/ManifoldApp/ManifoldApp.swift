@@ -49,6 +49,13 @@ struct ManifoldApp: App {
                 .keyboardShortcut("1", modifiers: .command)
             }
 
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo Last Action") {
+                    Task { await store.policy.undoLastAction() }
+                }
+                .keyboardShortcut("z", modifiers: .command)
+            }
+
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Manifold") {
                     store.quitManifold()

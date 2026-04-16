@@ -117,6 +117,73 @@ final class PolicyModel {
         }
     }
 
+    /// Persist a per-node override (include / exclude / inherit) for a
+    /// path within a source. `inherit` deletes any prior override so the
+    /// node resumes inheriting from its source-level membership.
+    func setNodeOverride(
+        sourceID: String,
+        relativePath: String,
+        agent: TargetApp,
+        state: NodeOverrideState
+    ) async {
+        guard let client else { return }
+        do {
+            try await client.setNodeOverride(
+                sourceID: sourceID,
+                relativePath: relativePath,
+                agent: agent,
+                state: state
+            )
+        } catch {
+            logger.error("Failed to set node override: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fetch all persisted node overrides for a source. Returns an empty
+    /// array on failure rather than throwing, so inspectors can surface
+    /// "no overrides yet" honestly.
+    func nodeOverrides(sourceID: String) async -> [NodeOverrideRecord] {
+        guard let client else { return [] }
+        do {
+            return try await client.listNodeOverrides(sourceID: sourceID)
+        } catch {
+            logger.error("Failed to list node overrides: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func clearNodeOverrides(sourceID: String, agent: TargetApp) async {
+        guard let client else { return }
+        do {
+            try await client.clearNodeOverrides(sourceID: sourceID, agent: agent)
+        } catch {
+            logger.error("Failed to clear node overrides: \(error.localizedDescription)")
+        }
+    }
+
+    /// The summary of the most recently reversed action, or nil when the
+    /// last ⌘Z tried to undo an empty stack. Observed by UI so the status
+    /// bar can flash a one-line "Undid: …" toast. Cleared by the view
+    /// after display.
+    var lastUndoSummary: UndoActionSummary?
+
+    /// Reverse the most recent user-initiated grant/revoke/override. Runs
+    /// on the runtime — we never undo locally. Refreshes policies afterward
+    /// so the three-column Scope view reflects the new truth immediately.
+    @discardableResult
+    func undoLastAction() async -> UndoActionSummary? {
+        guard let client else { return nil }
+        do {
+            let reversed = try await client.undoLastAction()
+            lastUndoSummary = reversed
+            await loadPolicies()
+            return reversed
+        } catch {
+            logger.error("Undo failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async {
         guard let client else { return }
         do {

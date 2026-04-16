@@ -3,10 +3,11 @@
 //
 // IntegratedToolbar — the Ledger window's native macOS toolbar.
 //
-// Matches design/html/chrome.css — a thin strip with filter chips where
-// appropriate, a SessionChip in the trailing position when a session is
-// live, and destination-specific actions. Phase 1 renders the shell; each
-// phase's destination adds its own toolbar items.
+// The live `SessionChip` now lives only in `StatusBar` (Principle 10 —
+// one ambient home for runtime state). The toolbar keeps "Start
+// session" as the primary action when no session is live, and drops
+// the Refresh button entirely: the runtime pushes state, so a Refresh
+// affordance was an admission that live state wasn't trusted.
 
 import SwiftUI
 import ManifoldKit
@@ -17,14 +18,7 @@ struct IntegratedToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if let session = store.activeSession {
-                SessionChip(
-                    name: session.name,
-                    remainingSeconds: session.remainingSeconds,
-                    isTrackedEdit: session.isTrackedEdit
-                )
-                .accessibilityAddTraits(.isStaticText)
-            } else {
+            if store.activeSession == nil {
                 Button {
                     Task { try? await store.startSession(SessionDraft()) }
                 } label: {
@@ -33,16 +27,6 @@ struct IntegratedToolbar: ToolbarContent {
                 .help("Start a new session (⌘N)")
                 .keyboardShortcut("n", modifiers: .command)
             }
-        }
-
-        ToolbarItemGroup(placement: .automatic) {
-            Button {
-                Task { await store.refreshAll(force: true) }
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .help("Refresh runtime state")
-            .keyboardShortcut("r", modifiers: .command)
         }
     }
 }

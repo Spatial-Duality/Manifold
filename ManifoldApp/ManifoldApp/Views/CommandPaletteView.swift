@@ -122,7 +122,7 @@ private struct CommandRow: View {
             }
             .padding(.horizontal, Spacing.section)
             .padding(.vertical, Spacing.standard)
-            .background(highlighted ? Color.accentColor.opacity(0.12) : Color.clear)
+            .background(highlighted ? ManifoldPalette.surface3 : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerSmall))
         }
         .buttonStyle(.plain)

@@ -19,6 +19,7 @@ struct ActivityWindowView: View {
     @State private var selectedSession: Session? = nil
     @State private var selectedEvent: AuditEntry.ID? = nil
     @State private var filter: EventTable.Filter = .all
+    @State private var showNewRuleSheet = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -37,7 +38,13 @@ struct ActivityWindowView: View {
                 EventTable(
                     entries: store.activityEntries,
                     filter: filter,
-                    selection: $selectedEvent
+                    selection: $selectedEvent,
+                    onRevokeSource: { entry in
+                        Task { await revokeSource(for: entry) }
+                    },
+                    onAddDenyRule: { _ in
+                        showNewRuleSheet = true
+                    }
                 )
             }
             .frame(maxWidth: .infinity)
@@ -57,39 +64,57 @@ struct ActivityWindowView: View {
             await store.history.loadActivity()
             await store.history.loadSessions()
         }
+        .sheet(isPresented: $showNewRuleSheet) {
+            NewRuleSheet(domain: .files) { rule in
+                store.rules.add(rule)
+                showNewRuleSheet = false
+            }
+        }
+    }
+
+    /// Find the source that contains `entry.filePath` (by root-path prefix)
+    /// and revoke it from whichever agent(s) currently see it. Honest
+    /// no-op when no match — the menu item only appears when the entry
+    /// carries a path, but the source may have been removed since.
+    private func revokeSource(for entry: AuditEntry) async {
+        guard let path = entry.filePath, !path.isEmpty else { return }
+        let expanded = (path as NSString).expandingTildeInPath
+        guard let source = store.sources.first(where: { src in
+            let root = (src.originalRootPath as NSString).expandingTildeInPath
+            return expanded.hasPrefix(root)
+        }) else { return }
+
+        let claudeHas = store.policy.claudePolicy?.allowedSourceIDs.contains(source.sourceID) == true
+        let codexHas = store.policy.codexPolicy?.allowedSourceIDs.contains(source.sourceID) == true
+
+        if claudeHas {
+            await store.policy.removeSource(source.sourceID, from: .cowork)
+        }
+        if codexHas {
+            await store.policy.removeSource(source.sourceID, from: .codex)
+        }
     }
 }
 
-/// Filter chips above the event table.
+/// Native segmented filter above the event table. Replaces the previous
+/// custom capsule pills per APPLE-DESIGN-EXCELLENCE-GUIDE §3.
 private struct EventTableToolbar: View {
     @Binding var filter: EventTable.Filter
 
     var body: some View {
-        HStack(spacing: Spacing.s2) {
-            ForEach(EventTable.Filter.allCases, id: \.self) { option in
-                Button(option.label) {
-                    filter = option
+        HStack {
+            Picker("Filter", selection: $filter) {
+                ForEach(EventTable.Filter.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
                 }
-                .buttonStyle(.plain)
-                .font(ManifoldType.captionMedium)
-                .padding(.horizontal, Spacing.s2)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(option == filter ? ManifoldPalette.claudeSoft : Color.clear)
-                )
-                .foregroundStyle(option == filter ? ManifoldPalette.claude : ManifoldPalette.text2)
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(
-                            option == filter ? ManifoldPalette.claude.opacity(0.35) : ManifoldPalette.border,
-                            lineWidth: 0.5
-                        )
-                )
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             Spacer()
         }
-        .padding(.horizontal, Spacing.s3)
+        .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
+        .background(.regularMaterial)
     }
 }

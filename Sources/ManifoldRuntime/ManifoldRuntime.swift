@@ -38,6 +38,8 @@ public actor ManifoldRuntime {
     public nonisolated let approvalQueue: ApprovalQueue
     /// Access decision and exposure record store.
     public nonisolated let exposureStore: ExposureStore
+    /// Append-only log of user-initiated mutations — powers universal undo.
+    public nonisolated let actionHistoryStore: ActionHistoryStore
 
     private var bridges: [String: ManifoldBridge] = [:]
     private var recordedCoverageEventKeys: Set<String> = []
@@ -64,6 +66,7 @@ public actor ManifoldRuntime {
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
         let approvalQueue = ApprovalQueue(db: db)
         let exposureStore = ExposureStore(db: db)
+        let actionHistoryStore = ActionHistoryStore(db: db)
 
         self.db = db
         self.contentStore = contentStore
@@ -79,6 +82,7 @@ public actor ManifoldRuntime {
         self.emailSyncEngine = emailSyncEngine
         self.approvalQueue = approvalQueue
         self.exposureStore = exposureStore
+        self.actionHistoryStore = actionHistoryStore
 
         runtimeLogger.info("Initialized runtime at \(rootURL.path, privacy: .public)")
     }
@@ -328,6 +332,62 @@ public actor ManifoldRuntime {
     }
 
     /// Summarizes recent email-rule activity for one agent from the audit trail.
+    // MARK: - Undo
+
+    /// Pop the most recent undoable action, apply its inverse, and mark it
+    /// undone. Returns the reversed action so callers can surface a toast
+    /// ("Undid: shared MyDocs with Claude"). Returns nil if the history
+    /// stack is empty.
+    ///
+    /// Action kinds the runtime currently knows how to reverse:
+    ///   - `policy.grant.add`   → removeSource(from:)
+    ///   - `policy.grant.remove`→ addSource(to:)
+    ///   - `policy.nodeOverride.set` → restore prior override state
+    ///
+    /// Unknown kinds are a no-op (logged). We never guess — if the runtime
+    /// can't undo something it was asked to record, we refuse rather than
+    /// apply a lossy approximation.
+    @discardableResult
+    public func undoLastAction() async throws -> ActionRecord? {
+        guard let action = try await actionHistoryStore.peekUndoable() else {
+            return nil
+        }
+        let inverse = (try? JSONSerialization.jsonObject(with: Data(action.inverseJSON.utf8))) as? [String: String] ?? [:]
+        switch action.kind {
+        case "policy.grant.add":
+            guard let sid = inverse["sourceID"], let agentRaw = inverse["agent"],
+                  let agent = TargetApp(rawValue: agentRaw) else { return nil }
+            try await policyStore.removeSource(sid, from: agent)
+
+        case "policy.grant.remove":
+            guard let sid = inverse["sourceID"], let agentRaw = inverse["agent"],
+                  let agent = TargetApp(rawValue: agentRaw) else { return nil }
+            try await policyStore.addSource(sid, to: agent)
+
+        case "policy.nodeOverride.set":
+            guard let sid = inverse["sourceID"],
+                  let rel = inverse["relativePath"],
+                  let agentRaw = inverse["agent"],
+                  let agent = TargetApp(rawValue: agentRaw),
+                  let stateRaw = inverse["state"],
+                  let state = NodeOverrideState(rawValue: stateRaw) else { return nil }
+            try await policyStore.setNodeOverride(
+                sourceID: sid,
+                relativePath: rel,
+                agent: agent,
+                state: state
+            )
+
+        default:
+            runtimeLogger.warning(
+                "undoLastAction: unknown kind \(action.kind, privacy: .public), leaving action untouched"
+            )
+            return nil
+        }
+        try await actionHistoryStore.markUndone(actionID: action.actionID)
+        return action
+    }
+
     public func emailRuleActivitySummary(for agent: TargetApp) async throws -> EmailRuleActivitySummary {
         let ruleSet = try await emailRuleStore.ruleSet(for: agent)
         let policy = try await policyStore.policy(for: agent)

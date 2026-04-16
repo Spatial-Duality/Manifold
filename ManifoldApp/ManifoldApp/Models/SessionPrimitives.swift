@@ -182,6 +182,44 @@ struct Rule: Identifiable, Hashable, Sendable {
     let createdBy: CreatedBy
     let createdAt: Date
 
+    /// Most recent time this rule fired, if ever. Remains nil until the
+    /// runtime starts writing rule-fired events to the audit log — the
+    /// view reads this and renders "Not yet fired" when it is nil
+    /// (Principle 10: honesty — no fake counts).
+    var lastFiredAt: Date?
+    /// How many times this rule has fired in the past seven days, if the
+    /// runtime is tracking it. Defaults to 0 — same honesty contract
+    /// as `lastFiredAt`.
+    var firesPast7Days: Int
+
+    init(
+        id: String,
+        domain: Domain,
+        verb: Verb,
+        subject: String,
+        object: String,
+        pattern: String,
+        enabled: Bool,
+        seeded: Bool,
+        createdBy: CreatedBy,
+        createdAt: Date,
+        lastFiredAt: Date? = nil,
+        firesPast7Days: Int = 0
+    ) {
+        self.id = id
+        self.domain = domain
+        self.verb = verb
+        self.subject = subject
+        self.object = object
+        self.pattern = pattern
+        self.enabled = enabled
+        self.seeded = seeded
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+        self.lastFiredAt = lastFiredAt
+        self.firesPast7Days = firesPast7Days
+    }
+
     enum Domain: String, Hashable, Sendable, CaseIterable {
         case files
         case email

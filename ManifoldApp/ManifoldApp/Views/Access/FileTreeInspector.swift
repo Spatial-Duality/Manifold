@@ -4,10 +4,11 @@
 // FileTreeInspector — the right-pane file tree for a selected source.
 //
 // Shows the folder's descendants as an indented DisclosureGroup tree with
-// TriStateCheckbox per node. Inclusion state is currently derived from
-// whether the parent source is in the selected agent's scope — Phase 3
-// scaffold; real per-file policy rollup lands when ScopeStore materializes
-// file-level inclusions.
+// TriStateCheckbox per node. Inclusion state is the source-level membership
+// for the selected agent, with any persisted per-node override layered on
+// top. Clicking a node records an `include` / `exclude` override against
+// the runtime's PolicyStore; clicking again to match the inherited state
+// clears the override and the node resumes inheriting.
 
 import SwiftUI
 import ManifoldKit
@@ -19,6 +20,10 @@ struct FileTreeInspector: View {
     @State private var root: TreeNode?
     @State private var isLoading = false
     @State private var targetAgent: TargetApp = .cowork
+    /// Per-node overrides for the current source, keyed by (agent,
+    /// relativePath). Repopulated on source change and after every mutation
+    /// so the tree reflects the store honestly.
+    @State private var overrides: [OverrideKey: NodeOverrideState] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,8 +46,9 @@ struct FileTreeInspector: View {
             }
         }
         .task(id: source?.sourceID) {
-            guard let source else { root = nil; return }
+            guard let source else { root = nil; overrides = [:]; return }
             await loadTree(for: source)
+            await loadOverrides(for: source)
         }
     }
 
@@ -62,15 +68,21 @@ struct FileTreeInspector: View {
                 Spacer()
             }
 
-            SegmentedToggle(
-                selection: $targetAgent,
-                options: [
-                    .init(value: TargetApp.cowork, label: "Claude", tint: ManifoldPalette.claude,
-                          systemImage: "sparkle"),
-                    .init(value: TargetApp.codex,  label: "Codex",  tint: ManifoldPalette.codex,
-                          systemImage: "chevron.left.forwardslash.chevron.right"),
-                ]
-            )
+            // Native `Picker.segmented` — the agent picker doesn't carry
+            // enough semantic per-option tint to justify a bespoke control
+            // (unlike the mail sensitivity picker). Stays within the macOS
+            // vocabulary the rest of the app speaks.
+            Picker("Agent", selection: $targetAgent) {
+                Text("Claude").tag(TargetApp.cowork)
+                Text("Codex").tag(TargetApp.codex)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Text("Tree shows what \(targetAgent == .codex ? "Codex" : "Claude") sees. Click a node to set a per-file exception; click again to clear and resume inheriting.")
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.s4)
     }
@@ -84,7 +96,7 @@ struct FileTreeInspector: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity)
-        } else if let root {
+        } else if let root, let source {
             ScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     TreeRow(
@@ -92,7 +104,17 @@ struct FileTreeInspector: View {
                         depth: 0,
                         agent: targetAgent,
                         sourceInScope: sourceInScope(for: targetAgent),
-                        store: store
+                        sourceRootPath: source.originalRootPath,
+                        overrides: overrides,
+                        onSetOverride: { relativePath, nextState in
+                            Task {
+                                await applyOverride(
+                                    source: source,
+                                    relativePath: relativePath,
+                                    state: nextState
+                                )
+                            }
+                        }
                     )
                 }
                 .padding(Spacing.s2)
@@ -119,6 +141,36 @@ struct FileTreeInspector: View {
         root = node
         isLoading = false
     }
+
+    private func loadOverrides(for source: SourceRecord) async {
+        let records = await store.policy.nodeOverrides(sourceID: source.sourceID)
+        var map: [OverrideKey: NodeOverrideState] = [:]
+        for record in records {
+            map[OverrideKey(agent: record.agent, relativePath: record.relativePath)] = record.state
+        }
+        overrides = map
+    }
+
+    private func applyOverride(
+        source: SourceRecord,
+        relativePath: String,
+        state: NodeOverrideState
+    ) async {
+        await store.policy.setNodeOverride(
+            sourceID: source.sourceID,
+            relativePath: relativePath,
+            agent: targetAgent,
+            state: state
+        )
+        await loadOverrides(for: source)
+    }
+}
+
+/// Composite key for the overrides dictionary — (agent, relativePath) is
+/// the natural unit, matching how PolicyStore persists them.
+struct OverrideKey: Hashable {
+    let agent: TargetApp
+    let relativePath: String
 }
 
 /// One row in the file-tree. Recursive — its children build themselves.
@@ -130,26 +182,66 @@ private struct TreeRow: View {
     let depth: Int
     let agent: TargetApp
     let sourceInScope: Bool
-    let store: ManifoldStore
-    @State private var overrideState: TriStateCheckbox.State?
+    let sourceRootPath: String
+    let overrides: [OverrideKey: NodeOverrideState]
+    let onSetOverride: (String, NodeOverrideState) -> Void
 
     init(node: TreeNode,
          depth: Int,
          agent: TargetApp,
          sourceInScope: Bool,
-         store: ManifoldStore) {
+         sourceRootPath: String,
+         overrides: [OverrideKey: NodeOverrideState],
+         onSetOverride: @escaping (String, NodeOverrideState) -> Void) {
         self.node = node
         self.depth = depth
         self.agent = agent
         self.sourceInScope = sourceInScope
-        self.store = store
+        self.sourceRootPath = sourceRootPath
+        self.overrides = overrides
+        self.onSetOverride = onSetOverride
         _isExpanded = State(initialValue: depth < 1)
     }
 
-    private var effectiveState: TriStateCheckbox.State {
-        if let overrideState { return overrideState }
-        return sourceInScope ? .on : .off
+    /// Path relative to the source root — empty string for the root node
+    /// itself, otherwise the portion after `sourceRootPath/`. Matches
+    /// PolicyStore's normalization.
+    private var relativePath: String {
+        let root = URL(fileURLWithPath: sourceRootPath).standardizedFileURL.path
+        let here = URL(fileURLWithPath: node.path).standardizedFileURL.path
+        guard here.hasPrefix(root) else { return here }
+        var rel = String(here.dropFirst(root.count))
+        while rel.hasPrefix("/") { rel.removeFirst() }
+        return rel
     }
+
+    private var overrideState: NodeOverrideState? {
+        overrides[OverrideKey(agent: agent, relativePath: relativePath)]
+    }
+
+    private var hasOverride: Bool {
+        guard let s = overrideState else { return false }
+        return s != .inherit
+    }
+
+    /// Inherited state: source-level membership. The root node and any
+    /// node without an override resolve to this.
+    private var inheritedState: TriStateCheckbox.State {
+        sourceInScope ? .on : .off
+    }
+
+    /// Visible state: override if present, else inherited.
+    private var effectiveState: TriStateCheckbox.State {
+        switch overrideState {
+        case .include: return .on
+        case .exclude: return .off
+        case .inherit, .none: return inheritedState
+        }
+    }
+
+    /// Root node is read-only — its state is the source membership itself,
+    /// which is edited in the Scope columns, not here.
+    private var isRoot: Bool { relativePath.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -163,12 +255,28 @@ private struct TreeRow: View {
                 TriStateCheckbox(
                     state: Binding(
                         get: { effectiveState },
-                        set: { overrideState = $0 }
+                        set: { newState in
+                            guard !isRoot else { return }
+                            // If the user's click matches the inherited state
+                            // while an override is in place, clear the override
+                            // so the node resumes inheriting. Otherwise write
+                            // the explicit include/exclude override.
+                            let matchesInherited = newState == inheritedState
+                            let next: NodeOverrideState
+                            if matchesInherited {
+                                next = .inherit
+                            } else {
+                                next = (newState == .on) ? .include : .exclude
+                            }
+                            onSetOverride(relativePath, next)
+                        }
                     ),
-                    override: overrideState != nil,
+                    override: hasOverride,
                     color: ManifoldPalette.agent(agent),
                     size: 14
                 )
+                .allowsHitTesting(!isRoot)
+                .opacity(isRoot ? 0.55 : 1.0)
 
                 if node.isDirectory {
                     Button {
@@ -199,10 +307,6 @@ private struct TreeRow: View {
             }
             .padding(.vertical, 2)
             .padding(.horizontal, Spacing.s1)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(overrideState != nil ? ManifoldPalette.attentionSoft : .clear)
-            )
 
             if node.isDirectory && isExpanded {
                 ForEach(node.children) { child in
@@ -211,7 +315,9 @@ private struct TreeRow: View {
                         depth: depth + 1,
                         agent: agent,
                         sourceInScope: sourceInScope,
-                        store: store
+                        sourceRootPath: sourceRootPath,
+                        overrides: overrides,
+                        onSetOverride: onSetOverride
                     )
                 }
             }

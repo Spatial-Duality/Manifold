@@ -79,6 +79,7 @@ final class ManifoldStore {
     let setup: SetupModel
     let emailAccounts: EmailAccountModel
     let policy: PolicyModel
+    let rules: RulesModel
     let integrationHealth: IntegrationHealthModel
 
     let runtime: any RuntimeClientProtocol
@@ -100,6 +101,7 @@ final class ManifoldStore {
         setup = SetupModel()
         emailAccounts = EmailAccountModel()
         policy = PolicyModel()
+        rules = RulesModel()
 
         session.configure(client: runtime)
         history.configure(client: runtime)
