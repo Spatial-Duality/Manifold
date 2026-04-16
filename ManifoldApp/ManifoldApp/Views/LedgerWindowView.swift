@@ -77,16 +77,23 @@ struct LedgerWindowView: View {
         NavigationSplitView {
             NavSidebar(selection: $destination)
         } detail: {
-            // Detail sets a `navigationSubtitle` rather than a second
-            // `navigationTitle` so the sidebar's "Manifold" title retains
-            // ownership of the window chrome. Two `.navigationTitle`
-            // calls on a NavigationSplitView on macOS 26 cause the
-            // sidebar List to intermittently render blank (reported on
-            // the Requests destination); keeping the detail's label as
-            // a subtitle avoids that collision.
+            // Title ownership: the DETAIL column owns the window title on
+            // macOS `NavigationSplitView`. Setting `.navigationTitle` on
+            // the sidebar as well causes the sidebar `List` to start
+            // drawing from Y=0 (the first rows land behind the traffic
+            // lights). So: the sidebar sets no title, the detail sets a
+            // single canonical title — `destination.title` — and that's
+            // it. No `.navigationSubtitle` (two-level titles on a
+            // destination-switching split view add nothing but another
+            // chrome collision surface).
+            //
+            // `.frame(minWidth:)` guards the detail pane from being
+            // squeezed to zero width when the user drags the sidebar
+            // divider aggressively; without it a very narrow detail
+            // column caused the ambient banner and toolbar to overlap.
             content
-                .navigationTitle("Manifold")
-                .navigationSubtitle(destination.title)
+                .frame(minWidth: 640, minHeight: 480)
+                .navigationTitle(destination.title)
                 .toolbar { IntegratedToolbar(destination: destination) }
                 .safeAreaInset(edge: .top, spacing: 0) { ambientSessionBanner }
                 .safeAreaInset(edge: .bottom) { StatusBar() }
