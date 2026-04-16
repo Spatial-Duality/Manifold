@@ -31,12 +31,27 @@ struct ThreadsView: View {
     @State private var messages: [EmailMessageRecord] = []
     @State private var quickLookURL: URL? = nil
     @State private var loadToken: Int = 0
+    @State private var isSyncing: Bool = false
 
     enum SenderFilter: Hashable {
         case all
         case account(String)
         case trusted
         case ruleExcluded
+    }
+
+    /// Honest classification of why the thread table is empty. The
+    /// previous single "No messages in this filter" copy was dishonest
+    /// for two of the four cases — Principle 10.
+    enum EmptyReason {
+        /// Accounts exist but no messages have been synced to the local
+        /// store yet. Offer a Sync Now action.
+        case nothingSyncedYet
+        /// The filter is a placeholder that the runtime doesn't resolve
+        /// yet (trusted senders, rule-excluded). Say so plainly.
+        case filterNotWired
+        /// The DB has messages; this filter genuinely returns none.
+        case noMatchForFilter
     }
 
     var body: some View {
@@ -47,7 +62,10 @@ struct ThreadsView: View {
             HStack(spacing: 0) {
                 ThreadTable(
                     messages: messages,
-                    selection: $selectedMessageID
+                    selection: $selectedMessageID,
+                    emptyReason: emptyReason,
+                    isSyncing: isSyncing,
+                    onSyncNow: syncAllAccounts
                 )
                 .frame(maxWidth: .infinity)
 
@@ -64,6 +82,36 @@ struct ThreadsView: View {
         }
         .quickLookPreview($quickLookURL)
         .task(id: loadKey) { await reload() }
+    }
+
+    /// Which empty state to show when `messages` is empty. Computed so the
+    /// copy stays honest for every combination of filter + DB state.
+    private var emptyReason: EmptyReason {
+        switch senderFilter {
+        case .trusted, .ruleExcluded:
+            return .filterNotWired
+        case .all, .account:
+            // `totalMessageCount` is the *global* DB count and doesn't
+            // change with the filter. If the DB is globally empty then
+            // no filter can match; the user needs a sync, not a
+            // different filter.
+            return store.emailAccounts.totalMessageCount == 0
+                ? .nothingSyncedYet
+                : .noMatchForFilter
+        }
+    }
+
+    private func syncAllAccounts() {
+        let accounts = store.emailAccounts.accounts
+        guard !accounts.isEmpty else { return }
+        Task {
+            isSyncing = true
+            defer { isSyncing = false }
+            for account in accounts {
+                await store.emailAccounts.syncNow(accountID: account.accountID)
+            }
+            await reload()
+        }
     }
 
     private var selectedMessage: EmailMessageRecord? {
@@ -215,15 +263,14 @@ private struct FilterChip: View {
 private struct ThreadTable: View {
     let messages: [EmailMessageRecord]
     @Binding var selection: String?
+    let emptyReason: ThreadsView.EmptyReason
+    let isSyncing: Bool
+    let onSyncNow: () -> Void
 
     var body: some View {
         if messages.isEmpty {
-            ContentUnavailableView {
-                Label("No messages in this filter", systemImage: "text.bubble")
-            } description: {
-                Text("When an agent is granted a mailbox, synced messages show up here with their subject, sender, and sensitivity.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            emptyStateView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Table(messages, selection: $selection) {
                 TableColumn("Subject") { message in
@@ -250,6 +297,48 @@ private struct ThreadTable: View {
                         .foregroundStyle(.secondary)
                 }
                 .width(min: 100, ideal: 140)
+            }
+        }
+    }
+
+    /// Honest empty state per `emptyReason`. No filter should ever show
+    /// a generic "no messages" shrug — each reason names itself and,
+    /// where a user action would help, offers it.
+    @ViewBuilder
+    private var emptyStateView: some View {
+        switch emptyReason {
+        case .nothingSyncedYet:
+            ContentUnavailableView {
+                Label("No mail synced yet", systemImage: "tray")
+            } description: {
+                Text("Accounts are connected, but Manifold hasn't pulled any messages into its local store. Sync an account to populate the Threads view.")
+            } actions: {
+                Button(action: onSyncNow) {
+                    if isSyncing {
+                        HStack(spacing: Spacing.s2) {
+                            ProgressView().controlSize(.small)
+                            Text("Syncing…")
+                        }
+                    } else {
+                        Label("Sync Now", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSyncing)
+            }
+
+        case .filterNotWired:
+            ContentUnavailableView {
+                Label("Not wired up yet", systemImage: "hammer")
+            } description: {
+                Text("This filter resolves against sensitivity and rule data that the runtime doesn't expose to the app yet. Pick an account or 'All' to see synced messages.")
+            }
+
+        case .noMatchForFilter:
+            ContentUnavailableView {
+                Label("No messages match this filter", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text("Try a different account or 'All'. Messages that are synced to this account don't match the current filter.")
             }
         }
     }
