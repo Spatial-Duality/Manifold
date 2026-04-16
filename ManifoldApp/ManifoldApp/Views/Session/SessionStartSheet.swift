@@ -33,14 +33,41 @@ struct SessionStartSheet: View {
             }
 
             FormRow(label: "Duration") {
-                HStack {
-                    Slider(value: $draft.durationHours, in: 0.5...8, step: 0.5)
-                    HStack(spacing: 0) {
-                        Text(draft.durationHours, format: .number.precision(.fractionLength(1)))
-                        Text("h")
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    // Time-limited slider: only shown when a duration is
+                    // bound. When the toggle below is on (nil duration),
+                    // the slider collapses out of the form entirely so
+                    // the user sees what their choice actually means.
+                    if let hours = draft.durationHours {
+                        HStack {
+                            Slider(
+                                value: Binding(
+                                    get: { hours },
+                                    set: { draft.durationHours = $0 }
+                                ),
+                                in: 0.5...8,
+                                step: 0.5
+                            )
+                            HStack(spacing: 0) {
+                                Text(hours, format: .number.precision(.fractionLength(1)))
+                                Text("h")
+                            }
+                            .font(ManifoldType.numericBody)
+                            .frame(width: 44, alignment: .trailing)
+                        }
                     }
-                    .font(ManifoldType.numericBody)
-                    .frame(width: 44, alignment: .trailing)
+
+                    Toggle(isOn: Binding(
+                        get: { draft.durationHours == nil },
+                        set: { indefinite in
+                            draft.durationHours = indefinite ? nil : 2
+                        }
+                    )) {
+                        Text("Run until I finish it manually")
+                            .font(ManifoldType.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("Session has no time limit. Ends only when you click Finish.")
                 }
             }
 

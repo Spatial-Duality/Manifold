@@ -8,8 +8,12 @@
 // "Not this time" is the focused default (Principle 3).
 //
 // Layout rules:
-//   - Empty queue  → EmptyRequestsView takes the full pane. No inspector,
-//     because there's nothing to pattern-match on yet.
+//   - Top bar     → header strip with status sentence + pending count.
+//     Gives the destination visual chrome consistent with Access, Rules
+//     and Activity so the user always has a "you are here" anchor when
+//     the canvas happens to be empty (prevents the "blank navbar" feeling
+//     reported in testing).
+//   - Empty queue  → EmptyRequestsView takes the full pane below the bar.
 //   - Active queue → two columns: pending + recent answers on the left,
 //     pattern-detection inspector on the right (320w).
 
@@ -20,11 +24,42 @@ struct RequestsWindowView: View {
     @Environment(ManifoldStore.self) private var store
 
     var body: some View {
-        if store.pendingRequests.isEmpty {
-            EmptyRequestsView()
-        } else {
-            activeLayout
+        VStack(spacing: 0) {
+            topBar
+            Divider()
+
+            if store.pendingRequests.isEmpty {
+                EmptyRequestsView()
+            } else {
+                activeLayout
+            }
         }
+    }
+
+    /// Top bar mirrors `ModeBar` / `RulesWindowView.toolbar` — a short
+    /// `.regularMaterial` strip so every destination's detail pane opens
+    /// with a consistent visual header instead of a full-frame illustration.
+    private var topBar: some View {
+        let count = store.pendingRequests.count
+        let isEmpty = count == 0
+        return HStack(spacing: Spacing.s2) {
+            Image(systemName: isEmpty ? "checkmark.seal" : "hand.raised.fill")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isEmpty ? ManifoldPalette.active : ManifoldPalette.attention)
+            Text(isEmpty ? "All caught up" : "\(count) waiting on you")
+                .font(ManifoldType.bodyMedium)
+            Text(isEmpty
+                 ? "Agents will land here when they ask for access."
+                 : "Answer in a ladder — deny, once, session, default.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s2)
+        .background(.regularMaterial)
     }
 
     private var activeLayout: some View {
