@@ -106,9 +106,16 @@ struct SessionDrift: Hashable, Sendable {
 }
 
 /// Form-backing draft for the SessionStartSheet / ReloadDriftSheet.
+///
+/// `durationHours == nil` means "run until the user finishes manually"
+/// — no auto-expiry. The default remains a bounded 2-hour session so
+/// the safe choice is still the default (Principle 3). When a time-
+/// limited session expires, the runtime ends it; with `nil`, the
+/// session lives until the user hits Finish in the StatusBar / menu
+/// bar panel.
 struct SessionDraft: Hashable, Sendable {
     var name: String = ""
-    var durationHours: Double = 2
+    var durationHours: Double? = 2
     var agents: Set<TargetApp> = [.cowork]
     var baseMode: SessionRecord.BaseMode = .defaultScope
     var trackWrites: Bool = false
