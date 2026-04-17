@@ -29,14 +29,7 @@ extension ManifoldXPCService {
                   let agentRaw = payload["agent"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            let agent = TargetApp(rawValue: agentRaw) ?? .cowork
-            try await runtime.policyStore.addSource(sourceID, to: agent)
-            try await recordAction(
-                kind: "policy.grant.add",
-                payload: ["sourceID": sourceID, "agent": agent.rawValue],
-                inverse: ["sourceID": sourceID, "agent": agent.rawValue],
-                summary: "Shared a folder with \(agentLabel(agent))"
-            )
+            try await runtime.policyStore.addSource(sourceID, to: TargetApp(rawValue: agentRaw) ?? .cowork)
             return ["ok": true]
 
         case "removeSourceFromPolicy":
@@ -46,68 +39,7 @@ extension ManifoldXPCService {
             }
             let agent = TargetApp(rawValue: agentRaw) ?? .cowork
             try await runtime.policyStore.removeSource(sourceID, from: agent)
-            try await recordAction(
-                kind: "policy.grant.remove",
-                payload: ["sourceID": sourceID, "agent": agent.rawValue],
-                inverse: ["sourceID": sourceID, "agent": agent.rawValue],
-                summary: "Revoked a folder from \(agentLabel(agent))"
-            )
-            return ["ok": true]
-
-        case "setNodeOverride":
-            guard let sourceID = payload["sourceID"] as? String,
-                  let relativePath = payload["relativePath"] as? String,
-                  let agentRaw = payload["agent"] as? String,
-                  let agent = TargetApp(rawValue: agentRaw),
-                  let stateRaw = payload["state"] as? String,
-                  let state = NodeOverrideState(rawValue: stateRaw) else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            // Capture prior state so undo restores it precisely (inherit
-            // resolves to "no override row" which is distinct from include/exclude).
-            let priorState = try await runtime.policyStore.nodeOverride(
-                sourceID: sourceID,
-                relativePath: relativePath,
-                agent: agent
-            ) ?? .inherit
-            try await runtime.policyStore.setNodeOverride(
-                sourceID: sourceID,
-                relativePath: relativePath,
-                agent: agent,
-                state: state
-            )
-            try await recordAction(
-                kind: "policy.nodeOverride.set",
-                payload: [
-                    "sourceID": sourceID,
-                    "relativePath": relativePath,
-                    "agent": agent.rawValue,
-                    "state": state.rawValue,
-                ],
-                inverse: [
-                    "sourceID": sourceID,
-                    "relativePath": relativePath,
-                    "agent": agent.rawValue,
-                    "state": priorState.rawValue,
-                ],
-                summary: overrideSummary(state: state, agent: agent, path: relativePath)
-            )
-            return ["ok": true]
-
-        case "listNodeOverrides":
-            guard let sourceID = payload["sourceID"] as? String else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            let overrides = try await runtime.policyStore.nodeOverrides(sourceID: sourceID)
-            return ["overrides": try XPCJSON.object(from: overrides)]
-
-        case "clearNodeOverrides":
-            guard let sourceID = payload["sourceID"] as? String,
-                  let agentRaw = payload["agent"] as? String,
-                  let agent = TargetApp(rawValue: agentRaw) else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            try await runtime.policyStore.clearNodeOverrides(sourceID: sourceID, agent: agent)
+            try await runtime.standingWriteApprovalStore.removeGrants(agent: agent, sourceID: sourceID)
             return ["ok": true]
 
         case "sessionPreview":
@@ -186,6 +118,48 @@ extension ManifoldXPCService {
             }
             return ["summary": try XPCJSON.object(from: await runtime.emailRuleActivitySummary(for: agent))]
 
+        case "listFileVisibilityOverrides":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["overrides": try XPCJSON.object(from: try await runtime.fileVisibilityOverrideStore.overrides(agent: agent))]
+
+        case "setFileVisibilityOverride":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw),
+                  let sourceID = payload["sourceID"] as? String,
+                  let relativePath = payload["relativePath"] as? String,
+                  let decisionRaw = payload["decision"] as? String,
+                  let decision = FileVisibilityOverrideDecision(rawValue: decisionRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let isDirectory = payload["isDirectory"] as? Bool ?? false
+            try await runtime.fileVisibilityOverrideStore.setOverride(
+                agent: agent,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory,
+                decision: decision
+            )
+            return ["ok": true]
+
+        case "clearFileVisibilityOverride":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw),
+                  let sourceID = payload["sourceID"] as? String,
+                  let relativePath = payload["relativePath"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let isDirectory = payload["isDirectory"] as? Bool ?? false
+            try await runtime.fileVisibilityOverrideStore.clearOverride(
+                agent: agent,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory
+            )
+            return ["ok": true]
+
         case "snapshotData":
             guard let hash = payload["hash"] as? String else {
                 throw ManifoldXPCError.invalidPayload
@@ -220,7 +194,7 @@ extension ManifoldXPCService {
                   let filePath = payload["filePath"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            return ["restored": try await restoreSnapshot(snapshotID: snapshotID, filePath: filePath)]
+            return ["result": try XPCJSON.object(from: await restoreSnapshot(snapshotID: snapshotID, filePath: filePath))]
 
         case "revertSessionEvent":
             guard let grantID = payload["grantID"] as? String,
@@ -520,9 +494,34 @@ extension ManifoldXPCService {
                   let answer = payload["answer"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
+            guard let request = try await runtime.approvalQueue.request(id: id),
+                  let agent = TargetApp(rawValue: request.agent) else {
+                throw ManifoldXPCError.invalidPayload
+            }
             switch answer {
-            case "approve", "once", "session", "default":
+            case "approve":
                 try await runtime.approvalQueue.approve(id: id)
+            case "once":
+                guard request.kind == .standingWrite,
+                      let sourceID = request.sourceID,
+                      let relativePath = request.relativePath else {
+                    throw ManifoldXPCError.invalidPayload
+                }
+                try await runtime.standingWriteApprovalStore.grantOnce(
+                    agent: agent,
+                    sourceID: sourceID,
+                    relativePath: relativePath
+                )
+                try await runtime.approvalQueue.approve(id: id)
+            case "default":
+                guard request.kind == .standingWrite,
+                      let sourceID = request.sourceID else {
+                    throw ManifoldXPCError.invalidPayload
+                }
+                try await runtime.standingWriteApprovalStore.grantDefault(agent: agent, sourceID: sourceID)
+                try await runtime.approvalQueue.approve(id: id)
+            case "session":
+                throw ManifoldXPCError.invalidPayload
             case "deny", "notThisTime":
                 try await runtime.approvalQueue.deny(id: id)
             default:
@@ -530,68 +529,67 @@ extension ManifoldXPCService {
             }
             return ["ok": true]
 
-        case "undoLastAction":
-            let reversed = try await runtime.undoLastAction()
-            if let action = reversed {
-                return [
-                    "ok": true,
-                    "actionID": action.actionID,
-                    "kind": action.kind,
-                    "summary": action.summary,
-                ]
+        // MARK: - Unified Rule catalog (file / email / agent)
+
+        case "listRules":
+            let scopeFilter = (payload["scope"] as? String).flatMap(RuleScope.init(rawValue:))
+            let rules: [RuleRecord]
+            if let scopeFilter {
+                rules = try await runtime.ruleStore.rules(scope: scopeFilter)
+            } else {
+                rules = try await runtime.ruleStore.allRules()
             }
-            return ["ok": true, "empty": true]
+            return ["rules": try XPCJSON.object(from: rules)]
+
+        case "upsertRule":
+            guard let ruleObject = payload["rule"] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let rule = try XPCJSON.decode(RuleRecord.self, from: ruleObject)
+            try await runtime.ruleStore.upsert(rule)
+            return ["ok": true]
+
+        case "deleteRule":
+            guard let id = payload["id"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.ruleStore.delete(id: id)
+            return ["ok": true]
+
+        case "setRuleEnabled":
+            guard let id = payload["id"] as? String,
+                  let enabled = payload["enabled"] as? Bool else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.ruleStore.setEnabled(id: id, enabled: enabled)
+            return ["ok": true]
+
+        case "reorderRules":
+            guard let scopeRaw = payload["scope"] as? String,
+                  let scope = RuleScope(rawValue: scopeRaw),
+                  let ids = payload["ids"] as? [String] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.ruleStore.reorder(scope: scope, ids: ids)
+            return ["ok": true]
+
+        case "resetSeededRules":
+            // Re-apply the seeded catalog (idempotent). Used by Settings > Rules > "Reset seeded rules".
+            try await runtime.ruleStore.seedIfNeeded(RuleSeedCatalog.seeds())
+            return ["ok": true]
+
+        case "previewRuleMatches":
+            // Live match preview for the inspector. Agent-scoped so "would block for Claude" vs "for Codex" are distinct.
+            guard let ruleObject = payload["rule"] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let rule = try XPCJSON.decode(RuleRecord.self, from: ruleObject)
+            let agent = (payload["agent"] as? String).flatMap(TargetApp.init(rawValue:)) ?? .cowork
+            let summary = try await computeRuleMatchPreview(rule: rule, agent: agent)
+            return ["preview": try XPCJSON.object(from: summary)]
 
         default:
             return nil
-        }
-    }
-
-    /// Append a user-initiated action to the undo stack. Payload + inverse
-    /// dicts are JSON-encoded; unknown kinds in undo just no-op (see
-    /// ManifoldRuntime.undoLastAction). Failures here are logged — they
-    /// must never block the forward mutation from succeeding.
-    fileprivate func recordAction(
-        kind: String,
-        payload: [String: String],
-        inverse: [String: String],
-        summary: String
-    ) async throws {
-        do {
-            let payloadJSON = String(
-                data: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-                encoding: .utf8
-            ) ?? "{}"
-            let inverseJSON = String(
-                data: try JSONSerialization.data(withJSONObject: inverse, options: [.sortedKeys]),
-                encoding: .utf8
-            ) ?? "{}"
-            try await runtime.actionHistoryStore.append(
-                kind: kind,
-                payloadJSON: payloadJSON,
-                inverseJSON: inverseJSON,
-                summary: summary
-            )
-        } catch {
-            appCommandLogger.error(
-                "Failed to record action \(kind, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-        }
-    }
-
-    fileprivate func agentLabel(_ agent: TargetApp) -> String {
-        switch agent {
-        case .cowork: return "Claude"
-        case .codex:  return "Codex"
-        }
-    }
-
-    fileprivate func overrideSummary(state: NodeOverrideState, agent: TargetApp, path: String) -> String {
-        let name = path.split(separator: "/").last.map(String.init) ?? path
-        switch state {
-        case .include: return "Included \(name) for \(agentLabel(agent))"
-        case .exclude: return "Excluded \(name) from \(agentLabel(agent))"
-        case .inherit: return "Cleared override on \(name) for \(agentLabel(agent))"
         }
     }
 
@@ -603,6 +601,10 @@ extension ManifoldXPCService {
         let agent: String
         let path: String
         let action: String
+        let kind: String
+        let sourceID: String?
+        let mountName: String?
+        let relativePath: String?
         let requestedAt: Double
         let status: String
 
@@ -613,6 +615,10 @@ extension ManifoldXPCService {
                 agent: request.agent,
                 path: request.path,
                 action: request.action,
+                kind: request.kind.rawValue,
+                sourceID: request.sourceID,
+                mountName: request.mountName,
+                relativePath: request.relativePath,
                 requestedAt: request.requestedAt,
                 status: request.status.rawValue
             )
@@ -1011,40 +1017,65 @@ extension ManifoldXPCService {
         ]
     }
 
-    private func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool {
-        let state = try await activeGrantState(preferredAgent: .cowork)
-        guard let grant = state.grant,
-              let data = try await runtime.snapshotStore.dataForRestore(snapshotID: snapshotID),
-              let resolved = Self.resolveGrantFilePath(
-                canonicalPath: filePath,
-                grant: grant,
-                grantSources: state.sources
-              ) else {
-            return false
-        }
+    private func restoreSnapshot(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
+        do {
+            let state = try await activeGrantState(preferredAgent: .cowork)
+            guard let grant = state.grant,
+                  let data = try await runtime.snapshotStore.dataForRestore(snapshotID: snapshotID),
+                  let resolved = Self.resolveGrantFilePath(
+                    canonicalPath: filePath,
+                    grant: grant,
+                    grantSources: state.sources
+                  ) else {
+                return RestoreSnapshotResult(
+                    status: "missingSnapshot",
+                    message: "Manifold couldn't find a live tracked file for this snapshot."
+                )
+            }
 
-        try FileManager.default.createDirectory(
-            at: resolved.fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try data.write(to: resolved.fileURL, options: .atomic)
-        try await runtime.snapshotStore.recordRestore(
-            runID: grant.grantID,
-            workspaceID: resolved.mount.sourceID,
-            filePath: filePath,
-            restoredData: data
-        )
-        try await runtime.artifactIndex.upsertFile(
-            grantID: grant.grantID,
-            mount: ArtifactMount(
-                sourceID: resolved.mount.sourceID,
-                mountName: resolved.mount.mountName,
-                mountPath: resolved.mount.mountPath
-            ),
-            relativePath: resolved.relativePath,
-            fileURL: resolved.fileURL
-        )
-        return true
+            if let expectedHash = try await runtime.snapshotStore.latestHash(runID: grant.grantID, filePath: filePath),
+               let currentData = try? ScopedFileAccess.readData(
+                    relativePath: resolved.relativePath,
+                    rootPath: resolved.mount.mountPath
+               ).data,
+               Self.hashHex(for: currentData) != expectedHash {
+                return RestoreSnapshotResult(
+                    status: "conflict",
+                    message: "This file changed after the snapshot was recorded. Review the current version before restoring it."
+                )
+            }
+
+            let written = try ScopedFileAccess.writeDataAtomically(
+                data,
+                relativePath: resolved.relativePath,
+                rootPath: resolved.mount.mountPath
+            )
+            try await runtime.snapshotStore.recordRestore(
+                runID: grant.grantID,
+                workspaceID: resolved.mount.sourceID,
+                filePath: filePath,
+                restoredData: data
+            )
+            try await runtime.artifactIndex.upsertFile(
+                grantID: grant.grantID,
+                mount: ArtifactMount(
+                    sourceID: resolved.mount.sourceID,
+                    mountName: resolved.mount.mountName,
+                    mountPath: resolved.mount.mountPath
+                ),
+                relativePath: resolved.relativePath,
+                fileURL: written.fileURL
+            )
+            return RestoreSnapshotResult(
+                status: "success",
+                message: "Restored \(filePath) to the selected snapshot."
+            )
+        } catch {
+            return RestoreSnapshotResult(
+                status: "error",
+                message: error.localizedDescription
+            )
+        }
     }
 
     private func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> [String: Any] {
@@ -1065,16 +1096,19 @@ extension ManifoldXPCService {
 
         if !force, FileManager.default.fileExists(atPath: resolved.fileURL.path),
            let afterHash = event.afterHash,
-           let currentData = try? Data(contentsOf: resolved.fileURL),
+           let currentData = try? ScopedFileAccess.readData(
+                relativePath: resolved.relativePath,
+                rootPath: resolved.mount.mountPath
+           ).data,
            Self.hashHex(for: currentData) != afterHash {
             return ["status": "contentDrift"]
         }
 
-        try FileManager.default.createDirectory(
-            at: resolved.fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        let written = try ScopedFileAccess.writeDataAtomically(
+            blobData,
+            relativePath: resolved.relativePath,
+            rootPath: resolved.mount.mountPath
         )
-        try blobData.write(to: resolved.fileURL, options: .atomic)
         try await runtime.snapshotStore.recordRestore(
             runID: grant.grantID,
             workspaceID: resolved.mount.sourceID,
@@ -1089,7 +1123,7 @@ extension ManifoldXPCService {
                 mountPath: resolved.mount.mountPath
             ),
             relativePath: resolved.relativePath,
-            fileURL: resolved.fileURL
+            fileURL: written.fileURL
         )
         return ["status": "success"]
     }
@@ -1250,24 +1284,23 @@ extension ManifoldXPCService {
         let components = cleaned.split(separator: "/", maxSplits: 1)
         if components.count >= 2,
            let mount = mounts.first(where: { $0.mountName == String(components[0]) }) {
-            let relativePath = String(components[1])
-            let fileURL = URL(fileURLWithPath: mount.mountPath)
-                .appendingPathComponent(relativePath)
-                .standardizedFileURL
-            guard fileURL.path.hasPrefix(URL(fileURLWithPath: mount.mountPath).standardizedFileURL.path) else {
-                return nil
-            }
+            let relativePath = ScopedFileAccess.cleanRelativePath(String(components[1]))
+            guard let fileURL = try? ScopedFileAccess.resolve(
+                relativePath: relativePath,
+                rootPath: mount.mountPath,
+                allowMissingLeaf: true
+            ).fileURL else { return nil }
             return (mount, relativePath, fileURL)
         }
 
         if mounts.count == 1, let mount = mounts.first {
-            let fileURL = URL(fileURLWithPath: mount.mountPath)
-                .appendingPathComponent(cleaned)
-                .standardizedFileURL
-            guard fileURL.path.hasPrefix(URL(fileURLWithPath: mount.mountPath).standardizedFileURL.path) else {
-                return nil
-            }
-            return (mount, cleaned, fileURL)
+            let relativePath = ScopedFileAccess.cleanRelativePath(cleaned)
+            guard let fileURL = try? ScopedFileAccess.resolve(
+                relativePath: relativePath,
+                rootPath: mount.mountPath,
+                allowMissingLeaf: true
+            ).fileURL else { return nil }
+            return (mount, relativePath, fileURL)
         }
 
         return nil
@@ -1275,5 +1308,91 @@ extension ManifoldXPCService {
 
     private static func hashHex(for data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - Rule match preview
+
+    /// Live "would block N files / N emails right now" summary for the Rules inspector.
+    /// Best-effort — bounded so the UI stays responsive.
+    private func computeRuleMatchPreview(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview {
+        let engine = RuleEngine()
+        var fileMatches = 0
+        var emailMatches = 0
+        var agentMatches = 0
+        var sampleMatches: [RuleMatchPreview.Sample] = []
+
+        switch rule.scope {
+        case .file:
+            // Use snapshot-tracked files as a fast, bounded probe surface.
+            let paths = (try? await runtime.snapshotStore.allTrackedFiles()) ?? []
+            let bounded = paths.prefix(2_000)
+            for path in bounded {
+                let leaf = path.split(separator: "/").last.map(String.init) ?? path
+                let probe = FileProbe(
+                    path: path,
+                    isHidden: { leaf.hasPrefix(".") }
+                )
+                let ctx = RuleEvalContext(fileProbe: probe)
+                let decision = engine.evaluate(.fileRead(path: path), against: [rule], agent: agent, context: ctx)
+                if decision.action != .allow {
+                    fileMatches += 1
+                    if sampleMatches.count < 5 {
+                        sampleMatches.append(.init(identifier: path, label: path))
+                    }
+                }
+            }
+        case .email:
+            let messages = (try? runtime.emailStore.allEmailMessages(limit: 2_000)) ?? []
+            for message in messages {
+                let resolvedSender = message.senderEmail ?? message.sender
+                let resolvedDomain = message.senderDomain ?? Self.domain(from: resolvedSender)
+                let probe = EmailProbe(
+                    emailID: message.emailID,
+                    senderEmail: resolvedSender,
+                    senderDomain: resolvedDomain,
+                    subject: message.subject,
+                    bodyText: message.bodyText ?? "",
+                    folder: message.mailbox,
+                    accountID: message.accountID,
+                    hasAttachment: message.attachmentCount > 0,
+                    largestAttachmentBytes: Int64(message.sizeBytes),
+                    receivedAt: Self.parseISO(message.receivedAt) ?? Date()
+                )
+                let ctx = RuleEvalContext(emailProbe: probe)
+                let decision = engine.evaluate(.emailRead(emailID: message.emailID), against: [rule], agent: agent, context: ctx)
+                if decision.action != .allow {
+                    emailMatches += 1
+                    if sampleMatches.count < 5 {
+                        sampleMatches.append(.init(identifier: message.emailID, label: "\(message.sender) — \(message.subject)"))
+                    }
+                }
+            }
+        case .agent:
+            // Agent rules are stateless — we just report whether the rule would apply to this agent.
+            let probe = AgentProbe(agent: agent, tool: .read, payloadBytes: nil, sessionStartedAt: Date())
+            let ctx = RuleEvalContext(agentProbe: probe)
+            let decision = engine.evaluate(.agentTool(tool: .read, payloadBytes: nil), against: [rule], agent: agent, context: ctx)
+            if decision.action != .allow {
+                agentMatches += 1
+                sampleMatches.append(.init(identifier: agent.rawValue, label: "Applies to \(agent.rawValue)"))
+            }
+        }
+
+        return RuleMatchPreview(
+            ruleID: rule.id,
+            fileMatches: fileMatches,
+            emailMatches: emailMatches,
+            agentMatches: agentMatches,
+            sample: sampleMatches
+        )
+    }
+
+    private static func domain(from sender: String) -> String {
+        guard let at = sender.firstIndex(of: "@") else { return "" }
+        return String(sender[sender.index(after: at)...]).lowercased()
+    }
+
+    private static func parseISO(_ string: String) -> Date? {
+        ISO8601DateFormatter.shared.date(from: string)
     }
 }

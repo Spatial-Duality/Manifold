@@ -4,12 +4,13 @@
 // EvidenceInspector — right-pane detail for a selected event.
 //
 // Per design/html/activity.html: kicker + title + mono path + stats +
-// DiffView + "Why allowed" card + file-history sparkline + related-files
+// DiffView + "Why allowed" card + file-activity sparkline + related-files
 // list + Revert/Open actions. Denial rows get the orange "Claude tried
 // to read…" variant.
 
 import SwiftUI
 import ManifoldKit
+import ManifoldXPC
 
 struct EvidenceInspector: View {
     let selection: AuditEntry.ID?
@@ -53,6 +54,8 @@ struct EvidenceInspector: View {
 private struct EventDetailCard: View {
     let entry: AuditEntry
     let store: ManifoldStore
+    @State private var restoreResult: RestoreSnapshotResult?
+    @State private var isRestoring = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s4) {
@@ -100,10 +103,45 @@ private struct EventDetailCard: View {
                     .controlSize(.small)
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 }
+                if let snapshotID = entrySnapshotID, let filePath = entry.filePath {
+                    Button(isRestoring ? "Restoring…" : "Restore this version") {
+                        isRestoring = true
+                        Task {
+                            let result = await store.restoreFile(snapshotID: snapshotID, filePath: filePath)
+                            await MainActor.run {
+                                restoreResult = result
+                                isRestoring = false
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isRestoring)
+                }
             }
             .padding(.top, Spacing.s2)
+
+            if let restoreResult {
+                RestoreStatusCard(result: restoreResult)
+            }
         }
         .padding(Spacing.s4)
+    }
+
+    private var entrySnapshotID: Int? {
+        if let metadataID = metadataValue(for: "snapshot_id").flatMap(Int.init) {
+            return metadataID
+        }
+        return nil
+    }
+
+    private func metadataValue(for key: String) -> String? {
+        guard let metadata = entry.metadata,
+              let data = metadata.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return nil
+        }
+        return json[key]
     }
 }
 
@@ -159,5 +197,48 @@ private struct LabeledMeta: View {
             Text(value)
                 .foregroundStyle(ManifoldPalette.text)
         }
+    }
+}
+
+private struct RestoreStatusCard: View {
+    let result: RestoreSnapshotResult
+
+    private var tone: Color {
+        switch result.status {
+        case "success":
+            return ManifoldPalette.active
+        case "conflict":
+            return ManifoldPalette.attention
+        default:
+            return ManifoldPalette.text2
+        }
+    }
+
+    private var background: Color {
+        switch result.status {
+        case "success":
+            return ManifoldPalette.activeSoft
+        case "conflict":
+            return ManifoldPalette.attentionSoft
+        default:
+            return ManifoldPalette.surface3
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s1) {
+            Text(result.status.replacingOccurrences(of: "_", with: " ").capitalized)
+                .font(ManifoldType.captionMedium)
+                .foregroundStyle(tone)
+            Text(result.message ?? "Manifold returned a restore update.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(ManifoldPalette.text2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Spacing.s3)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .fill(background)
+        )
     }
 }

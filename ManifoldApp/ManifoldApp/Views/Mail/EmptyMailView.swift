@@ -13,7 +13,9 @@ struct EmptyMailView: View {
             EmptyStateIllustration(
                 systemImage: "tray.2",
                 title: "No mailboxes connected",
-                subtitle: "Connect a mailbox so Claude or Codex can see subject lines (or trusted-sender bodies) during a session."
+                subtitle: "Connect a mailbox so you can review backed-up mail and share individual messages with confidence.",
+                tint: ManifoldPalette.selection,
+                style: .mail
             )
 
             HStack(spacing: Spacing.s2) {
@@ -36,6 +38,7 @@ struct EmptyMailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)
         .background(ManifoldPalette.bg)
+        .accessibilityIdentifier("mail.empty")
     }
 }
 
@@ -50,7 +53,7 @@ private struct ProviderChip: View {
             VStack(spacing: Spacing.s1) {
                 Image(systemName: systemImage)
                     .font(.title2)
-                    .foregroundStyle(ManifoldPalette.claude)
+                    .foregroundStyle(ManifoldPalette.selection)
                 Text(name)
                     .font(ManifoldType.captionMedium)
             }

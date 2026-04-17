@@ -5,16 +5,17 @@
 // controls" pane. Landing here is a self-selection into diagnostics;
 // normal users shouldn't need to visit this.
 //
-// Collects database paths, MCP binary location, and runtime connection
-// diagnostics. The plain-language maintenance affordances (GC, integrity
-// check) live in StorageSettingsPane — they were duplicated here in an
-// earlier stage and that duplicate has been removed.
+// Collects database paths, MCP binary location, runtime connection
+// diagnostics, and maintenance actions (GC, integrity check) that used
+// to live under Storage.
 
 import SwiftUI
 import ManifoldKit
 
 struct AdvancedSettingsPane: View {
     @Environment(ManifoldStore.self) var store
+    @State private var gcResult: Int?
+    @State private var integrityResult: Bool?
 
     var body: some View {
         Form {
@@ -55,6 +56,33 @@ struct AdvancedSettingsPane: View {
                 }
                 LabeledContent("Launch agent") {
                     PathLabel(ManifoldStore.launchAgentPlistURL.path)
+                }
+            }
+
+            Section("Maintenance") {
+                HStack {
+                    Button("Clean up orphan blobs") {
+                        Task { gcResult = await store.runGarbageCollection() }
+                    }
+                    .controlSize(.small)
+                    if let gc = gcResult {
+                        Text(gc > 0 ? "Removed \(gc) orphaned blobs" : "Nothing to clean up")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack {
+                    Button("Verify database") {
+                        Task { integrityResult = await store.runIntegrityCheck() }
+                    }
+                    .controlSize(.small)
+                    if let ok = integrityResult {
+                        Label(ok ? "Database OK" : "Issues found",
+                              systemImage: ok ? "checkmark.circle" : "exclamationmark.triangle")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(ok ? ManifoldPalette.active : ManifoldPalette.attention)
+                    }
                 }
             }
 

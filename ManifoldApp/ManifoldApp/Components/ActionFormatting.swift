@@ -27,14 +27,14 @@ enum ActionFormatting {
 
     static func color(for action: String) -> Color {
         switch action {
-        case "file_read": .blue
-        case "file_modified", "file_created": .green
-        case "file_deleted": .red
-        case "mcp_connection": .accentColor
-        case "restore": .orange
-        case "content_drift", "coverage_warning": .orange
-        case "tool_call": .purple
-        default: .secondary
+        case "file_read": ManifoldPalette.selection
+        case "file_modified", "file_created": ManifoldPalette.active
+        case "file_deleted": ManifoldPalette.danger
+        case "mcp_connection": ManifoldPalette.selection
+        case "restore": ManifoldPalette.preview
+        case "content_drift", "coverage_warning": ManifoldPalette.attention
+        case "tool_call": ManifoldPalette.codex
+        default: ManifoldPalette.text2
         }
     }
 

@@ -3,6 +3,7 @@
 
 import Foundation
 import ManifoldKit
+import ManifoldXPC
 import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "session")
@@ -196,12 +197,14 @@ final class SessionModel {
         return nil
     }
 
-    func restoreFile(snapshotID: Int, filePath: String) async -> Bool {
-        guard let client else { return false }
+    func restoreFile(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
+        guard let client else {
+            return RestoreSnapshotResult(status: "error", message: "No runtime client is available for restore.")
+        }
         do {
             return try await client.restoreSnapshot(snapshotID: snapshotID, filePath: filePath)
         } catch {
-            return false
+            return RestoreSnapshotResult(status: "error", message: error.localizedDescription)
         }
     }
 

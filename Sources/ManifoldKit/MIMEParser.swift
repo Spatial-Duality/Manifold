@@ -7,6 +7,10 @@ import Foundation
 /// Handles multipart/mixed, multipart/alternative, base64, quoted-printable,
 /// and charset decoding. No external dependencies.
 public struct MIMEParser: Sendable {
+    private static let maxMessageBytes = 5_000_000
+    private static let maxMultipartDepth = 8
+    private static let maxMultipartParts = 256
+    private static let maxAttachmentBytes = 10_000_000
 
     /// A parsed MIME part — either text content or an attachment.
     public enum MIMEPart: Sendable {
@@ -35,14 +39,24 @@ public struct MIMEParser: Sendable {
         public let htmlBody: String?       // best text/html content
         public let attachments: [AttachmentPart]
         public let allParts: [MIMEPart]
+
+        public func safeExcerpt(maxCharacters: Int = 4_000) -> String? {
+            let rawBody = textBody ?? htmlBody.map { MIMEParser.simpleHTMLStrip($0) }
+            let normalized = rawBody?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty
+            guard let normalized else { return nil }
+            return String(normalized.prefix(maxCharacters))
+        }
     }
 
     // MARK: - Public API
 
     /// Parse a raw RFC 822 message into structured parts.
     public static func parse(data: Data) -> ParsedEmail {
-        guard let raw = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .ascii) else {
+        let limitedData = data.count > maxMessageBytes ? Data(data.prefix(maxMessageBytes)) : data
+        guard let raw = String(data: limitedData, encoding: .utf8)
+                ?? String(data: limitedData, encoding: .ascii) else {
             return ParsedEmail(headers: [:], textBody: nil, htmlBody: nil, attachments: [], allParts: [])
         }
         return parse(raw: raw)
@@ -56,7 +70,7 @@ public struct MIMEParser: Sendable {
 
         // Check if this is multipart
         if let boundary = extractBoundary(from: contentType) {
-            let parts = parseMultipart(body: body, boundary: boundary)
+            let parts = parseMultipart(body: body, boundary: boundary, depth: 0)
             return assembleParsedEmail(headers: headers, parts: parts)
         }
 
@@ -115,12 +129,13 @@ public struct MIMEParser: Sendable {
 
     // MARK: - Multipart Parsing
 
-    static func parseMultipart(body: String, boundary: String) -> [MIMEPart] {
+    static func parseMultipart(body: String, boundary: String, depth: Int) -> [MIMEPart] {
+        guard depth < maxMultipartDepth else { return [] }
         let delimiter = "--\(boundary)"
         let endDelimiter = "--\(boundary)--"
 
         // Split on boundary
-        let sections = body.components(separatedBy: delimiter)
+        let sections = Array(body.components(separatedBy: delimiter).prefix(maxMultipartParts))
         var parts: [MIMEPart] = []
 
         for section in sections {
@@ -145,7 +160,7 @@ public struct MIMEParser: Sendable {
 
             // Nested multipart
             if let nestedBoundary = extractBoundary(from: partContentType) {
-                let nested = parseMultipart(body: partBody, boundary: nestedBoundary)
+                let nested = parseMultipart(body: partBody, boundary: nestedBoundary, depth: depth + 1)
                 parts.append(contentsOf: nested)
                 continue
             }
@@ -163,8 +178,8 @@ public struct MIMEParser: Sendable {
                 parts.append(.attachment(AttachmentPart(
                     filename: filename,
                     mimeType: partMimeType,
-                    data: decoded,
-                    size: decoded.count,
+                    data: Data(decoded.prefix(maxAttachmentBytes)),
+                    size: min(decoded.count, maxAttachmentBytes),
                     contentID: contentID
                 )))
             } else {
@@ -391,5 +406,11 @@ public struct MIMEParser: Sendable {
             attachments: attachments,
             allParts: parts
         )
+    }
+
+    private static func simpleHTMLStrip(_ html: String) -> String {
+        html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

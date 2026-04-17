@@ -36,6 +36,14 @@ enum ManifoldPalette {
     static let codexSoft2   = dynamicColor(light: 0x7C46D6, lightAlpha: 0.18,
                                            dark: 0xA67AE8,  darkAlpha: 0.26)
 
+    // Product chrome / selection — neutral, never agent-coded
+    static let selection    = dynamicColor(light: 0x51627D, dark: 0xA6B1C2)
+    static let selectionSoft = dynamicColor(light: 0x51627D, lightAlpha: 0.12,
+                                            dark: 0xA6B1C2, darkAlpha: 0.18)
+    static let preview      = dynamicColor(light: 0xA36A12, dark: 0xD79B40)
+    static let previewSoft  = dynamicColor(light: 0xA36A12, lightAlpha: 0.12,
+                                           dark: 0xD79B40, darkAlpha: 0.18)
+
     // Status — always reinforced by a second channel (icon/text)
     static let active       = dynamicColor(light: 0x1FAB5A, dark: 0x30C060)
     static let activeSoft   = dynamicColor(light: 0x1FAB5A, lightAlpha: 0.10,
@@ -78,6 +86,48 @@ enum ManifoldPalette {
 
     static func agentSoft(_ agent: TargetApp) -> Color {
         agent == .codex ? codexSoft : claudeSoft
+    }
+}
+
+// MARK: - AgentMeta
+//
+// Central display metadata for every agent identity the UI can render.
+// UI code must read label / color / systemImage from here instead of
+// hardcoding Claude / Codex strings. When the agent registry becomes
+// data-driven, only this helper needs to change.
+
+enum AgentMeta {
+    /// Short human-readable label used in chips, segmented controls, menus.
+    static func label(_ agent: TargetApp) -> String {
+        switch agent {
+        case .codex:  return "Codex"
+        case .cowork: return "Claude"
+        }
+    }
+
+    /// Fixed identity color for this agent.
+    static func color(_ agent: TargetApp) -> Color {
+        ManifoldPalette.agent(agent)
+    }
+
+    /// SF Symbol representing this agent.
+    static func systemImage(_ agent: TargetApp) -> String {
+        switch agent {
+        case .codex:  return "chevron.left.forwardslash.chevron.right"
+        case .cowork: return "sparkle"
+        }
+    }
+
+    /// Best-effort conversion of a connected-agent raw string into a known
+    /// `TargetApp`. Unknown identifiers silently drop out; the UI should
+    /// show nothing rather than a mislabeled placeholder.
+    static func resolve(_ raw: String) -> TargetApp? {
+        TargetApp(rawValue: raw)
+    }
+
+    /// Ordered, known-only projection of `store.connectedAgents`.
+    static func connected(from raw: [String]) -> [TargetApp] {
+        raw.compactMap(resolve)
     }
 }
 

@@ -680,6 +680,10 @@ public struct DatabaseMigrator {
                     agent TEXT NOT NULL,
                     path TEXT NOT NULL,
                     action TEXT NOT NULL,
+                    request_kind TEXT NOT NULL DEFAULT 'standing_write',
+                    source_id TEXT,
+                    mount_name TEXT,
+                    relative_path TEXT,
                     requested_at REAL NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
                     resolved_at REAL
@@ -869,66 +873,106 @@ public struct DatabaseMigrator {
             logger.info("Migration 20: runtime-owned email rule tables and defaults")
         },
 
-        // v21: Cache file count and byte size per source, so bulk-grant
-        // confirmation ("~2,143 files · 84 MB") can render without walking
-        // the filesystem at render time. Populated on source add and on
-        // demand via GrantStore.refreshSourceSizeCache.
-        Migration(version: 21, name: "source_size_cache") { db in
-            let columns = try db.queryAll("PRAGMA table_info(sources)")
-            let names = Set(columns.compactMap { $0["name"] })
-            if !names.contains("file_count") {
-                try db.execute("ALTER TABLE sources ADD COLUMN file_count INTEGER")
+        Migration(version: 21, name: "standing_write_approval_runtimeization") { db in
+            let approvalTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='approval_requests'"
+            )
+            if !approvalTables.isEmpty {
+                let approvalColumns = try db.queryAll("PRAGMA table_info(approval_requests)")
+                let approvalColumnNames = Set(approvalColumns.compactMap { $0["name"] })
+                if !approvalColumnNames.contains("request_kind") {
+                    try db.execute("ALTER TABLE approval_requests ADD COLUMN request_kind TEXT NOT NULL DEFAULT 'standing_write'")
+                }
+                if !approvalColumnNames.contains("source_id") {
+                    try db.execute("ALTER TABLE approval_requests ADD COLUMN source_id TEXT")
+                }
+                if !approvalColumnNames.contains("mount_name") {
+                    try db.execute("ALTER TABLE approval_requests ADD COLUMN mount_name TEXT")
+                }
+                if !approvalColumnNames.contains("relative_path") {
+                    try db.execute("ALTER TABLE approval_requests ADD COLUMN relative_path TEXT")
+                }
             }
-            if !names.contains("cached_size_bytes") {
-                try db.execute("ALTER TABLE sources ADD COLUMN cached_size_bytes INTEGER")
-            }
-            if !names.contains("size_cached_at") {
-                try db.execute("ALTER TABLE sources ADD COLUMN size_cached_at TEXT")
-            }
-            logger.info("Migration 21: sources gained (file_count, cached_size_bytes, size_cached_at)")
-        },
 
-        // v22: Per-file scope overrides. Previously PolicyStore only knew
-        // sources at the root level; this table records include/exclude
-        // overrides for specific paths under a source, scoped per agent.
-        // Rollup semantics live in the runtime's access filter, not here.
-        Migration(version: 22, name: "node_overrides") { db in
             try db.execute("""
-                CREATE TABLE IF NOT EXISTS node_overrides (
+                CREATE TABLE IF NOT EXISTS standing_write_default_grants (
+                    agent TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY(agent, source_id)
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_standing_write_default_grants_source ON standing_write_default_grants(source_id)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS standing_write_once_grants (
+                    agent TEXT NOT NULL,
                     source_id TEXT NOT NULL,
                     relative_path TEXT NOT NULL,
-                    agent TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (source_id, relative_path, agent)
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY(agent, source_id, relative_path)
                 )
             """)
             try db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_node_overrides_source ON node_overrides(source_id, agent)"
+                "CREATE INDEX IF NOT EXISTS idx_standing_write_once_grants_source ON standing_write_once_grants(source_id)"
             )
-            logger.info("Migration 22: node_overrides table created")
+
+            logger.info("Migration 21: standing write approval grants and richer request context")
         },
 
-        // v23: Action history stack for universal undo. Each mutation that
-        // the app exposes (grant source, revoke source, per-file override,
-        // etc.) appends an Action row with an `inverse` payload. Undo pops
-        // and applies the inverse; redo goes the other way.
-        Migration(version: 23, name: "action_history") { db in
+        Migration(version: 22, name: "file_visibility_overrides") { db in
             try db.execute("""
-                CREATE TABLE IF NOT EXISTS action_history (
-                    action_id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    inverse_json TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    undone_at TEXT
+                CREATE TABLE IF NOT EXISTS file_visibility_overrides (
+                    agent TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    is_directory INTEGER NOT NULL DEFAULT 0,
+                    decision TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(agent, source_id, relative_path, is_directory)
                 )
             """)
             try db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_action_history_created ON action_history(created_at DESC)"
+                "CREATE INDEX IF NOT EXISTS idx_file_visibility_overrides_source ON file_visibility_overrides(source_id)"
             )
-            logger.info("Migration 23: action_history table created")
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_file_visibility_overrides_agent ON file_visibility_overrides(agent)"
+            )
+
+            logger.info("Migration 22: persisted file visibility overrides")
+        },
+
+        // v23: Unified rule_records table — foundation for the cross-scope rules engine
+        // (files, emails, agent behavior). Coexists with the existing v1 email rule tables
+        // while the EmailPolicyEngine migration lands in a follow-up pass.
+        Migration(version: 23, name: "unified_rule_records") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS rule_records (
+                    rule_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    explanation TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    matcher_json TEXT NOT NULL,
+                    agents_json TEXT NOT NULL DEFAULT '[]',
+                    window_json TEXT NOT NULL DEFAULT '{"kind":"always"}',
+                    source TEXT NOT NULL DEFAULT 'user',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    order_index INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_matched_at TEXT,
+                    match_count INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_rule_records_scope ON rule_records(scope)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_rule_records_source ON rule_records(source)")
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rule_records_scope_enabled_order ON rule_records(scope, enabled, order_index)"
+            )
+            logger.info("Migration 23: unified rule_records table")
         },
     ]
 }

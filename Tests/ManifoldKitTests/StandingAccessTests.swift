@@ -22,7 +22,9 @@ struct StandingAccessTests {
         let policyStore: PolicyStore
         let emailRuleStore: EmailRuleStore
         let workBlockStore: WorkBlockStore
+        let fileVisibilityOverrideStore: FileVisibilityOverrideStore
         let approvalQueue: ApprovalQueue
+        let standingWriteApprovalStore: StandingWriteApprovalStore
         let exposureStore: ExposureStore
         let bridge: ManifoldBridge
         let tempDir: URL
@@ -46,7 +48,9 @@ struct StandingAccessTests {
         let policyStore = PolicyStore(db: db)
         let emailRuleStore = EmailRuleStore(db: db, policyStore: policyStore)
         let workBlockStore = WorkBlockStore(db: db)
+        let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
         let approvalQueue = ApprovalQueue(db: db)
+        let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let exposureStore = ExposureStore(db: db)
         let connectionID = "standing-test-\(UUID().uuidString)"
 
@@ -61,7 +65,9 @@ struct StandingAccessTests {
             policyStore: policyStore,
             emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore,
+            fileVisibilityOverrideStore: fileVisibilityOverrideStore,
             approvalQueue: approvalQueue,
+            standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore,
             targetApp: targetApp,
             connectionID: connectionID
@@ -71,13 +77,24 @@ struct StandingAccessTests {
             db: db, contentStore: contentStore, snapshotStore: snapshotStore,
             auditStore: auditStore, grantStore: grantStore, emailStore: emailStore,
             artifactIndex: artifactIndex, policyStore: policyStore, emailRuleStore: emailRuleStore,
-            workBlockStore: workBlockStore, approvalQueue: approvalQueue,
+            workBlockStore: workBlockStore, fileVisibilityOverrideStore: fileVisibilityOverrideStore,
+            approvalQueue: approvalQueue,
+            standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore, bridge: bridge, tempDir: tempDir,
             connectionID: connectionID
         )
     }
 
     func cleanup(_ url: URL) { try? FileManager.default.removeItem(at: url) }
+
+    func metadataJSON(_ metadata: String?) -> [String: String] {
+        guard let metadata,
+              let data = metadata.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return json
+    }
 
     /// Create a source directory with test files and register it.
     func createAndRegisterSource(harness: Harness, name: String) async throws -> String {
@@ -211,7 +228,7 @@ struct StandingAccessTests {
         #expect(status.active)
     }
 
-    @Test("Standing access write escalates and queues approval")
+    @Test("Standing access write escalates and queues a standing-write approval")
     func standingWriteEscalates() async throws {
         let h = try makeHarness()
         defer { cleanup(h.tempDir) }
@@ -222,7 +239,7 @@ struct StandingAccessTests {
         let result = try await h.bridge.writeFile(path: "myapp/README.md", content: "updated")
         switch result {
         case .escalationRequired(let message, let path):
-            #expect(message.contains("read-only"))
+            #expect(message.contains("reads by default"))
             #expect(path == "myapp/README.md")
         case .written:
             Issue.record("Standing access should not write files directly")
@@ -232,6 +249,156 @@ struct StandingAccessTests {
         #expect(pending.count == 1)
         #expect(pending[0].path == "myapp/README.md")
         #expect(pending[0].action == "write")
+        #expect(pending[0].kind == .standingWrite)
+        #expect(pending[0].sourceID == sourceID)
+        #expect(pending[0].mountName == "myapp")
+        #expect(pending[0].relativePath == "README.md")
+    }
+
+    @Test("Explicit file deny hides a file inside an otherwise shared source")
+    func explicitFileDenyHidesSharedFile() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        try await h.fileVisibilityOverrideStore.setOverride(
+            agent: .cowork,
+            sourceID: sourceID,
+            relativePath: "README.md",
+            isDirectory: false,
+            decision: .deny
+        )
+
+        let files = try await h.bridge.listFiles()
+        #expect(!files.contains(where: { $0.path == "myapp/README.md" }))
+
+        do {
+            _ = try await h.bridge.readFile(path: "myapp/README.md")
+            Issue.record("Expected explicitly denied file to be hidden")
+        } catch let error as ManifoldMCPError {
+            if case .fileNotFound(let hiddenPath) = error {
+                #expect(hiddenPath.contains("myapp/README.md"))
+            } else {
+                Issue.record("Expected fileNotFound for hidden file, got \(error)")
+            }
+        }
+    }
+
+    @Test("Explicit file allow exposes one file from a source that is not in default scope")
+    func explicitFileAllowExposesUnsharedFile() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "PrivateDocs")
+        try await h.fileVisibilityOverrideStore.setOverride(
+            agent: .cowork,
+            sourceID: sourceID,
+            relativePath: "README.md",
+            isDirectory: false,
+            decision: .allow
+        )
+
+        let files = try await h.bridge.listFiles()
+        #expect(files.contains(where: { $0.path == "privatedocs/README.md" }))
+        #expect(!files.contains(where: { $0.path == "privatedocs/src/main.swift" }))
+
+        let content = try await h.bridge.readFile(path: "privatedocs/README.md")
+        #expect(content == "hello world")
+
+        do {
+            _ = try await h.bridge.readFile(path: "privatedocs/src/main.swift")
+            Issue.record("Expected only the explicitly allowed file to be visible")
+        } catch let error as ManifoldMCPError {
+            if case .fileNotFound(let hiddenPath) = error {
+                #expect(hiddenPath.contains("privatedocs/src/main.swift"))
+            } else {
+                Issue.record("Expected fileNotFound for non-allowed file, got \(error)")
+            }
+        }
+    }
+
+    @Test("Standing write once approval allows one reversible write to the exact file")
+    func standingWriteOnceApprovalIsConsumed() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+
+        _ = try await h.bridge.writeFile(path: "myapp/README.md", content: "first pass")
+        let request = try #require(try await h.approvalQueue.pending().first)
+        try await h.standingWriteApprovalStore.grantOnce(
+            agent: .cowork,
+            sourceID: sourceID,
+            relativePath: "README.md"
+        )
+        try await h.approvalQueue.approve(id: request.id)
+
+        let write = try await h.bridge.writeFile(path: "myapp/README.md", content: "approved once")
+        switch write {
+        case .written(_, let path):
+            #expect(path == "myapp/README.md")
+        case .escalationRequired:
+            Issue.record("Expected once-approved write to succeed")
+        }
+
+        let fileURL = h.tempDir.appendingPathComponent("sources/MyApp/README.md")
+        let updated = try String(contentsOf: fileURL)
+        #expect(updated == "approved once")
+
+        let snapshots = try await h.snapshotStore.fileHistory(filePath: "myapp/README.md")
+        #expect(snapshots.count == 2)
+        #expect(snapshots.contains { $0.isBaseline && $0.source == "manifold" })
+        #expect(snapshots.contains { !$0.isBaseline && $0.source == "standing_write_once" })
+
+        let auditEntries = try await h.auditStore.recentEntries(limit: 10)
+        let writeEntry = try #require(auditEntries.first(where: { $0.filePath == "myapp/README.md" }))
+        let metadata = metadataJSON(writeEntry.metadata)
+        #expect(metadata["access_mode"] == "standing_write_once")
+
+        let secondAttempt = try await h.bridge.writeFile(path: "myapp/README.md", content: "needs approval again")
+        switch secondAttempt {
+        case .escalationRequired(_, let path):
+            #expect(path == "myapp/README.md")
+        case .written:
+            Issue.record("Expected one-shot grant to be consumed after first write")
+        }
+    }
+
+    @Test("Standing write default approval allows reversible writes anywhere in one shared source")
+    func standingWriteDefaultApprovalIsPerSource() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sharedSourceID = try await createAndRegisterSource(harness: h, name: "Shared")
+        let secondSourceID = try await createAndRegisterSource(harness: h, name: "Other")
+        try await h.policyStore.addSource(sharedSourceID, to: .cowork)
+        try await h.policyStore.addSource(secondSourceID, to: .cowork)
+        try await h.standingWriteApprovalStore.grantDefault(agent: .cowork, sourceID: sharedSourceID)
+
+        let writeInShared = try await h.bridge.writeFile(path: "shared/src/main.swift", content: "func main() { print(\"hi\") }")
+        switch writeInShared {
+        case .written(_, let path):
+            #expect(path == "shared/src/main.swift")
+        case .escalationRequired:
+            Issue.record("Expected default-approved source write to succeed")
+        }
+
+        let writeInOther = try await h.bridge.writeFile(path: "other/README.md", content: "other source change")
+        switch writeInOther {
+        case .escalationRequired(_, let path):
+            #expect(path == "other/README.md")
+        case .written:
+            Issue.record("Expected other source to require its own approval")
+        }
+
+        let reloadedStore = StandingWriteApprovalStore(db: h.db)
+        #expect(try await reloadedStore.hasDefaultGrant(agent: .cowork, sourceID: sharedSourceID))
+
+        try await h.policyStore.removeSource(sharedSourceID, from: .cowork)
+        try await h.standingWriteApprovalStore.removeGrants(agent: .cowork, sourceID: sharedSourceID)
+        #expect((try await h.standingWriteApprovalStore.hasDefaultGrant(agent: .cowork, sourceID: sharedSourceID)) == false)
     }
 
     @Test("Read file records access decision and exposure")
@@ -257,9 +424,39 @@ struct StandingAccessTests {
             $0.toolName == "read_file" &&
             $0.exposureType == "full_file" &&
             $0.byteCount == "hello world".utf8.count &&
-            $0.payloadPreview == "hello world" &&
+            $0.payloadPreview == "[redacted full_file, 11 bytes]" &&
             $0.payloadPreviewTruncated == false
         })
+    }
+
+    @Test("Standing access rejects symlinked files inside a shared source")
+    func standingAccessRejectsSymlinkedFiles() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceDir = h.tempDir.appendingPathComponent("sources/MyApp")
+        let outsideURL = h.tempDir.appendingPathComponent("outside/secret.txt")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("top secret".utf8).write(to: outsideURL)
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("linked.txt"),
+            withDestinationURL: outsideURL
+        )
+
+        let sourceID = try await h.grantStore.addSource(displayName: "MyApp", rootPath: sourceDir.path)
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+
+        do {
+            _ = try await h.bridge.readFile(path: "myapp/linked.txt")
+            Issue.record("Expected symlinked path to be rejected")
+        } catch let error as ManifoldMCPError {
+            if case .invalidPath(let message) = error {
+                #expect(message.contains("Symlinks are not allowed"))
+            } else {
+                Issue.record("Expected invalidPath, got \(error)")
+            }
+        }
     }
 
     @Test("Summary access recording requires intent summary")

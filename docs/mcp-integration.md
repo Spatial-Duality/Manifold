@@ -7,7 +7,7 @@ That means:
 - Manifold exposes tools through `manifold-mcp`
 - Claude Desktop and Codex connect to that server locally
 - requests flow through XPC into the runtime
-- the runtime applies access policy, records exposure, and manages tracked work
+- the runtime applies access governance, records exposure, and manages tracked work
 
 ## Why MCP
 
@@ -27,7 +27,7 @@ flowchart LR
     M --> X["ManifoldXPCClient"]
     X --> S["ManifoldXPCService"]
     S --> R["ManifoldRuntime / ManifoldBridge"]
-    R --> D["Policy, stores, history"]
+    R --> D["Policy, stores, activity"]
 ```
 
 ## What `manifold-mcp` Exposes
@@ -37,7 +37,7 @@ At a high level, the tool surface covers:
 - status and coverage
 - governed file listing and reads
 - governed email listing, reads, and search
-- tracked work and history/context queries
+- tracked work and activity/context queries
 
 See:
 

@@ -17,6 +17,10 @@ extension ManifoldStore: ManifoldCommands {
     // MARK: - Approvals
 
     func answer(_ request: ApprovalRequest, with answer: ApprovalAnswer) async {
+        if case .forSession = answer, !request.supportsSessionScope {
+            logger.error("Rejected unsupported session-scoped answer for request \(request.id, privacy: .public)")
+            return
+        }
         let xpcAnswer: String
         switch answer {
         case .notThisTime:        xpcAnswer = "notThisTime"
@@ -24,18 +28,13 @@ extension ManifoldStore: ManifoldCommands {
         case .forSession:         xpcAnswer = "session"
         case .addToDefault:       xpcAnswer = "default"
         }
-        await policy.answerApproval(id: request.id, answer: xpcAnswer)
-        // Keep the ScopeEntry promotion separate — the runtime records
-        // the answer; promotion to default scope still needs a follow-up
-        // `addSource(..., to: agent)` once the runtime wires the
-        // answer→promotion bridge. For now the UI-level answer is
-        // truthful: we stored the user's choice.
+        await governance.answerApproval(id: request.id, answer: xpcAnswer)
     }
 
     // MARK: - Sessions
 
     func startSession(_ draft: SessionDraft) async throws {
-        // Phase 1: reuse the existing tracked-work-block primitive.
+        // Phase 1: reuse the existing tracked session primitive.
         // Naming / duration / agents will be honored when SessionStore
         // lands in a later phase.
         let target = draft.agents.first ?? .cowork
@@ -47,10 +46,7 @@ extension ManifoldStore: ManifoldCommands {
     }
 
     func reloadSession(historyID: String) async throws {
-        // Phase 1 stub — actual reload pipeline arrives in Phase 3 with
-        // SessionHistory + drift computation. Intentionally no-op so call
-        // sites compile and can be tested visually.
-        logger.info("reloadSession(\(historyID)): pending Phase 3 SessionHistory")
+        logger.info("reloadSession(\(historyID)): preview-only surface, runtime pipeline not wired")
     }
 
     // MARK: - Scope
@@ -68,15 +64,15 @@ extension ManifoldStore: ManifoldCommands {
     // MARK: - Rules
 
     func createRule(_ rule: Rule) async throws {
-        logger.info("createRule(\(rule.id)): pending Phase 6 Rules surface")
+        logger.info("createRule(\(rule.id)): preview-only Rules surface")
     }
 
     func setRule(_ ruleID: String, enabled: Bool) async throws {
-        logger.info("setRule(\(ruleID), \(enabled)): pending Phase 6")
+        logger.info("setRule(\(ruleID), \(enabled)): preview-only Rules surface")
     }
 
     func deleteRule(_ ruleID: String) async throws {
-        logger.info("deleteRule(\(ruleID)): pending Phase 6")
+        logger.info("deleteRule(\(ruleID)): preview-only Rules surface")
     }
 
     // MARK: - Revert
@@ -87,25 +83,45 @@ extension ManifoldStore: ManifoldCommands {
         .error(message: "Revert surfaces land in Phase 2 (Activity).")
     }
 
-    // MARK: - Agent lifecycle (bridges to PolicyModel)
+    // MARK: - Agent lifecycle (bridges to GovernanceModel)
 
     func pauseAgent(_ agent: TargetApp) async {
-        await policy.pauseAgent(agent)
+        await governance.pauseAgent(agent)
     }
 
     func resumeAgent(_ agent: TargetApp) async {
-        await policy.resumeAgent(agent)
+        await governance.resumeAgent(agent)
     }
 
     // MARK: - Read-surface convenience
     //
-    // Forward PolicyModel's new primitives to the store so views that
+    // Forward GovernanceModel's new primitives to the store so views that
     // take a store (or a ManifoldCommands) can read them from one place.
 
-    var activeSession: SessionRecord? { policy.activeSession }
-    var pendingRequests: [ApprovalRequest] { policy.pendingRequests }
-    var recentSessionEntries: [SessionHistoryEntry] { policy.recentSessions }
-    func drift(for entry: SessionHistoryEntry) -> SessionDrift { policy.drift(for: entry) }
+    var activeSession: SessionRecord? { governance.activeSession }
+    var pendingRequests: [ApprovalRequest] { governance.pendingRequests }
+    var recentSessionEntries: [SessionHistoryEntry] {
+        activity.sessions.compactMap(Self.historyEntry(from:))
+    }
+    func drift(for entry: SessionHistoryEntry) -> SessionDrift { governance.drift(for: entry) }
+
+    private static func historyEntry(from session: Session) -> SessionHistoryEntry? {
+        guard let startedAt = ISO8601DateFormatter.shared.date(from: session.startTime),
+              let endedAt = ISO8601DateFormatter.shared.date(from: session.endTime) else {
+            return nil
+        }
+        let agent = TargetApp(rawValue: session.agent).map { Set([$0]) } ?? []
+        return SessionHistoryEntry(
+            id: session.id,
+            name: "\(session.agent.capitalized) session",
+            startedAt: startedAt,
+            endedAt: endedAt,
+            agents: agent,
+            eventCount: session.actionCount,
+            additions: [],
+            removals: []
+        )
+    }
 }
 
 // Module-scope logger used by the extension (ManifoldStore.swift declares

@@ -18,6 +18,7 @@ do {
     agentLogger.info("ManifoldAgent ready on \(ManifoldXPCClient.serviceName, privacy: .public)")
 
     Task {
+        await runtime.bootstrap()
         do { _ = try await runtime.snapshotStore.pruneByAge(days: 30) }
         catch { agentLogger.warning("Snapshot pruning failed: \(error.localizedDescription, privacy: .public)") }
         do { _ = try await runtime.contentStore.garbageCollect() }

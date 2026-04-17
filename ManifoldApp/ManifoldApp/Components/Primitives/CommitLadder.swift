@@ -1,17 +1,16 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// CommitLadder — the 4-button approval row used on approval cards.
+// CommitLadder — the approval row used on queue cards.
 //
 // Deny-focused by default (Principle 3). "Not this time" is prominent
-// and carries `.defaultAction`; the other three are borderless bordered.
-// The session button is hidden when no session is live, per Cooper —
-// no dead affordances.
+// and carries `.defaultAction`; the other actions are borderless bordered.
+// The session button only appears for request kinds that truly support it.
 //
 // Keyboard layout:
 //   ↩    → Not this time
 //   ⇧↩   → Once
-//   ⌥↩   → For this session
+//   ⌥↩   → For this session (when supported)
 //   ⌘↩   → Add to default
 
 import SwiftUI
@@ -19,7 +18,7 @@ import ManifoldKit
 
 struct CommitLadder: View {
     let agent: TargetApp
-    let sessionIsLive: Bool
+    let showsSessionScope: Bool
 
     var onNotThisTime: () -> Void = {}
     var onOnce:        () -> Void = {}
@@ -39,7 +38,7 @@ struct CommitLadder: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-            if sessionIsLive {
+            if showsSessionScope {
                 Button("For this session", action: onSession)
                     .keyboardShortcut(.return, modifiers: .option)
                     .buttonStyle(.bordered)
@@ -57,13 +56,13 @@ struct CommitLadder: View {
 }
 
 #Preview("Commit ladder — session live") {
-    CommitLadder(agent: .cowork, sessionIsLive: true)
+    CommitLadder(agent: .cowork, showsSessionScope: true)
         .padding(Spacing.s6)
         .background(ManifoldPalette.bg)
 }
 
 #Preview("Commit ladder — no session") {
-    CommitLadder(agent: .codex, sessionIsLive: false)
+    CommitLadder(agent: .codex, showsSessionScope: false)
         .padding(Spacing.s6)
         .background(ManifoldPalette.bg)
 }

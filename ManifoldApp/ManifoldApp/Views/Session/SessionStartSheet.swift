@@ -15,11 +15,24 @@ struct SessionStartSheet: View {
     @Environment(ManifoldStore.self) private var store
     @State private var draft = SessionDraft()
 
+    private var defaultScopeSummary: String {
+        let count = store.sources.filter(\.isAccessible).count
+        if count == 0 {
+            return "Nothing is in default scope yet. Add a folder first if you want this session to start with protected access."
+        }
+        return "Default scope: \(count) folder\(count == 1 ? "" : "s"). Choose Inherit default to start with the folders already shared here."
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s4) {
             HStack {
-                Text("Start a session")
-                    .font(ManifoldType.heading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Protect next session")
+                        .font(ManifoldType.heading)
+                    Text("Review what Claude or Codex can access here before the session starts.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -27,47 +40,30 @@ struct SessionStartSheet: View {
 
             Divider()
 
+            Text(defaultScopeSummary)
+                .font(ManifoldType.caption)
+                .foregroundStyle(ManifoldPalette.text2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(Spacing.s3)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                        .fill(ManifoldPalette.surface3.opacity(0.8))
+                )
+
             FormRow(label: "Name") {
                 TextField("What's this session about?", text: $draft.name)
                     .textFieldStyle(.roundedBorder)
             }
 
             FormRow(label: "Duration") {
-                VStack(alignment: .leading, spacing: Spacing.s2) {
-                    // Time-limited slider: only shown when a duration is
-                    // bound. When the toggle below is on (nil duration),
-                    // the slider collapses out of the form entirely so
-                    // the user sees what their choice actually means.
-                    if let hours = draft.durationHours {
-                        HStack {
-                            Slider(
-                                value: Binding(
-                                    get: { hours },
-                                    set: { draft.durationHours = $0 }
-                                ),
-                                in: 0.5...8,
-                                step: 0.5
-                            )
-                            HStack(spacing: 0) {
-                                Text(hours, format: .number.precision(.fractionLength(1)))
-                                Text("h")
-                            }
-                            .font(ManifoldType.numericBody)
-                            .frame(width: 44, alignment: .trailing)
-                        }
+                HStack {
+                    Slider(value: $draft.durationHours, in: 0.5...8, step: 0.5)
+                    HStack(spacing: 0) {
+                        Text(draft.durationHours, format: .number.precision(.fractionLength(1)))
+                        Text("h")
                     }
-
-                    Toggle(isOn: Binding(
-                        get: { draft.durationHours == nil },
-                        set: { indefinite in
-                            draft.durationHours = indefinite ? nil : 2
-                        }
-                    )) {
-                        Text("Run until I finish it manually")
-                            .font(ManifoldType.caption)
-                    }
-                    .toggleStyle(.checkbox)
-                    .help("Session has no time limit. Ends only when you click Finish.")
+                    .font(ManifoldType.numericBody)
+                    .frame(width: 44, alignment: .trailing)
                 }
             }
 
@@ -103,7 +99,7 @@ struct SessionStartSheet: View {
 
             HStack {
                 Spacer()
-                Button("Start session") {
+                Button("Start protected session") {
                     Task {
                         try? await store.startSession(draft)
                         dismiss()
@@ -168,52 +164,53 @@ private struct AgentToggle: View {
     }
 }
 
-/// ReloadDriftSheet — same shape as SessionStartSheet but prepopulated
-/// from a historical session, with a drift preview above the form.
+/// ReloadDriftSheet — preview-only drift review for a future session reload flow.
 struct ReloadDriftSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ManifoldStore.self) private var store
     let historyEntry: SessionHistoryEntry
 
-    @State private var draft: SessionDraft
-
-    init(historyEntry: SessionHistoryEntry) {
-        self.historyEntry = historyEntry
-        _draft = State(initialValue: SessionDraft(
-            name: historyEntry.name,
-            durationHours: 2,
-            agents: historyEntry.agents,
-            baseMode: .defaultScope,
-            trackWrites: false
-        ))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s4) {
             HStack {
-                Text("Reload session").font(ManifoldType.heading)
+                Text("Session reload preview").font(ManifoldType.heading)
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
 
             let drift = store.drift(for: historyEntry)
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                Label("Preview only", systemImage: "eye")
+                    .font(ManifoldType.captionMedium)
+                    .foregroundStyle(ManifoldPalette.preview)
+                Text("Session reload is still a preview surface. This shows the drift Manifold would review before a future reload flow is wired end to end.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Spacing.s3)
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                    .fill(ManifoldPalette.previewSoft)
+            )
+
             DriftBanner(drift: drift)
 
             Divider()
 
-            TextField("Name", text: $draft.name)
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: Spacing.s1) {
+                Text(historyEntry.name)
+                    .font(ManifoldType.bodyMedium)
+                Text("\(historyEntry.displayLastRun) · \(historyEntry.displayDuration)")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
                 Spacer()
-                Button("Reload") {
-                    Task {
-                        try? await store.reloadSession(historyID: historyEntry.id)
-                        dismiss()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
+                Button("Close") { dismiss() }
+                    .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }

@@ -14,7 +14,7 @@ struct SettingsView: View {
                 GeneralSettingsPane()
             }
             Tab("Agents", systemImage: "sparkle") {
-                AIAppsSettingsPane()
+                AgentsSettingsPane()
             }
             Tab("Storage", systemImage: "externaldrive") {
                 StorageSettingsPane()
@@ -22,10 +22,93 @@ struct SettingsView: View {
             Tab("Mail", systemImage: "envelope") {
                 MailSettingsPane()
             }
+            Tab("Rules", systemImage: "checklist") {
+                RulesSettingsPane()
+            }
             Tab("Advanced", systemImage: "slider.horizontal.3") {
                 AdvancedSettingsPane()
             }
         }
         .frame(minWidth: 580, minHeight: 500)
+    }
+}
+
+private struct RulesSettingsPane: View {
+    @Environment(ManifoldStore.self) private var store
+    @State private var isResetting = false
+    @State private var resetMessage: String?
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: Spacing.s3) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Rules live in the Ledger")
+                            .font(ManifoldType.bodyMedium)
+                        Text("Create, edit, and audit rules from Ledger ▸ Rules. This pane covers global defaults only.")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
+            Section("Default policy") {
+                LabeledContent("Claude (cowork)") {
+                    Text(defaultPolicyDescription(.cowork))
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Codex") {
+                    Text(defaultPolicyDescription(.codex))
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Default policy applies when no rule matches. Claude allows-unless-blocked (fast iteration); Codex blocks-unless-allowed (security-first). These baselines are the floor — rules refine what each agent sees.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Seeded rules") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Restore built-in rules")
+                            .font(ManifoldType.body)
+                        Text("Re-enables seeded rules that you disabled and resyncs their catalog after an app update.")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Button("Reset Seeded Rules") {
+                        Task {
+                            isResetting = true
+                            defer { isResetting = false }
+                            await store.rules.resetSeededRules()
+                            resetMessage = "Seeded rules restored."
+                        }
+                    }
+                    .disabled(isResetting)
+                }
+                if let resetMessage {
+                    Label(resetMessage, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(ManifoldPalette.active)
+                        .font(ManifoldType.caption)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func defaultPolicyDescription(_ agent: TargetApp) -> String {
+        switch agent {
+        case .cowork: return "Allow unless blocked"
+        case .codex:  return "Block unless allowed"
+        }
     }
 }

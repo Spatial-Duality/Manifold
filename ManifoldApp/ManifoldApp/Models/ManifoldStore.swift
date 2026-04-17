@@ -6,57 +6,13 @@ import SwiftUI
 import UserNotifications
 import os
 import ManifoldKit
+import ManifoldXPC
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "store")
-
-enum AppTab: String, Hashable, CaseIterable {
-    case overview
-    case files
-    case emails
-}
-
-enum SidebarItem: String, Hashable, CaseIterable {
-    case home
-    case files
-    case emails
-    case history
-    case sources
-}
-
-enum AgentFocus: String, Hashable, CaseIterable {
-    case claude
-    case codex
-    case compare
-
-    var displayName: String {
-        switch self {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        case .compare: "both agents"
-        }
-    }
-
-    /// Maps to the XPC/runtime TargetApp. `.compare` defaults to `.cowork`.
-    var targetApp: TargetApp {
-        self == .codex ? .codex : .cowork
-    }
-}
-
-enum EmailRulesDestination: Hashable {
-    case dashboard
-    case policy
-}
 
 @Observable
 @MainActor
 final class ManifoldStore {
-    var selectedTab: AppTab = .overview
-    var agentFocus: AgentFocus = .claude
-    var emailRulesDestination: EmailRulesDestination? = nil
-
-    var selectedSidebarItem: SidebarItem? = .home
-    var inspectedFilePath: String?
-
     var isConnected = false
     var isRuntimeConnected = false
     var connectedAgent: String?
@@ -74,11 +30,12 @@ final class ManifoldStore {
     var lastError: String?
 
     let session: SessionModel
-    let history: HistoryModel
+    let activity: ActivityModel
     let storage: StorageModel
     let setup: SetupModel
-    let emailAccounts: EmailAccountModel
-    let policy: PolicyModel
+    let mailAccounts: MailAccountsModel
+    let mailReview: MailReviewModel
+    let governance: GovernanceModel
     let rules: RulesModel
     let integrationHealth: IntegrationHealthModel
 
@@ -96,18 +53,21 @@ final class ManifoldStore {
         self.runtime = runtime
         self.integrationHealth = integrationHealth
         session = SessionModel()
-        history = HistoryModel()
+        activity = ActivityModel()
         storage = StorageModel()
         setup = SetupModel()
-        emailAccounts = EmailAccountModel()
-        policy = PolicyModel()
+        mailAccounts = MailAccountsModel()
+        mailReview = MailReviewModel()
+        governance = GovernanceModel()
         rules = RulesModel()
 
         session.configure(client: runtime)
-        history.configure(client: runtime)
+        activity.configure(client: runtime)
         storage.configure(client: runtime)
-        emailAccounts.configure(client: runtime)
-        policy.configure(client: runtime)
+        mailAccounts.configure(client: runtime)
+        mailReview.configure(mailAccounts: mailAccounts)
+        governance.configure(client: runtime)
+        rules.configure(client: runtime)
 
         integrationHealth.store = self
 
@@ -163,14 +123,14 @@ final class ManifoldStore {
         do {
             let dashboard = try await runtime.dashboardState()
             sources = dashboard.sources
-            policy.claudePolicy = dashboard.claudePolicy
-            policy.codexPolicy = dashboard.codexPolicy
-            policy.claudeEmailGovernance = dashboard.claudeEmailGovernance
-            policy.codexEmailGovernance = dashboard.codexEmailGovernance
-            policy.activeWorkBlock = dashboard.activeWorkBlock
-            policy.claudeCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
-            policy.codexCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
-            policy.coverageEvents = dashboard.coverageEvents
+            governance.claudePolicy = dashboard.claudePolicy
+            governance.codexPolicy = dashboard.codexPolicy
+            governance.claudeEmailGovernance = dashboard.claudeEmailGovernance
+            governance.codexEmailGovernance = dashboard.codexEmailGovernance
+            governance.activeSessionRecord = dashboard.activeSession
+            governance.claudeCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
+            governance.codexCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
+            governance.coverageEvents = dashboard.coverageEvents
             connectedAgents = dashboard.connectedAgents
             // Derive connectedAgent from actual runtime data, not heuristics
             connectedAgent = dashboard.connectedAgents.first
@@ -180,14 +140,22 @@ final class ManifoldStore {
             logger.error("Failed to refresh dashboard: \(error.localizedDescription)")
         }
 
+        do {
+            governance.pendingApprovals = try await runtime.listPendingApprovals()
+        } catch {
+            governance.pendingApprovals = []
+            logger.error("Failed to load pending approvals: \(error.localizedDescription)")
+        }
+
         consumePendingFinderRequest()
 
-        await history.loadActivity()
-        await history.loadSessions()
+        await activity.loadActivity()
+        await activity.loadSessions()
         await session.refreshGrantState()
         await storage.loadStorageStats()
         await storage.loadTrackedFiles()
-        await emailAccounts.loadAccounts()
+        await mailAccounts.loadAccounts()
+        await rules.load()
     }
 
     private func startConnectionMonitor() {
@@ -234,9 +202,6 @@ final class ManifoldStore {
             return
         }
 
-        if let agent = payload["agent"] as? String {
-            agentFocus = agent == TargetApp.codex.rawValue ? .codex : .claude
-        }
         for path in paths {
             if !sources.contains(where: { $0.originalRootPath == path }) {
                 addSource(path: path)
@@ -296,14 +261,21 @@ final class ManifoldStore {
         }
     }
 
-    func addSourceFromPicker() {
+    @discardableResult
+    func addSourceFromPicker() -> Bool {
+        let paths = chooseSourcePathsFromPicker()
+        for path in paths { addSource(path: path) }
+        return !paths.isEmpty
+    }
+
+    func chooseSourcePathsFromPicker() -> [String] {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.message = "Select folders for AI agents to access"
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls { addSource(path: url.path) }
+        panel.message = "Select folders to protect through Manifold"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return [] }
+        return panel.urls.map(\.path)
     }
 
     func removeSources(paths: Set<String>) {
@@ -323,6 +295,84 @@ final class ManifoldStore {
         return await Task.detached(priority: .userInitiated) {
             Self.walkSourceFiles(sources: activeSources)
         }.value
+    }
+
+    func enumerateSourceFilesProgressively(batchSize: Int = 200) -> AsyncStream<[SourceFile]> {
+        let activeSources = sources.filter { $0.isAccessible && !$0.isRemoved }
+        return AsyncStream { continuation in
+            let task = Task.detached(priority: .userInitiated) {
+                await Self.streamSourceFiles(
+                    sources: activeSources,
+                    batchSize: max(batchSize, 1)
+                ) { batch in
+                    continuation.yield(batch)
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private nonisolated static func streamSourceFiles(
+        sources: [SourceRecord],
+        batchSize: Int,
+        yield: @escaping @Sendable ([SourceFile]) async -> Void
+    ) async {
+        let fm = FileManager.default
+        var batch: [SourceFile] = []
+
+        for source in sources {
+            guard !Task.isCancelled else { return }
+            let root = URL(fileURLWithPath: source.originalRootPath)
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            let basePath = root.path + "/"
+            while let url = enumerator.nextObject() as? URL {
+                guard !Task.isCancelled else { return }
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                      values.isRegularFile == true else { continue }
+                let path = url.path
+                guard path.hasPrefix(basePath) else { continue }
+                let relativePath = String(path.dropFirst(basePath.count))
+
+                let first = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
+                let skip = [".git", "node_modules", ".build", "Build", "DerivedData", "Pods", "__pycache__", ".DS_Store"]
+                if skip.contains(first) {
+                    if url.hasDirectoryPath { enumerator.skipDescendants() }
+                    continue
+                }
+
+                batch.append(
+                    SourceFile(
+                        name: url.lastPathComponent,
+                        path: path,
+                        relativePath: relativePath,
+                        sourceName: source.displayName,
+                        sourceID: source.sourceID,
+                        fileExtension: url.pathExtension.lowercased(),
+                        sizeBytes: values.fileSize ?? 0,
+                        modifiedDate: values.contentModificationDate ?? .distantPast,
+                        isGrantedToClaude: true
+                    )
+                )
+
+                if batch.count >= batchSize {
+                    await yield(batch)
+                    batch.removeAll(keepingCapacity: true)
+                }
+            }
+        }
+
+        if !batch.isEmpty {
+            await yield(batch)
+        }
     }
 
     private nonisolated static func walkSourceFiles(sources: [SourceRecord]) -> [SourceFile] {
@@ -478,23 +528,23 @@ final class ManifoldStore {
             onConflict: { [weak self] count in self?.lastError = "\(count) conflict(s) during promote. Check activity for details." }
         )
         await refreshAll()
-        session.lastCompletedSession = history.sessions.first(where: { $0.id == session.activeGrant?.grantID })
+        session.lastCompletedSession = activity.sessions.first(where: { $0.id == session.activeGrant?.grantID })
     }
 
-    func restoreFile(snapshotID: Int, filePath: String) async -> Bool {
+    func restoreFile(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
         let result = await session.restoreFile(snapshotID: snapshotID, filePath: filePath)
-        if result { await refreshAll() }
+        if result.isSuccess { await refreshAll() }
         return result
     }
 
     func revertFile(event: SessionEvent) async -> RevertResult {
-        let result = await history.revertFile(event: event, activeGrant: session.activeGrant)
+        let result = await activity.revertFile(event: event, activeGrant: session.activeGrant)
         if case .success = result { await refreshAll() }
         return result
     }
 
     func forceRevertFile(event: SessionEvent) async -> RevertResult {
-        let result = await history.forceRevertFile(event: event, activeGrant: session.activeGrant)
+        let result = await activity.forceRevertFile(event: event, activeGrant: session.activeGrant)
         if case .success = result { await refreshAll() }
         return result
     }
@@ -506,16 +556,16 @@ final class ManifoldStore {
     var activeGrant: GrantRecord? { session.activeGrant }
     var activeGrantSources: [GrantSourceRecord] { session.activeGrantSources }
     var hasActiveSession: Bool { session.hasActiveSession }
-    var activityEntries: [AuditEntry] { history.activityEntries }
-    var sessions: [Session] { history.sessions }
+    var activityEntries: [AuditEntry] { activity.activityEntries }
+    var sessions: [Session] { activity.sessions }
     var selectedSession: Session? {
-        get { history.selectedSession }
-        set { history.selectedSession = newValue }
+        get { activity.selectedSession }
+        set { activity.selectedSession = newValue }
     }
-    var sessionEvents: [SessionEvent] { history.sessionEvents }
+    var sessionEvents: [SessionEvent] { activity.sessionEvents }
     var showSessionGrouping: Bool {
-        get { history.showSessionGrouping }
-        set { history.showSessionGrouping = newValue }
+        get { activity.showSessionGrouping }
+        set { activity.showSessionGrouping = newValue }
     }
     var allTrackedFiles: [String] { storage.allTrackedFiles }
     var storageUsed: Int64 { storage.storageUsed }
@@ -582,11 +632,97 @@ final class ManifoldStore {
         }
     }
 
-    func loadSessions() async { await history.loadSessions() }
-    func loadSessionEvents(sessionID: String) async { await history.loadSessionEvents(sessionID: sessionID) }
-    func selectSession(_ session: Session?) async { await history.selectSession(session) }
-    func sessionSummary(session: Session, events: [SessionEvent]) -> String { history.sessionSummary(session: session, events: events) }
+    func loadSessions() async { await activity.loadSessions() }
+    func loadSessionEvents(sessionID: String) async { await activity.loadSessionEvents(sessionID: sessionID) }
+    func selectSession(_ session: Session?) async { await activity.selectSession(session) }
+    func sessionSummary(session: Session, events: [SessionEvent]) -> String { activity.sessionSummary(session: session, events: events) }
     func refreshGrantState() async { await session.refreshGrantState() }
+
+    func fileVisibilityOverrides(agent: TargetApp) async -> [FileVisibilityOverrideRecord] {
+        do {
+            return try await runtime.fileVisibilityOverrides(agent: agent)
+        } catch {
+            logger.error("Failed to load file visibility overrides: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func setFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool = false,
+        decision: FileVisibilityOverrideDecision
+    ) async {
+        do {
+            try await runtime.setFileVisibilityOverride(
+                agent: agent,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory,
+                decision: decision
+            )
+        } catch {
+            logger.error("Failed to persist file visibility override: \(error.localizedDescription)")
+            lastError = "Couldn't update file visibility: \(error.localizedDescription)"
+        }
+    }
+
+    func clearFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool = false
+    ) async {
+        do {
+            try await runtime.clearFileVisibilityOverride(
+                agent: agent,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory
+            )
+        } catch {
+            logger.error("Failed to clear file visibility override: \(error.localizedDescription)")
+            lastError = "Couldn't reset file visibility: \(error.localizedDescription)"
+        }
+    }
+
+    func sourceIsInDefaultScope(_ sourceID: String, for agent: TargetApp) -> Bool {
+        governance.policy(for: agent)?.allowedSourceIDs.contains(sourceID) == true
+    }
+
+    /// Toggle a source's membership in an agent's default scope. Rolls back
+    /// the optimistic local mutation if the XPC round-trip fails, so UI
+    /// state never silently diverges from runtime truth.
+    func setSourceScope(sourceID: String, agent: TargetApp, inScope: Bool) async {
+        let currently = sourceIsInDefaultScope(sourceID, for: agent)
+        guard currently != inScope else { return }
+
+        mutateScope(agent: agent, sourceID: sourceID, inScope: inScope)
+
+        do {
+            if inScope {
+                try await runtime.addSource(sourceID, to: agent)
+            } else {
+                try await runtime.removeSource(sourceID, from: agent)
+            }
+        } catch {
+            logger.error("Failed to update scope for source \(sourceID, privacy: .public) agent \(agent.rawValue, privacy: .public): \(error.localizedDescription)")
+            lastError = "Couldn't update sharing: \(error.localizedDescription)"
+            mutateScope(agent: agent, sourceID: sourceID, inScope: !inScope)
+        }
+    }
+
+    private func mutateScope(agent: TargetApp, sourceID: String, inScope: Bool) {
+        switch agent {
+        case .cowork:
+            if inScope { governance.claudePolicy?.allowedSourceIDs.insert(sourceID) }
+            else       { governance.claudePolicy?.allowedSourceIDs.remove(sourceID) }
+        case .codex:
+            if inScope { governance.codexPolicy?.allowedSourceIDs.insert(sourceID) }
+            else       { governance.codexPolicy?.allowedSourceIDs.remove(sourceID) }
+        }
+    }
 
     func quitManifold() {
         unregisterAgent()

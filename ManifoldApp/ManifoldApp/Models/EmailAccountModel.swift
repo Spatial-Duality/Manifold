@@ -9,11 +9,12 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 
 @Observable
 @MainActor
-final class EmailAccountModel {
+final class MailAccountsModel {
     var accounts: [EmailAccountRecord] = []
     var syncStates: [String: [SyncStateRecord]] = [:]
     var totalMessageCount: Int = 0
     var mailboxRefreshToken: Int = 0
+    var lastQueryError: String?
 
     /// Whether any account is currently syncing.
     var isSyncing: Bool {
@@ -101,26 +102,66 @@ final class EmailAccountModel {
             let result = try await client.syncEmailNow(accountID: accountID)
             if !result.isSuccess {
                 logger.warning("Sync errors: \(result.errors.joined(separator: ", "))")
+                lastQueryError = result.errors.joined(separator: ", ")
+            } else {
+                lastQueryError = nil
             }
         } catch {
             logger.error("Sync failed: \(error.localizedDescription)")
+            lastQueryError = error.localizedDescription
         }
         await loadAccounts()
     }
 
     func messages(accountID: String, limit: Int = 200) async -> [EmailMessageRecord] {
         guard let client else { return [] }
-        return (try? await client.emailMessages(accountID: accountID, limit: limit)) ?? []
+        do {
+            let result = try await client.emailMessages(
+                accountID: accountID,
+                mailbox: nil,
+                ids: nil,
+                limit: limit
+            )
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func allMessages(limit: Int = 500) async -> [EmailMessageRecord] {
         guard let client else { return [] }
-        return (try? await client.emailMessages(limit: limit)) ?? []
+        do {
+            let result = try await client.emailMessages(
+                accountID: nil,
+                mailbox: nil,
+                ids: nil,
+                limit: limit
+            )
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func messages(ids: [String]) async -> [EmailMessageRecord] {
         guard let client else { return [] }
-        return (try? await client.emailMessages(ids: ids)) ?? []
+        do {
+            let result = try await client.emailMessages(
+                accountID: nil,
+                mailbox: nil,
+                ids: ids,
+                limit: max(ids.count, 500)
+            )
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func domainCounts() async -> [String: Int] {
@@ -130,8 +171,7 @@ final class EmailAccountModel {
 
     func readEmail(emlPath: String?) -> MIMEParser.ParsedEmail? {
         guard let path = emlPath, !path.isEmpty else { return nil }
-        let url = URL(fileURLWithPath: path)
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let data = EmailSyncEngine.readStoredMessage(at: path) else { return nil }
         return MIMEParser.parse(data: data)
     }
 
@@ -152,13 +192,32 @@ final class EmailAccountModel {
 
     func imapMailboxes(accountID: String) async -> [IMAPMailboxRecord] {
         guard let client else { return [] }
-        return (try? await client.imapMailboxes(accountID: accountID)) ?? []
+        do {
+            let result = try await client.imapMailboxes(accountID: accountID)
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func messagesInMailbox(accountID: String, mailbox: String, limit: Int = 500) async -> [EmailMessageRecord] {
         guard let client else { return [] }
         let resolvedMailbox = await resolvedMailboxName(accountID: accountID, requestedName: mailbox)
-        return (try? await client.emailMessages(accountID: accountID, mailbox: resolvedMailbox, limit: limit)) ?? []
+        do {
+            let result = try await client.emailMessages(
+                accountID: accountID,
+                mailbox: resolvedMailbox,
+                ids: nil,
+                limit: limit
+            )
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func resolvedMailboxName(accountID: String, requestedName: String) async -> String {
@@ -173,22 +232,46 @@ final class EmailAccountModel {
 
     func sharedEmailIDs() async -> Set<String> {
         guard let client else { return [] }
-        return (try? await client.sharedEmailIDs()) ?? []
+        do {
+            let result = try await client.sharedEmailIDs()
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func sharedEmails(limit: Int = 500) async -> [EmailMessageRecord] {
         guard let client else { return [] }
-        return (try? await client.sharedEmails(limit: limit)) ?? []
+        do {
+            let result = try await client.sharedEmails(limit: limit)
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func shareEmails(emailIDs: [String]) async {
         guard let client else { return }
-        try? await client.shareEmails(emailIDs: emailIDs)
+        do {
+            try await client.shareEmails(emailIDs: emailIDs)
+            lastQueryError = nil
+        } catch {
+            lastQueryError = error.localizedDescription
+        }
     }
 
     func unshareEmails(emailIDs: [String]) async {
         guard let client else { return }
-        try? await client.unshareEmails(emailIDs: emailIDs)
+        do {
+            try await client.unshareEmails(emailIDs: emailIDs)
+            lastQueryError = nil
+        } catch {
+            lastQueryError = error.localizedDescription
+        }
     }
 
     func unshareAllEmails() async {
@@ -226,15 +309,22 @@ final class EmailAccountModel {
         limit: Int = 500
     ) async -> [EmailMessageRecord] {
         guard let client else { return [] }
-        return (try? await client.searchEmailMessages(
-            tokens: tokens,
-            freeText: freeText,
-            accountID: accountID,
-            mailbox: mailbox,
-            filter: filter,
-            sortKey: sortKey,
-            limit: limit
-        )) ?? []
+        do {
+            let result = try await client.searchEmailMessages(
+                tokens: tokens,
+                freeText: freeText,
+                accountID: accountID,
+                mailbox: mailbox,
+                filter: filter,
+                sortKey: sortKey,
+                limit: limit
+            )
+            lastQueryError = nil
+            return result
+        } catch {
+            lastQueryError = error.localizedDescription
+            return []
+        }
     }
 
     func createSmartMailbox(displayName: String, iconName: String = "tray", rulesJSON: String = "[]") async throws {

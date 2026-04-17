@@ -1,29 +1,35 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// PendingQueueView — vertical stack of ApprovalCards, newest at top.
+// RequestsQueueView — vertical stack of approval request cards, newest at top.
 // Each card is self-contained: agent avatar, headline, target, context,
 // and the CommitLadder.
 
 import SwiftUI
 import ManifoldKit
 
-struct PendingQueueView: View {
+struct RequestsQueueView: View {
     @Environment(ManifoldStore.self) private var store
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.s3) {
                 ForEach(store.pendingRequests) { request in
-                    ApprovalCard(request: request, store: store)
+                    ApprovalRequestCard(request: request, store: store)
+                        .transition(.asymmetric(
+                            insertion: .opacity,
+                            removal: .push(from: .trailing).combined(with: .opacity)
+                        ))
                 }
             }
             .padding(Spacing.s4)
         }
+        .animation(ManifoldMotion.state, value: store.pendingRequests)
+        .accessibilityIdentifier("requests.queue")
     }
 }
 
-struct ApprovalCard: View {
+struct ApprovalRequestCard: View {
     let request: ApprovalRequest
     let store: ManifoldStore
 
@@ -62,7 +68,7 @@ struct ApprovalCard: View {
 
             CommitLadder(
                 agent: request.agent,
-                sessionIsLive: store.activeSession != nil,
+                showsSessionScope: request.supportsSessionScope && store.activeSession != nil,
                 onNotThisTime: { Task { await store.answer(request, with: .notThisTime) } },
                 onOnce:        { Task { await store.answer(request, with: .once) } },
                 onSession:     { Task {
@@ -81,6 +87,7 @@ struct ApprovalCard: View {
             RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
                 .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
         )
+        .accessibilityIdentifier("requests.card.\(request.id)")
     }
 
     private var operationPill: some View {

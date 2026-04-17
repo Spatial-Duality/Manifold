@@ -1,9 +1,9 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// RootWindowContent — wrapper that presents either the FirstRunFlow or
-// the LedgerWindowView, plus sheet presentations for session start and
-// reload drift.
+// AppRootView — wrapper that presents either the FirstRunFlow or
+// the LedgerView, plus sheet presentations for session start and
+// the command palette.
 //
 // Keeping this separate from ManifoldApp lets the @State sheet flags
 // live inside the window (SwiftUI-idiomatic) instead of polluting the
@@ -14,43 +14,59 @@ import ManifoldKit
 
 extension Notification.Name {
     static let manifoldShowSessionStartSheet = Notification.Name("manifold.showSessionStartSheet")
-    /// Posted by the menu bar panel when the user taps "Answer in Ledger".
-    /// LedgerWindowView listens and routes to the Requests destination.
-    static let manifoldOpenRequests = Notification.Name("manifold.openRequests")
-    /// Posted by the menu bar panel when the user taps an agent row.
-    /// Today the receiver only switches the Ledger destination to `.access`;
-    /// the `object` payload (`TargetApp`) is reserved for the Priority-2
-    /// agent-centric Scope canvas, which will consume it to pre-focus the
-    /// matching agent column. Posting it now keeps the call sites
-    /// forward-compatible; a receiver-side TODO marks the gap.
-    static let manifoldOpenScope = Notification.Name("manifold.openScope")
+    static let manifoldShowActivityLedger = Notification.Name("manifold.showActivityLedger")
+    static let manifoldShowLedgerDestination = Notification.Name("manifold.showLedgerDestination")
+    static let manifoldFocusCurrentSearch = Notification.Name("manifold.focusCurrentSearch")
+    static let manifoldCycleCurrentSubtab = Notification.Name("manifold.cycleCurrentSubtab")
+    static let manifoldPauseAllFromIntent = Notification.Name("manifoldPauseAllFromIntent")
+    static let manifoldStartSessionFromIntent = Notification.Name("manifoldStartSessionFromIntent")
+    static let manifoldOpenActivityFromIntent = Notification.Name("manifoldOpenActivityFromIntent")
 }
 
-struct RootWindowContent: View {
+struct AppRootView: View {
     @Environment(ManifoldStore.self) private var store
-    @State private var showStartSession = false
-    @State private var reloadEntry: SessionHistoryEntry?
+    @Environment(CommandPaletteModel.self) private var commandPalette
+    @State private var isPresentingSessionStartSheet = false
+    @State private var hasLoadedInitialSummary = false
 
-    private var showFirstRun: Bool {
+    private var shouldShowFirstRun: Bool {
         !store.hasCompletedOnboarding && store.sources.isEmpty
     }
 
     var body: some View {
         Group {
-            if showFirstRun {
+            if shouldShowFirstRun {
                 FirstRunFlow()
             } else {
-                LedgerWindowView()
+                LedgerView()
             }
         }
-        .sheet(isPresented: $showStartSession) {
+        .sheet(isPresented: $isPresentingSessionStartSheet) {
             SessionStartSheet()
         }
-        .sheet(item: $reloadEntry) { entry in
-            ReloadDriftSheet(historyEntry: entry)
+        .sheet(isPresented: Binding(
+            get: { commandPalette.isPresented },
+            set: { commandPalette.isPresented = $0 }
+        )) {
+            CommandPaletteView()
         }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldShowSessionStartSheet)) { _ in
-            showStartSession = true
+            isPresentingSessionStartSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldStartSessionFromIntent)) { _ in
+            isPresentingSessionStartSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldOpenActivityFromIntent)) { _ in
+            presentMainLedger(destination: .activity)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldPauseAllFromIntent)) { _ in
+            Task { await store.governance.pauseAllAgents() }
+        }
+        .task {
+            guard !hasLoadedInitialSummary else { return }
+            hasLoadedInitialSummary = true
+            commandPalette.bind(to: store)
+            await store.loadSummary()
         }
     }
 }

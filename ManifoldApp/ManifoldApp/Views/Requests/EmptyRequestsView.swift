@@ -13,10 +13,12 @@ import SwiftUI
 struct EmptyRequestsView: View {
     var body: some View {
         VStack(spacing: Spacing.s6) {
-            ContentUnavailableView(
-                "Nothing is waiting on you",
+            EmptyStateIllustration(
                 systemImage: "checkmark.seal",
-                description: Text("When an agent asks for access it will land here. You answer in a ladder — deny, once, for this session, or add to default. No modals.")
+                title: "Nothing is waiting on you",
+                subtitle: "When an agent asks for standing write access it lands here. You answer in a ladder — not this time, once, or add to default.",
+                tint: ManifoldPalette.active,
+                style: .requests
             )
 
             ShortcutsCard()
@@ -24,6 +26,7 @@ struct EmptyRequestsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)
+        .accessibilityIdentifier("requests.empty")
     }
 }
 
@@ -38,9 +41,8 @@ private struct ShortcutsCard: View {
 
     private let rows: [Row] = [
         .init(key: "↩",   label: "Not this time (focused default)"),
-        .init(key: "⇧↩",  label: "Allow once"),
-        .init(key: "⌥↩",  label: "Allow for this session"),
-        .init(key: "⌘↩",  label: "Add to default scope"),
+        .init(key: "⇧↩",  label: "Allow one reversible write"),
+        .init(key: "⌘↩",  label: "Allow reversible writes in default scope"),
     ]
 
     var body: some View {

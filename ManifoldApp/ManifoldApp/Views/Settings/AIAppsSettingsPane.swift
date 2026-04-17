@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// AIAppsSettingsPane — the "Agents" settings pane.
+// AgentsSettingsPane — the "Agents" settings pane.
 //
 // Stage-11 rebuild on the shared primitive AgentCard. Every visible
 // concept (identity, status, check rows, primary action) now draws
@@ -11,7 +11,7 @@
 import SwiftUI
 import ManifoldKit
 
-struct AIAppsSettingsPane: View {
+struct AgentsSettingsPane: View {
     @Environment(ManifoldStore.self) var store
     @State private var showClaudeSheet = false
     @State private var showCodexSheet = false
@@ -24,11 +24,11 @@ struct AIAppsSettingsPane: View {
                 Text("Claude").font(ManifoldType.title)
             }
 
-            if let policy = store.policy.claudePolicy {
+            if let governance = store.governance.claudePolicy {
                 Section("Recording level · Claude") {
                     AccessRecordingLevelPicker(
                         agent: .cowork,
-                        selection: policy.accessRecordingLevel
+                        selection: governance.accessRecordingLevel
                     )
                 }
             }
@@ -39,11 +39,11 @@ struct AIAppsSettingsPane: View {
                 Text("Codex").font(ManifoldType.title)
             }
 
-            if let policy = store.policy.codexPolicy {
+            if let governance = store.governance.codexPolicy {
                 Section("Recording level · Codex") {
                     AccessRecordingLevelPicker(
                         agent: .codex,
-                        selection: policy.accessRecordingLevel
+                        selection: governance.accessRecordingLevel
                     )
                 }
             }
@@ -51,7 +51,7 @@ struct AIAppsSettingsPane: View {
         .formStyle(.grouped)
         .task {
             await store.integrationHealth.checkAll()
-            await store.policy.loadPolicies()
+            await store.governance.loadPolicies()
         }
         .sheet(isPresented: $showClaudeSheet) {
             ConnectClaudeSheet()
@@ -73,9 +73,10 @@ struct AIAppsSettingsPane: View {
             consequenceText: claudeConsequence(),
             status: mapStatus(state.overallStatus),
             errorDetail: state.errorDetail,
-            primaryAction: primaryAction(for: state.overallStatus, displayName: "Claude") {
-                showClaudeSheet = true
-            }
+            primaryAction: AgentCardAction(
+                label: claudeActionLabel(for: state.overallStatus),
+                handler: { showClaudeSheet = true }
+            )
         ) {
             LiveCheckRow(label: "Claude Desktop installed",
                          status: state.appInstalled,
@@ -93,30 +94,16 @@ struct AIAppsSettingsPane: View {
     }
 
     private func claudeConsequence() -> String? {
-        guard let policy = store.policy.claudePolicy else { return nil }
-        let folders = policy.allowedSourceIDs.count
+        guard let governance = store.governance.claudePolicy else { return nil }
+        let folders = governance.allowedSourceIDs.count
         return "\(folders) folder\(folders == 1 ? "" : "s") in default scope"
     }
 
-    /// Card-level primary action per agent-connection status.
-    ///
-    /// - `.connected`: no card-level button; the per-row refresh icons on
-    ///   each `LiveCheckRow` are the per-fault affordance (plan §6.9).
-    /// - `.error`: "Reconfigure\u{2026}" — name the action rather than
-    ///   the vague "Repair".
-    /// - Otherwise: "Set up <agent>\u{2026}" opens the connect sheet.
-    private func primaryAction(
-        for status: AgentConnectionStatus,
-        displayName: String,
-        handler: @escaping () -> Void
-    ) -> AgentCardAction? {
+    private func claudeActionLabel(for status: AgentConnectionStatus) -> String {
         switch status {
-        case .connected:
-            return nil
-        case .error:
-            return AgentCardAction(label: "Reconfigure\u{2026}", handler: handler)
-        default:
-            return AgentCardAction(label: "Set up \(displayName)\u{2026}", handler: handler)
+        case .connected:    return "Reconnect"
+        case .error:        return "Repair"
+        default:            return "Set up Claude"
         }
     }
 
@@ -130,9 +117,10 @@ struct AIAppsSettingsPane: View {
             consequenceText: codexConsequence(),
             status: mapStatus(state.overallStatus),
             errorDetail: state.errorDetail,
-            primaryAction: primaryAction(for: state.overallStatus, displayName: "Codex") {
-                showCodexSheet = true
-            }
+            primaryAction: AgentCardAction(
+                label: codexActionLabel(for: state.overallStatus),
+                handler: { showCodexSheet = true }
+            )
         ) {
             LiveCheckRow(label: "Codex app installed",
                          status: state.codexAppInstalled,
@@ -144,9 +132,17 @@ struct AIAppsSettingsPane: View {
     }
 
     private func codexConsequence() -> String? {
-        guard let policy = store.policy.codexPolicy else { return nil }
-        let folders = policy.allowedSourceIDs.count
+        guard let governance = store.governance.codexPolicy else { return nil }
+        let folders = governance.allowedSourceIDs.count
         return "\(folders) folder\(folders == 1 ? "" : "s") in default scope"
+    }
+
+    private func codexActionLabel(for status: AgentConnectionStatus) -> String {
+        switch status {
+        case .connected:    return "Reconnect"
+        case .error:        return "Repair"
+        default:            return "Set up Codex"
+        }
     }
 
     // MARK: - Status mapping
@@ -191,12 +187,12 @@ private struct AccessRecordingLevelPicker: View {
         Binding(
             get: { currentLevel },
             set: { newValue in
-                Task { await store.policy.updateAccessRecordingLevel(newValue, for: agent) }
+                Task { await store.governance.updateAccessRecordingLevel(newValue, for: agent) }
             }
         )
     }
 
     private var currentLevel: AccessRecordingLevel {
-        store.policy.policy(for: agent)?.accessRecordingLevel ?? selection
+        store.governance.policy(for: agent)?.accessRecordingLevel ?? selection
     }
 }

@@ -4,12 +4,11 @@
 // FileTreeInspector — the right-pane file tree for a selected source.
 //
 // Shows the folder's descendants as an indented DisclosureGroup tree with
-// TriStateCheckbox per node. Inclusion state is the source-level membership
-// for the selected agent, with any persisted per-node override layered on
-// top. Clicking a node records an `include` / `exclude` override against
-// the runtime's PolicyStore; clicking again to match the inherited state
-// clears the override and the node resumes inheriting.
+// persisted folder/file overrides per node. Each row resolves inherited
+// visibility through the same override store used by the flat file browser,
+// so subfolders can be allowed, hidden, or reset back to inherited scope.
 
+import AppKit
 import SwiftUI
 import ManifoldKit
 
@@ -20,10 +19,32 @@ struct FileTreeInspector: View {
     @State private var root: TreeNode?
     @State private var isLoading = false
     @State private var targetAgent: TargetApp = .cowork
-    /// Per-node overrides for the current source, keyed by (agent,
-    /// relativePath). Repopulated on source change and after every mutation
-    /// so the tree reflects the store honestly.
-    @State private var overrides: [OverrideKey: NodeOverrideState] = [:]
+    @State private var overrides: [FileVisibilityOverrideRecord] = []
+
+    private var connectedAgents: [TargetApp] {
+        AgentMeta.connected(from: store.connectedAgents)
+    }
+
+    private var effectiveAgent: TargetApp {
+        if connectedAgents.contains(targetAgent) { return targetAgent }
+        return connectedAgents.first ?? .cowork
+    }
+
+    private var agentsWithScope: Set<TargetApp> {
+        guard let source else { return [] }
+        var set: Set<TargetApp> = []
+        for agent in connectedAgents {
+            if let governance = store.governance.policy(for: agent),
+               governance.allowedSourceIDs.contains(source.sourceID) {
+                set.insert(agent)
+            }
+        }
+        return set
+    }
+
+    private var visibilityResolver: FileVisibilityResolver {
+        FileVisibilityResolver(overrides: overrides)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,9 +67,14 @@ struct FileTreeInspector: View {
             }
         }
         .task(id: source?.sourceID) {
-            guard let source else { root = nil; overrides = [:]; return }
+            guard let source else {
+                root = nil
+                return
+            }
             await loadTree(for: source)
-            await loadOverrides(for: source)
+        }
+        .task(id: effectiveAgent) {
+            overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
         }
     }
 
@@ -66,23 +92,45 @@ struct FileTreeInspector: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
+                AccessChipStack(
+                    agents: connectedAgents,
+                    visibleAgents: agentsWithScope,
+                    onToggle: { agent, wasVisible in
+                        Task {
+                            await store.setSourceScope(
+                                sourceID: source.sourceID,
+                                agent: agent,
+                                inScope: !wasVisible
+                            )
+                        }
+                    }
+                )
             }
 
-            // Native `Picker.segmented` — the agent picker doesn't carry
-            // enough semantic per-option tint to justify a bespoke control
-            // (unlike the mail sensitivity picker). Stays within the macOS
-            // vocabulary the rest of the app speaks.
-            Picker("Agent", selection: $targetAgent) {
-                Text("Claude").tag(TargetApp.cowork)
-                Text("Codex").tag(TargetApp.codex)
+            if connectedAgents.isEmpty {
+                Text("No agents connected.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            } else if connectedAgents.count == 1 {
+                HStack(spacing: Spacing.s1) {
+                    GradientAvatar(agent: effectiveAgent, size: .tiny)
+                    Text("Editing \(AgentMeta.label(effectiveAgent)) overrides")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
+                Picker("Agent", selection: Binding(
+                    get: { effectiveAgent },
+                    set: { targetAgent = $0 }
+                )) {
+                    ForEach(connectedAgents, id: \.self) { agent in
+                        Text(AgentMeta.label(agent)).tag(agent)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            Text("Tree shows what \(targetAgent == .codex ? "Codex" : "Claude") sees. Click a node to set a per-file exception; click again to clear and resume inheriting.")
-                .font(ManifoldType.tiny)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.s4)
     }
@@ -96,25 +144,19 @@ struct FileTreeInspector: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity)
-        } else if let root, let source {
+        } else if let root {
             ScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     TreeRow(
                         node: root,
                         depth: 0,
-                        agent: targetAgent,
-                        sourceInScope: sourceInScope(for: targetAgent),
-                        sourceRootPath: source.originalRootPath,
-                        overrides: overrides,
-                        onSetOverride: { relativePath, nextState in
-                            Task {
-                                await applyOverride(
-                                    source: source,
-                                    relativePath: relativePath,
-                                    state: nextState
-                                )
-                            }
-                        }
+                        source: source,
+                        agent: effectiveAgent,
+                        sourceInScope: sourceInScope(for: effectiveAgent),
+                        resolver: visibilityResolver,
+                        onAllow: { node in await setOverride(.allow, for: node) },
+                        onHide: { node in await setOverride(.deny, for: node) },
+                        onReset: { node in await clearOverride(for: node) }
                     )
                 }
                 .padding(Spacing.s2)
@@ -131,8 +173,7 @@ struct FileTreeInspector: View {
 
     private func sourceInScope(for agent: TargetApp) -> Bool {
         guard let source else { return false }
-        let policy = agent == .codex ? store.policy.codexPolicy : store.policy.claudePolicy
-        return policy?.allowedSourceIDs.contains(source.sourceID) == true
+        return store.governance.policy(for: agent)?.allowedSourceIDs.contains(source.sourceID) == true
     }
 
     private func loadTree(for source: SourceRecord) async {
@@ -142,106 +183,98 @@ struct FileTreeInspector: View {
         isLoading = false
     }
 
-    private func loadOverrides(for source: SourceRecord) async {
-        let records = await store.policy.nodeOverrides(sourceID: source.sourceID)
-        var map: [OverrideKey: NodeOverrideState] = [:]
-        for record in records {
-            map[OverrideKey(agent: record.agent, relativePath: record.relativePath)] = record.state
-        }
-        overrides = map
-    }
-
-    private func applyOverride(
-        source: SourceRecord,
-        relativePath: String,
-        state: NodeOverrideState
-    ) async {
-        await store.policy.setNodeOverride(
-            sourceID: source.sourceID,
-            relativePath: relativePath,
+    private func setOverride(_ decision: FileVisibilityOverrideDecision, for node: TreeNode) async {
+        guard let source, !node.relativePath.isEmpty else { return }
+        await store.setFileVisibilityOverride(
             agent: targetAgent,
-            state: state
+            sourceID: source.sourceID,
+            relativePath: node.relativePath,
+            isDirectory: node.isDirectory,
+            decision: decision
         )
-        await loadOverrides(for: source)
+        overrides = await store.fileVisibilityOverrides(agent: targetAgent)
+    }
+
+    private func clearOverride(for node: TreeNode) async {
+        guard let source, !node.relativePath.isEmpty else { return }
+        await store.clearFileVisibilityOverride(
+            agent: targetAgent,
+            sourceID: source.sourceID,
+            relativePath: node.relativePath,
+            isDirectory: node.isDirectory
+        )
+        overrides = await store.fileVisibilityOverrides(agent: targetAgent)
     }
 }
 
-/// Composite key for the overrides dictionary — (agent, relativePath) is
-/// the natural unit, matching how PolicyStore persists them.
-struct OverrideKey: Hashable {
-    let agent: TargetApp
-    let relativePath: String
-}
-
-/// One row in the file-tree. Recursive — its children build themselves.
-/// Disclosure is preserved per-node via its own @State so expansion is
-/// independent of the rest of the tree.
 private struct TreeRow: View {
     @State private var isExpanded: Bool
+
     let node: TreeNode
     let depth: Int
+    let source: SourceRecord?
     let agent: TargetApp
     let sourceInScope: Bool
-    let sourceRootPath: String
-    let overrides: [OverrideKey: NodeOverrideState]
-    let onSetOverride: (String, NodeOverrideState) -> Void
+    let resolver: FileVisibilityResolver
+    let onAllow: @Sendable (TreeNode) async -> Void
+    let onHide: @Sendable (TreeNode) async -> Void
+    let onReset: @Sendable (TreeNode) async -> Void
 
-    init(node: TreeNode,
-         depth: Int,
-         agent: TargetApp,
-         sourceInScope: Bool,
-         sourceRootPath: String,
-         overrides: [OverrideKey: NodeOverrideState],
-         onSetOverride: @escaping (String, NodeOverrideState) -> Void) {
+    init(
+        node: TreeNode,
+        depth: Int,
+        source: SourceRecord?,
+        agent: TargetApp,
+        sourceInScope: Bool,
+        resolver: FileVisibilityResolver,
+        onAllow: @escaping @Sendable (TreeNode) async -> Void,
+        onHide: @escaping @Sendable (TreeNode) async -> Void,
+        onReset: @escaping @Sendable (TreeNode) async -> Void
+    ) {
         self.node = node
         self.depth = depth
+        self.source = source
         self.agent = agent
         self.sourceInScope = sourceInScope
-        self.sourceRootPath = sourceRootPath
-        self.overrides = overrides
-        self.onSetOverride = onSetOverride
+        self.resolver = resolver
+        self.onAllow = onAllow
+        self.onHide = onHide
+        self.onReset = onReset
         _isExpanded = State(initialValue: depth < 1)
     }
 
-    /// Path relative to the source root — empty string for the root node
-    /// itself, otherwise the portion after `sourceRootPath/`. Matches
-    /// PolicyStore's normalization.
-    private var relativePath: String {
-        let root = URL(fileURLWithPath: sourceRootPath).standardizedFileURL.path
-        let here = URL(fileURLWithPath: node.path).standardizedFileURL.path
-        guard here.hasPrefix(root) else { return here }
-        var rel = String(here.dropFirst(root.count))
-        while rel.hasPrefix("/") { rel.removeFirst() }
-        return rel
+    private var visibilityState: VisibilityState {
+        resolvedVisibilityState(for: node)
     }
 
-    private var overrideState: NodeOverrideState? {
-        overrides[OverrideKey(agent: agent, relativePath: relativePath)]
-    }
-
-    private var hasOverride: Bool {
-        guard let s = overrideState else { return false }
-        return s != .inherit
-    }
-
-    /// Inherited state: source-level membership. The root node and any
-    /// node without an override resolve to this.
-    private var inheritedState: TriStateCheckbox.State {
-        sourceInScope ? .on : .off
-    }
-
-    /// Visible state: override if present, else inherited.
-    private var effectiveState: TriStateCheckbox.State {
-        switch overrideState {
-        case .include: return .on
-        case .exclude: return .off
-        case .inherit, .none: return inheritedState
+    private var checkboxState: TriStateCheckbox.State {
+        switch visibilityState.effective {
+        case .allowed:
+            return .on
+        case .hidden:
+            return .off
+        case .mixed:
+            return .mixed
         }
     }
 
-    /// Root node is read-only — its state is the source membership itself,
-    /// which is edited in the Scope columns, not here.
-    private var isRoot: Bool { relativePath.isEmpty }
+    private var canOverride: Bool {
+        !node.relativePath.isEmpty
+    }
+
+    private var hasExplicitOverride: Bool {
+        guard let source else { return false }
+        let evaluation = resolver.evaluate(
+            sourceID: source.sourceID,
+            relativePath: node.relativePath,
+            defaultVisible: sourceInScope
+        )
+        return evaluation.origin == .explicitAllow || evaluation.origin == .explicitDeny
+    }
+
+    private var agentLabel: String {
+        agent == .cowork ? "Claude" : "Codex"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -254,33 +287,28 @@ private struct TreeRow: View {
 
                 TriStateCheckbox(
                     state: Binding(
-                        get: { effectiveState },
-                        set: { newState in
-                            guard !isRoot else { return }
-                            // If the user's click matches the inherited state
-                            // while an override is in place, clear the override
-                            // so the node resumes inheriting. Otherwise write
-                            // the explicit include/exclude override.
-                            let matchesInherited = newState == inheritedState
-                            let next: NodeOverrideState
-                            if matchesInherited {
-                                next = .inherit
-                            } else {
-                                next = (newState == .on) ? .include : .exclude
+                        get: { checkboxState },
+                        set: { newValue in
+                            guard canOverride else { return }
+                            switch newValue {
+                            case .on, .mixed:
+                                Task { await onAllow(node) }
+                            case .off:
+                                Task { await onHide(node) }
                             }
-                            onSetOverride(relativePath, next)
                         }
                     ),
-                    override: hasOverride,
+                    override: hasExplicitOverride,
                     color: ManifoldPalette.agent(agent),
                     size: 14
                 )
-                .allowsHitTesting(!isRoot)
-                .opacity(isRoot ? 0.55 : 1.0)
+                .disabled(!canOverride)
 
                 if node.isDirectory {
                     Button {
-                        withAnimation(ManifoldMotion.micro) { isExpanded.toggle() }
+                        withAnimation(ManifoldMotion.micro) {
+                            isExpanded.toggle()
+                        }
                     } label: {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.caption.weight(.medium))
@@ -293,77 +321,172 @@ private struct TreeRow: View {
                 }
 
                 FileTypeIcon(filename: node.name, isFolder: node.isDirectory, size: 12)
+
                 Text(node.name)
                     .font(ManifoldType.body)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer()
-                if node.isDirectory && !node.children.isEmpty {
-                    Text("\(node.children.count)")
-                        .font(ManifoldType.tiny)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
+
+                Spacer(minLength: Spacing.s2)
+
+                VisibilityChip(state: visibilityState)
+
+                if hasExplicitOverride {
+                    Button {
+                        Task { await onReset(node) }
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .foregroundStyle(ManifoldPalette.text2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reset to inherited visibility")
                 }
             }
             .padding(.vertical, 2)
             .padding(.horizontal, Spacing.s1)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(hasExplicitOverride ? ManifoldPalette.attentionSoft : .clear)
+            )
+            .contextMenu {
+                if canOverride {
+                    Button("Allow for \(agentLabel)") {
+                        Task { await onAllow(node) }
+                    }
+                    Button("Hide for \(agentLabel)") {
+                        Task { await onHide(node) }
+                    }
+                    Button("Reset to inherited") {
+                        Task { await onReset(node) }
+                    }
+                    Divider()
+                }
+
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: node.path)])
+                }
+                Button("Copy Path") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(node.path, forType: .string)
+                }
+            }
 
             if node.isDirectory && isExpanded {
                 ForEach(node.children) { child in
                     TreeRow(
                         node: child,
                         depth: depth + 1,
+                        source: source,
                         agent: agent,
                         sourceInScope: sourceInScope,
-                        sourceRootPath: sourceRootPath,
-                        overrides: overrides,
-                        onSetOverride: onSetOverride
+                        resolver: resolver,
+                        onAllow: onAllow,
+                        onHide: onHide,
+                        onReset: onReset
                     )
                 }
             }
         }
     }
+
+    private func resolvedVisibilityState(for node: TreeNode) -> VisibilityState {
+        guard let source else {
+            return VisibilityState(effective: .hidden, origin: .defaultScope)
+        }
+
+        let evaluation = resolver.evaluate(
+            sourceID: source.sourceID,
+            relativePath: node.relativePath,
+            defaultVisible: sourceInScope
+        )
+        let ownState = visibilityState(from: evaluation)
+
+        guard node.isDirectory, !node.children.isEmpty else {
+            return ownState
+        }
+
+        let childStates = node.children.map(resolvedVisibilityState(for:))
+        let allAllowed = childStates.allSatisfy { $0.effective == .allowed }
+        let allHidden = childStates.allSatisfy { $0.effective == .hidden }
+
+        if allAllowed {
+            return VisibilityState(effective: .allowed, origin: ownState.origin)
+        }
+        if allHidden {
+            return VisibilityState(effective: .hidden, origin: ownState.origin)
+        }
+
+        let hasExplicitChild = childStates.contains { $0.origin == .explicit }
+        return VisibilityState(
+            effective: .mixed,
+            origin: ownState.origin == .explicit || hasExplicitChild ? .explicit : .defaultScope
+        )
+    }
+
+    private func visibilityState(from evaluation: FileVisibilityEvaluation) -> VisibilityState {
+        switch evaluation.origin {
+        case .explicitAllow:
+            return VisibilityState(effective: .allowed, origin: .explicit)
+        case .explicitDeny:
+            return VisibilityState(effective: .hidden, origin: .explicit)
+        case .inheritedAllow:
+            return VisibilityState(effective: .allowed, origin: .defaultScope)
+        case .inheritedHidden:
+            return VisibilityState(effective: .hidden, origin: .defaultScope)
+        }
+    }
 }
 
-/// Materialized on demand from a SourceRecord; bounded to the first two
-/// levels to stay responsive. Deeper levels load when a directory is
-/// expanded (future work — current scaffold loads 2 levels eagerly).
 private struct TreeNode: Identifiable, Sendable {
     let id: String
     let name: String
     let path: String
+    let relativePath: String
     let isDirectory: Bool
     let children: [TreeNode]
 
     static func load(from source: SourceRecord) async -> TreeNode? {
         let root = URL(fileURLWithPath: source.originalRootPath)
         return await Task.detached(priority: .userInitiated) {
-            walk(root: root, depth: 0, maxDepth: 2)
+            walk(root: root, baseRoot: root, depth: 0, maxDepth: 2)
         }.value
     }
 
-    private static func walk(root: URL, depth: Int, maxDepth: Int) -> TreeNode? {
+    private static func walk(root: URL, baseRoot: URL, depth: Int, maxDepth: Int) -> TreeNode? {
         let name = root.lastPathComponent
         let id = root.path
-        let isDir = (try? root.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        let relativePath: String
+        if root.path == baseRoot.path {
+            relativePath = ""
+        } else {
+            relativePath = String(root.path.dropFirst(baseRoot.path.count + 1))
+        }
+        let isDirectory = (try? root.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
         var children: [TreeNode] = []
 
-        if isDir && depth < maxDepth {
-            let skip: Set<String> = [".git", "node_modules", ".build", "Build",
-                                      "DerivedData", "Pods", "__pycache__", ".DS_Store"]
+        if isDirectory && depth < maxDepth {
+            let skip: Set<String> = [".git", "node_modules", ".build", "Build", "DerivedData", "Pods", "__pycache__", ".DS_Store"]
             if let urls = try? FileManager.default.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: [.isDirectoryKey],
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
             ) {
                 for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                     if skip.contains(url.lastPathComponent) { continue }
-                    if let child = walk(root: url, depth: depth + 1, maxDepth: maxDepth) {
+                    if let child = walk(root: url, baseRoot: baseRoot, depth: depth + 1, maxDepth: maxDepth) {
                         children.append(child)
                     }
                 }
             }
         }
-        return TreeNode(id: id, name: name, path: root.path,
-                        isDirectory: isDir, children: children)
+
+        return TreeNode(
+            id: id,
+            name: name,
+            path: root.path,
+            relativePath: relativePath,
+            isDirectory: isDirectory,
+            children: children
+        )
     }
 }

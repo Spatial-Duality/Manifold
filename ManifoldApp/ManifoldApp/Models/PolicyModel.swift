@@ -5,16 +5,16 @@ import Foundation
 import ManifoldKit
 import os
 
-private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "policy-model")
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "governance-model")
 
 @Observable
 @MainActor
-final class PolicyModel {
+final class GovernanceModel {
     var claudePolicy: AgentAccessPolicy?
     var codexPolicy: AgentAccessPolicy?
     var claudeEmailGovernance: AgentEmailGovernanceSummary?
     var codexEmailGovernance: AgentEmailGovernanceSummary?
-    var activeWorkBlock: WorkBlockRecord?
+    var activeSessionRecord: WorkBlockRecord?
     var claudeCoverage: AgentCoverageSnapshot?
     var codexCoverage: AgentCoverageSnapshot?
     var coverageEvents: [CoverageEvent] = []
@@ -39,7 +39,7 @@ final class PolicyModel {
             codexPolicy = state.codexPolicy
             claudeEmailGovernance = state.claudeEmailGovernance
             codexEmailGovernance = state.codexEmailGovernance
-            activeWorkBlock = state.activeWorkBlock
+            activeSessionRecord = state.activeSession
             claudeCoverage = state.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
             codexCoverage = state.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
             coverageEvents = state.coverageEvents
@@ -48,7 +48,7 @@ final class PolicyModel {
         }
         // Pull pending approvals. Failures here leave the list as-was so the
         // UI doesn't flicker on transient XPC hiccups — honest-state is
-        // preserved by the StatusBar's runtime-connection indicator.
+        // preserved by the LedgerStatusBar's runtime-connection indicator.
         do {
             pendingApprovals = try await client.listPendingApprovals()
         } catch {
@@ -68,7 +68,7 @@ final class PolicyModel {
         }
     }
 
-    func loadActiveWorkBlock() async {
+    func loadActiveSession() async {
         await loadPolicies()
     }
 
@@ -117,73 +117,6 @@ final class PolicyModel {
         }
     }
 
-    /// Persist a per-node override (include / exclude / inherit) for a
-    /// path within a source. `inherit` deletes any prior override so the
-    /// node resumes inheriting from its source-level membership.
-    func setNodeOverride(
-        sourceID: String,
-        relativePath: String,
-        agent: TargetApp,
-        state: NodeOverrideState
-    ) async {
-        guard let client else { return }
-        do {
-            try await client.setNodeOverride(
-                sourceID: sourceID,
-                relativePath: relativePath,
-                agent: agent,
-                state: state
-            )
-        } catch {
-            logger.error("Failed to set node override: \(error.localizedDescription)")
-        }
-    }
-
-    /// Fetch all persisted node overrides for a source. Returns an empty
-    /// array on failure rather than throwing, so inspectors can surface
-    /// "no overrides yet" honestly.
-    func nodeOverrides(sourceID: String) async -> [NodeOverrideRecord] {
-        guard let client else { return [] }
-        do {
-            return try await client.listNodeOverrides(sourceID: sourceID)
-        } catch {
-            logger.error("Failed to list node overrides: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func clearNodeOverrides(sourceID: String, agent: TargetApp) async {
-        guard let client else { return }
-        do {
-            try await client.clearNodeOverrides(sourceID: sourceID, agent: agent)
-        } catch {
-            logger.error("Failed to clear node overrides: \(error.localizedDescription)")
-        }
-    }
-
-    /// The summary of the most recently reversed action, or nil when the
-    /// last ⌘Z tried to undo an empty stack. Observed by UI so the status
-    /// bar can flash a one-line "Undid: …" toast. Cleared by the view
-    /// after display.
-    var lastUndoSummary: UndoActionSummary?
-
-    /// Reverse the most recent user-initiated grant/revoke/override. Runs
-    /// on the runtime — we never undo locally. Refreshes policies afterward
-    /// so the three-column Scope view reflects the new truth immediately.
-    @discardableResult
-    func undoLastAction() async -> UndoActionSummary? {
-        guard let client else { return nil }
-        do {
-            let reversed = try await client.undoLastAction()
-            lastUndoSummary = reversed
-            await loadPolicies()
-            return reversed
-        } catch {
-            logger.error("Undo failed: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async {
         guard let client else { return }
         do {
@@ -194,62 +127,68 @@ final class PolicyModel {
         }
     }
 
-    func finishWorkBlock() async {
-        guard let client, let block = activeWorkBlock else { return }
+    func finishSession() async {
+        guard let client, let block = activeSessionRecord else { return }
         do {
             try await client.markWorkBlockReviewing(id: block.id)
-            await loadActiveWorkBlock()
+            await loadActiveSession()
         } catch {
-            logger.error("Failed to finish work block: \(error.localizedDescription)")
+            logger.error("Failed to finish session: \(error.localizedDescription)")
         }
     }
 
     func cancelReview() async {
-        guard let client, let block = activeWorkBlock, block.status == .reviewing else { return }
+        guard let client, let block = activeSessionRecord, block.status == .reviewing else { return }
         do {
             try await client.cancelWorkBlockReview(id: block.id)
-            await loadActiveWorkBlock()
+            await loadActiveSession()
         } catch {
             logger.error("Failed to cancel review: \(error.localizedDescription)")
         }
     }
 
-    func completeWorkBlock() async {
-        guard let client, let block = activeWorkBlock else { return }
+    func completeSession() async {
+        guard let client, let block = activeSessionRecord else { return }
         do {
             _ = try await client.applyTrackedRun(grantID: block.grantID)
-            await loadActiveWorkBlock()
+            await loadActiveSession()
         } catch {
-            logger.error("Failed to complete work block: \(error.localizedDescription)")
+            logger.error("Failed to complete session: \(error.localizedDescription)")
         }
     }
 
-    func pauseWorkBlock() async {
-        guard let client, let block = activeWorkBlock else { return }
+    func pauseSession() async {
+        guard let client, let block = activeSessionRecord else { return }
         do {
             if block.isPaused {
                 try await client.resumeTrackedRun(id: block.id)
             } else {
                 try await client.pauseTrackedRun(id: block.id)
             }
-            await loadActiveWorkBlock()
+            await loadActiveSession()
         } catch {
-            logger.error("Failed to pause/resume work block: \(error.localizedDescription)")
+            logger.error("Failed to pause/resume session: \(error.localizedDescription)")
         }
     }
 
-    func stopWorkBlock() async {
-        guard let client, let block = activeWorkBlock else { return }
+    func stopSession() async {
+        guard let client, let block = activeSessionRecord else { return }
         do {
             try await client.discardTrackedRun(id: block.id, grantID: block.grantID)
-            await loadActiveWorkBlock()
+            await loadActiveSession()
         } catch {
-            logger.error("Failed to stop work block: \(error.localizedDescription)")
+            logger.error("Failed to stop session: \(error.localizedDescription)")
         }
     }
 
-    func policy(for agent: TargetApp) -> AgentAccessPolicy? {
+    func governance(for agent: TargetApp) -> AgentAccessPolicy? {
         agent == .codex ? codexPolicy : claudePolicy
+    }
+
+    /// Convenience alias — reads better at call sites like
+    /// `store.governance.policy(for: agent)?.allowedSourceIDs`.
+    func policy(for agent: TargetApp) -> AgentAccessPolicy? {
+        governance(for: agent)
     }
 
     func coverage(for agent: TargetApp) -> AgentCoverageSnapshot? {

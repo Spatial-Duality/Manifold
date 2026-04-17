@@ -224,6 +224,9 @@ public struct PromoteEngine: Sendable {
         for path in uniquePaths {
             let fileURL = originalURL.appendingPathComponent(path)
             guard fm.fileExists(atPath: fileURL.path) else { continue }
+            if ScopedFileAccess.isBlockedGovernedEntry(at: fileURL) {
+                continue
+            }
             let data = try Data(contentsOf: fileURL)
             hashes[path] = SHA256.hash(data: data).hexString
         }
@@ -234,6 +237,12 @@ public struct PromoteEngine: Sendable {
     /// Copy a single file, creating parent directories as needed.
     private static func copyFile(from source: URL, to destination: URL) throws {
         let fm = FileManager.default
+        guard !ScopedFileAccess.isBlockedGovernedEntry(at: source) else {
+            throw ManifoldError.promotion("Refused to promote unsafe symlink or hard-linked file: \(source.path)")
+        }
+        if fm.fileExists(atPath: destination.path), ScopedFileAccess.isBlockedGovernedEntry(at: destination) {
+            throw ManifoldError.promotion("Refused to overwrite unsafe original file: \(destination.path)")
+        }
         let parentDir = destination.deletingLastPathComponent()
         if !fm.fileExists(atPath: parentDir.path) {
             try fm.createDirectory(at: parentDir, withIntermediateDirectories: true)

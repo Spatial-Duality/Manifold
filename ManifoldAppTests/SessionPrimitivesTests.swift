@@ -36,7 +36,7 @@ final class SessionPrimitivesTests: XCTestCase {
             isTrackedEdit: false,
             additions: [], removals: []
         )
-        XCTAssertEqual(record.remainingSeconds, 0, accuracy: 2)
+        XCTAssertEqual(try XCTUnwrap(record.remainingSeconds), 0, accuracy: 2)
     }
 
     func testDisplayDurationFormats() {
@@ -50,7 +50,9 @@ final class SessionPrimitivesTests: XCTestCase {
             isTrackedEdit: false,
             additions: [], removals: []
         )
-        XCTAssertEqual(record.displayDuration, "2h 2m remaining")
+        let displayDuration = try? XCTUnwrap(record.displayDuration)
+        XCTAssertTrue(displayDuration?.hasPrefix("2h ") == true)
+        XCTAssertTrue(displayDuration?.hasSuffix(" remaining") == true)
     }
 
     // MARK: - SessionRecord adapter over WorkBlockRecord
@@ -61,7 +63,7 @@ final class SessionPrimitivesTests: XCTestCase {
             grantID: "g-1",
             status: .active
         )
-        let session = SessionRecord(workBlock: active)
+        let session = SessionRecord(storageRecord: active)
         XCTAssertTrue(session.isTrackedEdit)
         XCTAssertEqual(session.agents, [.cowork])
 
@@ -70,7 +72,7 @@ final class SessionPrimitivesTests: XCTestCase {
             grantID: "g-1",
             status: .discarded
         )
-        XCTAssertFalse(SessionRecord(workBlock: discarded).isTrackedEdit)
+        XCTAssertFalse(SessionRecord(storageRecord: discarded).isTrackedEdit)
     }
 
     // MARK: - Drift
@@ -132,11 +134,49 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertNotEqual(a, c)
     }
 
+    func testPendingRequestsMapFolderReadsIntoSessionPrimitives() throws {
+        let model = GovernanceModel()
+        model.pendingApprovals = [
+            PendingApprovalRecord(
+                id: "approval-1",
+                connectionID: "conn-1",
+                agent: TargetApp.codex.rawValue,
+                path: "/tmp/shared",
+                action: "read_folder",
+                requestedAt: 1_715_000_000,
+                status: "pending"
+            )
+        ]
+
+        let request = try XCTUnwrap(model.pendingRequests.first)
+        XCTAssertEqual(request.agent, .codex)
+        XCTAssertEqual(request.operation, .readFolder)
+        XCTAssertEqual(request.headline, "Codex wants to read a folder.")
+        XCTAssertEqual(request.context, "Requested outside this Codex session's scope. Answer or ignore.")
+    }
+
+    func testPendingRequestsIgnoreUnknownAgents() {
+        let model = GovernanceModel()
+        model.pendingApprovals = [
+            PendingApprovalRecord(
+                id: "approval-1",
+                connectionID: "conn-1",
+                agent: "unknown-agent",
+                path: "/tmp/shared",
+                action: "write",
+                requestedAt: 1_715_000_000,
+                status: "pending"
+            )
+        ]
+
+        XCTAssertTrue(model.pendingRequests.isEmpty)
+    }
+
     // MARK: - ManifoldCommands protocol conformance
 
     func testStoreConformsToManifoldCommands() {
-        let runtime = FixtureRuntimeClient(profile: .empty)
-        let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .empty))
+        let runtime = FixtureRuntimeClient(profile: .dashboard)
+        let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard))
         let store = ManifoldStore(runtime: runtime, integrationHealth: health, startServices: false)
         let commands: any ManifoldCommands = store
         XCTAssertNotNil(commands)

@@ -118,9 +118,9 @@ final class EmailRulesModel {
         await persist(ruleSet)
     }
 
-    func updateDefaultPolicy(_ policy: AgentDefaultPolicy) async {
+    func updateDefaultPolicy(_ governance: AgentDefaultPolicy) async {
         guard var ruleSet else { return }
-        ruleSet.defaultPolicy = policy.runtimeValue
+        ruleSet.defaultPolicy = governance.runtimeValue
         await persist(ruleSet)
     }
 

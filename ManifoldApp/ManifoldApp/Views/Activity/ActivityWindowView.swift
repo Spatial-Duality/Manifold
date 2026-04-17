@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// ActivityWindowView — the 3-pane evidence ledger.
+// ActivityView — the 3-pane evidence ledger.
 //
 // Per design/html/activity.html:
 //   [ SessionRail | EventTable | EvidenceInspector ]
@@ -14,18 +14,35 @@
 import SwiftUI
 import ManifoldKit
 
-struct ActivityWindowView: View {
+struct ActivityView: View {
     @Environment(ManifoldStore.self) private var store
-    @State private var selectedSession: Session? = nil
     @State private var selectedEvent: AuditEntry.ID? = nil
-    @State private var filter: EventTable.Filter = .all
-    @State private var showNewRuleSheet = false
+    @State private var selectedFilter: EventTable.Filter = .all
+    @State private var filterText = ""
+    @State private var displayedEntries: [AuditEntry] = []
+    @FocusState private var isSearchFocused: Bool
+
+    private var selectedSession: Session? {
+        store.selectedSession
+    }
+
+    private var selectedSessionBinding: Binding<Session?> {
+        Binding(
+            get: { store.selectedSession },
+            set: { newValue in
+                store.selectedSession = newValue
+                Task {
+                    await store.activity.selectSession(newValue)
+                }
+            }
+        )
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            SessionRail(
-                sessions: store.history.sessions,
-                selection: $selectedSession
+            ActivitySessionRail(
+                sessions: store.activity.sessions,
+                selection: selectedSessionBinding
             )
             .frame(width: 240)
             .background(ManifoldPalette.surface2)
@@ -33,17 +50,24 @@ struct ActivityWindowView: View {
             Divider()
 
             VStack(spacing: 0) {
-                EventTableToolbar(filter: $filter)
+                ActivityFilterBar(filter: $selectedFilter, searchText: $filterText, isSearchFocused: $isSearchFocused)
+                if let selectedSession {
+                    Divider()
+                    SessionSummaryHeader(session: selectedSession, entries: displayedEntries)
+                }
                 Divider()
                 EventTable(
-                    entries: store.activityEntries,
-                    filter: filter,
+                    entries: displayedEntries,
+                    filter: selectedFilter,
                     selection: $selectedEvent,
-                    onRevokeSource: { entry in
-                        Task { await revokeSource(for: entry) }
+                    onFilterToAgent: { agent in
+                        filterText = agent
+                        selectedFilter = .all
                     },
-                    onAddDenyRule: { _ in
-                        showNewRuleSheet = true
+                    onFocusSession: { sessionID in
+                        guard let sessionID,
+                              let session = store.activity.sessions.first(where: { $0.id == sessionID }) else { return }
+                        selectedSessionBinding.wrappedValue = session
                     }
                 )
             }
@@ -54,67 +78,135 @@ struct ActivityWindowView: View {
 
             EvidenceInspector(
                 selection: selectedEvent,
-                entries: store.activityEntries,
+                entries: displayedEntries,
                 store: store
             )
             .frame(width: 340)
             .background(ManifoldPalette.surface2)
         }
         .task {
-            await store.history.loadActivity()
-            await store.history.loadSessions()
+            await store.activity.loadActivity()
+            await store.activity.loadSessions()
+            recomputeVisibleEntries()
         }
-        .sheet(isPresented: $showNewRuleSheet) {
-            NewRuleSheet(domain: .files) { rule in
-                store.rules.add(rule)
-                showNewRuleSheet = false
-            }
+        .onChange(of: selectedSession?.id) {
+            selectedEvent = nil
+            recomputeVisibleEntries()
         }
+        .onChange(of: filterText) {
+            recomputeVisibleEntries()
+        }
+        .onChange(of: store.activity.activityRevision) {
+            recomputeVisibleEntries()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
+            isSearchFocused = true
+        }
+        .accessibilityIdentifier("ledger.surface.activity")
     }
 
-    /// Find the source that contains `entry.filePath` (by root-path prefix)
-    /// and revoke it from whichever agent(s) currently see it. Honest
-    /// no-op when no match — the menu item only appears when the entry
-    /// carries a path, but the source may have been removed since.
-    private func revokeSource(for entry: AuditEntry) async {
-        guard let path = entry.filePath, !path.isEmpty else { return }
-        let expanded = (path as NSString).expandingTildeInPath
-        guard let source = store.sources.first(where: { src in
-            let root = (src.originalRootPath as NSString).expandingTildeInPath
-            return expanded.hasPrefix(root)
-        }) else { return }
-
-        let claudeHas = store.policy.claudePolicy?.allowedSourceIDs.contains(source.sourceID) == true
-        let codexHas = store.policy.codexPolicy?.allowedSourceIDs.contains(source.sourceID) == true
-
-        if claudeHas {
-            await store.policy.removeSource(source.sourceID, from: .cowork)
+    private func recomputeVisibleEntries() {
+        let scopedEntries = if let selectedSession {
+            store.activityEntries.filter { $0.sessionID == selectedSession.id || $0.grantID == selectedSession.id }
+        } else {
+            store.activityEntries
         }
-        if codexHas {
-            await store.policy.removeSource(source.sourceID, from: .codex)
+        let trimmedQuery = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            displayedEntries = scopedEntries
+            return
+        }
+        displayedEntries = scopedEntries.filter { entry in
+            [entry.action, entry.agent ?? "", entry.filePath ?? "", entry.metadata ?? ""]
+                .joined(separator: "\n")
+                .localizedCaseInsensitiveContains(trimmedQuery)
         }
     }
 }
 
-/// Native segmented filter above the event table. Replaces the previous
-/// custom capsule pills per APPLE-DESIGN-EXCELLENCE-GUIDE §3.
-private struct EventTableToolbar: View {
+/// Filter chips above the event table.
+private struct ActivityFilterBar: View {
     @Binding var filter: EventTable.Filter
+    @Binding var searchText: String
+    @FocusState.Binding var isSearchFocused: Bool
 
     var body: some View {
-        HStack {
-            Picker("Filter", selection: $filter) {
-                ForEach(EventTable.Filter.allCases, id: \.self) { option in
-                    Text(option.label).tag(option)
+        HStack(spacing: Spacing.s2) {
+            ForEach(EventTable.Filter.allCases, id: \.self) { option in
+                Button(option.label) {
+                    filter = option
                 }
+                .buttonStyle(.plain)
+                .font(ManifoldType.captionMedium)
+                .padding(.horizontal, Spacing.s2)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(option == filter ? ManifoldPalette.selectionSoft : Color.clear)
+                )
+                .foregroundStyle(option == filter ? ManifoldPalette.selection : ManifoldPalette.text2)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(
+                            option == filter ? ManifoldPalette.selection.opacity(0.35) : ManifoldPalette.border,
+                            lineWidth: 0.5
+                        )
+                )
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
             Spacer()
+            TextField("Filter activity", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 240)
+                .focused($isSearchFocused)
         }
-        .padding(.horizontal, Spacing.s4)
+        .padding(.horizontal, Spacing.s3)
         .padding(.vertical, Spacing.s2)
-        .background(.regularMaterial)
+    }
+}
+
+private struct SessionSummaryHeader: View {
+    let session: Session
+    let entries: [AuditEntry]
+
+    private var deniedCount: Int {
+        entries.filter { $0.action.contains("deny") || $0.action.contains("denied") }.count
+    }
+
+    private var restoredCount: Int {
+        entries.filter { $0.action == "restore" || $0.action.contains("manifold-restore") }.count
+    }
+
+    var body: some View {
+        HStack(spacing: Spacing.s4) {
+            SessionSummaryMetric(label: "Reads", value: "\(session.readCount)")
+            SessionSummaryMetric(label: "Writes", value: "\(session.writeCount)")
+            SessionSummaryMetric(label: "Searches", value: "\(session.searchCount)")
+            SessionSummaryMetric(label: "Denied", value: "\(deniedCount)")
+            SessionSummaryMetric(label: "Restored", value: "\(restoredCount)")
+            Spacer()
+            Text(session.agent.capitalized)
+                .font(ManifoldType.captionMedium)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, Spacing.s3)
+        .padding(.vertical, Spacing.s2)
+        .background(ManifoldPalette.surface3.opacity(0.75))
+    }
+}
+
+private struct SessionSummaryMetric: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label.uppercased())
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.tertiary)
+                .tracking(0.4)
+            Text(value)
+                .font(ManifoldType.numericCaption.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
     }
 }

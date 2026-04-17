@@ -9,6 +9,10 @@ private let approvalQueueLogger = Logger(subsystem: "com.spatialduality.manifold
 
 public actor ApprovalQueue {
     public struct PendingRequest: Sendable {
+        public enum Kind: String, Sendable {
+            case standingWrite = "standing_write"
+        }
+
         public enum Status: String, Sendable {
             case pending
             case approved
@@ -21,6 +25,10 @@ public actor ApprovalQueue {
         public let agent: String
         public let path: String
         public let action: String
+        public let kind: Kind
+        public let sourceID: String?
+        public let mountName: String?
+        public let relativePath: String?
         public let requestedAt: Double
         public let status: Status
 
@@ -30,6 +38,10 @@ public actor ApprovalQueue {
             agent: String,
             path: String,
             action: String,
+            kind: Kind,
+            sourceID: String?,
+            mountName: String?,
+            relativePath: String?,
             requestedAt: Double,
             status: Status
         ) {
@@ -38,6 +50,10 @@ public actor ApprovalQueue {
             self.agent = agent
             self.path = path
             self.action = action
+            self.kind = kind
+            self.sourceID = sourceID
+            self.mountName = mountName
+            self.relativePath = relativePath
             self.requestedAt = requestedAt
             self.status = status
         }
@@ -50,21 +66,35 @@ public actor ApprovalQueue {
     }
 
     @discardableResult
-    public func submit(connectionID: String, agent: String, path: String, action: String) throws -> PendingRequest {
+    public func submit(
+        connectionID: String,
+        agent: String,
+        path: String,
+        action: String,
+        kind: PendingRequest.Kind = .standingWrite,
+        sourceID: String? = nil,
+        mountName: String? = nil,
+        relativePath: String? = nil
+    ) throws -> PendingRequest {
         let request = PendingRequest(
             id: UUID().uuidString,
             connectionID: connectionID,
             agent: agent,
             path: path,
             action: action,
+            kind: kind,
+            sourceID: sourceID,
+            mountName: mountName,
+            relativePath: relativePath,
             requestedAt: Date().timeIntervalSince1970,
             status: .pending
         )
         try db.execute(
             """
             INSERT INTO approval_requests (
-                id, connection_id, agent, path, action, requested_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, connection_id, agent, path, action, request_kind,
+                source_id, mount_name, relative_path, requested_at, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             params: [
                 request.id,
@@ -72,6 +102,10 @@ public actor ApprovalQueue {
                 request.agent,
                 request.path,
                 request.action,
+                request.kind.rawValue,
+                request.sourceID,
+                request.mountName,
+                request.relativePath,
                 String(request.requestedAt),
                 request.status.rawValue,
             ]
@@ -97,6 +131,18 @@ public actor ApprovalQueue {
             """
         )
         return rows.compactMap(Self.request(from:))
+    }
+
+    public func request(id: String) throws -> PendingRequest? {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM approval_requests
+            WHERE id = ?
+            LIMIT 1
+            """,
+            params: [id]
+        )
+        return rows.first.flatMap(Self.request(from:))
     }
 
     @discardableResult
@@ -139,6 +185,7 @@ public actor ApprovalQueue {
               let agent = row["agent"],
               let path = row["path"],
               let action = row["action"],
+              let kind = PendingRequest.Kind(rawValue: row["request_kind"] ?? PendingRequest.Kind.standingWrite.rawValue),
               let requestedAtRaw = row["requested_at"],
               let requestedAt = Double(requestedAtRaw),
               let statusRaw = row["status"],
@@ -152,6 +199,10 @@ public actor ApprovalQueue {
             agent: agent,
             path: path,
             action: action,
+            kind: kind,
+            sourceID: row["source_id"],
+            mountName: row["mount_name"],
+            relativePath: row["relative_path"],
             requestedAt: requestedAt,
             status: status
         )

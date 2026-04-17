@@ -126,4 +126,22 @@ struct ContentStoreTests {
         let exists = await store.exists(hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         #expect(!exists)
     }
+
+    @Test("Blob storage uses owner-only permissions")
+    func blobStorageUsesOwnerOnlyPermissions() async throws {
+        let (store, tempDir) = try makeTempStore()
+        defer { cleanup(tempDir) }
+
+        let data = Data("private blob".utf8)
+        let hash = try await store.ingest(data: data)
+        let shard = String(hash.prefix(2))
+        let blobURL = tempDir.appendingPathComponent("blobs/\(shard)/\(hash)")
+        let rawBlob = try Data(contentsOf: blobURL)
+
+        #expect(try LocalFileProtection.posixPermissions(at: tempDir.appendingPathComponent("blobs")) == LocalFileProtection.directoryMode)
+        #expect(try LocalFileProtection.posixPermissions(at: blobURL.deletingLastPathComponent()) == LocalFileProtection.directoryMode)
+        #expect(try LocalFileProtection.posixPermissions(at: blobURL) == LocalFileProtection.fileMode)
+        #expect(rawBlob != data)
+        #expect(ProtectedStorageCrypto.isEncryptedPayload(rawBlob))
+    }
 }

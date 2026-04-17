@@ -1,57 +1,26 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// PolicyModel+Session — Stage-6 session primitives exposed on PolicyModel.
+// GovernanceModel+Session — Stage-6 session primitives exposed on GovernanceModel.
 //
-// Additive over the existing PolicyModel. Internally `activeWorkBlock`
-// remains the runtime-facing storage type; `activeSession` is the new
-// UI vocabulary, computed lazily when called. During Phase 1 the two
-// live side-by-side; in Phase 9 the legacy name is removed.
+// Additive over the existing GovernanceModel. Internally the runtime still
+// stores a `WorkBlockRecord`, but the app-facing vocabulary is `Session`.
 
 import Foundation
 import ManifoldKit
 
-extension PolicyModel {
+extension GovernanceModel {
 
-    /// The live session (if any), derived from the active tracked work block.
+    /// The live session (if any), derived from the active tracked session record.
     /// Returns nil when no session is running.
     var activeSession: SessionRecord? {
-        guard let block = activeWorkBlock else { return nil }
+        guard let block = activeSessionRecord else { return nil }
         return SessionRecord(
-            workBlock: block,
+            storageRecord: block,
             expiresAt: nil,
             additions: [],
             removals: []
         )
-    }
-
-    /// Source IDs that the live session adds beyond the agent's default
-    /// policy (the session can see them, but they aren't in the default
-    /// scope). Empty when no session is live or all scope is already
-    /// default. Derived from the active workBlock — honest signal.
-    var sessionAdditionIDs: Set<String> {
-        guard let block = activeWorkBlock else { return [] }
-        let defaultIDs: Set<String> = {
-            switch block.agent {
-            case .cowork: return Set(claudePolicy?.allowedSourceIDs ?? [])
-            case .codex:  return Set(codexPolicy?.allowedSourceIDs ?? [])
-            }
-        }()
-        return Set(block.sourceIDs).subtracting(defaultIDs)
-    }
-
-    /// Source IDs in the agent's default scope that the live session has
-    /// removed. Empty when no session is live. Also derived from the
-    /// active workBlock.
-    var sessionRemovalIDs: Set<String> {
-        guard let block = activeWorkBlock else { return [] }
-        let defaultIDs: Set<String> = {
-            switch block.agent {
-            case .cowork: return Set(claudePolicy?.allowedSourceIDs ?? [])
-            case .codex:  return Set(codexPolicy?.allowedSourceIDs ?? [])
-            }
-        }()
-        return defaultIDs.subtracting(Set(block.sourceIDs))
     }
 
     /// Pending approval requests for the queue. Derived from the real
@@ -59,13 +28,15 @@ extension PolicyModel {
     var pendingRequests: [ApprovalRequest] {
         pendingApprovals.compactMap { record in
             guard let agent = TargetApp(rawValue: record.agent) else { return nil }
+            let kind = ApprovalRequest.Kind(rawValue: record.kind) ?? .standingWrite
             return ApprovalRequest(
                 id: record.id,
+                kind: kind,
                 agent: agent,
                 operation: Self.mapOperation(record.action),
                 target: record.path,
-                headline: Self.headline(for: agent, action: record.action, target: record.path),
-                context: Self.context(for: agent, action: record.action),
+                headline: Self.headline(for: agent, record: record),
+                context: Self.context(for: agent, record: record),
                 createdAt: Date(timeIntervalSince1970: record.requestedAt)
             )
         }
@@ -85,19 +56,33 @@ extension PolicyModel {
         }
     }
 
-    private static func headline(for agent: TargetApp, action: String, target: String) -> String {
+    private static func headline(for agent: TargetApp, record: PendingApprovalRecord) -> String {
         let name = agent == .codex ? "Codex" : "Claude"
-        switch action {
+        switch record.kind {
+        case "standing_write":
+            return "\(name) wants reversible write access."
+        default:
+            break
+        }
+
+        switch record.action {
         case "write":  return "\(name) wants to write a file."
         case "list":   return "\(name) wants to list a directory."
         case "search": return "\(name) wants to search file contents."
         case "mail":   return "\(name) wants to read mail."
+        case "read_folder": return "\(name) wants to read a folder."
         default:       return "\(name) wants to read a file."
         }
     }
 
-    private static func context(for agent: TargetApp, action: String) -> String {
-        "Requested outside this \(agent == .codex ? "Codex" : "Claude") session's scope. Answer or ignore."
+    private static func context(for agent: TargetApp, record: PendingApprovalRecord) -> String {
+        switch record.kind {
+        case "standing_write":
+            let mountLabel = record.mountName ?? "shared folder"
+            return "Reads are ambient here. Once allows one reversible write to this file. Add to default allows reversible writes anywhere in \(mountLabel)."
+        default:
+            return "Requested outside this \(agent == .codex ? "Codex" : "Claude") session's scope. Answer or ignore."
+        }
     }
 
     /// Recent sessions, most recent first. Empty during Phase 1 — wired

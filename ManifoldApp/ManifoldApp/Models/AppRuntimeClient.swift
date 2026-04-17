@@ -14,7 +14,7 @@ struct DashboardState: Codable, Sendable {
     let codexPolicy: AgentAccessPolicy
     let claudeEmailGovernance: AgentEmailGovernanceSummary
     let codexEmailGovernance: AgentEmailGovernanceSummary
-    let activeWorkBlock: WorkBlockRecord?
+    let activeSession: WorkBlockRecord?
     let pendingApprovalCount: Int
     let agentCoverages: [AgentCoverageSnapshot]
     let coverageEvents: [CoverageEvent]
@@ -28,6 +28,7 @@ struct DashboardState: Codable, Sendable {
         case codexPolicy
         case claudeEmailGovernance
         case codexEmailGovernance
+        case activeSession
         case activeWorkBlock
         case pendingApprovalCount
         case agentCoverages
@@ -43,7 +44,7 @@ struct DashboardState: Codable, Sendable {
         codexPolicy: AgentAccessPolicy,
         claudeEmailGovernance: AgentEmailGovernanceSummary,
         codexEmailGovernance: AgentEmailGovernanceSummary,
-        activeWorkBlock: WorkBlockRecord?,
+        activeSession: WorkBlockRecord?,
         pendingApprovalCount: Int,
         agentCoverages: [AgentCoverageSnapshot],
         coverageEvents: [CoverageEvent]
@@ -56,7 +57,7 @@ struct DashboardState: Codable, Sendable {
         self.codexPolicy = codexPolicy
         self.claudeEmailGovernance = claudeEmailGovernance
         self.codexEmailGovernance = codexEmailGovernance
-        self.activeWorkBlock = activeWorkBlock
+        self.activeSession = activeSession
         self.pendingApprovalCount = pendingApprovalCount
         self.agentCoverages = agentCoverages
         self.coverageEvents = coverageEvents
@@ -80,21 +81,41 @@ struct DashboardState: Codable, Sendable {
         self.codexEmailGovernance =
             try container.decodeIfPresent(AgentEmailGovernanceSummary.self, forKey: .codexEmailGovernance)
             ?? Self.legacyGovernanceSummary(for: codexPolicy)
-        self.activeWorkBlock = try container.decodeIfPresent(WorkBlockRecord.self, forKey: .activeWorkBlock)
+        if let activeSession = try container.decodeIfPresent(WorkBlockRecord.self, forKey: .activeSession) {
+            self.activeSession = activeSession
+        } else {
+            self.activeSession = try container.decodeIfPresent(WorkBlockRecord.self, forKey: .activeWorkBlock)
+        }
         self.pendingApprovalCount = try container.decodeIfPresent(Int.self, forKey: .pendingApprovalCount) ?? 0
         self.agentCoverages = try container.decodeIfPresent([AgentCoverageSnapshot].self, forKey: .agentCoverages) ?? []
         self.coverageEvents = try container.decodeIfPresent([CoverageEvent].self, forKey: .coverageEvents) ?? []
     }
 
-    private static func legacyGovernanceSummary(for policy: AgentAccessPolicy) -> AgentEmailGovernanceSummary {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(runtimeConnected, forKey: .runtimeConnected)
+        try container.encode(activeBridgeCount, forKey: .activeBridgeCount)
+        try container.encode(connectedAgents, forKey: .connectedAgents)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(claudePolicy, forKey: .claudePolicy)
+        try container.encode(codexPolicy, forKey: .codexPolicy)
+        try container.encode(claudeEmailGovernance, forKey: .claudeEmailGovernance)
+        try container.encode(codexEmailGovernance, forKey: .codexEmailGovernance)
+        try container.encodeIfPresent(activeSession, forKey: .activeSession)
+        try container.encode(pendingApprovalCount, forKey: .pendingApprovalCount)
+        try container.encode(agentCoverages, forKey: .agentCoverages)
+        try container.encode(coverageEvents, forKey: .coverageEvents)
+    }
+
+    private static func legacyGovernanceSummary(for governance: AgentAccessPolicy) -> AgentEmailGovernanceSummary {
         AgentEmailGovernanceSummary(
-            agent: policy.agent,
+            agent: governance.agent,
             enabledShieldCount: 0,
-            domainRuleCount: policy.allowedEmailDomains.count,
+            domainRuleCount: governance.allowedEmailDomains.count,
             contactRuleCount: 0,
             keywordRuleCount: 0,
-            defaultPolicy: policy.defaultEmailPolicy,
-            emailSensitivity: policy.emailSensitivity
+            defaultPolicy: governance.defaultEmailPolicy,
+            emailSensitivity: governance.emailSensitivity
         )
     }
 }
@@ -127,6 +148,11 @@ struct ApplyTrackedRunResult: Codable, Sendable {
 struct RevertEventResult: Codable, Sendable {
     let status: String
     let message: String?
+}
+
+extension RestoreSnapshotResult {
+    var isSuccess: Bool { status == "success" }
+    var isConflict: Bool { status == "conflict" }
 }
 
 struct EmailBackupInfo: Codable, Sendable {
@@ -163,14 +189,6 @@ protocol RuntimeClientProtocol: Sendable {
     func resumeAgent(_ agent: TargetApp) async throws
     func addSource(_ sourceID: String, to agent: TargetApp) async throws
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws
-    func setNodeOverride(
-        sourceID: String,
-        relativePath: String,
-        agent: TargetApp,
-        state: NodeOverrideState
-    ) async throws
-    func listNodeOverrides(sourceID: String) async throws -> [NodeOverrideRecord]
-    func clearNodeOverrides(sourceID: String, agent: TargetApp) async throws
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws
@@ -190,7 +208,7 @@ protocol RuntimeClientProtocol: Sendable {
         noteCaptureMode: SessionNoteCaptureMode,
         emailSensitivity: String?
     ) async throws -> ActiveGrantState
-    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult
     func markWorkBlockReviewing(id: String) async throws
     func cancelWorkBlockReview(id: String) async throws
     func pauseTrackedRun(id: String) async throws
@@ -253,32 +271,44 @@ protocol RuntimeClientProtocol: Sendable {
     func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws
     func deleteSmartMailbox(mailboxID: String) async throws
     func emailBackupInfo() async throws -> EmailBackupInfo
+    func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord]
+    func setFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool,
+        decision: FileVisibilityOverrideDecision
+    ) async throws
+    func clearFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool
+    ) async throws
 
     // MARK: - Approval queue (Phase-5 wiring)
 
     /// Pending approval requests from the runtime's ApprovalQueue.
     func listPendingApprovals() async throws -> [PendingApprovalRecord]
-    /// Resolve a pending request. Accepted values for `answer`:
-    /// "notThisTime" / "once" / "session" / "default".
+    /// Resolve a pending request. Accepted values depend on the runtime request kind.
     func answerApproval(id: String, answer: String) async throws
 
-    // MARK: - Undo
+    // MARK: - Unified rules (files / emails / agents)
 
-    /// Ask the runtime to reverse the most recent user-initiated action
-    /// (grant/revoke/override). Returns the reversed action's summary, or
-    /// nil when the history stack is empty. The runtime is authoritative
-    /// — the app never attempts an undo locally.
-    func undoLastAction() async throws -> UndoActionSummary?
-}
-
-/// Minimal app-side reflection of a reversed action. Only the fields the
-/// UI needs to surface a toast ("Undid: shared MyDocs with Claude"). Kept
-/// separate from the runtime's ActionRecord to avoid exposing inverse
-/// JSON payloads across the XPC boundary.
-public struct UndoActionSummary: Codable, Sendable, Hashable {
-    public let actionID: String
-    public let kind: String
-    public let summary: String
+    /// Returns all rules, optionally filtered by scope.
+    func listRules(scope: RuleScope?) async throws -> [RuleRecord]
+    /// Inserts or updates a rule.
+    func upsertRule(_ rule: RuleRecord) async throws
+    /// Deletes a user-authored rule. Seeded rules throw.
+    func deleteRule(id: String) async throws
+    /// Toggles enabled state for a rule.
+    func setRuleEnabled(id: String, enabled: Bool) async throws
+    /// Replaces the ordering of rules within a scope.
+    func reorderRules(scope: RuleScope, ids: [String]) async throws
+    /// Re-applies the seeded catalog (idempotent). Used by Settings > Rules > Reset seeded rules.
+    func resetSeededRules() async throws
+    /// Live preview — "how many files/emails would match this rule right now?"
+    func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview
 }
 
 /// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.
@@ -288,6 +318,10 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
     public let agent: String
     public let path: String
     public let action: String
+    public let kind: String
+    public let sourceID: String?
+    public let mountName: String?
+    public let relativePath: String?
     public let requestedAt: Double
     public let status: String
 
@@ -297,6 +331,10 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
         agent: String,
         path: String,
         action: String,
+        kind: String = "standing_write",
+        sourceID: String? = nil,
+        mountName: String? = nil,
+        relativePath: String? = nil,
         requestedAt: Double,
         status: String
     ) {
@@ -305,6 +343,10 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
         self.agent = agent
         self.path = path
         self.action = action
+        self.kind = kind
+        self.sourceID = sourceID
+        self.mountName = mountName
+        self.relativePath = relativePath
         self.requestedAt = requestedAt
         self.status = status
     }
@@ -323,9 +365,6 @@ extension RuntimeClientProtocol {
     func resumeAgent(_ agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("resumeAgent") }
     func addSource(_ sourceID: String, to agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("addSource(_:to:)") }
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("removeSource(_:from:)") }
-    func setNodeOverride(sourceID: String, relativePath: String, agent: TargetApp, state: NodeOverrideState) async throws { throw RuntimeClientStubError.unimplemented("setNodeOverride") }
-    func listNodeOverrides(sourceID: String) async throws -> [NodeOverrideRecord] { [] }
-    func clearNodeOverrides(sourceID: String, agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("clearNodeOverrides") }
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("updateAccessRecordingLevel") }
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet { throw RuntimeClientStubError.unimplemented("getEmailRuleSet") }
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws { throw RuntimeClientStubError.unimplemented("updateEmailRuleSet") }
@@ -333,7 +372,7 @@ extension RuntimeClientProtocol {
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("activeGrantState") }
     func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview { throw RuntimeClientStubError.unimplemented("sessionPreview") }
     func startTrackedRun(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("startTrackedRun") }
-    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool { throw RuntimeClientStubError.unimplemented("restoreSnapshot") }
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult { throw RuntimeClientStubError.unimplemented("restoreSnapshot") }
     func markWorkBlockReviewing(id: String) async throws { throw RuntimeClientStubError.unimplemented("markWorkBlockReviewing") }
     func cancelWorkBlockReview(id: String) async throws { throw RuntimeClientStubError.unimplemented("cancelWorkBlockReview") }
     func pauseTrackedRun(id: String) async throws { throw RuntimeClientStubError.unimplemented("pauseTrackedRun") }
@@ -347,7 +386,6 @@ extension RuntimeClientProtocol {
     func recentSessions(limit: Int) async throws -> [Session] { [] }
     func listPendingApprovals() async throws -> [PendingApprovalRecord] { [] }
     func answerApproval(id: String, answer: String) async throws {}
-    func undoLastAction() async throws -> UndoActionSummary? { nil }
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { [] }
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult { throw RuntimeClientStubError.unimplemented("revertSessionEvent") }
     func trackedFiles() async throws -> [String] { [] }
@@ -386,6 +424,20 @@ extension RuntimeClientProtocol {
     func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws { throw RuntimeClientStubError.unimplemented("updateSmartMailbox") }
     func deleteSmartMailbox(mailboxID: String) async throws { throw RuntimeClientStubError.unimplemented("deleteSmartMailbox") }
     func emailBackupInfo() async throws -> EmailBackupInfo { EmailBackupInfo(path: "", diskUsage: 0) }
+    func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] { [] }
+    func setFileVisibilityOverride(agent: TargetApp, sourceID: String, relativePath: String, isDirectory: Bool, decision: FileVisibilityOverrideDecision) async throws {}
+    func clearFileVisibilityOverride(agent: TargetApp, sourceID: String, relativePath: String, isDirectory: Bool) async throws {}
+
+    // Rules — default stubs return empty / no-op so optional profiles don't need to implement them.
+    func listRules(scope: RuleScope?) async throws -> [RuleRecord] { [] }
+    func upsertRule(_ rule: RuleRecord) async throws { throw RuntimeClientStubError.unimplemented("upsertRule") }
+    func deleteRule(id: String) async throws { throw RuntimeClientStubError.unimplemented("deleteRule") }
+    func setRuleEnabled(id: String, enabled: Bool) async throws { throw RuntimeClientStubError.unimplemented("setRuleEnabled") }
+    func reorderRules(scope: RuleScope, ids: [String]) async throws { throw RuntimeClientStubError.unimplemented("reorderRules") }
+    func resetSeededRules() async throws { throw RuntimeClientStubError.unimplemented("resetSeededRules") }
+    func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview {
+        RuleMatchPreview(ruleID: rule.id, fileMatches: 0, emailMatches: 0, agentMatches: 0, sample: [])
+    }
 }
 
 enum AppFixtureProfile: String, Sendable {
@@ -427,14 +479,18 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var sessionEvents: [String: [SessionEvent]]
         var activeGrant: GrantRecord?
         var activeGrantSources: [GrantSourceRecord]
+        var pendingApprovals: [PendingApprovalRecord]
         var emailRuleSets: [TargetApp: EmailRuleSet]
         var emailRuleSummaries: [TargetApp: EmailRuleActivitySummary]
         var domainCounts: [String: Int]
         var trackedFiles: [String]
         var storageUsed: Int64
-        var emailAccounts: [EmailAccountRecord]
+        var mailAccounts: [EmailAccountRecord]
         var syncStates: [String: [SyncStateRecord]]
         var emails: [EmailMessageRecord]
+        var imapMailboxes: [String: [IMAPMailboxRecord]]
+        var sharedEmailIDs: Set<String>
+        var fileVisibilityOverrides: [TargetApp: [FileVisibilityOverrideRecord]]
     }
 
     private var state: FixtureState
@@ -457,8 +513,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             codexPolicy: state.codexPolicy,
             claudeEmailGovernance: state.claudeGovernance,
             codexEmailGovernance: state.codexGovernance,
-            activeWorkBlock: state.activeWorkBlock,
-            pendingApprovalCount: 0,
+            activeSession: state.activeWorkBlock,
+            pendingApprovalCount: state.pendingApprovals.count,
             agentCoverages: state.coverages,
             coverageEvents: state.coverageEvents
         )
@@ -483,6 +539,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         state.sources.removeAll { $0.sourceID == sourceID }
         state.claudePolicy.allowedSourceIDs.remove(sourceID)
         state.codexPolicy.allowedSourceIDs.remove(sourceID)
+        for agent in TargetApp.allCases {
+            state.fileVisibilityOverrides[agent]?.removeAll { $0.sourceID == sourceID }
+        }
     }
 
     func pauseSource(sourceID: String) async throws {
@@ -552,7 +611,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
 
     func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview {
         let estimates = state.sources.filter { source in
-            policy(for: targetApp).allowedSourceIDs.contains(source.sourceID)
+            governance(for: targetApp).allowedSourceIDs.contains(source.sourceID)
         }.map { source in
             SessionPreview.SourceEstimate(
                 sourceID: source.sourceID,
@@ -566,7 +625,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             sources: estimates,
             emailCount: state.emails.count,
             visibleEmailCount: state.emails.count,
-            sensitivityLevel: emailSensitivity ?? policy(for: targetApp).emailSensitivity.rawValue,
+            sensitivityLevel: emailSensitivity ?? governance(for: targetApp).emailSensitivity.rawValue,
             selectedEmailCount: selectedEmailIDs.count
         )
     }
@@ -580,13 +639,13 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             startedAt: ISO8601DateFormatter.shared.string(from: Date()),
             materializationRoot: "/tmp/manifold-fixture/\(targetApp.rawValue)",
             inactivityDeadline: nil,
-            emailSensitivity: (EmailSensitivityLevel(rawValue: emailSensitivity ?? "") ?? policy(for: targetApp).emailSensitivity).rawValue,
+            emailSensitivity: (EmailSensitivityLevel(rawValue: emailSensitivity ?? "") ?? governance(for: targetApp).emailSensitivity).rawValue,
             summaryFraming: summaryFraming,
             explicitSelection: !selectedEmailIDs.isEmpty,
             noteCaptureMode: noteCaptureMode.rawValue
         )
         state.activeGrant = grant
-        state.activeGrantSources = state.sources.filter { policy(for: targetApp).allowedSourceIDs.contains($0.sourceID) }.map {
+        state.activeGrantSources = state.sources.filter { governance(for: targetApp).allowedSourceIDs.contains($0.sourceID) }.map {
             GrantSourceRecord(grantID: grant.grantID, sourceID: $0.sourceID, mountName: $0.displayName.replacingOccurrences(of: " ", with: "-").lowercased())
         }
         state.activeWorkBlock = WorkBlockRecord(agent: targetApp, grantID: grant.grantID, sourceIDs: state.activeGrantSources.map(\.sourceID))
@@ -598,7 +657,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         return ActiveGrantState(activeGrant: grant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
     }
 
-    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool { true }
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult {
+        RestoreSnapshotResult(status: "success", message: nil)
+    }
     func markWorkBlockReviewing(id: String) async throws { state.activeWorkBlock?.status = .reviewing }
     func cancelWorkBlockReview(id: String) async throws { state.activeWorkBlock?.status = .active }
     func pauseTrackedRun(id: String) async throws { state.activeWorkBlock?.status = .paused }
@@ -630,42 +691,131 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
 
     func recentActivity(limit: Int) async throws -> [AuditEntry] { Array(state.activityEntries.prefix(limit)) }
     func recentSessions(limit: Int) async throws -> [Session] { Array(state.sessions.prefix(limit)) }
+    func listPendingApprovals() async throws -> [PendingApprovalRecord] { state.pendingApprovals }
+    func answerApproval(id: String, answer: String) async throws {
+        state.pendingApprovals.removeAll { $0.id == id }
+    }
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { state.sessionEvents[sessionID] ?? [] }
     func trackedFiles() async throws -> [String] { state.trackedFiles }
     func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: state.storageUsed) }
-    func listEmailAccounts() async throws -> [EmailAccountRecord] { state.emailAccounts }
+    func listEmailAccounts() async throws -> [EmailAccountRecord] { state.mailAccounts }
     func syncStates(accountID: String) async throws -> [SyncStateRecord] { state.syncStates[accountID] ?? [] }
     func emailMessageCount() async throws -> Int { state.emails.count }
+    func syncEmailNow(accountID: String) async throws -> SyncResult {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        state.syncStates[accountID] = (state.syncStates[accountID] ?? []).map { existing in
+            SyncStateRecord(
+                accountID: existing.accountID,
+                mailboxName: existing.mailboxName,
+                uidValidity: existing.uidValidity,
+                lastSyncUID: existing.lastSyncUID,
+                lastSyncAt: now,
+                messageCount: state.emails.filter { $0.accountID == accountID && $0.mailbox == existing.mailboxName }.count,
+                syncStatus: .idle,
+                errorMessage: nil
+            )
+        }
+        return SyncResult(accountID: accountID, newMessages: 0, updatedMessages: 0, errors: [], duration: 0.2)
+    }
     func domainCounts() async throws -> [String: Int] { state.domainCounts }
     func unreadCountAll() async throws -> Int { state.emails.filter { !$0.isRead }.count }
     func unreadCount(accountID: String, mailbox: String? = nil) async throws -> Int {
         state.emails.filter { $0.accountID == accountID && (mailbox == nil || $0.mailbox == mailbox) && !$0.isRead }.count
     }
-    func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] { [] }
-    func sharedEmailCount() async throws -> Int { state.emails.count }
-    func sharedEmailIDs() async throws -> Set<String> { Set(state.emails.map(\.emailID)) }
-    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] { Array(state.emails.prefix(limit)) }
+    func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] {
+        state.imapMailboxes[accountID] ?? []
+    }
+    func sharedEmailCount() async throws -> Int { state.sharedEmailIDs.count }
+    func sharedEmailIDs() async throws -> Set<String> { state.sharedEmailIDs }
+    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] {
+        Array(state.emails.filter { state.sharedEmailIDs.contains($0.emailID) }.prefix(limit))
+    }
     func emailMessages(accountID: String? = nil, mailbox: String? = nil, ids: [String]? = nil, limit: Int = 500) async throws -> [EmailMessageRecord] {
         let filtered = state.emails.filter { email in
             (accountID == nil || email.accountID == accountID)
                 && (mailbox == nil || email.mailbox == mailbox)
                 && (ids == nil || ids?.contains(email.emailID) == true)
         }
-        return Array(filtered.prefix(limit))
+        return Array(filtered.sorted(by: { $0.receivedAt > $1.receivedAt }).prefix(limit))
     }
     func searchEmailMessages(tokens: [SearchToken], freeText: String, accountID: String?, mailbox: String?, filter: QuickFilter?, sortKey: EmailSortKey, limit: Int) async throws -> [EmailMessageRecord] {
-        let term = freeText.lowercased()
+        let term = freeText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let base = try await emailMessages(accountID: accountID, mailbox: mailbox, ids: nil, limit: limit)
-        guard !term.isEmpty else { return base }
-        return base.filter { email in
+        let filteredByQuickFilter = base.filter { email in
+            guard let filter else { return true }
+            return fixtureMatches(email: email, filter: filter)
+        }
+        let filtered = term.isEmpty ? filteredByQuickFilter : filteredByQuickFilter.filter { email in
             [email.sender, email.subject, email.preview ?? "", email.bodyText ?? ""]
                 .joined(separator: "\n")
                 .lowercased()
                 .contains(term)
         }
+        return Array(filtered.prefix(limit))
+    }
+    func shareEmails(emailIDs: [String]) async throws {
+        for emailID in emailIDs {
+            state.sharedEmailIDs.insert(emailID)
+        }
+    }
+    func unshareEmails(emailIDs: [String]) async throws {
+        for emailID in emailIDs {
+            state.sharedEmailIDs.remove(emailID)
+        }
+    }
+    func unshareAllEmails() async throws {
+        state.sharedEmailIDs.removeAll()
     }
 
-    private func policy(for agent: TargetApp) -> AgentAccessPolicy {
+    func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] {
+        state.fileVisibilityOverrides[agent] ?? []
+    }
+
+    func setFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool,
+        decision: FileVisibilityOverrideDecision
+    ) async throws {
+        let normalized = FileSelectionScope(
+            sourceID: sourceID,
+            relativePath: relativePath,
+            isDirectory: isDirectory
+        ).normalizedRelativePath
+        var records = state.fileVisibilityOverrides[agent] ?? []
+        records.removeAll {
+            $0.sourceID == sourceID && $0.relativePath == normalized && $0.isDirectory == isDirectory
+        }
+        records.append(
+            FileVisibilityOverrideRecord(
+                agent: agent,
+                sourceID: sourceID,
+                relativePath: normalized,
+                isDirectory: isDirectory,
+                decision: decision
+            )
+        )
+        state.fileVisibilityOverrides[agent] = records.sorted { $0.id < $1.id }
+    }
+
+    func clearFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool
+    ) async throws {
+        let normalized = FileSelectionScope(
+            sourceID: sourceID,
+            relativePath: relativePath,
+            isDirectory: isDirectory
+        ).normalizedRelativePath
+        state.fileVisibilityOverrides[agent]?.removeAll {
+            $0.sourceID == sourceID && $0.relativePath == normalized && $0.isDirectory == isDirectory
+        }
+    }
+
+    private func governance(for agent: TargetApp) -> AgentAccessPolicy {
         agent == .codex ? state.codexPolicy : state.claudePolicy
     }
 
@@ -743,22 +893,142 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 SessionEvent(id: 1, timestamp: now, action: AuditAction.fileRead.rawValue, agent: TargetApp.cowork.rawValue, filePath: "shared/worklog.md", metadata: "{}"),
             ]
         ]
-        let email = EmailMessageRecord(
-            emailID: "email-1",
-            accountID: "account-1",
-            mailbox: "INBOX",
-            sender: "Ops <ops@example.com>",
-            senderEmail: "ops@example.com",
-            senderDomain: "example.com",
-            recipients: "you@example.com",
-            subject: "MANIFOLD_EMAIL_TEST",
-            receivedAt: now,
-            sizeBytes: 1200,
-            preview: "Governed email preview",
-            isRead: false,
-            bodyText: "Governed body text for fixture mode."
-        )
+        let pendingApprovals = profile == .trackedWork ? [
+            PendingApprovalRecord(
+                id: "approval-1",
+                connectionID: "conn-fixture",
+                agent: TargetApp.codex.rawValue,
+                path: "shared/worklog.md",
+                action: "write",
+                kind: "standing_write",
+                sourceID: "src-shared",
+                mountName: "shared",
+                relativePath: "worklog.md",
+                requestedAt: Date().addingTimeInterval(-300).timeIntervalSince1970,
+                status: "pending"
+            )
+        ] : []
+        let boardRootDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-21_600))
+        let boardReplyDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-7_200))
+        let boardLatestDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-1_200))
+        let digestDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-86_400))
+        let archiveDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-172_800))
+        let emails = [
+            EmailMessageRecord(
+                emailID: "email-1",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Jane Doe <jane@acme.com>",
+                senderEmail: "jane@acme.com",
+                senderDomain: "acme.com",
+                recipients: "you@example.com",
+                subject: "Board deck v2",
+                receivedAt: boardRootDate,
+                sizeBytes: 3_200,
+                preview: "First draft of the board deck for Thursday’s review.",
+                isRead: false,
+                isFlagged: true,
+                messageIDHeader: "<thread-board@example.com>",
+                attachmentCount: 1,
+                bodyText: "First draft of the board deck for Thursday’s review."
+            ),
+            EmailMessageRecord(
+                emailID: "email-2",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Mark Chen <mark@acme.com>",
+                senderEmail: "mark@acme.com",
+                senderDomain: "acme.com",
+                recipients: "you@example.com",
+                subject: "Re: Board deck v2",
+                receivedAt: boardReplyDate,
+                sizeBytes: 2_900,
+                preview: "Added a tighter summary slide and trimmed the appendix.",
+                isRead: true,
+                inReplyTo: "<thread-board@example.com>",
+                referencesHeader: "<thread-board@example.com>",
+                messageIDHeader: "<thread-board-reply@example.com>",
+                bodyText: "Added a tighter summary slide and trimmed the appendix."
+            ),
+            EmailMessageRecord(
+                emailID: "email-3",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Jane Doe <jane@acme.com>",
+                senderEmail: "jane@acme.com",
+                senderDomain: "acme.com",
+                recipients: "you@example.com",
+                subject: "Re: Board deck v2",
+                receivedAt: boardLatestDate,
+                sizeBytes: 2_600,
+                preview: "Latest revenue numbers are in. This should be the final version.",
+                isRead: true,
+                inReplyTo: "<thread-board-reply@example.com>",
+                referencesHeader: "<thread-board@example.com> <thread-board-reply@example.com>",
+                messageIDHeader: "<thread-board-final@example.com>",
+                attachmentCount: 1,
+                bodyText: "Latest revenue numbers are in. This should be the final version."
+            ),
+            EmailMessageRecord(
+                emailID: "email-4",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Ops <ops@example.com>",
+                senderEmail: "ops@example.com",
+                senderDomain: "example.com",
+                recipients: "you@example.com",
+                subject: "MANIFOLD_EMAIL_TEST",
+                receivedAt: digestDate,
+                sizeBytes: 1_200,
+                preview: "Governed email preview",
+                isRead: false,
+                messageIDHeader: "<fixture-digest@example.com>",
+                attachmentCount: 2,
+                bodyText: "Governed body text for fixture mode."
+            ),
+            EmailMessageRecord(
+                emailID: "email-5",
+                accountID: "account-1",
+                mailbox: "Archive",
+                sender: "Security Team <security@example.com>",
+                senderEmail: "security@example.com",
+                senderDomain: "example.com",
+                recipients: "you@example.com",
+                subject: "Quarterly governance review",
+                receivedAt: archiveDate,
+                sizeBytes: 2_100,
+                preview: "Archived governance review summary with the approved checklist.",
+                isRead: true,
+                messageIDHeader: "<archive-governance@example.com>",
+                bodyText: "Archived governance review summary with the approved checklist."
+            ),
+        ]
         let account = EmailAccountRecord(accountID: "account-1", displayName: "Fixture Inbox", providerType: "gmail", syncEnabled: true, createdAt: now, updatedAt: now)
+        let imapMailboxes = [
+            "account-1": [
+                IMAPMailboxRecord(row: [
+                    "account_id": "account-1",
+                    "mailbox_name": "INBOX",
+                    "flags": "[\"\\\\Inbox\"]",
+                    "is_selectable": "1",
+                    "sort_order": "0",
+                ]),
+                IMAPMailboxRecord(row: [
+                    "account_id": "account-1",
+                    "mailbox_name": "Archive",
+                    "flags": "[\"\\\\Archive\"]",
+                    "is_selectable": "1",
+                    "sort_order": "1",
+                ]),
+                IMAPMailboxRecord(row: [
+                    "account_id": "account-1",
+                    "mailbox_name": "Sent",
+                    "flags": "[\"\\\\Sent\"]",
+                    "is_selectable": "1",
+                    "sort_order": "2",
+                ]),
+            ].compactMap { $0 },
+        ]
         let activeGrant: GrantRecord? = profile == .trackedWork ? GrantRecord(
             grantID: "grant-fixture",
             targetApp: TargetApp.codex.rawValue,
@@ -789,6 +1059,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             sessionEvents: sessionEvents,
             activeGrant: activeGrant,
             activeGrantSources: activeGrantSources,
+            pendingApprovals: pendingApprovals,
             emailRuleSets: [.cowork: claudeRules, .codex: codexRules],
             emailRuleSummaries: [
                 .cowork: EmailRuleActivitySummary(agent: .cowork, shieldBlockedCounts: ["security": 2], recentShieldMatches: [], domainRuleHits: [.init(ruleID: claudeRules.domainRules[0].id, count: 5)], contactRuleHits: [.init(ruleID: claudeRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: claudeRules.keywordRules[0].id, count: 3)]),
@@ -797,10 +1068,36 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             domainCounts: ["example.com": 12, "builds.example.com": 7],
             trackedFiles: ["shared/worklog.md"],
             storageUsed: 24_576,
-            emailAccounts: profile == .onboarding ? [] : [account],
+            mailAccounts: profile == .onboarding ? [] : [account],
             syncStates: ["account-1": [SyncStateRecord(accountID: "account-1", mailboxName: "INBOX", lastSyncAt: now, messageCount: 42, syncStatus: .idle)]],
-            emails: profile == .onboarding ? [] : [email]
+            emails: profile == .onboarding ? [] : emails,
+            imapMailboxes: profile == .onboarding ? [:] : imapMailboxes,
+            sharedEmailIDs: profile == .onboarding ? [] : ["email-1", "email-4"],
+            fileVisibilityOverrides: [:]
         )
+    }
+
+    private func fixtureMatches(email: EmailMessageRecord, filter: QuickFilter) -> Bool {
+        switch filter {
+        case .unread:
+            return !email.isRead
+        case .flagged:
+            return email.isFlagged
+        case .attachments:
+            return email.attachmentCount > 0
+        case .today:
+            return Calendar.current.isDateInToday(MailDisplayFormatter.date(from: email.receivedAt))
+        case .unviewed:
+            return !email.localIsViewed
+        case .deletedOnServer:
+            return email.deletedOnServerAt != nil
+        case .junk:
+            return email.isJunk
+        case .thisWeek:
+            let date = MailDisplayFormatter.date(from: email.receivedAt)
+            guard let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) else { return false }
+            return date >= weekAgo
+        }
     }
 }
 
@@ -865,39 +1162,6 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws {
         _ = try await xpc.command(name: "removeSourceFromPolicy", payload: ["sourceID": sourceID, "agent": agent.rawValue])
-    }
-
-    func setNodeOverride(
-        sourceID: String,
-        relativePath: String,
-        agent: TargetApp,
-        state: NodeOverrideState
-    ) async throws {
-        _ = try await xpc.command(
-            name: "setNodeOverride",
-            payload: [
-                "sourceID": sourceID,
-                "relativePath": relativePath,
-                "agent": agent.rawValue,
-                "state": state.rawValue,
-            ]
-        )
-    }
-
-    func listNodeOverrides(sourceID: String) async throws -> [NodeOverrideRecord] {
-        try await command(
-            name: "listNodeOverrides",
-            payload: ["sourceID": sourceID],
-            field: "overrides",
-            as: [NodeOverrideRecord].self
-        )
-    }
-
-    func clearNodeOverrides(sourceID: String, agent: TargetApp) async throws {
-        _ = try await xpc.command(
-            name: "clearNodeOverrides",
-            payload: ["sourceID": sourceID, "agent": agent.rawValue]
-        )
     }
 
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws {
@@ -976,12 +1240,12 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         return try await command(name: "startTrackedRun", payload: payload, as: ActiveGrantState.self)
     }
 
-    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> Bool {
+    func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult {
         try await command(
             name: "restoreSnapshot",
             payload: ["snapshotID": snapshotID, "filePath": filePath],
-            field: "restored",
-            as: Bool.self
+            field: "result",
+            as: RestoreSnapshotResult.self
         )
     }
 
@@ -1262,6 +1526,51 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         try await command(name: "emailBackupInfo", field: "info", as: EmailBackupInfo.self)
     }
 
+    func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] {
+        try await command(
+            name: "listFileVisibilityOverrides",
+            payload: ["agent": agent.rawValue],
+            field: "overrides",
+            as: [FileVisibilityOverrideRecord].self
+        )
+    }
+
+    func setFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool,
+        decision: FileVisibilityOverrideDecision
+    ) async throws {
+        _ = try await xpc.command(
+            name: "setFileVisibilityOverride",
+            payload: [
+                "agent": agent.rawValue,
+                "sourceID": sourceID,
+                "relativePath": relativePath,
+                "isDirectory": isDirectory,
+                "decision": decision.rawValue,
+            ]
+        )
+    }
+
+    func clearFileVisibilityOverride(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool
+    ) async throws {
+        _ = try await xpc.command(
+            name: "clearFileVisibilityOverride",
+            payload: [
+                "agent": agent.rawValue,
+                "sourceID": sourceID,
+                "relativePath": relativePath,
+                "isDirectory": isDirectory,
+            ]
+        )
+    }
+
     func listPendingApprovals() async throws -> [PendingApprovalRecord] {
         try await command(name: "listPendingApprovals", field: "requests", as: [PendingApprovalRecord].self)
     }
@@ -1270,15 +1579,47 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         _ = try await xpc.command(name: "answerApproval", payload: ["id": id, "answer": answer])
     }
 
-    func undoLastAction() async throws -> UndoActionSummary? {
-        let response = try await xpc.command(name: "undoLastAction", payload: [:])
-        if response["empty"] as? Bool == true { return nil }
-        guard let actionID = response["actionID"] as? String,
-              let kind = response["kind"] as? String,
-              let summary = response["summary"] as? String else {
-            return nil
-        }
-        return UndoActionSummary(actionID: actionID, kind: kind, summary: summary)
+    // MARK: - Unified rules
+
+    func listRules(scope: RuleScope?) async throws -> [RuleRecord] {
+        var payload: [String: Any] = [:]
+        if let scope { payload["scope"] = scope.rawValue }
+        return try await command(name: "listRules", payload: payload, field: "rules", as: [RuleRecord].self)
+    }
+
+    func upsertRule(_ rule: RuleRecord) async throws {
+        _ = try await xpc.command(
+            name: "upsertRule",
+            payload: ["rule": try XPCJSON.object(from: rule)]
+        )
+    }
+
+    func deleteRule(id: String) async throws {
+        _ = try await xpc.command(name: "deleteRule", payload: ["id": id])
+    }
+
+    func setRuleEnabled(id: String, enabled: Bool) async throws {
+        _ = try await xpc.command(name: "setRuleEnabled", payload: ["id": id, "enabled": enabled])
+    }
+
+    func reorderRules(scope: RuleScope, ids: [String]) async throws {
+        _ = try await xpc.command(name: "reorderRules", payload: ["scope": scope.rawValue, "ids": ids])
+    }
+
+    func resetSeededRules() async throws {
+        _ = try await xpc.command(name: "resetSeededRules", payload: [:])
+    }
+
+    func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview {
+        try await command(
+            name: "previewRuleMatches",
+            payload: [
+                "rule": try XPCJSON.object(from: rule),
+                "agent": agent.rawValue,
+            ],
+            field: "preview",
+            as: RuleMatchPreview.self
+        )
     }
 
     private func command<T: Decodable>(

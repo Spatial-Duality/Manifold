@@ -360,4 +360,54 @@ struct MaterializationEngineTests {
             Int64("also keep".utf8.count)
         #expect(estimate.totalBytes == expectedBytes)
     }
+
+    @Test("Materialization skips symlinked and hard-linked entries")
+    func materializationSkipsUnsafeEntries() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let sourceDir = tempDir.appendingPathComponent("unsafe-source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let safeFile = sourceDir.appendingPathComponent("safe.txt")
+        try Data("safe".utf8).write(to: safeFile)
+
+        let external = tempDir.appendingPathComponent("external/secret.txt")
+        try FileManager.default.createDirectory(at: external.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("secret".utf8).write(to: external)
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("linked.txt"),
+            withDestinationURL: external
+        )
+
+        let originalHardLink = sourceDir.appendingPathComponent("hard-a.txt")
+        let secondaryHardLink = sourceDir.appendingPathComponent("hard-b.txt")
+        try Data("same inode".utf8).write(to: originalHardLink)
+        try FileManager.default.linkItem(at: originalHardLink, to: secondaryHardLink)
+
+        let source = SourceRecord(row: [
+            "source_id": "src-unsafe",
+            "display_name": "Unsafe",
+            "original_root_path": sourceDir.path,
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        ])!
+
+        let matRoot = tempDir.appendingPathComponent("workspace")
+        let results = try MaterializationEngine.materialize(
+            grantID: "grant-unsafe",
+            sources: [(source: source, mountName: "Unsafe")],
+            materializationRoot: matRoot.path
+        )
+
+        #expect(results.count == 1)
+        #expect(results[0].fileCount == 1)
+
+        let mountPath = matRoot.appendingPathComponent("Unsafe")
+        #expect(FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("safe.txt").path))
+        #expect(FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("linked.txt").path) == false)
+        #expect(FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("hard-a.txt").path) == false)
+        #expect(FileManager.default.fileExists(atPath: mountPath.appendingPathComponent("hard-b.txt").path) == false)
+    }
 }

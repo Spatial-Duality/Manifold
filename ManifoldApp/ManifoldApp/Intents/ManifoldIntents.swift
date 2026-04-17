@@ -29,16 +29,16 @@ struct OpenManifoldIntent: AppIntent {
     }
 }
 
-// MARK: - Start Tracked Work Block
+// MARK: - Start Protected Session
 
-struct StartWorkBlockIntent: AppIntent {
-    static let title: LocalizedStringResource = "Start Tracked Work Block"
-    static let description: IntentDescription = "Opens Manifold to start a tracked work block with change monitoring."
+struct StartSessionIntent: AppIntent {
+    static let title: LocalizedStringResource = "Start Protected Session"
+    static let description: IntentDescription = "Opens Manifold to start a protected session with change monitoring."
     static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        NotificationCenter.default.post(name: .manifoldStartWorkBlockFromIntent, object: nil)
+        NotificationCenter.default.post(name: .manifoldStartSessionFromIntent, object: nil)
         return .result()
     }
 }
@@ -72,11 +72,11 @@ struct ManifoldShortcuts: AppShortcutsProvider {
         )
 
         AppShortcut(
-            intent: StartWorkBlockIntent(),
+            intent: StartSessionIntent(),
             phrases: [
                 "Start tracking changes in \(.applicationName)"
             ],
-            shortTitle: "Track Changes",
+            shortTitle: "Start Session",
             systemImageName: "timeline.selection"
         )
 
@@ -92,9 +92,3 @@ struct ManifoldShortcuts: AppShortcutsProvider {
 }
 
 // MARK: - Notification Names
-
-extension Notification.Name {
-    static let manifoldPauseAllFromIntent = Notification.Name("manifoldPauseAllFromIntent")
-    static let manifoldStartWorkBlockFromIntent = Notification.Name("manifoldStartWorkBlockFromIntent")
-    static let manifoldOpenActivityFromIntent = Notification.Name("manifoldOpenActivityFromIntent")
-}

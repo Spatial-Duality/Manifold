@@ -6,13 +6,8 @@
 // Columns: leading-edge, time, agent, operation, target, size-delta, meta.
 // Denial rows carry an orange leading edge and are not dimmed — denials
 // are successes (Principle 1).
-//
-// Row-level direct manipulation (Principle 8): every row carries a
-// `.contextMenu` with revoke/reveal-in-Finder/copy-path/add-a-rule —
-// turning the ledger from a log into a set of handles.
 
 import SwiftUI
-import AppKit
 import ManifoldKit
 
 struct EventTable: View {
@@ -34,10 +29,8 @@ struct EventTable: View {
     let entries: [AuditEntry]
     let filter: Filter
     @Binding var selection: AuditEntry.ID?
-    /// Optional hooks wired from the parent. `nil` means the surrounding
-    /// store doesn't expose that capability yet; the menu item hides.
-    var onRevokeSource: ((AuditEntry) -> Void)? = nil
-    var onAddDenyRule: ((AuditEntry) -> Void)? = nil
+    var onFilterToAgent: (String) -> Void = { _ in }
+    var onFocusSession: (String?) -> Void = { _ in }
 
     private var rows: [AuditEntry] {
         entries.filter { entry in
@@ -136,40 +129,33 @@ struct EventTable: View {
         } rows: {
             ForEach(rows) { entry in
                 TableRow(entry)
-                    .contextMenu { contextMenu(for: entry) }
+                    .contextMenu {
+                        Button("View Evidence") {
+                            selection = entry.id
+                        }
+                        if let path = entry.filePath {
+                            Button("Copy Path") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(path, forType: .string)
+                            }
+                            Button("Reveal in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                            }
+                        }
+                        if let agent = entry.agent {
+                            Button("Filter to \(agent.capitalized)") {
+                                onFilterToAgent(agent)
+                            }
+                        }
+                        if entry.sessionID != nil || entry.grantID != nil {
+                            Button("Focus This Session") {
+                                onFocusSession(entry.sessionID ?? entry.grantID)
+                            }
+                        }
+                    }
             }
         }
         .tableStyle(.inset)
-    }
-
-    /// Every row is a handle (Principle 8). Denial rows and write rows
-    /// both surface "what can I do about this?" actions directly.
-    @ViewBuilder
-    private func contextMenu(for entry: AuditEntry) -> some View {
-        if let path = entry.filePath, !path.isEmpty {
-            Button("Reveal in Finder") {
-                let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
-            Button("Copy path") {
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(path, forType: .string)
-            }
-            Divider()
-        }
-
-        if let onRevokeSource {
-            Button("Revoke this folder from scope\u{2026}", role: .destructive) {
-                onRevokeSource(entry)
-            }
-        }
-
-        if let onAddDenyRule {
-            Button("Add a never-share rule for this pattern\u{2026}") {
-                onAddDenyRule(entry)
-            }
-        }
     }
 
     private func leadingEdgeColor(for entry: AuditEntry) -> Color {

@@ -22,8 +22,11 @@ public actor ManifoldBridge {
     private let policyStore: PolicyStore?
     private let emailRuleStore: EmailRuleStore?
     private let workBlockStore: WorkBlockStore?
+    private let fileVisibilityOverrideStore: FileVisibilityOverrideStore?
     private let approvalQueue: ApprovalQueue?
+    private let standingWriteApprovalStore: StandingWriteApprovalStore?
     private let exposureStore: ExposureStore?
+    private let ruleStore: RuleStore?
     nonisolated let targetApp: TargetApp
     private let profileID: String
     private var runtimeContext: AgentRuntimeContext
@@ -40,8 +43,11 @@ public actor ManifoldBridge {
         policyStore: PolicyStore? = nil,
         emailRuleStore: EmailRuleStore? = nil,
         workBlockStore: WorkBlockStore? = nil,
+        fileVisibilityOverrideStore: FileVisibilityOverrideStore? = nil,
         approvalQueue: ApprovalQueue? = nil,
+        standingWriteApprovalStore: StandingWriteApprovalStore? = nil,
         exposureStore: ExposureStore? = nil,
+        ruleStore: RuleStore? = nil,
         targetApp: TargetApp = .cowork,
         profileID: String = "default",
         serverName: String = "manifold",
@@ -58,8 +64,11 @@ public actor ManifoldBridge {
         self.policyStore = policyStore
         self.emailRuleStore = emailRuleStore
         self.workBlockStore = workBlockStore
+        self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
         self.approvalQueue = approvalQueue
+        self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
+        self.ruleStore = ruleStore
         self.targetApp = targetApp
         self.profileID = profileID
         self.runtimeContext = AgentRuntimeContext(
@@ -141,6 +150,8 @@ public actor ManifoldBridge {
                 return DecisionContext(reason: "intent_required", accessMode: "governed", policySnapshot: nil)
             case .noSources, .fileNotFound, .invalidPath:
                 return DecisionContext(reason: "policy_denied", accessMode: "unknown", policySnapshot: nil)
+            case .ruleDenied:
+                return DecisionContext(reason: "rule_denied", accessMode: "rule", policySnapshot: nil)
             }
         }
         return DecisionContext(reason: "policy_denied", accessMode: "unknown", policySnapshot: nil)
@@ -210,16 +221,7 @@ public actor ManifoldBridge {
     ) async {
         guard let exposureStore, let decisionID else { return }
         let hash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
-        let previewText: String?
-        let previewTruncated: Bool
-        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
-            let preview = String(text.prefix(Self.maxExposurePreviewCharacters))
-            previewText = preview
-            previewTruncated = text.count > preview.count
-        } else {
-            previewText = nil
-            previewTruncated = false
-        }
+        let previewText = "[redacted \(exposureType), \(data.count) bytes]"
         let exposure = ExposureRecord(
             connectionID: runtimeContext.connectionID,
             agent: agentName,
@@ -230,7 +232,7 @@ public actor ManifoldBridge {
             exposureType: exposureType,
             accessDecisionID: decisionID,
             payloadPreview: previewText,
-            payloadPreviewTruncated: previewTruncated,
+            payloadPreviewTruncated: false,
             clientIdentity: clientIdentityJSON(),
             intentSummary: intent?.summary,
             intentDetails: intent?.details
@@ -499,13 +501,20 @@ public actor ManifoldBridge {
 
             // Standing access — fail only when neither file policy nor the
             // governed email rule set expose anything to the agent.
-            if policy.allowedSourceIDs.isEmpty, !(try await hasStandingEmailAccess(policy: policy)) {
+            let resolver = try await standingFileVisibilityResolver(for: policy)
+            let hasExplicitFileAccess = !resolver.sourceIDsWithAllowOverrides.isEmpty
+            if policy.allowedSourceIDs.isEmpty,
+               !hasExplicitFileAccess,
+               !(try await hasStandingEmailAccess(policy: policy)) {
                 throw ManifoldMCPError.noAccessConfigured
             }
 
             // Resolve allowed source records
             let allSources = try await grantStore.allSources()
-            let allowedSources = allSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
+            let allowedSources = allSources.filter {
+                policy.allowedSourceIDs.contains($0.sourceID)
+                    || resolver.sourceIDsWithAllowOverrides.contains($0.sourceID)
+            }
             return .standing(policy: policy, sources: allowedSources)
         }
 
@@ -622,6 +631,8 @@ public actor ManifoldBridge {
         let grant: GrantRecord?
         let isStanding: Bool
         let decisionID: String?
+        let standingPolicy: AgentAccessPolicy?
+        let standingResolver: FileVisibilityResolver?
     }
 
     /// Resolve access and return mounts suitable for file operations.
@@ -639,13 +650,16 @@ public actor ManifoldBridge {
             intent: intent
         )
         switch context {
-        case .standing(_, let sources):
+        case .standing(let policy, let sources):
+            let resolver = try await standingFileVisibilityResolver(for: policy)
             return ResolvedMounts(
                 mounts: standingMounts(sources: sources),
                 grantID: nil,
                 grant: nil,
                 isStanding: true,
-                decisionID: decisionID
+                decisionID: decisionID,
+                standingPolicy: policy,
+                standingResolver: resolver
             )
         case .workBlock(let grant, let grantSources, _):
             return ResolvedMounts(
@@ -653,7 +667,9 @@ public actor ManifoldBridge {
                 grantID: grant.grantID,
                 grant: grant,
                 isStanding: false,
-                decisionID: decisionID
+                decisionID: decisionID,
+                standingPolicy: nil,
+                standingResolver: nil
             )
         case .legacyGrant(let grant, let grantSources):
             return ResolvedMounts(
@@ -661,9 +677,45 @@ public actor ManifoldBridge {
                 grantID: grant.grantID,
                 grant: grant,
                 isStanding: false,
-                decisionID: decisionID
+                decisionID: decisionID,
+                standingPolicy: nil,
+                standingResolver: nil
             )
         }
+    }
+
+    private func standingFileVisibilityResolver(for policy: AgentAccessPolicy) async throws -> FileVisibilityResolver {
+        try await fileVisibilityOverrideStore?.resolver(agent: policy.agent) ?? FileVisibilityResolver(overrides: [])
+    }
+
+    private func standingFileEvaluation(
+        relativePath: String,
+        mount: GrantMount,
+        access: ResolvedMounts
+    ) -> FileVisibilityEvaluation? {
+        guard access.isStanding,
+              let policy = access.standingPolicy,
+              let resolver = access.standingResolver else {
+            return nil
+        }
+        return resolver.evaluate(
+            sourceID: mount.sourceID,
+            relativePath: relativePath,
+            defaultVisible: policy.allowedSourceIDs.contains(mount.sourceID)
+        )
+    }
+
+    private func assertStandingVisibility(
+        relativePath: String,
+        mount: GrantMount,
+        access: ResolvedMounts,
+        originalPath: String
+    ) throws {
+        guard let evaluation = standingFileEvaluation(relativePath: relativePath, mount: mount, access: access),
+              !evaluation.isVisible else {
+            return
+        }
+        throw ManifoldMCPError.fileNotFound(originalPath)
     }
 
     /// Get mount directories for a grant, including source IDs.
@@ -685,6 +737,18 @@ public actor ManifoldBridge {
         let sourceID: String
         let mountName: String
         let mountPath: String
+    }
+
+    private enum StandingWriteMode: String {
+        case once = "standing_write_once"
+        case defaultScope = "standing_write_default"
+    }
+
+    private struct ResolvedWriteTarget {
+        let mount: GrantMount
+        let relativePath: String
+        let identity: ScopedFileIdentity
+        let canonicalPath: String
     }
 
     private func ensureIndexed(grant: GrantRecord, mounts: [GrantMount]) async throws {
@@ -831,15 +895,13 @@ public actor ManifoldBridge {
     }
 
     private func validatePath(_ path: String, rootPath: String) throws -> URL {
-        let cleaned = cleanPath(path)
-        guard !cleaned.hasPrefix("/") else { throw ManifoldMCPError.invalidPath("Absolute paths not allowed") }
-        guard !cleaned.contains("..") else { throw ManifoldMCPError.invalidPath("Path traversal not allowed") }
-        let root = URL(fileURLWithPath: rootPath)
-        let resolved = root.appendingPathComponent(cleaned).standardizedFileURL
-        guard resolved.path.hasPrefix(root.standardizedFileURL.path) else {
-            throw ManifoldMCPError.invalidPath("Path escapes workspace boundary")
+        do {
+            return try ScopedFileAccess.resolve(relativePath: path, rootPath: rootPath).fileURL
+        } catch let error as ManifoldError {
+            throw ManifoldMCPError.invalidPath(error.localizedDescription)
+        } catch {
+            throw error
         }
-        return resolved
     }
 
     /// Resolve a cleaned path to a specific mount. Returns nil if no mount prefix matches.
@@ -868,6 +930,42 @@ public actor ManifoldBridge {
         guard FileSelectionScope.allows(relativePath, in: allowedScopes) else {
             throw ManifoldMCPError.invalidPath("Path is outside the approved grant scope")
         }
+    }
+
+    private func resolveWriteTarget(_ path: String, in mounts: [GrantMount]) throws -> ResolvedWriteTarget {
+        let targetMount: GrantMount
+        let resolvedPath: String
+        if let (mount, relPath) = resolveMountAndPath(path, in: mounts) {
+            targetMount = mount
+            resolvedPath = relPath
+        } else if mounts.count == 1, let first = mounts.first {
+            targetMount = first
+            resolvedPath = path
+        } else if mounts.count > 1 {
+            let (mount, relPath) = try resolveBarePath(path, in: mounts)
+            targetMount = mount
+            resolvedPath = relPath
+        } else {
+            throw ManifoldMCPError.noSources
+        }
+
+        let identity: ScopedFileIdentity
+        do {
+            identity = try ScopedFileAccess.resolve(
+                relativePath: resolvedPath,
+                rootPath: targetMount.mountPath,
+                allowMissingLeaf: true
+            )
+        } catch let error as ManifoldError {
+            throw ManifoldMCPError.invalidPath(error.localizedDescription)
+        }
+
+        return ResolvedWriteTarget(
+            mount: targetMount,
+            relativePath: resolvedPath,
+            identity: identity,
+            canonicalPath: "\(targetMount.mountName)/\(resolvedPath)"
+        )
     }
 
     /// Resolve bare path to a single unambiguous mount. Throws if ambiguous.
@@ -913,7 +1011,8 @@ public actor ManifoldBridge {
                 let sourceNames = sources.map(\.displayName).joined(separator: ", ")
                 // Use cached file list for count (avoids full enumeration on every getStatus)
                 let mounts = standingMounts(sources: sources)
-                let totalFiles = (try? listFilesFromOriginals(mounts: mounts).count) ?? 0
+                let resolver = try? await standingFileVisibilityResolver(for: policy)
+                let totalFiles = (try? listFilesFromOriginals(mounts: mounts, policy: policy, resolver: resolver).count) ?? 0
                 let emailCount = (try? await accessibleEmails(policy: policy, limit: 5_000).count) ?? 0
                 let message = "Manifold standing access active. \(sources.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails. Sensitivity: \(policy.emailSensitivity.rawValue)."
                 let status = StatusResult(
@@ -1030,7 +1129,11 @@ public actor ManifoldBridge {
 
         // Standing access: enumerate files from original source paths
         if resolved.isStanding {
-            files = try listFilesFromOriginals(mounts: resolved.mounts)
+            files = try listFilesFromOriginals(
+                mounts: resolved.mounts,
+                policy: resolved.standingPolicy,
+                resolver: resolved.standingResolver
+            )
         } else {
             // Grant-based: use artifact index
             guard let grant = resolved.grant else { throw ManifoldMCPError.noActiveSession }
@@ -1056,25 +1159,41 @@ public actor ManifoldBridge {
 
     // MARK: - File Enumeration Cache
 
-    private var fileListCache: (entries: [FileInfo], timestamp: Date, mountPaths: Set<String>)?
+    private var fileListCache: (entries: [FileInfo], timestamp: Date, mountPaths: Set<String>, visibilityKey: String)?
     private let fileListCacheTTL: TimeInterval = 10
 
     /// List files from original source paths with 10-second TTL cache.
     /// Avoids re-enumerating 5,000+ files on every list_files MCP call.
-    private func listFilesFromOriginals(mounts: [GrantMount]) throws -> [FileInfo] {
+    private func listFilesFromOriginals(
+        mounts: [GrantMount],
+        policy: AgentAccessPolicy? = nil,
+        resolver: FileVisibilityResolver? = nil
+    ) throws -> [FileInfo] {
         let currentPaths = Set(mounts.map(\.mountPath))
+        let visibilityKey = cacheKey(policy: policy, resolver: resolver)
         if let cache = fileListCache,
            Date().timeIntervalSince(cache.timestamp) < fileListCacheTTL,
-           cache.mountPaths == currentPaths {
+           cache.mountPaths == currentPaths,
+           cache.visibilityKey == visibilityKey {
             return cache.entries
         }
-        let files = try enumerateOriginalFiles(mounts: mounts)
-        fileListCache = (files, Date(), currentPaths)
+        let files = try enumerateOriginalFiles(mounts: mounts, policy: policy, resolver: resolver)
+        fileListCache = (files, Date(), currentPaths, visibilityKey)
         return files
     }
 
+    private func cacheKey(policy: AgentAccessPolicy?, resolver: FileVisibilityResolver?) -> String {
+        let allowed = policy?.allowedSourceIDs.sorted().joined(separator: ",") ?? ""
+        let overrideKey = resolver?.cacheKey ?? ""
+        return "\(allowed)|\(overrideKey)"
+    }
+
     /// Actual file enumeration — only called when cache is stale or mount set changed.
-    private func enumerateOriginalFiles(mounts: [GrantMount]) throws -> [FileInfo] {
+    private func enumerateOriginalFiles(
+        mounts: [GrantMount],
+        policy: AgentAccessPolicy? = nil,
+        resolver: FileVisibilityResolver? = nil
+    ) throws -> [FileInfo] {
         let fm = FileManager.default
         var files: [FileInfo] = []
         let now = ISO8601DateFormatter.shared.string(from: Date())
@@ -1104,6 +1223,15 @@ public actor ManifoldBridge {
 
                 guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
                       values.isRegularFile == true else { continue }
+
+                if let policy, let resolver {
+                    let evaluation = resolver.evaluate(
+                        sourceID: mount.sourceID,
+                        relativePath: relativePath,
+                        defaultVisible: policy.allowedSourceIDs.contains(mount.sourceID)
+                    )
+                    guard evaluation.isVisible else { continue }
+                }
 
                 let modified = values.contentModificationDate.map {
                     ISO8601DateFormatter.shared.string(from: $0)
@@ -1140,6 +1268,7 @@ public actor ManifoldBridge {
 
         // Try mount-prefixed resolution first (e.g. "MyProject/src/main.swift")
         if let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) {
+            try assertStandingVisibility(relativePath: relPath, mount: mount, access: resolved, originalPath: cleaned)
             return try await readFromMount(
                 relativePath: relPath,
                 mountPath: mount.mountPath,
@@ -1152,6 +1281,7 @@ public actor ManifoldBridge {
 
         // Bare path: resolve unambiguously or reject
         let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
+        try assertStandingVisibility(relativePath: relPath, mount: mount, access: resolved, originalPath: cleaned)
         return try await readFromMount(
             relativePath: relPath,
             mountPath: mount.mountPath,
@@ -1170,14 +1300,20 @@ public actor ManifoldBridge {
         decisionID: String?,
         intent: AccessIntent?
     ) async throws -> String {
-        let fileURL = try validatePath(relativePath, rootPath: mountPath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw ManifoldMCPError.fileNotFound(relativePath)
+        let identity: ScopedFileIdentity
+        do {
+            identity = try ScopedFileAccess.resolve(relativePath: relativePath, rootPath: mountPath)
+        } catch let error as ManifoldError {
+            throw ManifoldMCPError.invalidPath(error.localizedDescription)
         }
         let canonicalPath = "\(mountName)/\(relativePath)"
+
+        // Rule gate — consult the unified rule catalog before reading.
+        try await enforceFileReadRules(fileURL: identity.fileURL, canonicalPath: canonicalPath, grantID: grantID)
+
         let artifact = try await artifactIndex.artifact(grantID: grantID, canonicalPath: canonicalPath)
         let read = try ContextEngine.read(
-            fileURL: fileURL,
+            fileURL: identity.fileURL,
             selection: artifact?.selection
         )
 
@@ -1195,6 +1331,118 @@ public actor ManifoldBridge {
         )
         await recordExposure(toolName: "read_file", resourcePath: canonicalPath, text: read.text, exposureType: "full_file", decisionID: decisionID, intent: intent)
         return read.text
+    }
+
+    /// Consults `RuleStore` / `RuleEngine` for a `fileRead` request. Throws `ManifoldMCPError.ruleDenied`
+    /// if a rule blocks the read; logs a `.warn`/`.redact`/etc. outcome but allows the read to continue.
+    /// Best-effort — if `ruleStore` is absent (test bridge) or fails, the read proceeds.
+    private func enforceFileReadRules(fileURL: URL, canonicalPath: String, grantID: String) async throws {
+        guard let ruleStore else { return }
+        let rules: [RuleRecord]
+        do {
+            rules = try await ruleStore.rules(scope: .file)
+        } catch {
+            logger.error("Rule gate: failed to load file rules — \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard !rules.isEmpty else { return }
+
+        let probe = Self.makeFileProbe(url: fileURL, canonicalPath: canonicalPath)
+        let context = RuleEvalContext(fileProbe: probe)
+        let decision = RuleEngine().evaluate(
+            .fileRead(path: canonicalPath),
+            against: rules,
+            agent: targetApp,
+            context: context
+        )
+
+        switch decision.action {
+        case .deny:
+            if let ruleID = decision.matchedRuleID {
+                await ruleStore.recordMatch(id: ruleID)
+            }
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: agentName,
+                filePath: canonicalPath,
+                metadata: mergedMetadata([
+                    "grant_id": grantID,
+                    "rule_decision": "deny",
+                    "matched_rule_id": decision.matchedRuleID ?? "",
+                    "matched_rule_name": decision.matchedRuleName ?? "",
+                ]),
+                grantID: grantID
+            )
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: decision.matchedRuleName ?? "rule",
+                explanation: decision.explanation
+            )
+        case .warn, .redact, .summarize, .downgrade, .log:
+            if let ruleID = decision.matchedRuleID {
+                await ruleStore.recordMatch(id: ruleID)
+            }
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: agentName,
+                filePath: canonicalPath,
+                metadata: mergedMetadata([
+                    "grant_id": grantID,
+                    "rule_decision": decision.action.rawValue,
+                    "matched_rule_id": decision.matchedRuleID ?? "",
+                    "matched_rule_name": decision.matchedRuleName ?? "",
+                ]),
+                grantID: grantID
+            )
+        case .allow:
+            break
+        }
+    }
+
+    /// Builds a lazy `FileProbe` for a file URL. `sizeBytes`, `isHidden`, and `containsSecret`
+    /// are computed on demand so rules that never need them don't pay the cost.
+    nonisolated private static func makeFileProbe(url: URL, canonicalPath: String) -> FileProbe {
+        FileProbe(
+            path: canonicalPath,
+            sizeBytes: {
+                (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) }
+            },
+            modifiedAt: {
+                try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            },
+            isHidden: {
+                url.lastPathComponent.hasPrefix(".")
+            },
+            isBinary: {
+                guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+                defer { try? handle.close() }
+                let chunk = (try? handle.read(upToCount: 512)) ?? Data()
+                return chunk.contains(0)
+            },
+            isGitignored: { false },
+            containsSecret: {
+                // Cheap heuristic: read up to 64KB and test for AWS/GitHub/JWT/private-key patterns.
+                guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+                defer { try? handle.close() }
+                let chunk = (try? handle.read(upToCount: 64 * 1024)) ?? Data()
+                guard let text = String(data: chunk, encoding: .utf8) else { return false }
+                let needles = [
+                    "AKIA",                               // AWS access key prefix
+                    "-----BEGIN PRIVATE KEY-----",
+                    "-----BEGIN RSA PRIVATE KEY-----",
+                    "-----BEGIN OPENSSH PRIVATE KEY-----",
+                    "ghp_",                               // GitHub personal access token
+                    "ghs_",                               // GitHub server-to-server
+                    "xoxb-",                              // Slack bot token
+                    "xoxp-",                              // Slack user token
+                ]
+                if needles.contains(where: { text.contains($0) }) { return true }
+                // Bearer JWT heuristic: 3 base64 segments separated by dots.
+                if text.range(of: #"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"#, options: .regularExpression) != nil {
+                    return true
+                }
+                return false
+            }
+        )
     }
 
     // MARK: - Write File (P1 FIX: record snapshots, use canonical paths, reject ambiguous)
@@ -1224,100 +1472,200 @@ public actor ManifoldBridge {
             throw error
         }
 
-        if case .standing(let policy, _) = accessContext {
-            _ = try? await approvalQueue?.submit(
-                connectionID: runtimeContext.connectionID,
-                agent: agentName,
-                path: cleaned,
-                action: "write"
+        let data = content.data(using: .utf8) ?? Data()
+        let accessDecisionID: String?
+        let access: ResolvedMounts
+        let writeID: String
+        let writeSource: String
+        let writeGrantID: String?
+        let writeTarget: ResolvedWriteTarget
+
+        switch accessContext {
+        case .standing(let policy, let sources):
+            let mounts = standingMounts(sources: sources)
+            let target = try resolveWriteTarget(cleaned, in: mounts)
+            let visibilityResolver = try await standingFileVisibilityResolver(for: policy)
+            let visibility = visibilityResolver.evaluate(
+                sourceID: target.mount.sourceID,
+                relativePath: target.relativePath,
+                defaultVisible: policy.allowedSourceIDs.contains(target.mount.sourceID)
             )
-            _ = await recordAccessDecision(
+            guard visibility.isVisible else {
+                _ = await recordAccessDecision(
+                    toolName: "write_file",
+                    resourcePath: target.canonicalPath,
+                    action: "write",
+                    allowed: false,
+                    reason: "standing_access",
+                    accessMode: "standing",
+                    policySnapshot: policySnapshot(for: policy)
+                )
+                throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+            }
+            guard policy.allowedSourceIDs.contains(target.mount.sourceID) else {
+                _ = await recordAccessDecision(
+                    toolName: "write_file",
+                    resourcePath: target.canonicalPath,
+                    action: "write",
+                    allowed: false,
+                    reason: "standing_access",
+                    accessMode: "standing",
+                    policySnapshot: policySnapshot(for: policy)
+                )
+                throw ManifoldMCPError.invalidPath("Standing writes require the folder to remain in default scope. Explicit file overrides are read-only until a tracked session starts.")
+            }
+            let defaultApproved = try await standingWriteApprovalStore?.hasDefaultGrant(
+                agent: targetApp,
+                sourceID: target.mount.sourceID
+            ) ?? false
+            let onceApproved: Bool
+            if defaultApproved {
+                onceApproved = false
+            } else {
+                onceApproved = try await standingWriteApprovalStore?.consumeOnce(
+                    agent: targetApp,
+                    sourceID: target.mount.sourceID,
+                    relativePath: target.relativePath
+                ) ?? false
+            }
+
+            guard defaultApproved || onceApproved else {
+                _ = try? await approvalQueue?.submit(
+                    connectionID: runtimeContext.connectionID,
+                    agent: agentName,
+                    path: target.canonicalPath,
+                    action: "write",
+                    kind: .standingWrite,
+                    sourceID: target.mount.sourceID,
+                    mountName: target.mount.mountName,
+                    relativePath: target.relativePath
+                )
+                _ = await recordAccessDecision(
+                    toolName: "write_file",
+                    resourcePath: target.canonicalPath,
+                    action: "write",
+                    allowed: false,
+                    reason: "standing_access",
+                    accessMode: "standing",
+                    policySnapshot: policySnapshot(for: policy)
+                )
+                return .escalationRequired(
+                    message: "Always-on access reads by default. Approve one reversible write for this file, or add reversible write access for this shared folder through Manifold.",
+                    path: target.canonicalPath
+                )
+            }
+
+            accessDecisionID = await recordAccessDecision(
+                toolName: "write_file",
+                resourcePath: target.canonicalPath,
+                action: "write",
+                allowed: true,
+                reason: "standing_access",
+                accessMode: defaultApproved ? StandingWriteMode.defaultScope.rawValue : StandingWriteMode.once.rawValue,
+                policySnapshot: policySnapshot(for: policy)
+            )
+            access = ResolvedMounts(
+                mounts: mounts,
+                grantID: nil,
+                grant: nil,
+                isStanding: true,
+                decisionID: accessDecisionID,
+                standingPolicy: policy,
+                standingResolver: visibilityResolver
+            )
+            writeID = "standing-write:\(target.mount.sourceID)"
+            writeSource = defaultApproved ? StandingWriteMode.defaultScope.rawValue : StandingWriteMode.once.rawValue
+            writeGrantID = nil
+            writeTarget = target
+
+        case .workBlock(let grant, let grantSources, _):
+            accessDecisionID = await recordAccessDecision(
                 toolName: "write_file",
                 resourcePath: cleaned,
                 action: "write",
-                allowed: false,
-                reason: "standing_access",
-                accessMode: "standing",
-                policySnapshot: policySnapshot(for: policy)
+                allowed: true,
+                reason: "work_block",
+                accessMode: "tracked_run"
             )
-            return .escalationRequired(
-                message: "Always-on access is read-only. Start a tracked run to edit files.",
-                path: cleaned
-            )
-        }
-
-        let accessDecisionID = await recordAccessDecision(
-            toolName: "write_file",
-            resourcePath: cleaned,
-            action: "write",
-            allowed: true,
-            reason: "work_block",
-            accessMode: "tracked_run"
-        )
-
-        let access: ResolvedMounts
-        switch accessContext {
-        case .workBlock(let grant, let grantSources, _):
             access = ResolvedMounts(
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
                 isStanding: false,
-                decisionID: accessDecisionID
+                decisionID: accessDecisionID,
+                standingPolicy: nil,
+                standingResolver: nil
             )
+            let target = try resolveWriteTarget(cleaned, in: access.mounts)
+            try await assertWritableScope(relativePath: target.relativePath, mount: target.mount, grant: grant)
+            writeID = grant.grantID
+            writeSource = "mcp"
+            writeGrantID = grant.grantID
+            writeTarget = target
+
         case .legacyGrant(let grant, let grantSources):
+            accessDecisionID = await recordAccessDecision(
+                toolName: "write_file",
+                resourcePath: cleaned,
+                action: "write",
+                allowed: true,
+                reason: "work_block",
+                accessMode: "tracked_run"
+            )
             access = ResolvedMounts(
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
                 isStanding: false,
-                decisionID: accessDecisionID
+                decisionID: accessDecisionID,
+                standingPolicy: nil,
+                standingResolver: nil
             )
-        case .standing:
-            throw ManifoldMCPError.noActiveSession
+            let target = try resolveWriteTarget(cleaned, in: access.mounts)
+            try await assertWritableScope(relativePath: target.relativePath, mount: target.mount, grant: grant)
+            writeID = grant.grantID
+            writeSource = "mcp"
+            writeGrantID = grant.grantID
+            writeTarget = target
         }
 
-        let mounts = access.mounts
-        let data = content.data(using: .utf8) ?? Data()
-        let writeID = access.grantID ?? "standing"
+        let targetMount = writeTarget.mount
+        let resolvedPath = writeTarget.relativePath
+        let targetIdentity = writeTarget.identity
+        let canonicalPath = writeTarget.canonicalPath
 
-        // Resolve mount deterministically
-        let targetMount: GrantMount
-        let resolvedPath: String
-        if let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) {
-            targetMount = mount
-            resolvedPath = relPath
-        } else if mounts.count == 1, let first = mounts.first {
-            targetMount = first
-            resolvedPath = cleaned
-        } else if mounts.count > 1 {
-            let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
-            targetMount = mount
-            resolvedPath = relPath
-        } else {
-            throw ManifoldMCPError.noSources
+        let existed = targetIdentity.exists
+        if access.isStanding,
+           existed,
+           try await snapshotStore.latestHash(runID: writeID, filePath: canonicalPath) == nil {
+            let existingData = try ScopedFileAccess.readData(
+                relativePath: resolvedPath,
+                rootPath: targetMount.mountPath
+            ).data
+            try await snapshotStore.recordBaseline(
+                runID: writeID,
+                workspaceID: targetMount.sourceID,
+                filePath: canonicalPath,
+                data: existingData
+            )
         }
-
-        let fileURL = try validatePath(resolvedPath, rootPath: targetMount.mountPath)
-        if let grant = access.grant {
-            try await assertWritableScope(relativePath: resolvedPath, mount: targetMount, grant: grant)
+        let writtenIdentity: ScopedFileIdentity
+        do {
+            writtenIdentity = try ScopedFileAccess.writeDataAtomically(
+                data,
+                relativePath: resolvedPath,
+                rootPath: targetMount.mountPath
+            )
+        } catch let error as ManifoldError {
+            throw ManifoldMCPError.invalidPath(error.localizedDescription)
         }
-        let canonicalPath = "\(targetMount.mountName)/\(resolvedPath)"
-
-        let existed = FileManager.default.fileExists(atPath: fileURL.path)
-
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try data.write(to: fileURL, options: .atomic)
 
         if let grant = access.grant {
             try await artifactIndex.upsertFile(
                 grantID: grant.grantID,
                 mount: ArtifactMount(sourceID: targetMount.sourceID, mountName: targetMount.mountName, mountPath: targetMount.mountPath),
                 relativePath: resolvedPath,
-                fileURL: fileURL
+                fileURL: writtenIdentity.fileURL
             )
         }
 
@@ -1326,8 +1674,18 @@ public actor ManifoldBridge {
             workspaceID: targetMount.sourceID,
             filePath: canonicalPath,
             newData: data,
-            source: "mcp"
+            source: writeSource
         )
+
+        var writeMetadata = mergedMetadata([
+            "mount": targetMount.mountName,
+            "bytes": "\(data.count)",
+            "snapshot_id": "\(snapshot.id)",
+            "access_mode": access.isStanding ? writeSource : "tracked_run",
+        ])
+        if let writeGrantID {
+            writeMetadata["grant_id"] = writeGrantID
+        }
 
         try? await auditStore.log(
             action: existed ? .fileModified : .fileCreated,
@@ -1337,13 +1695,8 @@ public actor ManifoldBridge {
             filePath: canonicalPath,
             beforeHash: snapshot.beforeHash,
             afterHash: snapshot.afterHash,
-            metadata: mergedMetadata([
-                "grant_id": writeID,
-                "mount": targetMount.mountName,
-                "bytes": "\(data.count)",
-                "snapshot_id": "\(snapshot.id)",
-            ]),
-            grantID: writeID
+            metadata: writeMetadata,
+            grantID: writeGrantID
         )
         if let grant = access.grant {
             await maybeRecordVerboseCheckpointNote(
@@ -1363,7 +1716,12 @@ public actor ManifoldBridge {
 
         // Standing access: grep through original source files
         if resolved.isStanding {
-            results = try searchFilesInOriginals(query: query, mounts: resolved.mounts)
+            results = try searchFilesInOriginals(
+                query: query,
+                mounts: resolved.mounts,
+                policy: resolved.standingPolicy,
+                resolver: resolved.standingResolver
+            )
         } else {
             // Grant-based: use artifact index
             guard let grant = resolved.grant else { throw ManifoldMCPError.noActiveSession }
@@ -1396,7 +1754,12 @@ public actor ManifoldBridge {
     }
 
     /// Search files directly in original source paths (standing access).
-    private func searchFilesInOriginals(query: String, mounts: [GrantMount]) throws -> [(path: String, source: String, matches: [String])] {
+    private func searchFilesInOriginals(
+        query: String,
+        mounts: [GrantMount],
+        policy: AgentAccessPolicy? = nil,
+        resolver: FileVisibilityResolver? = nil
+    ) throws -> [(path: String, source: String, matches: [String])] {
         let fm = FileManager.default
         let queryLower = query.lowercased()
         var results: [(path: String, source: String, matches: [String])] = []
@@ -1424,6 +1787,15 @@ public actor ManifoldBridge {
 
                 guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                       values.isRegularFile == true else { continue }
+
+                if let policy, let resolver {
+                    let evaluation = resolver.evaluate(
+                        sourceID: mount.sourceID,
+                        relativePath: relativePath,
+                        defaultVisible: policy.allowedSourceIDs.contains(mount.sourceID)
+                    )
+                    guard evaluation.isVisible else { continue }
+                }
 
                 // Read file and search
                 guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe),
@@ -1539,6 +1911,7 @@ public actor ManifoldBridge {
         guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
             throw ManifoldMCPError.fileNotFound(path)
         }
+        try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
 
         let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
@@ -1573,6 +1946,7 @@ public actor ManifoldBridge {
         guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
             throw ManifoldMCPError.fileNotFound(archivePath)
         }
+        try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
 
         let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
@@ -1621,6 +1995,7 @@ public actor ManifoldBridge {
         } else {
             resolved = try resolveBarePath(cleaned, in: mounts)
         }
+        try assertStandingVisibility(relativePath: resolved.relativePath, mount: resolved.mount, access: access, originalPath: cleaned)
 
         let fileURL = try validatePath(resolved.relativePath, rootPath: resolved.mount.mountPath)
         let read = try ContextEngine.read(
@@ -1663,6 +2038,7 @@ public actor ManifoldBridge {
         } else {
             resolved = try resolveBarePath(cleaned, in: mounts)
         }
+        try assertStandingVisibility(relativePath: resolved.relativePath, mount: resolved.mount, access: access, originalPath: cleaned)
 
         let canonicalPath = "\(resolved.mount.mountName)/\(resolved.relativePath)"
         let fileURL = try validatePath(resolved.relativePath, rootPath: resolved.mount.mountPath)
@@ -2007,8 +2383,17 @@ public actor ManifoldBridge {
 
         // Read from .eml file on disk
         if let emlPath = email.emlPath,
-           FileManager.default.fileExists(atPath: emlPath),
-           let content = try? String(contentsOfFile: emlPath, encoding: .utf8) {
+           let data = EmailSyncEngine.readStoredMessage(at: emlPath) {
+            let parsed = MIMEParser.parse(data: data)
+            let excerpt = parsed.safeExcerpt(maxCharacters: 4_000) ?? email.preview ?? "(no preview available)"
+            let content = """
+            From: \(email.sender)
+            To: \(email.recipients)
+            Subject: \(email.subject)
+            Date: \(email.receivedAt)
+
+            \(excerpt)
+            """
             await auditEmailRead(email: email, grantID: grantID, decision: emailDecision)
             await recordExposure(toolName: "read_email", resourcePath: id, text: content, exposureType: "email_body", decisionID: decisionID, intent: validatedIntent)
             return content

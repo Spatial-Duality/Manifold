@@ -1,519 +1,179 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// ThreadsView — the Active-Backup thread view.
+// MailReviewView — Active Backup-style mail review surface.
 //
-// Revised layout: two-column (table + inspector). A compact horizontal
-// sender-filter strip sits above the table — the previous nested
-// "sidebar"-styled List collided with the outer NavigationSplitView on
-// narrow windows (the outer sidebar auto-collapsed and the inner List
-// rendered empty). The filter strip carries the same affordances —
-// Accounts, Smart filters — in a form that never competes with the
-// window's real sidebar.
-//
-// Stage-8 posture: no reading pane. The inspector shows the selected
-// message's metadata only; the body is never rendered inline. Space →
-// QuickLook the raw .eml (Finder-parity peek); ⌘↩ → NSWorkspace.open
-// hands the file to the user's default mail client. Both affordances
-// are conditional on emlPath existing on disk — Principle 10 forbids
-// a button that pretends to open a file we don't actually have.
+// This is intentionally not a mail client. The left rail scopes the
+// backed-up mail, the center table is dense and sortable, and the
+// inspector shows only the metadata and safe excerpt needed to make
+// atomic allow / hide decisions.
 
 import SwiftUI
-import AppKit
-import QuickLook
 import ManifoldKit
 
-struct ThreadsView: View {
-    @Environment(ManifoldStore.self) private var store
+struct MailReviewView: View {
+    @Environment(MailAccountsModel.self) private var mailAccounts
+    @Environment(MailReviewModel.self) private var mailReview
+    @FocusState private var isSearchFocused: Bool
+    @State private var sortOrder = [KeyPathComparator(\MailReviewRow.receivedDate, order: .reverse)]
 
-    @State private var senderFilter: SenderFilter = .all
-    @State private var selectedMessageID: String? = nil
-    @State private var messages: [EmailMessageRecord] = []
-    @State private var quickLookURL: URL? = nil
-    @State private var loadToken: Int = 0
-    @State private var isSyncing: Bool = false
-
-    enum SenderFilter: Hashable {
-        case all
-        case account(String)
-        case trusted
-        case ruleExcluded
+    private var selectedAccount: EmailAccountRecord? {
+        guard let accountID = mailReview.selectedAccountID else { return nil }
+        return mailAccounts.accounts.first(where: { $0.accountID == accountID })
     }
 
-    /// Honest classification of why the thread table is empty. The
-    /// previous single "No messages in this filter" copy was dishonest
-    /// for two of the four cases — Principle 10.
-    enum EmptyReason {
-        /// Accounts exist but no messages have been synced to the local
-        /// store yet. Offer a Sync Now action.
-        case nothingSyncedYet
-        /// The filter is a placeholder that the runtime doesn't resolve
-        /// yet (trusted senders, rule-excluded). Say so plainly.
-        case filterNotWired
-        /// The DB has messages; this filter genuinely returns none.
-        case noMatchForFilter
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            SenderFilterStrip(filter: $senderFilter)
-            Divider()
-
-            HStack(spacing: 0) {
-                ThreadTable(
-                    messages: messages,
-                    selection: $selectedMessageID,
-                    emptyReason: emptyReason,
-                    isSyncing: isSyncing,
-                    onSyncNow: syncAllAccounts
-                )
-                .frame(maxWidth: .infinity)
-
-                Divider()
-
-                ThreadInspector(
-                    message: selectedMessage,
-                    onQuickLook: presentQuickLook,
-                    onOpenInDefaultClient: openInDefaultClient
-                )
-                .frame(width: 300)
-                .background(ManifoldPalette.surface2)
-            }
+    private var selectedSyncState: SyncStateRecord? {
+        guard let accountID = mailReview.selectedAccountID,
+              let mailboxName = mailReview.selectedMailboxName else {
+            return nil
         }
-        .quickLookPreview($quickLookURL)
-        .task(id: loadKey) { await reload() }
+        return mailAccounts.syncStates[accountID]?.first(where: { $0.mailboxName == mailboxName })
     }
 
-    /// Which empty state to show when `messages` is empty. Computed so the
-    /// copy stays honest for every combination of filter + DB state.
-    private var emptyReason: EmptyReason {
-        switch senderFilter {
-        case .trusted, .ruleExcluded:
-            return .filterNotWired
-        case .all, .account:
-            // `totalMessageCount` is the *global* DB count and doesn't
-            // change with the filter. If the DB is globally empty then
-            // no filter can match; the user needs a sync, not a
-            // different filter.
-            return store.emailAccounts.totalMessageCount == 0
-                ? .nothingSyncedYet
-                : .noMatchForFilter
-        }
-    }
-
-    private func syncAllAccounts() {
-        let accounts = store.emailAccounts.accounts
-        guard !accounts.isEmpty else { return }
-        Task {
-            isSyncing = true
-            defer { isSyncing = false }
-            for account in accounts {
-                await store.emailAccounts.syncNow(accountID: account.accountID)
-            }
-            await reload()
-        }
-    }
-
-    private var selectedMessage: EmailMessageRecord? {
-        guard let id = selectedMessageID else { return nil }
-        return messages.first { $0.emailID == id }
-    }
-
-    /// Reload token that changes whenever the filter or upstream account
-    /// list changes; the .task(id:) observer re-runs on change.
-    private var loadKey: String {
-        switch senderFilter {
-        case .all:                return "all-\(store.emailAccounts.mailboxRefreshToken)"
-        case .account(let id):    return "acct-\(id)-\(store.emailAccounts.mailboxRefreshToken)"
-        case .trusted:            return "trusted-\(store.emailAccounts.mailboxRefreshToken)"
-        case .ruleExcluded:       return "ruleExcluded-\(store.emailAccounts.mailboxRefreshToken)"
-        }
-    }
-
-    private func reload() async {
-        let next: [EmailMessageRecord]
-        switch senderFilter {
-        case .all:
-            next = await store.emailAccounts.allMessages(limit: 500)
-        case .account(let accountID):
-            next = await store.emailAccounts.messages(accountID: accountID, limit: 500)
-        case .trusted, .ruleExcluded:
-            // These filters require sensitivity + rule resolution that
-            // the runtime hasn't exposed to the app yet; render empty
-            // honestly instead of faking a subset.
-            next = []
-        }
-        messages = next
-        if let sel = selectedMessageID, !messages.contains(where: { $0.emailID == sel }) {
-            selectedMessageID = nil
-        }
-        loadToken &+= 1
-    }
-
-    private func presentQuickLook() {
-        guard let message = selectedMessage,
-              let url = openableEMLURL(for: message) else { return }
-        quickLookURL = url
-    }
-
-    private func openInDefaultClient() {
-        guard let message = selectedMessage,
-              let url = openableEMLURL(for: message) else { return }
-        NSWorkspace.shared.open(url)
-    }
-}
-
-/// The on-disk URL for a message's raw `.eml`, if and only if the file
-/// actually exists. Returning nil when the path is missing lets callers
-/// disable their affordances honestly.
-func openableEMLURL(for message: EmailMessageRecord) -> URL? {
-    guard let path = message.emlPath, !path.isEmpty else { return nil }
-    guard FileManager.default.fileExists(atPath: path) else { return nil }
-    return URL(fileURLWithPath: path)
-}
-
-// MARK: - Sender filter strip
-
-private struct SenderFilterStrip: View {
-    @Environment(ManifoldStore.self) private var store
-    @Binding var filter: ThreadsView.SenderFilter
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: Spacing.s2) {
-                FilterChip(
-                    label: "All",
-                    systemImage: "tray.full",
-                    tint: ManifoldPalette.claude,
-                    isSelected: filter == .all,
-                    action: { filter = .all }
-                )
-
-                if !store.emailAccounts.accounts.isEmpty {
-                    Divider().frame(height: 18)
-                    ForEach(store.emailAccounts.accounts) { account in
-                        FilterChip(
-                            label: account.displayName,
-                            systemImage: "envelope",
-                            tint: ManifoldPalette.codex,
-                            isSelected: filter == .account(account.accountID),
-                            action: { filter = .account(account.accountID) }
-                        )
-                    }
-                }
-
-                Divider().frame(height: 18)
-
-                FilterChip(
-                    label: "Trusted senders",
-                    systemImage: "star.fill",
-                    tint: ManifoldPalette.paused,
-                    isSelected: filter == .trusted,
-                    action: { filter = .trusted }
-                )
-                FilterChip(
-                    label: "Rule-excluded",
-                    systemImage: "exclamationmark.shield.fill",
-                    tint: ManifoldPalette.attention,
-                    isSelected: filter == .ruleExcluded,
-                    action: { filter = .ruleExcluded }
-                )
-            }
-            .padding(.horizontal, Spacing.s4)
-            .padding(.vertical, Spacing.s2)
-        }
-        .scrollIndicators(.hidden)
-    }
-}
-
-private struct FilterChip: View {
-    let label: String
-    let systemImage: String
-    let tint: Color
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(label, systemImage: systemImage)
-                .font(ManifoldType.captionMedium)
-                .labelStyle(.titleAndIcon)
-                .padding(.horizontal, Spacing.s3)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(isSelected ? tint.opacity(0.14) : Color.clear)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(
-                            isSelected ? tint.opacity(0.35) : ManifoldPalette.border,
-                            lineWidth: 0.6
-                        )
-                )
-                .foregroundStyle(isSelected ? tint : Color.secondary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-// MARK: - Thread table
-
-private struct ThreadTable: View {
-    let messages: [EmailMessageRecord]
-    @Binding var selection: String?
-    let emptyReason: ThreadsView.EmptyReason
-    let isSyncing: Bool
-    let onSyncNow: () -> Void
-
-    var body: some View {
-        if messages.isEmpty {
-            emptyStateView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            Table(messages, selection: $selection) {
-                TableColumn("Subject") { message in
-                    Text(message.subject.isEmpty ? "(no subject)" : message.subject)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                TableColumn("Sender") { message in
-                    Text(message.sender)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(.secondary)
-                }
-                .width(min: 120, ideal: 200)
-                TableColumn("Mailbox") { message in
-                    Text(message.mailbox)
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .width(min: 80, ideal: 140)
-                TableColumn("Received") { message in
-                    Text(formatReceivedAt(message.receivedAt))
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .width(min: 100, ideal: 140)
-            }
-        }
-    }
-
-    /// Honest empty state per `emptyReason`. No filter should ever show
-    /// a generic "no messages" shrug — each reason names itself and,
-    /// where a user action would help, offers it.
-    @ViewBuilder
-    private var emptyStateView: some View {
-        switch emptyReason {
-        case .nothingSyncedYet:
-            ContentUnavailableView {
-                Label("No mail synced yet", systemImage: "tray")
-            } description: {
-                Text("Accounts are connected, but Manifold hasn't pulled any messages into its local store. Sync an account to populate the Threads view.")
-            } actions: {
-                Button(action: onSyncNow) {
-                    if isSyncing {
-                        HStack(spacing: Spacing.s2) {
-                            ProgressView().controlSize(.small)
-                            Text("Syncing…")
-                        }
-                    } else {
-                        Label("Sync Now", systemImage: "arrow.clockwise")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSyncing)
-            }
-
-        case .filterNotWired:
-            ContentUnavailableView {
-                Label("Not wired up yet", systemImage: "hammer")
-            } description: {
-                Text("This filter resolves against sensitivity and rule data that the runtime doesn't expose to the app yet. Pick an account or 'All' to see synced messages.")
-            }
-
-        case .noMatchForFilter:
-            ContentUnavailableView {
-                Label("No messages match this filter", systemImage: "line.3.horizontal.decrease.circle")
-            } description: {
-                Text("Try a different account or 'All'. Messages that are synced to this account don't match the current filter.")
-            }
-        }
-    }
-
-    /// Hoisted formatter — `ISO8601DateFormatter` is expensive to construct
-    /// and this runs once per visible row on every table render.
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    /// Fallback formatter for timestamps without fractional seconds.
-    private static let isoFormatterNoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
-    private func formatReceivedAt(_ iso: String) -> String {
-        if let date = Self.isoFormatter.date(from: iso)
-            ?? Self.isoFormatterNoFrac.date(from: iso) {
-            return date.formatted(date: .abbreviated, time: .shortened)
-        }
-        return iso
-    }
-}
-
-// MARK: - Thread inspector
-
-private struct ThreadInspector: View {
-    let message: EmailMessageRecord?
-    let onQuickLook: () -> Void
-    let onOpenInDefaultClient: () -> Void
-
-    var body: some View {
-        if let message {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.s3) {
-                    Text("Message")
-                        .font(ManifoldType.tiny.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.5)
-
-                    Text(message.subject.isEmpty ? "(no subject)" : message.subject)
-                        .font(ManifoldType.bodyMedium)
-
-                    MetadataGrid(message: message)
-
-                    Divider().padding(.vertical, Spacing.s1)
-
-                    ActionButtons(
-                        message: message,
-                        onQuickLook: onQuickLook,
-                        onOpenInDefaultClient: onOpenInDefaultClient
-                    )
-
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Spacing.s4)
-            }
-        } else {
-            ContentUnavailableView(
-                "No message selected",
-                systemImage: "sidebar.right",
-                description: Text("Pick a message on the left to see its metadata and peek at the raw .eml.")
+    private var reviewRows: [MailReviewRow] {
+        mailReview.messages.map { message in
+            MailReviewRow(
+                message: message,
+                threadKey: MailThreadRow.threadKey(for: message),
+                visibilityState: mailReview.sharedEmailIDs.contains(message.emailID)
+                    ? VisibilityState(effective: .allowed, origin: .explicit)
+                    : VisibilityState(effective: .hidden, origin: .defaultScope)
             )
         }
+        .sorted(using: sortOrder)
     }
-}
 
-private struct MetadataGrid: View {
-    let message: EmailMessageRecord
+    private var selectedMessageBinding: Binding<String?> {
+        Binding(
+            get: { mailReview.selectedMessageID },
+            set: { newValue in
+                guard let newValue,
+                      let row = reviewRows.first(where: { $0.emailID == newValue }) else {
+                    mailReview.selectedMessageID = nil
+                    return
+                }
+                mailReview.selectMessage(row.emailID, threadKey: row.threadKey)
+            }
+        )
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s2) {
-            MetadataRow(label: "From",     value: message.sender)
-            MetadataRow(label: "Mailbox",  value: message.mailbox)
-            MetadataRow(label: "Received", value: message.receivedAt)
-            if !message.recipients.isEmpty {
-                MetadataRow(label: "To", value: message.recipients)
-            }
-            if message.attachmentCount > 0 {
-                MetadataRow(
-                    label: "Attachments",
-                    value: "\(message.attachmentCount) — open the .eml to access"
+        HStack(spacing: 0) {
+            MailScopeRail()
+                .frame(width: 248)
+                .background(ManifoldPalette.surface)
+
+            Divider()
+
+            VStack(spacing: 0) {
+                ThreadToolbar(
+                    selectedAccount: selectedAccount,
+                    selectedMailboxName: mailReview.selectedMailboxName,
+                    isSearchFocused: $isSearchFocused
+                )
+                Divider()
+                MailReviewTableArea(
+                    selectedAccount: selectedAccount,
+                    selectedSyncState: selectedSyncState,
+                    rows: reviewRows,
+                    sortOrder: $sortOrder,
+                    selection: selectedMessageBinding
                 )
             }
+            .frame(maxWidth: .infinity)
+
+            Divider()
+
+            ThreadInspector()
+                .frame(width: 320)
+                .background(ManifoldPalette.surface2)
+        }
+        .accessibilityElement(children: .contain)
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
+            isSearchFocused = true
         }
     }
 }
 
-private struct MetadataRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
-            Text(label)
-                .font(ManifoldType.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 78, alignment: .leading)
-            Text(value)
-                .font(ManifoldType.caption)
-                .textSelection(.enabled)
-        }
-    }
-}
-
-private struct ActionButtons: View {
-    let message: EmailMessageRecord
-    let onQuickLook: () -> Void
-    let onOpenInDefaultClient: () -> Void
-
-    private var canOpen: Bool { openableEMLURL(for: message) != nil }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s2) {
-            // ⌘↩ primary — open in default mail client.
-            Button {
-                onOpenInDefaultClient()
-            } label: {
-                Label("Open in Default Mail Client", systemImage: "arrow.up.right.square")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!canOpen)
-
-            // Space-keyed peek — QuickLook.
-            Button {
-                onQuickLook()
-            } label: {
-                Label("Preview (Space)", systemImage: "eye")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .keyboardShortcut(.space, modifiers: [])
-            .disabled(!canOpen)
-
-            if !canOpen {
-                Text("The raw .eml for this message isn't on disk — Manifold can't peek or hand it off.")
-                    .font(ManifoldType.tiny)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, Spacing.s1)
-            }
-        }
-    }
-}
-
-// MARK: - Adjacent tab bodies
-
-struct MailSessionView: View {
-    @Environment(ManifoldStore.self) private var store
+private struct MailScopeRail: View {
+    @Environment(MailAccountsModel.self) private var mailAccounts
+    @Environment(MailReviewModel.self) private var mailReview
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.s4) {
-                if let session = store.activeSession {
-                    SessionChip(
-                        name: session.name,
-                        remainingSeconds: session.remainingSeconds,
-                        isTrackedEdit: session.isTrackedEdit
-                    )
-                    Text("Mailbox additions, removals, and inherited scope land here when the mail-session pipeline is wired end-to-end.")
-                        .font(ManifoldType.caption)
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    Text("Accounts")
+                        .font(ManifoldType.tiny.weight(.semibold))
                         .foregroundStyle(.secondary)
-                } else {
-                    ContentUnavailableView(
-                        "No session running",
-                        systemImage: "play.circle",
-                        description: Text("Mail-scope changes layer on top of the default whenever a session is live.")
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 280)
+                        .tracking(0.4)
+
+                            ForEach(mailAccounts.accounts) { account in
+                                ScopeRailButton(
+                                    title: account.displayName,
+                                    subtitle: account.username ?? account.provider.displayName,
+                                    systemImage: account.provider.systemImage,
+                                    isSelected: mailReview.selectedAccountID == account.accountID,
+                                    accessibilityIdentifier: "mail.account.\(account.accountID)"
+                                ) {
+                                    Task { await mailReview.selectAccount(account.accountID) }
+                                }
+                            }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    Text("Mailboxes")
+                        .font(ManifoldType.tiny.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.4)
+
+                    if let accountID = mailReview.selectedAccountID {
+                        let mailboxes = mailReview.mailboxes(for: accountID).filter(\.isSelectable)
+                        if mailboxes.isEmpty {
+                            Text("No synced mailboxes yet")
+                                .font(ManifoldType.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(mailboxes) { mailbox in
+                                ScopeRailButton(
+                                    title: mailbox.mailboxName,
+                                    subtitle: mailbox.folderType.rawValue.capitalized,
+                                    systemImage: mailbox.folderType.systemImage,
+                                    isSelected: mailReview.selectedMailboxName == mailbox.mailboxName,
+                                    accessibilityIdentifier: "mail.mailbox.\(accountID).\(mailbox.mailboxName.replacingOccurrences(of: " ", with: "-"))"
+                                ) {
+                                    Task { await mailReview.selectMailbox(mailbox.mailboxName) }
+                                }
+                            }
+                        }
+                    } else {
+                        Text("Pick an account first")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    Text("Quick filters")
+                        .font(ManifoldType.tiny.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.4)
+
+                    ForEach(QuickFilter.defaultVisible) { filter in
+                        ScopeRailButton(
+                            title: filter.displayName,
+                            subtitle: "Filter the current mailbox",
+                            systemImage: filter.systemImage,
+                            isSelected: mailReview.activeQuickFilter == filter,
+                            accessibilityIdentifier: "mail.quickFilter.\(filter.rawValue)"
+                        ) {
+                            Task { await mailReview.setQuickFilter(filter) }
+                        }
+                    }
                 }
             }
             .padding(Spacing.s4)
@@ -521,13 +181,502 @@ struct MailSessionView: View {
     }
 }
 
-struct MailHistoryView: View {
+private struct ScopeRailButton: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let isSelected: Bool
+    var accessibilityIdentifier: String?
+    let action: () -> Void
+
     var body: some View {
-        ContentUnavailableView(
-            "No mail sessions yet",
-            systemImage: "clock.arrow.circlepath",
-            description: Text("Finished mail sessions show up here with the mailboxes they touched and how many threads they read.")
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Button(action: action) {
+            HStack(spacing: Spacing.s2) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(isSelected ? ManifoldPalette.selection : ManifoldPalette.text2)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(ManifoldType.body)
+                    Text(subtitle)
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.s3)
+            .padding(.vertical, Spacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? ManifoldPalette.selectionSoft : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier ?? "mail.scope.\(title)")
+    }
+}
+
+private struct ThreadToolbar: View {
+    @Environment(MailReviewModel.self) private var mailReview
+
+    let selectedAccount: EmailAccountRecord?
+    let selectedMailboxName: String?
+    @FocusState.Binding var isSearchFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            HStack(spacing: Spacing.s3) {
+                TextField(
+                    "Search sender, subject, or preview",
+                    text: Binding(
+                        get: { mailReview.searchText },
+                        set: { mailReview.updateSearchText($0) }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 320)
+                .focused($isSearchFocused)
+                .accessibilityIdentifier("mail.searchField")
+
+                if let selectedAccount, let selectedMailboxName {
+                    Text("\(selectedAccount.displayName) · \(selectedMailboxName)")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Sync now") {
+                    Task { await mailReview.syncSelectedAccount() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(selectedAccount == nil)
+            }
+
+            Text(summaryLine)
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s3)
+        .background(.regularMaterial)
+    }
+
+    private var summaryLine: String {
+        let threadCount = mailReview.threadRows.count
+        let messageCount = mailReview.messages.count
+        let sharedCount = mailReview.sharedEmailIDs.intersection(Set(mailReview.messages.map(\.emailID))).count
+        return "\(threadCount) conversations · \(messageCount) messages · \(sharedCount) shared"
+    }
+}
+
+private struct MailReviewTableArea: View {
+    @Environment(MailReviewModel.self) private var mailReview
+
+    let selectedAccount: EmailAccountRecord?
+    let selectedSyncState: SyncStateRecord?
+    let rows: [MailReviewRow]
+    @Binding var sortOrder: [KeyPathComparator<MailReviewRow>]
+    @Binding var selection: String?
+
+    var body: some View {
+        if mailReview.isLoading && mailReview.messages.isEmpty {
+            ProgressView("Loading backed-up mail…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let errorMessage = mailReview.errorMessage, mailReview.messages.isEmpty {
+            ContentUnavailableView(
+                "Couldn’t load backed-up mail",
+                systemImage: "exclamationmark.triangle",
+                description: Text(errorMessage)
+            )
+            .overlay(alignment: .bottom) {
+                Button("Retry") {
+                    Task { await mailReview.retry() }
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(Spacing.s5)
+            }
+        } else if mailReview.selectedMailboxName == nil {
+            ContentUnavailableView(
+                "No synced mailboxes yet",
+                systemImage: "tray",
+                description: Text("Run a backup for this account, then come back here to browse individual messages.")
+            )
+        } else if mailReview.messages.isEmpty {
+            EmptyMailboxState(selectedAccount: selectedAccount, selectedSyncState: selectedSyncState)
+        } else {
+            VStack(spacing: 0) {
+                if let banner = syncBannerText {
+                    HStack(spacing: Spacing.s2) {
+                        Image(systemName: "clock.arrow.circlepath")
+                        Text(banner)
+                            .font(ManifoldType.caption)
+                        Spacer()
+                    }
+                    .padding(.horizontal, Spacing.s4)
+                    .padding(.vertical, Spacing.s2)
+                    .background(ManifoldPalette.attention.opacity(0.12))
+                    .foregroundStyle(ManifoldPalette.attention)
+                }
+
+                Table(of: MailReviewRow.self, selection: $selection, sortOrder: $sortOrder) {
+                    TableColumn("Visibility", value: \.visibilitySortKey) { row in
+                        VisibilityChip(state: row.visibilityState)
+                    }
+                    .width(min: 110, ideal: 124, max: 138)
+
+                    TableColumn("Sender", value: \.senderSortKey) { row in
+                        HStack(spacing: Spacing.s2) {
+                            SenderAvatar(label: row.senderSortKey, size: 18)
+                            Text(row.senderSortKey)
+                                .font(ManifoldType.body)
+                                .lineLimit(1)
+                        }
+                    }
+                    .width(min: 160, ideal: 190)
+
+                    TableColumn("Subject", value: \.subjectSortKey) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.subjectSortKey)
+                                .font(ManifoldType.bodyMedium)
+                                .lineLimit(1)
+                            Text(row.previewText)
+                                .font(ManifoldType.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    TableColumn("Mailbox", value: \.mailboxSortKey) { row in
+                        Text(row.mailboxSortKey)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(min: 120, ideal: 140, max: 180)
+
+                    TableColumn("Received", value: \.receivedDate) { row in
+                        Text(MailDisplayFormatter.mailTimestamp(row.receivedAt))
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(min: 100, ideal: 120, max: 140)
+
+                    TableColumn("Attach", value: \.attachmentCount) { row in
+                        if row.attachmentCount > 0 {
+                            Label("\(row.attachmentCount)", systemImage: "paperclip")
+                                .font(ManifoldType.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("—")
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .width(min: 70, ideal: 80, max: 90)
+                } rows: {
+                    ForEach(rows) { row in
+                        TableRow(row)
+                            .contextMenu {
+                                VisibilityActionMenu(row: row)
+                            }
+                    }
+                }
+                .tableStyle(.inset)
+                .accessibilityIdentifier("mail.review.table")
+            }
+        }
+    }
+
+    private var syncBannerText: String? {
+        guard let selectedAccount else { return nil }
+        if !selectedAccount.syncEnabled {
+            return "Backup is paused for this account. Sync again to refresh what’s visible here."
+        }
+        guard let lastSyncAt = selectedSyncState?.lastSyncAt else { return nil }
+        let age = Date().timeIntervalSince(MailDisplayFormatter.date(from: lastSyncAt))
+        return age > 86_400 ? "This mailbox backup is older than a day. Sync now if you need the latest messages." : nil
+    }
+}
+
+private struct EmptyMailboxState: View {
+    @Environment(MailReviewModel.self) private var mailReview
+
+    let selectedAccount: EmailAccountRecord?
+    let selectedSyncState: SyncStateRecord?
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("No backed-up messages in this mailbox", systemImage: "text.bubble")
+        } description: {
+            Text(descriptionText)
+        } actions: {
+            if selectedAccount != nil {
+                Button("Sync now") {
+                    Task { await mailReview.syncSelectedAccount() }
+                }
+            }
+        }
+    }
+
+    private var descriptionText: String {
+        guard let selectedAccount else {
+            return "Choose an account and mailbox to browse backed-up mail."
+        }
+        if !selectedAccount.syncEnabled {
+            return "Backup is paused for this account. Turn sync back on, then sync now to populate this mailbox."
+        }
+        if let lastSyncAt = selectedSyncState?.lastSyncAt {
+            return "Manifold has a mailbox selected, but there are no backed-up messages here yet. Last backup \(MailDisplayFormatter.relativeTimestamp(lastSyncAt))."
+        }
+        return "Run a backup for this mailbox, then come back here to review and share individual messages."
+    }
+}
+
+private struct ThreadInspector: View {
+    @Environment(MailAccountsModel.self) private var mailAccounts
+    @Environment(MailReviewModel.self) private var mailReview
+
+    var body: some View {
+        ScrollView {
+            if let selectedThread = mailReview.selectedThread,
+               let selectedMessage = mailReview.selectedMessage {
+                let visibilityState = mailReview.sharedEmailIDs.contains(selectedMessage.emailID)
+                    ? VisibilityState(effective: .allowed, origin: .explicit)
+                    : VisibilityState(effective: .hidden, origin: .defaultScope)
+                VStack(alignment: .leading, spacing: Spacing.s4) {
+                    HStack(spacing: Spacing.s2) {
+                        SenderAvatar(label: MailThreadRow.shortSender(from: selectedMessage.sender), size: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selectedMessage.subject.isEmpty ? "(No subject)" : selectedMessage.subject)
+                                .font(ManifoldType.heading)
+                            Text(MailThreadRow.shortSender(from: selectedMessage.sender))
+                                .font(ManifoldType.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack(spacing: Spacing.s2) {
+                        VisibilityChip(state: visibilityState)
+                        Text(visibilityState.detail)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("mail.message.inspector.visibility.\(selectedMessage.emailID)")
+
+                    HStack(spacing: Spacing.s2) {
+                        Button("Allow") {
+                            Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: true) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ManifoldPalette.selection)
+                        .accessibilityIdentifier("mail.message.allow")
+
+                        Button("Hide") {
+                            Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: false) }
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("mail.message.hide")
+
+                        Button("Reset") {
+                            Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: false) }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(visibilityState.origin != .explicit)
+                        .accessibilityIdentifier("mail.message.reset")
+                    }
+
+                    VStack(alignment: .leading, spacing: Spacing.s2) {
+                        inspectorRow("Received", MailDisplayFormatter.mailTimestamp(selectedMessage.receivedAt))
+                        inspectorRow("Account", accountName(for: selectedMessage.accountID))
+                        inspectorRow("Mailbox", selectedMessage.mailbox)
+                        inspectorRow("Conversation", "\(selectedThread.messages.count) messages")
+                        inspectorRow("Attachments", "\(selectedMessage.attachmentCount)")
+                    }
+
+                    VStack(alignment: .leading, spacing: Spacing.s2) {
+                        Text("Safe excerpt")
+                            .font(ManifoldType.tiny.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .tracking(0.4)
+
+                        Text(MailDisplayFormatter.compactPreview(selectedMessage.preview ?? selectedMessage.bodyText ?? "No preview available"))
+                            .font(ManifoldType.body)
+                            .italic()
+                            .padding(Spacing.s3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(ManifoldPalette.surface)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.6)
+                            )
+                    }
+
+                    VStack(alignment: .leading, spacing: Spacing.s2) {
+                        Text("Conversation context")
+                            .font(ManifoldType.tiny.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .tracking(0.4)
+
+                        ForEach(selectedThread.messageRows) { row in
+                            HStack(spacing: Spacing.s2) {
+                                Circle()
+                                    .fill(mailReview.sharedEmailIDs.contains(row.emailID) ? ManifoldPalette.selection : ManifoldPalette.border2)
+                                    .frame(width: 8, height: 8)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(MailThreadRow.shortSender(from: row.message.sender))
+                                        .font(ManifoldType.captionMedium)
+                                    Text(MailDisplayFormatter.mailTimestamp(row.message.receivedAt))
+                                        .font(ManifoldType.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .padding(Spacing.s4)
+            } else {
+                ContentUnavailableView(
+                    "No message selected",
+                    systemImage: "sidebar.right",
+                    description: Text("Pick a backed-up message to inspect its metadata, safe excerpt, and visibility state.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 360)
+            }
+        }
+    }
+
+    private func accountName(for accountID: String) -> String {
+        mailAccounts.accounts.first(where: { $0.accountID == accountID })?.displayName ?? accountID
+    }
+
+    @ViewBuilder
+    private func inspectorRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
+            Text(title)
+                .font(ManifoldType.captionMedium)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(ManifoldType.caption)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct VisibilityActionMenu: View {
+    @Environment(MailReviewModel.self) private var mailReview
+    let row: MailReviewRow
+
+    var body: some View {
+        Button("Allow") {
+            Task { await mailReview.setMessageShared(row.emailID, isShared: true) }
+        }
+        Button("Hide") {
+            Task { await mailReview.setMessageShared(row.emailID, isShared: false) }
+        }
+        Button("Reset to Default Hidden") {
+            Task { await mailReview.setMessageShared(row.emailID, isShared: false) }
+        }
+        .disabled(row.visibilityState.origin != .explicit)
+    }
+}
+
+private struct MailReviewRow: Identifiable, Hashable {
+    let message: EmailMessageRecord
+    let threadKey: String
+    let visibilityState: VisibilityState
+
+    var id: String { message.emailID }
+    var emailID: String { message.emailID }
+    var senderSortKey: String { MailThreadRow.shortSender(from: message.sender) }
+    var subjectSortKey: String { message.subject.isEmpty ? "(No subject)" : message.subject }
+    var mailboxSortKey: String { message.mailbox }
+    var receivedDate: Date { MailDisplayFormatter.date(from: message.receivedAt) }
+    var receivedAt: String { message.receivedAt }
+    var attachmentCount: Int { message.attachmentCount }
+    var previewText: String {
+        MailDisplayFormatter.compactPreview(message.preview ?? message.bodyText ?? "No preview available")
+    }
+    var visibilitySortKey: String {
+        "\(visibilityState.effective.rawValue)-\(visibilityState.origin.rawValue)"
+    }
+}
+
+private struct SenderAvatar: View {
+    let label: String
+    var size: CGFloat = 22
+
+    private var initials: String {
+        let parts = label
+            .split(separator: " ")
+            .prefix(2)
+            .map { String($0.prefix(1)).uppercased() }
+            .joined()
+        return parts.isEmpty ? "?" : parts
+    }
+
+    private var color: Color {
+        let palette: [Color] = [
+            ManifoldPalette.claude,
+            ManifoldPalette.codex,
+            ManifoldPalette.active,
+            ManifoldPalette.attention,
+            ManifoldPalette.paused,
+        ]
+        let hash = abs(label.lowercased().hashValue)
+        return palette[hash % palette.count]
+    }
+
+    var body: some View {
+        Circle()
+            .fill(color.opacity(0.18))
+            .frame(width: size, height: size)
+            .overlay(
+                Text(initials)
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(color)
+            )
+    }
+}
+
+enum MailDisplayFormatter {
+    static func date(from rawValue: String) -> Date {
+        ISO8601DateFormatter.shared.date(from: rawValue) ?? .distantPast
+    }
+
+    static func mailTimestamp(_ rawValue: String) -> String {
+        let date = date(from: rawValue)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            return "Today \(formatter.string(from: date))"
+        }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        return formatter.string(from: date)
+    }
+
+    static func relativeTimestamp(_ rawValue: String?) -> String {
+        guard let rawValue else { return "recently" }
+        let formatter = RelativeDateTimeFormatter()
+        return formatter.localizedString(for: date(from: rawValue), relativeTo: .now)
+    }
+
+    static func compactPreview(_ rawValue: String) -> String {
+        rawValue
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

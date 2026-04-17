@@ -20,7 +20,7 @@ struct MailSettingsPane: View {
     var body: some View {
         Form {
             Section("Accounts") {
-                if store.emailAccounts.accounts.isEmpty {
+                if store.mailAccounts.accounts.isEmpty {
                     ContentUnavailableView(
                         "No mailboxes connected",
                         systemImage: "envelope.badge",
@@ -28,7 +28,7 @@ struct MailSettingsPane: View {
                     )
                     .padding(.vertical, Spacing.s4)
                 } else {
-                    ForEach(store.emailAccounts.accounts) { account in
+                    ForEach(store.mailAccounts.accounts) { account in
                         MailAccountRow(
                             account: account,
                             syncEnabled: syncBinding(for: account)
@@ -44,10 +44,10 @@ struct MailSettingsPane: View {
 
             Section("Storage") {
                 LabeledContent("Backup location") {
-                    PathLabel(store.emailAccounts.backupRootPath)
+                    PathLabel(store.mailAccounts.backupRootPath)
                 }
                 LabeledContent("Total messages") {
-                    Text("\(store.emailAccounts.totalMessageCount)")
+                    Text("\(store.mailAccounts.totalMessageCount)")
                         .monospacedDigit()
                 }
             }
@@ -66,7 +66,7 @@ struct MailSettingsPane: View {
             get: { account.syncEnabled },
             set: { enabled in
                 Task {
-                    await store.emailAccounts.toggleSync(
+                    await store.mailAccounts.toggleSync(
                         accountID: account.accountID,
                         enabled: enabled
                     )

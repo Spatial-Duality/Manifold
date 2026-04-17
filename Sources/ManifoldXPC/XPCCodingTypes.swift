@@ -35,6 +35,44 @@ public struct RequestIDPayload: Codable, Sendable {
     public init(id: String) { self.id = id }
 }
 
+public struct RuleMatchPreview: Codable, Sendable, Hashable {
+    public struct Sample: Codable, Sendable, Hashable {
+        public let identifier: String
+        public let label: String
+
+        public init(identifier: String, label: String) {
+            self.identifier = identifier
+            self.label = label
+        }
+    }
+
+    public let ruleID: String
+    public let fileMatches: Int
+    public let emailMatches: Int
+    public let agentMatches: Int
+    public let sample: [Sample]
+
+    public init(ruleID: String, fileMatches: Int, emailMatches: Int, agentMatches: Int, sample: [Sample]) {
+        self.ruleID = ruleID
+        self.fileMatches = fileMatches
+        self.emailMatches = emailMatches
+        self.agentMatches = agentMatches
+        self.sample = sample
+    }
+
+    public var totalMatches: Int { fileMatches + emailMatches + agentMatches }
+}
+
+public struct RestoreSnapshotResult: Codable, Sendable {
+    public let status: String
+    public let message: String?
+
+    public init(status: String, message: String? = nil) {
+        self.status = status
+        self.message = message
+    }
+}
+
 public enum XPCJSON {
     public static func data(from object: Any) throws -> Data {
         guard JSONSerialization.isValidJSONObject(object) else {

@@ -1,76 +1,107 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// MailWindowView — the mail surface.
+// MailView — the mail surface.
 //
 // Per Stage 8: this is Active-Backup, not a Mail client. No reading pane,
-// no compose, no reply. The surface answers: which mailboxes does an
-// agent see, at what sensitivity, and which threads were touched in
-// which session.
+// no compose, no reply. The primary surface is now a dense review browser:
+// account/mailbox rail, sortable message table, and a narrow metadata
+// inspector for atomic allow / hide decisions.
 
 import SwiftUI
 import ManifoldKit
 
-struct MailWindowView: View {
+struct MailView: View {
     @Environment(ManifoldStore.self) private var store
+    @State private var hasLoadedMailAccounts = false
 
-    /// Three modes. `.session` (disabled-when-no-session) was a posture
-    /// leak per plan §2.5.1 — dropped; session activity is visible via
-    /// the Activity ledger filtered on the live session.
-    enum Tab: String, Hashable, CaseIterable, Identifiable {
-        case mailboxes, threads, history
-
-        var id: String { rawValue }
+    enum MailSection: String, Hashable, CaseIterable {
+        case review
+        case session
+        case history
 
         var label: String {
             switch self {
-            case .mailboxes: return "Mailboxes"
-            case .threads:   return "Threads"
+            case .review:    return "Review"
+            case .session:   return "Session"
             case .history:   return "History"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .review:    return "text.bubble"
+            case .session:   return "play.fill"
+            case .history:   return "clock.arrow.circlepath"
             }
         }
     }
 
-    @State private var tab: Tab = .mailboxes
+    @State private var selectedSection: MailSection = .review
 
     var body: some View {
         VStack(spacing: 0) {
-            MailTabBar(selection: $tab)
+            SegmentedTabBar(
+                selection: $selectedSection,
+                items: MailSection.allCases.map { item in
+                    SegmentedTabItem(
+                        value: item,
+                        title: item.label,
+                        systemImage: item.systemImage,
+                        isEnabled: item != .session || store.activeSession != nil,
+                        accessibilityIdentifier: "mail.tab.\(item.rawValue)"
+                    )
+                }
+            )
             Divider()
 
-            if store.emailAccounts.accounts.isEmpty {
+            if !hasLoadedMailAccounts {
+                ProgressView("Loading mail backup…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(ManifoldPalette.surface)
+            } else if store.mailAccounts.accounts.isEmpty {
                 EmptyMailView()
             } else {
-                switch tab {
-                case .mailboxes: MailboxesMatrixView()
-                case .threads:   ThreadsView()
+                switch selectedSection {
+                case .review:
+                    MailReviewView()
+                case .session:   MailSessionView()
                 case .history:   MailHistoryView()
                 }
             }
         }
-        .task { await store.emailAccounts.loadAccounts() }
-    }
-}
-
-/// Native segmented picker, replaces the previous custom capsule bar
-/// per APPLE-DESIGN-EXCELLENCE-GUIDE §3.
-private struct MailTabBar: View {
-    @Binding var selection: MailWindowView.Tab
-
-    var body: some View {
-        HStack {
-            Picker("View", selection: $selection) {
-                ForEach(MailWindowView.Tab.allCases) { tab in
-                    Text(tab.label).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            Spacer()
+        .accessibilityElement(children: .contain)
+        .environment(store.mailAccounts)
+        .environment(store.mailReview)
+        .task {
+            await store.mailAccounts.loadAccounts()
+            await store.mailReview.prepare(force: true)
+            hasLoadedMailAccounts = true
         }
-        .padding(.horizontal, Spacing.s4)
-        .padding(.vertical, Spacing.s2)
-        .background(.regularMaterial)
+        .task(id: selectedSection) {
+            guard hasLoadedMailAccounts, selectedSection == .review else { return }
+            await store.mailReview.prepare(force: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
+            guard selectedSection != .review else { return }
+            selectedSection = .review
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .manifoldFocusCurrentSearch, object: nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldCycleCurrentSubtab)) { notification in
+            guard let delta = notification.object as? Int else { return }
+            cycleTab(by: delta)
+        }
+        .accessibilityIdentifier("ledger.surface.mail")
+    }
+
+    private func cycleTab(by delta: Int) {
+        let enabledSections = MailSection.allCases.filter { $0 != .session || store.activeSession != nil }
+        guard let currentIndex = enabledSections.firstIndex(of: selectedSection), !enabledSections.isEmpty else { return }
+        let nextIndex = (currentIndex + delta + enabledSections.count) % enabledSections.count
+        withAnimation(ManifoldMotion.micro) {
+            selectedSection = enabledSections[nextIndex]
+        }
     }
 }

@@ -10,7 +10,6 @@ import ManifoldKit
 
 struct ConceptPanel: View {
     let next: () -> Void
-    let skip: () -> Void
 
     @State private var glow = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -44,10 +43,11 @@ struct ConceptPanel: View {
             .frame(height: 180)
 
             VStack(spacing: Spacing.s3) {
-                Text("Manifold is a trust layer for your AI agents")
+                Text("Protect your next AI session")
                     .font(ManifoldType.display)
                     .multilineTextAlignment(.center)
-                Text("It's a daemon running in the background that decides what Claude and Codex can see on your Mac. You won't spend much time in this app — it's here when you need it.")
+                    .accessibilityIdentifier("onboarding.concept.title")
+                Text("Manifold governs the files and mail you choose to share here. It records what was exposed and changed, while staying honest about activity outside this boundary.")
                     .font(ManifoldType.body)
                     .foregroundStyle(ManifoldPalette.text2)
                     .multilineTextAlignment(.center)
@@ -61,15 +61,16 @@ struct ConceptPanel: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("onboarding.concept.continue")
         }
         .padding(Spacing.s6)
+        .accessibilityIdentifier("onboarding.panel.concept")
     }
 }
 
 struct DefaultsPanel: View {
     let next: () -> Void
     let back: () -> Void
-    let skip: () -> Void
 
     var body: some View {
         VStack(spacing: Spacing.s6) {
@@ -77,7 +78,7 @@ struct DefaultsPanel: View {
             EmptyStateIllustration(
                 systemImage: "lock.shield",
                 title: "Nothing is shared until you share it",
-                subtitle: "Agents start with no scope. The next panel helps you share one folder so they have something to work with."
+                subtitle: "No agent can see anything until you share it. The next panel helps you protect one project folder for the next session."
             )
             Spacer()
             HStack(spacing: Spacing.s3) {
@@ -87,42 +88,130 @@ struct DefaultsPanel: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding.defaults.continue")
             }
         }
         .padding(Spacing.s6)
+        .accessibilityIdentifier("onboarding.panel.defaults")
     }
 }
 
 struct GuidedAddPanel: View {
-    @Environment(ManifoldStore.self) private var store
-    let finish: () -> Void
+    let choose: () -> Void
     let back: () -> Void
-    let skip: () -> Void
 
     var body: some View {
         VStack(spacing: Spacing.s6) {
             Spacer()
             EmptyStateIllustration(
                 systemImage: "folder.badge.plus",
-                title: "Share your first folder",
-                subtitle: "Pick one project folder. Only files inside it are visible to agents — everything else stays private.",
+                title: "Protect one project first",
+                subtitle: "Pick one project folder. Files inside it become visible here when you choose to share them. Everything else stays outside this governed path.",
                 tint: ManifoldPalette.active
             )
             Spacer()
             HStack(spacing: Spacing.s3) {
                 Button("Back", action: back)
                     .buttonStyle(.bordered)
-                Button {
-                    store.addSourceFromPicker()
-                    finish()
-                } label: {
+                Button(action: choose) {
                     Label("Choose folder\u{2026}", systemImage: "folder.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("onboarding.guidedAdd.chooseFolder")
             }
         }
         .padding(Spacing.s6)
+        .accessibilityIdentifier("onboarding.panel.guidedAdd")
+    }
+}
+
+struct ScopeReviewPanel: View {
+    let selectedPaths: [String]
+    let finish: () -> Void
+    let back: () -> Void
+
+    private var folderCountLabel: String {
+        let count = selectedPaths.count
+        return "\(count) folder\(count == 1 ? "" : "s")"
+    }
+
+    var body: some View {
+        VStack(spacing: Spacing.s6) {
+            Spacer(minLength: 0)
+
+            VStack(spacing: Spacing.s3) {
+                Text("Review your first protected scope")
+                    .font(ManifoldType.display)
+                    .multilineTextAlignment(.center)
+                Text("Only these folders are visible when you start a protected session. Everything else stays outside this governed path unless you choose to share more later.")
+                    .font(ManifoldType.body)
+                    .foregroundStyle(ManifoldPalette.text2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.s3) {
+                HStack(spacing: Spacing.s2) {
+                    Pill(text: folderCountLabel, variant: .defaultScope)
+                    Text("ready for your next protected session")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(selectedPaths, id: \.self) { path in
+                    HStack(alignment: .top, spacing: Spacing.s2) {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(ManifoldPalette.active)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(URL(fileURLWithPath: path).lastPathComponent)
+                                .font(ManifoldType.bodyMedium)
+                            Text(path.shortenedPath)
+                                .font(ManifoldType.mono)
+                                .foregroundStyle(ManifoldPalette.text2)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                VStack(alignment: .leading, spacing: Spacing.s1) {
+                    Text("Boundary")
+                        .font(ManifoldType.captionMedium)
+                    Text("Manifold governs the access it mediates. Native app connectors, terminal access, and other local capabilities fall outside this boundary.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(ManifoldPalette.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(Spacing.s3)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                        .fill(ManifoldPalette.surface3.opacity(0.65))
+                )
+            }
+            .padding(Spacing.s5)
+            .frame(maxWidth: 620, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r5, style: .continuous)
+                    .fill(ManifoldPalette.surface2)
+            )
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: Spacing.s3) {
+                Button("Back", action: back)
+                    .buttonStyle(.bordered)
+                Button("Protect next session", action: finish)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding.scopeReview.finish")
+            }
+        }
+        .padding(Spacing.s6)
+        .accessibilityIdentifier("onboarding.panel.scopeReview")
     }
 }

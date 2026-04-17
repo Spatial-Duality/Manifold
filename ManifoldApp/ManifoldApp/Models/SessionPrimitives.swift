@@ -10,7 +10,7 @@
 //
 // These types live in the app because they are UI adapters. Runtime-side
 // storage types remain in ManifoldKit (WorkBlockRecord, GrantRecord,
-// RequestRecord, etc.). PolicyModel and ManifoldStore provide the bridge.
+// RequestRecord, etc.). GovernanceModel and ManifoldStore provide the bridge.
 
 import Foundation
 import ManifoldKit
@@ -63,7 +63,7 @@ struct SessionScopeChange: Identifiable, Hashable, Sendable {
     enum Kind: Hashable, Sendable { case file, folder, mailbox }
 }
 
-/// A past session indexed for the Recent / Resume list.
+/// A past session indexed for the Recent / reload-preview list.
 struct SessionHistoryEntry: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
@@ -106,16 +106,9 @@ struct SessionDrift: Hashable, Sendable {
 }
 
 /// Form-backing draft for the SessionStartSheet / ReloadDriftSheet.
-///
-/// `durationHours == nil` means "run until the user finishes manually"
-/// — no auto-expiry. The default remains a bounded 2-hour session so
-/// the safe choice is still the default (Principle 3). When a time-
-/// limited session expires, the runtime ends it; with `nil`, the
-/// session lives until the user hits Finish in the StatusBar / menu
-/// bar panel.
 struct SessionDraft: Hashable, Sendable {
     var name: String = ""
-    var durationHours: Double? = 2
+    var durationHours: Double = 2
     var agents: Set<TargetApp> = [.cowork]
     var baseMode: SessionRecord.BaseMode = .defaultScope
     var trackWrites: Bool = false
@@ -126,7 +119,12 @@ struct SessionDraft: Hashable, Sendable {
 /// A pending agent request for expanded scope. Accumulates on the queue
 /// rather than firing a modal (Principle 2 — modelessness).
 struct ApprovalRequest: Identifiable, Hashable, Sendable {
+    enum Kind: String, Hashable, Sendable {
+        case standingWrite = "standing_write"
+    }
+
     let id: String
+    let kind: Kind
     let agent: TargetApp
     let operation: Operation
     let target: String
@@ -134,6 +132,13 @@ struct ApprovalRequest: Identifiable, Hashable, Sendable {
     let context: String
     let createdAt: Date
     var snoozedUntil: Date?
+
+    var supportsSessionScope: Bool {
+        switch kind {
+        case .standingWrite:
+            return false
+        }
+    }
 
     enum Operation: Hashable, Sendable {
         case readFile
@@ -151,9 +156,9 @@ enum ApprovalAnswer: Hashable, Sendable {
     case notThisTime
     /// Allow this exact request, no persisted scope addition.
     case once
-    /// Add target to the active session's scope (session must be live).
+    /// Reserved for future request kinds that bind to a live session.
     case forSession(sessionID: String)
-    /// Promote target to the agent's default scope.
+    /// Promote target to the agent's default standing scope.
     case addToDefault
 }
 
@@ -188,44 +193,6 @@ struct Rule: Identifiable, Hashable, Sendable {
     let seeded: Bool
     let createdBy: CreatedBy
     let createdAt: Date
-
-    /// Most recent time this rule fired, if ever. Remains nil until the
-    /// runtime starts writing rule-fired events to the audit log — the
-    /// view reads this and renders "Not yet fired" when it is nil
-    /// (Principle 10: honesty — no fake counts).
-    var lastFiredAt: Date?
-    /// How many times this rule has fired in the past seven days, if the
-    /// runtime is tracking it. Defaults to 0 — same honesty contract
-    /// as `lastFiredAt`.
-    var firesPast7Days: Int
-
-    init(
-        id: String,
-        domain: Domain,
-        verb: Verb,
-        subject: String,
-        object: String,
-        pattern: String,
-        enabled: Bool,
-        seeded: Bool,
-        createdBy: CreatedBy,
-        createdAt: Date,
-        lastFiredAt: Date? = nil,
-        firesPast7Days: Int = 0
-    ) {
-        self.id = id
-        self.domain = domain
-        self.verb = verb
-        self.subject = subject
-        self.object = object
-        self.pattern = pattern
-        self.enabled = enabled
-        self.seeded = seeded
-        self.createdBy = createdBy
-        self.createdAt = createdAt
-        self.lastFiredAt = lastFiredAt
-        self.firesPast7Days = firesPast7Days
-    }
 
     enum Domain: String, Hashable, Sendable, CaseIterable {
         case files
@@ -318,22 +285,22 @@ extension SessionRecord {
     /// Build a SessionRecord view over an active WorkBlockRecord + its
     /// associated grant. Keeps the Stage-6 vocabulary at the UI layer while
     /// the runtime still speaks WorkBlock / Grant.
-    init(workBlock: WorkBlockRecord,
+    init(storageRecord: WorkBlockRecord,
          grantName: String? = nil,
          expiresAt: Date? = nil,
          additions: [SessionScopeChange] = [],
          removals: [SessionScopeChange] = []) {
-        self.id = workBlock.id
+        self.id = storageRecord.id
         self.name = grantName
-            ?? "Session · \(DateFormatter.sessionName.string(from: Self.parseISO(workBlock.startedAt) ?? .now))"
-        self.startedAt = Self.parseISO(workBlock.startedAt) ?? .now
+            ?? "Session · \(DateFormatter.sessionName.string(from: Self.parseISO(storageRecord.startedAt) ?? .now))"
+        self.startedAt = Self.parseISO(storageRecord.startedAt) ?? .now
         self.expiresAt = expiresAt
-        self.agents = [workBlock.agent]
+        self.agents = [storageRecord.agent]
         self.baseMode = .defaultScope
         self.trackWrites = true
-        self.isTrackedEdit = (workBlock.status == .active
-                              || workBlock.status == .paused
-                              || workBlock.status == .reviewing)
+        self.isTrackedEdit = (storageRecord.status == .active
+                              || storageRecord.status == .paused
+                              || storageRecord.status == .reviewing)
         self.additions = additions
         self.removals = removals
     }

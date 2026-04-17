@@ -1,70 +1,110 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-VERSION=$(cat VERSION | tr -d '[:space:]')
+VERSION="$(tr -d '[:space:]' < VERSION)"
 CONFIG="${1:-debug}"
+
+APP_IDENTITY="${MANIFOLD_CODESIGN_IDENTITY:-}"
+NOTARY_PROFILE="${MANIFOLD_NOTARY_PROFILE:-}"
+REQUIRE_SIGNED_RELEASE="${MANIFOLD_REQUIRE_SIGNED_RELEASE:-0}"
+REQUIRE_NOTARIZATION="${MANIFOLD_REQUIRE_NOTARIZATION:-0}"
 
 echo "Building Manifold v$VERSION ($CONFIG)..."
 
-if [ "$CONFIG" = "release" ]; then
-    swift build -c release --product ManifoldApp --product manifold-mcp
-    BUILD_DIR="$PROJECT_DIR/.build/release"
+if [[ "$CONFIG" == "release" ]]; then
+    SWIFT_BUILD_CONFIG="release"
+    XCODE_CONFIGURATION="Release"
 else
-    swift build --product ManifoldApp --product manifold-mcp
-    BUILD_DIR="$PROJECT_DIR/.build/debug"
+    SWIFT_BUILD_CONFIG="debug"
+    XCODE_CONFIGURATION="Debug"
 fi
 
-BINARY="$BUILD_DIR/ManifoldApp"
+DERIVED_DATA_PATH="$PROJECT_DIR/.deriveddata-release"
+XCODE_APP_BUNDLE="$DERIVED_DATA_PATH/Build/Products/$XCODE_CONFIGURATION/Manifold.app"
+
+xcodebuild \
+    -project Manifold.xcodeproj \
+    -scheme Manifold \
+    -configuration "$XCODE_CONFIGURATION" \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
+    build \
+    CODE_SIGNING_ALLOWED=NO >/tmp/manifold-build-script-xcodebuild.log 2>&1
+
+swift build -c "$SWIFT_BUILD_CONFIG" --product manifold-mcp
+BUILD_DIR="$PROJECT_DIR/.build/$SWIFT_BUILD_CONFIG"
 MCP_BINARY="$BUILD_DIR/manifold-mcp"
+
 BUNDLE="$PROJECT_DIR/ManifoldApp/build/Manifold.app"
+MCP_BINARY_PATH="$BUNDLE/Contents/Resources/manifold-mcp"
+
+if [[ ! -d "$XCODE_APP_BUNDLE" ]]; then
+    echo "error: expected app bundle at $XCODE_APP_BUNDLE" >&2
+    exit 1
+fi
 
 rm -rf "$BUNDLE"
-mkdir -p "$BUNDLE/Contents/MacOS"
+ditto "$XCODE_APP_BUNDLE" "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/Resources"
+cp "$MCP_BINARY" "$MCP_BINARY_PATH"
+chmod +x "$MCP_BINARY_PATH"
 
-cp "$BINARY" "$BUNDLE/Contents/MacOS/ManifoldApp"
-cp "$MCP_BINARY" "$BUNDLE/Contents/Resources/manifold-mcp"
-chmod +x "$BUNDLE/Contents/Resources/manifold-mcp"
+LAUNCH_AGENT_DIR="$BUNDLE/Contents/Library/LaunchAgents"
+LAUNCH_SERVICE_DIR="$BUNDLE/Contents/Library/LaunchServices"
+AGENT_BINARY_PATH="$LAUNCH_SERVICE_DIR/ManifoldAgent"
 
-cat > "$BUNDLE/Contents/Info.plist" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>ManifoldApp</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.spatialduality.manifold</string>
-    <key>CFBundleName</key>
-    <string>Manifold</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$VERSION</string>
-    <key>CFBundleVersion</key>
-    <string>$VERSION</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>26.0</string>
-    <key>LSUIElement</key>
-    <false/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.utilities</string>
-</dict>
-</plist>
-PLIST
+if [[ ! -x "$AGENT_BINARY_PATH" ]]; then
+    echo "error: expected bundled ManifoldAgent helper at $AGENT_BINARY_PATH" >&2
+    exit 1
+fi
+
+if [[ "$CONFIG" == "release" ]]; then
+    if [[ "$REQUIRE_SIGNED_RELEASE" == "1" && -z "$APP_IDENTITY" ]]; then
+        echo "error: MANIFOLD_CODESIGN_IDENTITY is required for release builds." >&2
+        exit 1
+    fi
+
+    if [[ -n "$APP_IDENTITY" ]]; then
+        echo "Signing nested helpers and app bundle..."
+        /usr/bin/codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$MCP_BINARY_PATH"
+        /usr/bin/codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$AGENT_BINARY_PATH"
+        /usr/bin/codesign \
+            --force \
+            --sign "$APP_IDENTITY" \
+            --entitlements "$PROJECT_DIR/ManifoldApp/ManifoldApp/Manifold.entitlements" \
+            --options runtime \
+            --timestamp \
+            "$BUNDLE"
+    fi
+
+    if [[ "$REQUIRE_NOTARIZATION" == "1" && -z "$NOTARY_PROFILE" ]]; then
+        echo "error: MANIFOLD_NOTARY_PROFILE is required for notarized release builds." >&2
+        exit 1
+    fi
+
+    if [[ -n "$NOTARY_PROFILE" ]]; then
+        if [[ -z "$APP_IDENTITY" ]]; then
+            echo "error: notarization requires MANIFOLD_CODESIGN_IDENTITY." >&2
+            exit 1
+        fi
+        echo "Submitting app for notarization..."
+        NOTARY_ZIP="$PROJECT_DIR/ManifoldApp/build/Manifold-v$VERSION-notary.zip"
+        rm -f "$NOTARY_ZIP"
+        ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$NOTARY_ZIP"
+        xcrun notarytool submit "$NOTARY_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+        xcrun stapler staple "$BUNDLE"
+        rm -f "$NOTARY_ZIP"
+    fi
+fi
 
 echo "Build complete: $BUNDLE (v$VERSION)"
 echo "Run: open \"$BUNDLE\""
 
-# If release, also create a zip for GitHub Release
-if [ "$CONFIG" = "release" ]; then
+if [[ "$CONFIG" == "release" ]]; then
     ZIP="$PROJECT_DIR/ManifoldApp/build/Manifold-v$VERSION-macOS.zip"
-    cd "$PROJECT_DIR/ManifoldApp/build"
-    ditto -c -k --sequesterRsrc --keepParent "Manifold.app" "Manifold-v$VERSION-macOS.zip"
+    rm -f "$ZIP"
+    ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$ZIP"
     echo "Release archive: $ZIP"
 fi

@@ -21,10 +21,6 @@ struct ManifoldCLI {
             try await handleLog(Array(args.dropFirst()))
         case "sources":
             try await handleSources()
-        case "pause":
-            try await handlePause(Array(args.dropFirst()))
-        case "resume":
-            try await handleResume(Array(args.dropFirst()))
         case "install":
             try handleInstall()
         default:
@@ -42,8 +38,6 @@ struct ManifoldCLI {
           log        Show recent MCP activity
           activity   Alias for log
           sources    List approved sources
-          pause      Pause an agent (default: cowork)
-          resume     Resume an agent (default: cowork)
           install    Install MCP server into Claude Desktop and Codex configs
         """)
     }
@@ -87,20 +81,6 @@ struct ManifoldCLI {
                 print("\(path) [\(status)]")
             }
         }
-    }
-
-    static func handlePause(_ args: [String]) async throws {
-        let agent = args.first ?? "cowork"
-        let xpc = ManifoldXPCClient()
-        _ = try await xpc.command(name: "pauseAgent", payload: ["agent": agent])
-        print("Paused \(agent).")
-    }
-
-    static func handleResume(_ args: [String]) async throws {
-        let agent = args.first ?? "cowork"
-        let xpc = ManifoldXPCClient()
-        _ = try await xpc.command(name: "resumeAgent", payload: ["agent": agent])
-        print("Resumed \(agent).")
     }
 
     static func handleInstall() throws {

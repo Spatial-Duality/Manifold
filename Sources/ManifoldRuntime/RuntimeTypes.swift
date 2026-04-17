@@ -438,6 +438,7 @@ public enum ManifoldMCPError: Error, LocalizedError {
     case accessPaused
     case noAccessConfigured
     case intentRequired(String)
+    case ruleDenied(ruleName: String, explanation: String)
 
     public var errorDescription: String? {
         switch self {
@@ -455,6 +456,8 @@ public enum ManifoldMCPError: Error, LocalizedError {
             return "No file or email access configured. Use Review & Update Access in Manifold to grant access."
         case .intentRequired(let message):
             return message
+        case .ruleDenied(let ruleName, let explanation):
+            return "Blocked by rule \"\(ruleName)\": \(explanation)"
         }
     }
 }

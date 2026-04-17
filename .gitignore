@@ -11,3 +11,6 @@ default.profraw
 .mcp.json
 .mcp.json.disabled
 .xcodebuildmcp/
+ManifoldApp/build/
+.claude/worktrees/
+.claude/plans/

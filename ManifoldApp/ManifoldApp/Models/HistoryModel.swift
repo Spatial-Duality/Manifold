@@ -5,12 +5,13 @@ import Foundation
 import ManifoldKit
 import os
 
-private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "history")
+private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "activity")
 
 @Observable
 @MainActor
-final class HistoryModel {
+final class ActivityModel {
     var activityEntries: [AuditEntry] = []
+    var activityRevision: Int = 0
     var sessions: [Session] = []
     var selectedSession: Session?
     var sessionEvents: [SessionEvent] = []
@@ -28,9 +29,11 @@ final class HistoryModel {
         guard let client else { return }
         do {
             activityEntries = try await client.recentActivity(limit: 100)
+            activityRevision &+= 1
         } catch {
             logger.error("Failed to load activity: \(error.localizedDescription)")
             activityEntries = []
+            activityRevision &+= 1
         }
     }
 

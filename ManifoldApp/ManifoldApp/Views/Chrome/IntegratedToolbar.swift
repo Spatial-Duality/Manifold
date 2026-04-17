@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// IntegratedToolbar — the Ledger window's native macOS toolbar.
+// LedgerToolbar — the Ledger window's native macOS toolbar.
 //
 // The live `SessionChip` now lives only in `StatusBar` (Principle 10 —
 // one ambient home for runtime state). The toolbar keeps "Start
@@ -13,27 +13,42 @@
 import SwiftUI
 import ManifoldKit
 
-struct IntegratedToolbar: ToolbarContent {
+struct LedgerToolbar: ToolbarContent {
     @Environment(ManifoldStore.self) private var store
+    @Environment(CommandPaletteModel.self) private var commandPalette
     let destination: LedgerDestination
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if store.activeSession == nil {
-                Button {
-                    Task { try? await store.startSession(SessionDraft()) }
-                } label: {
-                    Label("Start session", systemImage: "play.fill")
-                }
-                .help("Start a new session (⌘N)")
-                .keyboardShortcut("n", modifiers: .command)
-            } else {
+            if store.activeSession != nil {
                 Button(role: .destructive) {
                     Task { await store.endSession() }
                 } label: {
                     Label("Finish session", systemImage: "stop.fill")
                 }
                 .help("Finish the active session")
+            } else {
+                if let command = commandPalette.command(.protectNextSession, for: store) {
+                    Button {
+                        Task { await command.action(store) }
+                    } label: {
+                        Label(command.title, systemImage: command.icon)
+                    }
+                    .help("\(command.title) (\(command.shortcutLabel ?? ""))")
+                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                }
+            }
+        }
+
+        ToolbarItemGroup(placement: .automatic) {
+            if let command = commandPalette.command(.refreshRuntime, for: store) {
+                Button {
+                    Task { await command.action(store) }
+                } label: {
+                    Label(command.title, systemImage: command.icon)
+                }
+                .help(command.title)
+                .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
             }
         }
     }

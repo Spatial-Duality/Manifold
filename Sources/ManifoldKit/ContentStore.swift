@@ -16,7 +16,8 @@ public actor ContentStore {
     public init(rootURL: URL, db: DatabaseConnection) throws {
         self.rootURL = rootURL
         self.blobsURL = rootURL.appendingPathComponent("blobs")
-        try FileManager.default.createDirectory(at: blobsURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: rootURL)
+        try LocalFileProtection.ensureDirectory(at: blobsURL)
         self.db = db
         try Self.ensureTables(db: db)
     }
@@ -25,7 +26,8 @@ public actor ContentStore {
     public init(rootURL: URL) throws {
         self.rootURL = rootURL
         self.blobsURL = rootURL.appendingPathComponent("blobs")
-        try FileManager.default.createDirectory(at: blobsURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: rootURL)
+        try LocalFileProtection.ensureDirectory(at: blobsURL)
 
         let dbURL = rootURL.appendingPathComponent("manifold.db")
         self.db = try DatabaseConnection(url: dbURL)
@@ -51,10 +53,11 @@ public actor ContentStore {
 
         // Create shard directory (first 2 chars of hash)
         let shardURL = blobsURL.appendingPathComponent(String(hash.prefix(2)))
-        try FileManager.default.createDirectory(at: shardURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: shardURL)
 
-        // Write blob atomically
-        try data.write(to: blobURL, options: .atomic)
+        // Encrypt blob payloads at rest before persisting them locally.
+        let protectedData = try ProtectedStorageCrypto.encrypt(data)
+        try LocalFileProtection.writeOwnerOnly(protectedData, to: blobURL)
 
         // Record metadata
         try db.execute("""
@@ -89,10 +92,11 @@ public actor ContentStore {
 
         // Create shard directory
         let shardURL = blobsURL.appendingPathComponent(String(hash.prefix(2)))
-        try FileManager.default.createDirectory(at: shardURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: shardURL)
 
-        // Copy file to blob store instead of writing Data
-        try FileManager.default.copyItem(at: fileURL, to: blobURL)
+        let plaintext = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+        let protectedData = try ProtectedStorageCrypto.encrypt(plaintext)
+        try LocalFileProtection.writeOwnerOnly(protectedData, to: blobURL)
 
         // Record metadata
         try db.execute("""
@@ -107,7 +111,8 @@ public actor ContentStore {
     public func retrieve(hash: String) throws -> Data? {
         let url = blobURL(for: hash)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try Data(contentsOf: url)
+        let stored = try Data(contentsOf: url, options: [.mappedIfSafe])
+        return try ProtectedStorageCrypto.decrypt(stored)
     }
 
     /// Check if a blob exists in the store.

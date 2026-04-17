@@ -26,22 +26,13 @@ struct GeneralSettingsPane: View {
                 Toggle("Launch at Login", isOn: $store.launchAtLogin)
             }
 
-            Section("Default Agent") {
-                Picker("Show access for", selection: $store.agentFocus) {
-                    Text("Claude").tag(AgentFocus.claude)
-                    Text("Codex").tag(AgentFocus.codex)
-                    Text("Compare").tag(AgentFocus.compare)
-                }
-                .pickerStyle(.menu)
-            }
-
             Section("Notifications") {
-                Toggle("Agent connect and disconnect", isOn: $store.notifyOnSessionEnd)
+                Toggle("Session start and finish", isOn: $store.notifyOnSessionEnd)
                 Toggle("Access denied alerts", isOn: $store.notifyOnAccessDenied)
             }
 
             Section("Data & Privacy") {
-                Text("All data stays on your Mac. Manifold never sends your files or emails to any server.")
+                Text("All governed data stays on your Mac. Manifold records what Claude and Codex saw through Manifold, not everything they can do outside that path.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -60,7 +51,7 @@ private struct IdentityRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Manifold")
                     .font(ManifoldType.heading)
-                Text("A trust layer for your AI agents.")
+                Text("A local control layer for Claude and Codex through Manifold.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                 Text("Version \(Bundle.main.shortVersionString)")

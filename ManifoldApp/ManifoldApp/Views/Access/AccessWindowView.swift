@@ -1,79 +1,100 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// AccessWindowView — the "who can see what" surface.
+// AccessView — the "who can see what" surface.
 //
-// After the Stage-11 redesign: one canonical Scope view (three columns)
-// with two secondary view modes — Files (flat listing) and History
-// (past grants). The old "Folders" matrix and "Session" sub-tab are
-// gone; Session state is surfaced on Scope as an overlay when live
-// (temporal axis, not a sibling destination).
-//
-// Mode switching uses the native segmented picker per
-// APPLE-DESIGN-EXCELLENCE-GUIDE §3 — no custom capsule bars.
+// Per design/html/access.html: 4-tab router — Folders / Files / Session
+// / History — plus an empty state when no sources exist. Each sub-view
+// is a dense matrix or list with its own inspector on the right.
 
 import SwiftUI
 import ManifoldKit
 
-struct AccessWindowView: View {
+struct AccessView: View {
     @Environment(ManifoldStore.self) private var store
 
-    enum Mode: String, Hashable, CaseIterable, Identifiable {
-        case scope, files, history
-
-        var id: String { rawValue }
+    enum AccessSection: String, Hashable, CaseIterable {
+        case folders
+        case files
+        case session
+        case history
 
         var label: String {
             switch self {
-            case .scope:   return "Scope"
+            case .folders: return "Folders"
             case .files:   return "Files"
+            case .session: return "Session"
             case .history: return "History"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .folders: return "folder.fill"
+            case .files:   return "doc.on.doc"
+            case .session: return "play.fill"
+            case .history: return "clock.arrow.circlepath"
             }
         }
     }
 
-    @State private var mode: Mode = .scope
+    @State private var selectedSection: AccessSection = .folders
+    @AppStorage("access.inspector.visible") private var isInspectorVisible = true
 
     var body: some View {
         VStack(spacing: 0) {
-            if !store.sources.isEmpty {
-                ModeBar(mode: $mode)
-                Divider()
-            }
+            SegmentedTabBar(
+                selection: $selectedSection,
+                items: AccessSection.allCases.map { item in
+                    SegmentedTabItem(
+                        value: item,
+                        title: item.label,
+                        systemImage: item.systemImage,
+                        isEnabled: item != .session || store.activeSession != nil,
+                        accessibilityIdentifier: "access.tab.\(item.rawValue)"
+                    )
+                }
+            )
+            Divider()
 
             if store.sources.isEmpty {
                 EmptyFoldersView()
             } else {
-                switch mode {
-                case .scope:   ScopeColumnsView()
+                switch selectedSection {
+                case .folders: FoldersMatrixView()
                 case .files:   FilesFlatView()
+                case .session: SessionDiffView()
                 case .history: AccessHistoryView()
                 }
             }
         }
-        .task { await store.refreshAll(force: false) }
-    }
-}
-
-/// Native segmented picker, centered, with light vertical padding.
-/// Replaces the previous custom capsule tab bar.
-private struct ModeBar: View {
-    @Binding var mode: AccessWindowView.Mode
-
-    var body: some View {
-        HStack {
-            Picker("View", selection: $mode) {
-                ForEach(AccessWindowView.Mode.allCases) { m in
-                    Text(m.label).tag(m)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            Spacer()
+        .background {
+            Button("Toggle Inspector") { isInspectorVisible.toggle() }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .opacity(0)
+                .accessibilityHidden(true)
         }
-        .padding(.horizontal, Spacing.s4)
-        .padding(.vertical, Spacing.s2)
-        .background(.regularMaterial)
+        .task { await store.refreshAll(force: false) }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
+            guard selectedSection != .files else { return }
+            selectedSection = .files
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .manifoldFocusCurrentSearch, object: nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldCycleCurrentSubtab)) { notification in
+            guard let delta = notification.object as? Int else { return }
+            cycleTab(by: delta)
+        }
+        .accessibilityIdentifier("ledger.surface.access")
+    }
+
+    private func cycleTab(by delta: Int) {
+        let enabledSections = AccessSection.allCases.filter { $0 != .session || store.activeSession != nil }
+        guard let currentIndex = enabledSections.firstIndex(of: selectedSection), !enabledSections.isEmpty else { return }
+        let nextIndex = (currentIndex + delta + enabledSections.count) % enabledSections.count
+        withAnimation(ManifoldMotion.micro) {
+            selectedSection = enabledSections[nextIndex]
+        }
     }
 }

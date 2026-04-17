@@ -19,19 +19,30 @@ struct Pill: View {
         case seeded
         case user
         case agent(TargetApp)
+        case preview
         case neutral
 
         var color: Color {
             switch self {
             case .session:       return ManifoldPalette.active
-            case .defaultScope:  return ManifoldPalette.claude
+            case .defaultScope:  return ManifoldPalette.selection
             case .attention:     return ManifoldPalette.attention
             case .scope:         return ManifoldPalette.text2
             case .seeded:        return ManifoldPalette.paused
-            case .user:          return ManifoldPalette.claude
+            case .user:          return ManifoldPalette.selection
             case .agent(let a):  return ManifoldPalette.agent(a)
+            case .preview:       return ManifoldPalette.preview
             case .neutral:       return ManifoldPalette.text3
             }
+        }
+    }
+
+    var backgroundOpacity: Double {
+        switch variant {
+        case .preview:
+            return 0.16
+        default:
+            return 0.14
         }
     }
 
@@ -56,13 +67,82 @@ struct Pill: View {
         .foregroundStyle(fills ? .white : variant.color)
         .background(
             Capsule(style: .continuous)
-                .fill(fills ? variant.color : variant.color.opacity(0.14))
+                .fill(fills ? variant.color : variant.color.opacity(backgroundOpacity))
         )
         .overlay(
             Capsule(style: .continuous)
                 .strokeBorder(variant.color.opacity(fills ? 0 : 0.22), lineWidth: 0.5)
         )
         .accessibilityLabel(text)
+    }
+}
+
+enum VisibilityEffectiveState: String, Hashable, Sendable {
+    case allowed
+    case hidden
+    case mixed
+}
+
+enum VisibilityOrigin: String, Hashable, Sendable {
+    case explicit
+    case defaultScope
+    case preview
+}
+
+struct VisibilityState: Hashable, Sendable {
+    let effective: VisibilityEffectiveState
+    let origin: VisibilityOrigin
+
+    var label: String {
+        switch (effective, origin) {
+        case (.allowed, .explicit): return "Allowed"
+        case (.allowed, .defaultScope): return "Inherited"
+        case (.allowed, .preview): return "Preview"
+        case (.hidden, .explicit): return "Denied"
+        case (.hidden, .defaultScope): return "Hidden"
+        case (.hidden, .preview): return "Preview"
+        case (.mixed, _): return "Mixed"
+        }
+    }
+
+    var detail: String {
+        switch (effective, origin) {
+        case (.allowed, .explicit): return "Explicitly shared"
+        case (.allowed, .defaultScope): return "Inherited from default scope"
+        case (.allowed, .preview): return "Preview-only allowance"
+        case (.hidden, .explicit): return "Explicitly hidden"
+        case (.hidden, .defaultScope): return "Hidden by default"
+        case (.hidden, .preview): return "Preview-only hidden state"
+        case (.mixed, _): return "Partially shared"
+        }
+    }
+
+    var pillVariant: Pill.Variant {
+        switch effective {
+        case .allowed:
+            return origin == .preview ? .preview : .defaultScope
+        case .hidden:
+            return origin == .explicit ? .attention : .neutral
+        case .mixed:
+            return .scope
+        }
+    }
+
+    var icon: String {
+        switch effective {
+        case .allowed: return "eye"
+        case .hidden: return "eye.slash"
+        case .mixed: return "circle.lefthalf.filled"
+        }
+    }
+}
+
+struct VisibilityChip: View {
+    let state: VisibilityState
+
+    var body: some View {
+        Pill(text: state.label, variant: state.pillVariant, systemImage: state.icon)
+            .accessibilityLabel("\(state.label). \(state.detail)")
     }
 }
 

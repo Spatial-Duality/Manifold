@@ -38,6 +38,9 @@ jobs:
             exit 1
           fi
 
+      - name: Validate release settings
+        run: bash script/validate_release_posture.sh
+
       - name: Run app unit and integration tests
         run: |
           xcodebuild -project Manifold.xcodeproj \
@@ -56,6 +59,10 @@ jobs:
       - name: Build app bundle (release)
         if: github.ref == 'refs/heads/main'
         run: bash ManifoldApp/build.sh release
+
+      - name: Validate release bundle
+        if: github.ref == 'refs/heads/main'
+        run: bash script/validate_release_posture.sh --app ManifoldApp/build/Manifold.app
 
       - name: Upload artifact
         if: github.ref == 'refs/heads/main'

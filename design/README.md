@@ -15,6 +15,7 @@ Manifold is the user-owned control plane that sits beside Claude and Codex, reco
 
 - [PRODUCT-SPEC.md](PRODUCT-SPEC.md) — canonical product definition
 - [../docs/architecture.md](../docs/architecture.md) — outsider-friendly system overview
+- [../docs/ui-map.md](../docs/ui-map.md) — app structure, screen map, and user flow
 - [../docs/design-decisions.md](../docs/design-decisions.md) — why the product is shaped this way
 - [../ARCHITECTURE.md](../ARCHITECTURE.md) — deeper runtime and system shape
 

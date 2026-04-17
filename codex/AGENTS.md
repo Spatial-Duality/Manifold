@@ -2,15 +2,15 @@
 
 ## What Manifold Is
 
-Manifold is a native macOS app (Swift 6, SwiftUI, macOS 26+) that controls which files and emails AI coding agents can access. It sits between agents (Claude, Codex, Cursor) and the user's filesystem/inbox — the agent asks Manifold for permission, Manifold decides, and Manifold records what was exposed.
+Manifold is a native macOS app (Swift 6, SwiftUI, macOS 26+) that governs which files and emails Claude and Codex can access through Manifold. It records what was exposed, what changed, and what can be restored, but it must never claim OS-level control over native activity outside the Manifold path.
 
-The product's entire value is the constraint itself. The product IS the thing that sits between agents and your files and says: you can see this, you cannot see that, and here is the proof of both.
+The product's entire value is the constraint itself. The product IS the thing that sits between an agent and governed data and says: you can see this through Manifold, you cannot see that through Manifold, and here is the proof of both.
 
-## Architecture (Current → Target)
+## Architecture (Current)
 
-**Current problem:** Two processes independently create full store graphs against the same SQLite file. The SwiftUI app (`ManifoldStore.swift`) and the MCP server (`ManifoldMCPServer.swift`) both construct `DatabaseConnection`, `PolicyStore`, `GrantStore`, `AuditStore`, `SnapshotStore`, `ContentStore`, `WorkBlockStore`, `EmailStore`, `ArtifactIndex`. They coordinate through fire-and-forget `DistributedNotificationCenter` posts. This means the control surface the user sees (app) and the thing that decides (MCP server) are different things.
+**Current architecture:** One bundled per-user LaunchAgent (`ManifoldAgent`) owns the stores and policy enforcement. The SwiftUI app, `manifold-mcp`, and `manifold-cli` are XPC clients connecting via the launchd-registered Mach service `com.spatialduality.manifold.runtime`.
 
-**Target architecture:** One bundled per-user LaunchAgent (`ManifoldAgent`) owns all stores and policy enforcement. The SwiftUI app, `manifold-mcp`, and `manifold-cli` are all XPC clients connecting via a launchd-registered Mach service (`com.spatialduality.manifold.runtime`).
+**Design direction:** keep the runtime as the single judge, keep the MCP/CLI/app clients thin, and keep the product boundary explicit in both code and copy.
 
 **Key design doc:** `design/RUNTIME-MIGRATION.md` — the authoritative 8-phase migration plan with code sketches, plist, file changes, verification checklist.
 
@@ -18,15 +18,6 @@ The product's entire value is the constraint itself. The product IS the thing th
 
 ## Package Layout
 
-### Current
-```
-ManifoldKit      (library)    → stores, engines, types
-ManifoldMCP      (executable) → MCPServer + ManifoldBridge + ToolHandlers
-ManifoldCLI      (executable) → CLI commands + own store init
-ManifoldApp      (Xcode)      → SwiftUI app + ManifoldStore (own store init)
-```
-
-### Target (after migration)
 ```
 ManifoldKit        (library)    → stores, engines, types (unchanged)
 ManifoldRuntime    (library)    → runtime actor, service protocol, bridge, approval queue
@@ -52,8 +43,10 @@ ManifoldApp        ← ManifoldXPC
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `Sources/ManifoldMCP/ManifoldBridge.swift` | Core decision engine (dual-path access resolution) | ~1467 |
-| `Sources/ManifoldMCP/ManifoldMCPServer.swift` | MCP server entry — **has second composition root** | ~200 |
+| `Sources/ManifoldRuntime/ManifoldBridge.swift` | Core decision engine (dual-path access resolution, audit, exposure) | ~2000 |
+| `Sources/ManifoldXPC/ManifoldXPCService.swift` | XPC boundary and command/tool dispatch | ~200 |
+| `Sources/ManifoldXPC/ClientIdentityVerifier.swift` | Local caller verification and app-command authorization | ~250 |
+| `Sources/ManifoldXPC/ManifoldXPCService+AppCommands.swift` | App and CLI command handlers | ~900 |
 | `Sources/ManifoldMCP/ToolHandlers.swift` | 17 MCP tool registrations | ~395 |
 | `Sources/ManifoldMCP/AgentRuntimeContext.swift` | Connection metadata | ~80 |
 | `Sources/ManifoldMCP/MCPProtocol.swift` | JSON-RPC 2.0 over stdio | ~300 |
@@ -67,8 +60,8 @@ ManifoldApp        ← ManifoldXPC
 | `Sources/ManifoldKit/AuditStore.swift` | Audit log | ~200 |
 | `Sources/ManifoldKit/EmailStore.swift` | Email metadata and body storage | ~250 |
 | `Sources/ManifoldKit/DatabaseMigrator.swift` | SQLite schema migrations | ~400 |
-| `Sources/ManifoldKit/ManifoldNotifications.swift` | DistributedNotificationCenter IPC (to be replaced) | ~100 |
-| `ManifoldApp/ManifoldApp/Models/ManifoldStore.swift` | App composition root — **first composition root** | ~697 |
+| `ManifoldApp/ManifoldApp/Models/AppRuntimeClient.swift` | App-side XPC client and typed runtime commands | ~1000 |
+| `ManifoldApp/ManifoldApp/Models/ManifoldStore.swift` | App composition, refresh, and window-level state | ~700 |
 | `ManifoldApp/ManifoldApp/Models/PolicyModel.swift` | @Observable policy model (optional stores) | ~239 |
 | `ManifoldApp/ManifoldApp/Models/SessionModel.swift` | Session/grant/promotion lifecycle (optional stores) | ~809 |
 
@@ -117,6 +110,16 @@ xcodebuild -project ManifoldApp/ManifoldApp.xcodeproj \
 4. **XPC protocol stays minimal.** Four methods: `connect`, `disconnect`, `callTool`, `command`. All feature growth happens behind `callTool` (for agents) and `command` (for UI/CLI). Do not add XPC methods for individual features.
 
 5. **ManifoldKit stays clean.** `ManifoldKit` is the library of stores, engines, and types. It has no knowledge of XPC, MCP, UI, or runtime lifecycle. It does not import Foundation frameworks beyond what's needed for data types and file operations.
+
+6. **No unauthenticated app commands.** State-changing XPC commands must reject untrusted local callers. Do not add a localhost or Mach control path that assumes same-user equals trusted.
+
+7. **No string-only path checks.** Governed file access must resolve canonical paths before policy decisions. Symlink, hard-link, and TOCTOU risks are in scope and require tests.
+
+8. **Restore must be conflict-aware.** Do not overwrite newer user work silently. Restore paths must compare current content to expected content and surface conflicts explicitly.
+
+9. **Exposure storage is metadata-first.** Do not casually persist raw content previews, prompts, filenames, paths, or email subjects into analytics or telemetry surfaces.
+
+10. **Always state the boundary honestly.** UI copy, docs, and agent instructions must say "through Manifold" when coverage is partial. Manifold does not claim total control over native Claude/Codex behavior outside the governed path.
 
 ## Test Strategy
 

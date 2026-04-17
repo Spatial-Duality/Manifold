@@ -6,30 +6,31 @@ import ManifoldKit
 
 struct CommandPaletteView: View {
     @Environment(ManifoldStore.self) var store
-    @Environment(CommandCenter.self) var commands
+    @Environment(CommandPaletteModel.self) var commandPalette
     @FocusState private var isSearchFocused: Bool
     @State private var selectedIndex: Int = 0
 
     private var filteredCommands: [ManifoldCommand] {
-        commands.filteredCommands()
+        commandPalette.filteredCommands(for: store)
     }
 
     var body: some View {
-        @Bindable var commands = commands
+        @Bindable var commandPalette = commandPalette
 
         VStack(spacing: 0) {
             // Search field
             HStack(spacing: Spacing.standard) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Search commands...", text: $commands.searchText)
+                TextField("Search commands...", text: $commandPalette.searchText)
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($isSearchFocused)
                     .onSubmit { executeSelected() }
-                if !commands.searchText.isEmpty {
+                    .accessibilityIdentifier("commandPalette.search")
+                if !commandPalette.searchText.isEmpty {
                     Button {
-                        commands.searchText = ""
+                        commandPalette.searchText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.tertiary)
@@ -43,24 +44,33 @@ struct CommandPaletteView: View {
             Divider()
 
             // Command list
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(filteredCommands.enumerated()), id: \.element.id) { index, command in
-                            CommandRow(
-                                command: command,
-                                isSelected: index == selectedIndex
-                            ) {
-                                runCommand(command)
+            if filteredCommands.isEmpty {
+                ContentUnavailableView(
+                    "No commands match",
+                    systemImage: "magnifyingglass",
+                    description: Text("Try a shorter search, or clear the filter to browse all available actions.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(filteredCommands.enumerated()), id: \.element.id) { index, command in
+                                CommandRow(
+                                    command: command,
+                                    isSelected: index == selectedIndex
+                                ) {
+                                    runCommand(command)
+                                }
+                                .id(index)
                             }
-                            .id(index)
                         }
+                        .padding(.vertical, Spacing.standard)
+                        .padding(.horizontal, Spacing.standard)
                     }
-                    .padding(.vertical, Spacing.standard)
-                    .padding(.horizontal, Spacing.standard)
-                }
-                .onChange(of: selectedIndex) { _, newIndex in
-                    proxy.scrollTo(newIndex, anchor: .center)
+                    .onChange(of: selectedIndex) { _, newIndex in
+                        proxy.scrollTo(newIndex, anchor: .center)
+                    }
                 }
             }
         }
@@ -68,11 +78,11 @@ struct CommandPaletteView: View {
         .glassBackground(in: RoundedRectangle(cornerRadius: Spacing.cornerLarge))
         .shadow(color: .black.opacity(0.15), radius: 24, y: 12)
         .onAppear {
-            commands.searchText = ""
+            commandPalette.searchText = ""
             selectedIndex = 0
             isSearchFocused = true
         }
-        .onChange(of: commands.searchText) {
+        .onChange(of: commandPalette.searchText) {
             selectedIndex = 0
         }
         .onKeyPress(.upArrow) {
@@ -83,6 +93,7 @@ struct CommandPaletteView: View {
             if selectedIndex < filteredCommands.count - 1 { selectedIndex += 1 }
             return .handled
         }
+        .accessibilityIdentifier("commandPalette.sheet")
     }
 
     private func executeSelected() {
@@ -91,8 +102,8 @@ struct CommandPaletteView: View {
     }
 
     private func runCommand(_ command: ManifoldCommand) {
-        commands.isPresented = false
-        Task { await command.action() }
+        commandPalette.isPresented = false
+        Task { await command.action(store) }
     }
 }
 
@@ -114,7 +125,7 @@ private struct CommandRow: View {
                 Text(command.title)
                     .font(.body)
                 Spacer()
-                if let shortcut = command.shortcut {
+                if let shortcut = command.shortcutLabel {
                     Text(shortcut)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -122,11 +133,31 @@ private struct CommandRow: View {
             }
             .padding(.horizontal, Spacing.section)
             .padding(.vertical, Spacing.standard)
-            .background(highlighted ? ManifoldPalette.surface3 : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerSmall))
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.cornerSmall, style: .continuous)
+                    .fill(highlighted ? ManifoldPalette.selectionSoft : Color.clear)
+            )
+            .overlay(alignment: .leading) {
+                if highlighted {
+                    Capsule(style: .continuous)
+                        .fill(ManifoldPalette.selection)
+                        .frame(width: 2)
+                        .padding(.vertical, 6)
+                }
+            }
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("commandPalette.command.\(command.identifierSlug)")
+    }
+}
+
+private extension ManifoldCommand {
+    var identifierSlug: String {
+        title
+            .lowercased()
+            .replacingOccurrences(of: "…", with: "")
+            .replacingOccurrences(of: " ", with: "-")
     }
 }

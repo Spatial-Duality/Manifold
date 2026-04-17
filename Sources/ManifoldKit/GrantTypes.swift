@@ -16,23 +16,10 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
     public let status: String  // idle, active, paused, removed
     public let createdAt: String
     public let updatedAt: String
-    /// File count cached at most recent size estimate. nil until first scan.
-    /// Honest: absence means "we haven't walked this source yet" — UI
-    /// should render "—" rather than "0".
-    public let fileCount: Int?
-    /// Byte size cached at most recent size estimate. nil until first scan.
-    public let cachedSizeBytes: Int64?
-    /// ISO-8601 timestamp of the most recent successful scan. Used to age
-    /// out stale caches (e.g. > 7 days → recompute).
-    public let sizeCachedAt: String?
 
     public var isAccessible: Bool { status == "idle" || status == "active" }
     public var isPaused: Bool { status == "paused" }
     public var isRemoved: Bool { status == "removed" }
-
-    /// Whether a cached size reading exists at all. Controls whether the
-    /// UI can honestly render "N files · M MB" or must fall back to "—".
-    public var hasCachedSize: Bool { fileCount != nil && cachedSizeBytes != nil }
 
     public init(
         sourceID: String,
@@ -40,10 +27,7 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
         originalRootPath: String,
         status: String,
         createdAt: String,
-        updatedAt: String,
-        fileCount: Int? = nil,
-        cachedSizeBytes: Int64? = nil,
-        sizeCachedAt: String? = nil
+        updatedAt: String
     ) {
         self.sourceID = sourceID
         self.displayName = displayName
@@ -51,9 +35,6 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.fileCount = fileCount
-        self.cachedSizeBytes = cachedSizeBytes
-        self.sizeCachedAt = sizeCachedAt
     }
 
     init?(row: [String: String]) {
@@ -72,9 +53,6 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.fileCount = row["file_count"].flatMap { Int($0) }
-        self.cachedSizeBytes = row["cached_size_bytes"].flatMap { Int64($0) }
-        self.sizeCachedAt = row["size_cached_at"]
     }
 }
 
@@ -89,52 +67,6 @@ public enum GrantStatus: String, Sendable, Codable {
 public enum TargetApp: String, Sendable, CaseIterable, Codable {
     case cowork
     case codex
-}
-
-// MARK: - Node Override (per-file scope override under a source)
-
-/// Ternary state recording a user override for a specific path under a
-/// source, scoped per agent. `.inherit` is the absence of an override and
-/// is never persisted — the row simply does not exist.
-public enum NodeOverrideState: String, Sendable, CaseIterable, Codable {
-    case include
-    case exclude
-    case inherit
-}
-
-/// One row of the node_overrides table, surfaced to the app so it can
-/// render the tri-state checkbox tree without N XPC round-trips.
-public struct NodeOverrideRecord: Sendable, Hashable, Codable {
-    public let sourceID: String
-    public let relativePath: String
-    public let agent: TargetApp
-    public let state: NodeOverrideState
-    public let updatedAt: String
-
-    public init(sourceID: String, relativePath: String, agent: TargetApp, state: NodeOverrideState, updatedAt: String) {
-        self.sourceID = sourceID
-        self.relativePath = relativePath
-        self.agent = agent
-        self.state = state
-        self.updatedAt = updatedAt
-    }
-
-    public init?(row: [String: String]) {
-        guard let sourceID = row["source_id"],
-              let relativePath = row["relative_path"],
-              let agentRaw = row["agent"],
-              let agent = TargetApp(rawValue: agentRaw),
-              let stateRaw = row["state"],
-              let state = NodeOverrideState(rawValue: stateRaw),
-              let updatedAt = row["updated_at"] else {
-            return nil
-        }
-        self.sourceID = sourceID
-        self.relativePath = relativePath
-        self.agent = agent
-        self.state = state
-        self.updatedAt = updatedAt
-    }
 }
 
 public enum SessionNoteCaptureMode: String, Sendable, CaseIterable, Codable {

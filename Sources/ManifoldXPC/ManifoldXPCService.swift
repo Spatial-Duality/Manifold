@@ -146,6 +146,21 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         reply: @escaping (Data, NSError?) -> Void
     ) {
         let replyBox = CommandReplyBox(reply: reply)
+        let authorization = ClientIdentityVerifier.authorizeCommand(
+            name: name,
+            connection: NSXPCConnection.current()
+        )
+        guard authorization.isAuthorized else {
+            replyBox.reply(
+                Data(),
+                NSError(
+                    domain: "com.spatialduality.manifold.xpc",
+                    code: 403,
+                    userInfo: [NSLocalizedDescriptionKey: authorization.reason]
+                )
+            )
+            return
+        }
         Task {
             do {
                 let commandPayload: [String: Any]
@@ -246,33 +261,18 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             }
             let displayName = (payload["displayName"] as? String) ?? URL(fileURLWithPath: path).lastPathComponent
             let sourceID = try await runtime.grantStore.addSource(displayName: displayName, rootPath: path)
-            // Warm the size cache in the background so bulk-grant UIs can
-            // honestly show "N files · M MB" without walking the folder
-            // on each render. Walk happens off the XPC response path.
-            let grantStore = runtime.grantStore
-            Task.detached(priority: .utility) {
-                await grantStore.refreshSourceSizeCache(sourceID: sourceID)
-            }
             guard let source = try await runtime.grantStore.source(id: sourceID) else {
                 return ["ok": true]
             }
             return ["source": Self.sourceJSON(source)]
-
-        case "refreshSourceSizeCache":
-            guard let sourceID = payload["sourceID"] as? String else {
-                throw ManifoldXPCError.invalidPayload
-            }
-            await runtime.grantStore.refreshSourceSizeCache(sourceID: sourceID)
-            if let refreshed = try await runtime.grantStore.source(id: sourceID) {
-                return ["source": Self.sourceJSON(refreshed)]
-            }
-            return ["ok": true]
 
         case "removeSource":
             guard let sourceID = payload["sourceID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
             try await runtime.grantStore.removeSource(sourceID: sourceID)
+            try await runtime.standingWriteApprovalStore.removeGrants(sourceID: sourceID)
+            try await runtime.fileVisibilityOverrideStore.clearOverrides(sourceID: sourceID)
             return ["ok": true]
 
         case "pauseSource":
@@ -696,7 +696,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
     }
 
     private static func sourceJSON(_ source: SourceRecord) -> [String: Any] {
-        var dict: [String: Any] = [
+        [
             "sourceID": source.sourceID,
             "displayName": source.displayName,
             "originalRootPath": source.originalRootPath,
@@ -707,10 +707,6 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             "isPaused": source.isPaused,
             "isRemoved": source.isRemoved,
         ]
-        if let count = source.fileCount { dict["fileCount"] = count }
-        if let bytes = source.cachedSizeBytes { dict["cachedSizeBytes"] = Int64(bytes) }
-        if let ts = source.sizeCachedAt { dict["sizeCachedAt"] = ts }
-        return dict
     }
 
     private static func policyJSON(_ policy: AgentAccessPolicy) -> [String: Any] {

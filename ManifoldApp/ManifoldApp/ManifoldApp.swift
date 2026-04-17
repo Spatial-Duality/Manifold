@@ -4,10 +4,21 @@
 import SwiftUI
 import ManifoldKit
 
+@MainActor
+func presentMainLedger(destination: LedgerDestination? = nil) {
+    NSApp.activate(ignoringOtherApps: true)
+    if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+        window.makeKeyAndOrderFront(nil)
+    }
+    if let destination {
+        NotificationCenter.default.post(name: .manifoldShowLedgerDestination, object: destination.rawValue)
+    }
+}
+
 @main
 struct ManifoldApp: App {
     @State private var store: ManifoldStore
-    @State private var commands = CommandCenter()
+    @State private var commandPalette = CommandPaletteModel()
 
     init() {
         _store = State(initialValue: Self.bootstrapStore())
@@ -15,45 +26,80 @@ struct ManifoldApp: App {
 
     var body: some Scene {
         Window("Manifold", id: "main") {
-            RootWindowContent()
+            AppRootView()
                 .environment(store)
-                .environment(commands)
+                .environment(commandPalette)
                 .frame(minWidth: 920, minHeight: 600)
         }
         .defaultSize(width: 1100, height: 720)
         .windowStyle(.automatic)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("New Session\u{2026}") {
-                    NotificationCenter.default.post(name: .manifoldShowSessionStartSheet, object: nil)
+                if let command = commandPalette.command(.protectNextSession, for: store) {
+                    Button(command.title) {
+                        Task { await command.action(store) }
+                    }
+                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
                 }
-                .keyboardShortcut("n", modifiers: .command)
 
-                Button("Add Folder\u{2026}") {
-                    store.addSourceFromPicker()
+                if let command = commandPalette.command(.addFolder, for: store) {
+                    Button(command.title) {
+                        Task { await command.action(store) }
+                    }
+                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
                 }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
 
             CommandGroup(after: .toolbar) {
                 Button("Command Palette") {
-                    commands.isPresented.toggle()
+                    commandPalette.isPresented.toggle()
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
                 Divider()
 
-                Button("Activity") {
-                    focusLedger()
+                if let command = commandPalette.command(.openSessionRecap, for: store) {
+                    Button(command.title) {
+                        Task { await command.action(store) }
+                    }
                 }
-                .keyboardShortcut("1", modifiers: .command)
+
+                if let command = commandPalette.command(.refreshRuntime, for: store) {
+                    Button(command.title) {
+                        Task { await command.action(store) }
+                    }
+                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                }
             }
 
-            CommandGroup(replacing: .undoRedo) {
-                Button("Undo Last Action") {
-                    Task { await store.policy.undoLastAction() }
+            CommandMenu("View") {
+                ForEach([ManifoldCommandID.openActivity, .openAccess, .openMail, .openRequests], id: \.self) { commandID in
+                    if let command = commandPalette.command(commandID, for: store) {
+                        Button(command.title) {
+                            Task { await command.action(store) }
+                        }
+                        .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                    }
                 }
-                .keyboardShortcut("z", modifiers: .command)
+
+                Divider()
+
+                Button("Previous Section") {
+                    NotificationCenter.default.post(name: .manifoldCycleCurrentSubtab, object: -1)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+
+                Button("Next Section") {
+                    NotificationCenter.default.post(name: .manifoldCycleCurrentSubtab, object: 1)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            }
+
+            CommandMenu("Find") {
+                Button("Find in Current View") {
+                    NotificationCenter.default.post(name: .manifoldFocusCurrentSearch, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: .command)
             }
 
             CommandGroup(replacing: .appTermination) {
@@ -67,19 +113,13 @@ struct ManifoldApp: App {
         MenuBarExtra("Manifold", systemImage: store.menuBarIcon) {
             MenuBarPanelView()
                 .environment(store)
+                .environment(commandPalette)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
                 .environment(store)
-        }
-    }
-
-    private func focusLedger() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
-            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -92,10 +132,6 @@ struct ManifoldApp: App {
             let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: profile))
             let store = ManifoldStore(runtime: runtime, integrationHealth: health, startServices: false)
             store.setup.hasCompletedOnboarding = profile != .onboarding
-            if profile == .emailRules {
-                store.selectedTab = .emails
-                store.agentFocus = .claude
-            }
             return store
         }
     }

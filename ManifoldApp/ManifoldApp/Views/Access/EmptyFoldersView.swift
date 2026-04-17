@@ -17,7 +17,9 @@ struct EmptyFoldersView: View {
             EmptyStateIllustration(
                 systemImage: "folder.badge.plus",
                 title: "Nothing shared yet",
-                subtitle: "Nothing is shared until you share it. Add a folder to let an agent read inside a session. Mail is a separate surface."
+                subtitle: "Nothing is shared until you share it. Add a folder to let an agent read inside a session. Mail is a separate surface.",
+                tint: ManifoldPalette.selection,
+                style: .access
             )
 
             Button {
@@ -30,9 +32,11 @@ struct EmptyFoldersView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .keyboardShortcut("f", modifiers: [.command, .shift])
+            .accessibilityIdentifier("access.empty.addFolder")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)
         .background(ManifoldPalette.bg)
+        .accessibilityIdentifier("access.empty")
     }
 }

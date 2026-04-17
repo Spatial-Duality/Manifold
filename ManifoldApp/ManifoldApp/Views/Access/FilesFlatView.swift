@@ -1,80 +1,548 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// FilesFlatView — flat, sortable list of every file under every shared
-// source. Columns: name, path, size, source, modified. Phase 3 scaffold
-// without the version timeline — version chips land once snapshot
-// tracking is wired through ManifoldCommands.
+// FilesFlatView — governance-aware Finder for every file Manifold knows
+// about. Multi-select, Finder-grade sorting, Scope filter, native macOS
+// search, per-agent access chips, Quick Look (Space), open with default
+// app (⏎ / double-click), and a toggleable right inspector.
 
 import SwiftUI
+import UniformTypeIdentifiers
+import QuickLook
 import ManifoldKit
 
 struct FilesFlatView: View {
     @Environment(ManifoldStore.self) private var store
+    @AppStorage("access.inspector.visible") private var inspectorVisible = true
+
     @State private var files: [SourceFile] = []
     @State private var isLoading = false
+    @State private var selectedFilePaths: Set<String> = []
+    @State private var selectedHistory: [SnapshotRecord] = []
+    @State private var fileOverridesByAgent: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
+    @State private var scopeFilter: ScopeFilter = .all
+    @State private var searchText = ""
+    @State private var quickLookURL: URL?
+    @State private var sortOrder: [KeyPathComparator<SourceFile>] = [
+        KeyPathComparator(\SourceFile.sourceName),
+        KeyPathComparator(\SourceFile.relativePath),
+    ]
+
+    enum ScopeFilter: Hashable {
+        case all
+        case shared
+        case unshared
+        case sharedWith(TargetApp)
+        case overriddenAllow
+        case overriddenHide
+        case changed
+    }
+
+    // MARK: - Derived
+
+    private var connectedAgents: [TargetApp] {
+        AgentMeta.connected(from: store.connectedAgents)
+    }
+
+    private var sourceReloadKey: String {
+        store.sources
+            .filter { $0.isAccessible && !$0.isRemoved }
+            .map { "\($0.sourceID):\($0.updatedAt)" }
+            .sorted()
+            .joined(separator: "|")
+    }
+
+    private var defaultScopeByAgent: [TargetApp: Set<String>] {
+        var result: [TargetApp: Set<String>] = [:]
+        for agent in connectedAgents {
+            result[agent] = Set(store.governance.policy(for: agent)?.allowedSourceIDs ?? [])
+        }
+        return result
+    }
+
+    private var resolverByAgent: [TargetApp: FileVisibilityResolver] {
+        var result: [TargetApp: FileVisibilityResolver] = [:]
+        for agent in connectedAgents {
+            result[agent] = FileVisibilityResolver(overrides: fileOverridesByAgent[agent] ?? [])
+        }
+        return result
+    }
+
+    private func visibleAgents(for file: SourceFile) -> Set<TargetApp> {
+        var set: Set<TargetApp> = []
+        let defaults = defaultScopeByAgent
+        let resolvers = resolverByAgent
+        for agent in connectedAgents {
+            guard let resolver = resolvers[agent] else { continue }
+            let defaultVisible = defaults[agent]?.contains(file.sourceID) == true
+            let evaluation = resolver.evaluate(
+                sourceID: file.sourceID,
+                relativePath: file.relativePath,
+                defaultVisible: defaultVisible
+            )
+            switch evaluation.origin {
+            case .explicitAllow, .inheritedAllow:
+                set.insert(agent)
+            case .explicitDeny, .inheritedHidden:
+                break
+            }
+        }
+        return set
+    }
+
+    private func hasOverride(_ decision: FileVisibilityOverrideDecision, for file: SourceFile) -> Bool {
+        for overrides in fileOverridesByAgent.values {
+            if overrides.contains(where: {
+                $0.sourceID == file.sourceID
+                && $0.relativePath == file.relativePath
+                && $0.decision == decision
+            }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var visibleFiles: [SourceFile] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return files.filter { file in
+            let visible = visibleAgents(for: file)
+
+            let matches: Bool
+            switch scopeFilter {
+            case .all:
+                matches = true
+            case .shared:
+                matches = !visible.isEmpty
+            case .unshared:
+                matches = visible.isEmpty
+            case .sharedWith(let agent):
+                matches = visible.contains(agent)
+            case .overriddenAllow:
+                matches = hasOverride(.allow, for: file)
+            case .overriddenHide:
+                matches = hasOverride(.deny, for: file)
+            case .changed:
+                matches = file.versionCount > 0
+            }
+            guard matches else { return false }
+
+            guard !trimmed.isEmpty else { return true }
+            let haystack = [file.name, file.relativePath, file.sourceName].joined(separator: "\n")
+            return haystack.localizedCaseInsensitiveContains(trimmed)
+        }
+        .sorted(using: sortOrder)
+    }
+
+    private var selectedFile: SourceFile? {
+        guard selectedFilePaths.count == 1, let path = selectedFilePaths.first else { return nil }
+        return files.first(where: { $0.path == path })
+    }
+
+    // MARK: - Body
 
     var body: some View {
-        Table(of: SourceFile.self) {
-            TableColumn("Name") { file in
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                toolbar
+                table
+                if !selectedFilePaths.isEmpty {
+                    bulkBar
+                }
+            }
+
+            if inspectorVisible {
+                Divider()
+                FileInspectorPane(
+                    file: selectedFile,
+                    selectionCount: selectedFilePaths.count,
+                    activity: selectedHistory,
+                    connectedAgents: connectedAgents,
+                    visibleAgents: selectedFile.map(visibleAgents(for:)) ?? [],
+                    onToggleAgent: { agent, wasVisible in
+                        guard let file = selectedFile else { return }
+                        Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
+                    },
+                    onReset: {
+                        guard let file = selectedFile else { return }
+                        Task { await resetOverrides(for: file) }
+                    }
+                )
+                .frame(width: 340)
+                .background(ManifoldPalette.surface2)
+            }
+        }
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search name, path, or folder")
+        .quickLookPreview($quickLookURL)
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
+            // searchable handles focus natively; kept for forward-compat.
+        }
+        .task(id: sourceReloadKey) {
+            await loadFilesProgressively()
+        }
+        .task(id: connectedAgentsKey) {
+            await loadOverrides()
+        }
+        .task(id: selectedFilePaths) {
+            guard selectedFilePaths.count == 1, let path = selectedFilePaths.first else {
+                selectedHistory = []
+                return
+            }
+            selectedHistory = await store.fileHistory(filePath: path)
+        }
+    }
+
+    private var connectedAgentsKey: String {
+        connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
+    }
+
+    // MARK: - Toolbar
+
+    private var toolbar: some View {
+        HStack(spacing: Spacing.s3) {
+            Menu {
+                Button("All files")         { scopeFilter = .all }
+                Button("Shared")            { scopeFilter = .shared }
+                Button("Unshared")          { scopeFilter = .unshared }
+                if !connectedAgents.isEmpty {
+                    Divider()
+                    ForEach(connectedAgents, id: \.self) { agent in
+                        Button("Shared with \(AgentMeta.label(agent))") {
+                            scopeFilter = .sharedWith(agent)
+                        }
+                    }
+                }
+                Divider()
+                Button("Allowed overrides") { scopeFilter = .overriddenAllow }
+                Button("Hidden overrides")  { scopeFilter = .overriddenHide }
+                Button("Changed")           { scopeFilter = .changed }
+            } label: {
+                Label(scopeFilterLabel, systemImage: "line.3.horizontal.decrease.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Spacer()
+
+            Text("\(visibleFiles.count) of \(files.count)")
+                .font(ManifoldType.numericCaption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s3)
+        .background(.regularMaterial)
+    }
+
+    private var scopeFilterLabel: String {
+        switch scopeFilter {
+        case .all:                   return "All files"
+        case .shared:                return "Shared"
+        case .unshared:              return "Unshared"
+        case .sharedWith(let agent): return "Shared with \(AgentMeta.label(agent))"
+        case .overriddenAllow:       return "Allowed overrides"
+        case .overriddenHide:        return "Hidden overrides"
+        case .changed:               return "Changed"
+        }
+    }
+
+    // MARK: - Table
+
+    private var table: some View {
+        Table(of: SourceFile.self, selection: $selectedFilePaths, sortOrder: $sortOrder) {
+            TableColumn("Access") { file in
+                AccessChipStack(
+                    agents: connectedAgents,
+                    visibleAgents: visibleAgents(for: file),
+                    onToggle: { agent, wasVisible in
+                        Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
+                    }
+                )
+            }
+            .width(min: 60, ideal: 80, max: 160)
+
+            TableColumn("Name", value: \.name) { file in
                 HStack(spacing: Spacing.s2) {
                     FileTypeIcon(filename: file.name, size: 13)
                     Text(file.name)
                         .font(ManifoldType.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
-            .width(min: 160)
-            TableColumn("Path") { file in
+            .width(min: 160, ideal: 220)
+
+            TableColumn("Kind", value: \.fileExtension) { file in
+                Text(kindLabel(for: file))
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .width(min: 80, ideal: 120, max: 180)
+
+            TableColumn("Path", value: \.relativePath) { file in
                 Text(file.relativePath)
                     .font(ManifoldType.mono)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            TableColumn("Source") { file in
+
+            TableColumn("Source", value: \.sourceName) { file in
                 Text(file.sourceName)
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .width(120)
-            TableColumn("Size") { file in
+
+            TableColumn("Size", value: \.sizeBytes) { file in
                 Text(ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file))
                     .font(ManifoldType.numericCaption)
                     .foregroundStyle(.secondary)
             }
             .width(72)
-            TableColumn("Modified") { file in
+
+            TableColumn("Modified", value: \.modifiedDate) { file in
                 Text(Self.relativeFormatter.localizedString(for: file.modifiedDate, relativeTo: .now))
                     .font(ManifoldType.caption)
                     .foregroundStyle(.tertiary)
             }
-            .width(140)
+            .width(120)
+
+            TableColumn("Versions", value: \.versionCount) { file in
+                if file.versionCount > 0 {
+                    Text("\(file.versionCount)")
+                        .font(ManifoldType.numericCaption.weight(.semibold))
+                } else {
+                    Text("—")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .width(70)
         } rows: {
-            ForEach(files, id: \.path) { file in
+            ForEach(visibleFiles) { file in
                 TableRow(file)
             }
         }
         .tableStyle(.inset)
+        .contextMenu(forSelectionType: String.self) { selection in
+            contextMenu(for: selection)
+        } primaryAction: { selection in
+            openWithDefaultApp(paths: selection)
+        }
         .overlay {
             if isLoading && files.isEmpty {
                 ProgressView().progressViewStyle(.circular)
             } else if files.isEmpty {
-                VStack(spacing: Spacing.s2) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 24, weight: .light))
-                        .foregroundStyle(.tertiary)
-                    Text("No files visible yet.")
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                }
+                EmptyStateIllustration(
+                    systemImage: "doc.on.doc",
+                    title: "No files indexed yet",
+                    subtitle: "Once you share a folder, its files appear here with default scope, overrides, and tracked activity.",
+                    tint: ManifoldPalette.selection,
+                    style: .access
+                )
             }
-        }
-        .task {
-            isLoading = true
-            files = await store.enumerateSourceFiles()
-            isLoading = false
         }
     }
 
-    private static let relativeFormatter = RelativeDateTimeFormatter()
+    // MARK: - Context menu
+
+    @ViewBuilder
+    private func contextMenu(for selection: Set<String>) -> some View {
+        let filesInSelection = files.filter { selection.contains($0.path) }
+
+        Button("Open") { openWithDefaultApp(paths: selection) }
+            .disabled(filesInSelection.isEmpty)
+        Button("Quick Look") {
+            if let first = filesInSelection.first {
+                quickLookURL = URL(fileURLWithPath: first.path)
+            }
+        }
+        .disabled(filesInSelection.isEmpty)
+
+        Divider()
+
+        if !connectedAgents.isEmpty {
+            Menu("Share with") {
+                ForEach(connectedAgents, id: \.self) { agent in
+                    Button(AgentMeta.label(agent)) {
+                        Task { await bulkSetVisibility(agent: agent, decision: .allow, files: filesInSelection) }
+                    }
+                }
+            }
+            Menu("Unshare from") {
+                ForEach(connectedAgents, id: \.self) { agent in
+                    Button(AgentMeta.label(agent)) {
+                        Task { await bulkSetVisibility(agent: agent, decision: .deny, files: filesInSelection) }
+                    }
+                }
+            }
+        }
+        Button("Reset overrides") {
+            Task { await bulkReset(files: filesInSelection) }
+        }
+
+        Divider()
+
+        Button("Reveal in Finder") {
+            let urls = filesInSelection.map { URL(fileURLWithPath: $0.path) }
+            if !urls.isEmpty {
+                NSWorkspace.shared.activateFileViewerSelecting(urls)
+            }
+        }
+        Button("Copy Path") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(filesInSelection.map(\.path).joined(separator: "\n"), forType: .string)
+        }
+    }
+
+    // MARK: - Bulk bar
+
+    private var bulkBar: some View {
+        HStack(spacing: Spacing.s2) {
+            Text("\(selectedFilePaths.count) selected")
+                .font(ManifoldType.captionMedium)
+
+            Spacer()
+
+            if !connectedAgents.isEmpty {
+                Menu {
+                    ForEach(connectedAgents, id: \.self) { agent in
+                        Button(AgentMeta.label(agent)) {
+                            Task { await bulkSetVisibility(agent: agent, decision: .allow, files: filesInSelection) }
+                        }
+                    }
+                } label: {
+                    Label("Share with", systemImage: "plus.circle")
+                }
+                .menuStyle(.button)
+                .controlSize(.small)
+
+                Menu {
+                    ForEach(connectedAgents, id: \.self) { agent in
+                        Button(AgentMeta.label(agent)) {
+                            Task { await bulkSetVisibility(agent: agent, decision: .deny, files: filesInSelection) }
+                        }
+                    }
+                } label: {
+                    Label("Unshare from", systemImage: "minus.circle")
+                }
+                .menuStyle(.button)
+                .controlSize(.small)
+            }
+
+            Button("Reset overrides") {
+                Task { await bulkReset(files: filesInSelection) }
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s2)
+        .background(.ultraThinMaterial)
+        .overlay(Divider(), alignment: .top)
+    }
+
+    private var filesInSelection: [SourceFile] {
+        files.filter { selectedFilePaths.contains($0.path) }
+    }
+
+    // MARK: - Actions
+
+    private func openWithDefaultApp(paths: Set<String>) {
+        for path in paths {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        }
+    }
+
+    private func toggle(agent: TargetApp, for file: SourceFile, currentlyVisible: Bool) async {
+        let decision: FileVisibilityOverrideDecision = currentlyVisible ? .deny : .allow
+        await store.setFileVisibilityOverride(
+            agent: agent,
+            sourceID: file.sourceID,
+            relativePath: file.relativePath,
+            decision: decision
+        )
+        await reloadOverrides(agent: agent)
+    }
+
+    private func resetOverrides(for file: SourceFile) async {
+        for agent in connectedAgents {
+            await store.clearFileVisibilityOverride(
+                agent: agent,
+                sourceID: file.sourceID,
+                relativePath: file.relativePath
+            )
+        }
+        await loadOverrides()
+    }
+
+    private func bulkSetVisibility(agent: TargetApp, decision: FileVisibilityOverrideDecision, files: [SourceFile]) async {
+        for file in files {
+            await store.setFileVisibilityOverride(
+                agent: agent,
+                sourceID: file.sourceID,
+                relativePath: file.relativePath,
+                decision: decision
+            )
+        }
+        await reloadOverrides(agent: agent)
+    }
+
+    private func bulkReset(files: [SourceFile]) async {
+        for file in files {
+            for agent in connectedAgents {
+                await store.clearFileVisibilityOverride(
+                    agent: agent,
+                    sourceID: file.sourceID,
+                    relativePath: file.relativePath
+                )
+            }
+        }
+        await loadOverrides()
+    }
+
+    // MARK: - Loading
+
+    private func loadFilesProgressively() async {
+        files = []
+        selectedFilePaths = []
+        isLoading = true
+        for await batch in store.enumerateSourceFilesProgressively() {
+            files.append(contentsOf: batch)
+        }
+        isLoading = false
+    }
+
+    private func loadOverrides() async {
+        await withTaskGroup(of: (TargetApp, [FileVisibilityOverrideRecord]).self) { group in
+            for agent in connectedAgents {
+                group.addTask { (agent, await store.fileVisibilityOverrides(agent: agent)) }
+            }
+            var result: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
+            for await (agent, records) in group {
+                result[agent] = records
+            }
+            fileOverridesByAgent = result
+        }
+    }
+
+    private func reloadOverrides(agent: TargetApp) async {
+        fileOverridesByAgent[agent] = await store.fileVisibilityOverrides(agent: agent)
+    }
+
+    // MARK: - Helpers
+
+    private func kindLabel(for file: SourceFile) -> String {
+        let ext = file.fileExtension.isEmpty
+            ? (file.path as NSString).pathExtension
+            : file.fileExtension
+        if ext.isEmpty { return "File" }
+        if let type = UTType(filenameExtension: ext), let desc = type.localizedDescription {
+            return desc
+        }
+        return ext.uppercased()
+    }
+
+    static let relativeFormatter = RelativeDateTimeFormatter()
 }

@@ -83,7 +83,7 @@ public actor EmailSyncEngine {
             for (emailID, emlPath) in batch {
                 guard !Task.isCancelled else { return }
 
-                guard let data = try? Data(contentsOf: URL(fileURLWithPath: emlPath)) else { continue }
+                guard let data = Self.readStoredMessage(at: emlPath) else { continue }
                 let parsed = MIMEParser.parse(data: data)
                 let rawBody = parsed.textBody ?? parsed.htmlBody.map { Self.stripHTML($0) }
                 guard let body = rawBody else { continue }
@@ -282,7 +282,7 @@ public actor EmailSyncEngine {
 
         // Ensure .eml directory exists
         let emlDir = Self.emlDirectory(accountID: accountID, mailbox: mailboxName)
-        try FileManager.default.createDirectory(at: emlDir, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: emlDir)
 
         var newCount = 0
 
@@ -300,7 +300,8 @@ public actor EmailSyncEngine {
                 // Fetch raw message body and save as .eml
                 do {
                     let bodyData = try await conn.fetchBody(uid: uid)
-                    try bodyData.write(to: emlFile, options: Data.WritingOptions.atomic)
+                    let protectedMessage = try ProtectedStorageCrypto.encrypt(bodyData)
+                    try LocalFileProtection.writeOwnerOnly(protectedMessage, to: emlFile)
                 } catch {
                     logger.warning("Failed to fetch body for UID \(uid): \(error.localizedDescription)")
                     continue
@@ -311,7 +312,7 @@ public actor EmailSyncEngine {
                 let contentType: String?
                 let attachmentCount: Int
                 let bodyText: String?
-                if let data = try? Data(contentsOf: emlFile) {
+                if let data = Self.readStoredMessage(at: emlFile.path) {
                     let parsed = MIMEParser.parse(data: data)
                     preview = parsed.textBody.map {
                         String($0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).prefix(200))
@@ -566,6 +567,12 @@ public actor EmailSyncEngine {
     public static func emlDirectory(accountID: String, mailbox: String) -> URL {
         let safe = mailbox.replacingOccurrences(of: "/", with: "_")
         return backupRoot.appendingPathComponent(accountID).appendingPathComponent(safe)
+    }
+
+    public static func readStoredMessage(at path: String) -> Data? {
+        let url = URL(fileURLWithPath: path)
+        guard let stored = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
+        return try? ProtectedStorageCrypto.decrypt(stored)
     }
 
     // MARK: - Email Address Parsing

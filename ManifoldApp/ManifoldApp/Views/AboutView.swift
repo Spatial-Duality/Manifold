@@ -17,7 +17,7 @@ struct AboutView: View {
                 .font(ManifoldType.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Text("Control what AI agents can see on your Mac.")
+            Text("Control what Claude and Codex can see here.")
                 .font(ManifoldType.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -9,7 +9,7 @@ These are the main decisions behind the current product shape.
 The product promise is local ownership:
 
 - the user owns the record
-- audit and history live on the Mac
+- audit and activity live on the Mac
 - trust does not depend on a vendor dashboard or cloud service
 
 That is why Manifold uses a local runtime plus a native app instead of a hosted control plane.
@@ -39,14 +39,14 @@ That is a more honest product than claiming total machine enforcement.
 
 The runtime stores different kinds of data with different needs:
 
-- SQLite is a good fit for policy, audit events, exposure records, summaries, and indexes.
+- SQLite is a good fit for governance, audit events, exposure records, summaries, and indexes.
 - content-addressed blobs are a good fit for immutable file versions and snapshot payloads.
 
 This gives Manifold:
 
 - local durability
 - easy indexing and querying
-- efficient deduplication for tracked history
+- efficient deduplication for tracked activity
 
 ## Why Record Exposure, Not Just Requests
 
@@ -57,7 +57,7 @@ Manifold records:
 - access decisions
 - exposure records
 - tracked changes
-- version history
+- version activity
 - session context
 
 That is what makes the app useful as a real system of record instead of a thin permission layer.
@@ -85,4 +85,4 @@ The durable value of Manifold is that later work can build on:
 - what changed
 - what else happened around that change
 
-That is why Manifold treats version history and session context as product pillars, not just internal implementation details.
+That is why Manifold treats version activity and session context as product pillars, not just internal implementation details.

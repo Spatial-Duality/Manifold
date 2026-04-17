@@ -1,15 +1,15 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// AccessHistoryView — past sessions grouped by day with a Resume button
-// per row. Resume computes drift and presents the drift preview sheet
-// (Phase 7 wires the sheet itself; Phase 3 renders the list).
+// AccessHistoryView — past sessions grouped by day with a reload-preview
+// action per row. The row opens a read-only drift preview sheet.
 
 import SwiftUI
 import ManifoldKit
 
 struct AccessHistoryView: View {
     @Environment(ManifoldStore.self) private var store
+    @State private var previewEntry: SessionHistoryEntry?
 
     private var entries: [SessionHistoryEntry] {
         store.recentSessionEntries
@@ -22,24 +22,29 @@ struct AccessHistoryView: View {
                     EmptyStateIllustration(
                         systemImage: "clock.arrow.circlepath",
                         title: "No past sessions yet",
-                        subtitle: "When you finish a session it lands here with the scope it used and the evidence it produced. You can resume any of them."
+                        subtitle: "When you finish a session it lands here with the scope it used and the evidence it produced. Reload previews will appear here as that flow hardens."
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.s8)
                 } else {
                     ForEach(entries) { entry in
-                        SessionHistoryRow(entry: entry)
+                        SessionHistoryRow(entry: entry) {
+                            previewEntry = entry
+                        }
                     }
                 }
             }
             .padding(Spacing.s4)
         }
+        .sheet(item: $previewEntry) { entry in
+            ReloadDriftSheet(historyEntry: entry)
+        }
     }
 }
 
 private struct SessionHistoryRow: View {
-    @Environment(ManifoldStore.self) private var store
     let entry: SessionHistoryEntry
+    let onPreview: () -> Void
 
     var body: some View {
         HStack(spacing: Spacing.s3) {
@@ -54,8 +59,8 @@ private struct SessionHistoryRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Resume") {
-                Task { try? await store.reloadSession(historyID: entry.id) }
+            Button("Reload Preview") {
+                onPreview()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

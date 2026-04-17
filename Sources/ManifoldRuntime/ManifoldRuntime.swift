@@ -32,14 +32,18 @@ public actor ManifoldRuntime {
     public nonisolated let emailRuleStore: EmailRuleStore
     /// Persistent tracked work block store.
     public nonisolated let workBlockStore: WorkBlockStore
+    /// Persisted per-file visibility overrides used by the review surfaces.
+    public nonisolated let fileVisibilityOverrideStore: FileVisibilityOverrideStore
     /// Mail synchronization engine.
     public nonisolated let emailSyncEngine: EmailSyncEngine
     /// Approval queue for governed escalations.
     public nonisolated let approvalQueue: ApprovalQueue
+    /// Persisted standing-write grants for queue approvals.
+    public nonisolated let standingWriteApprovalStore: StandingWriteApprovalStore
     /// Access decision and exposure record store.
     public nonisolated let exposureStore: ExposureStore
-    /// Append-only log of user-initiated mutations — powers universal undo.
-    public nonisolated let actionHistoryStore: ActionHistoryStore
+    /// Unified cross-scope rule catalog (file / email / agent).
+    public nonisolated let ruleStore: RuleStore
 
     private var bridges: [String: ManifoldBridge] = [:]
     private var recordedCoverageEventKeys: Set<String> = []
@@ -47,7 +51,7 @@ public actor ManifoldRuntime {
     /// Creates the runtime and initializes all local stores at the chosen root URL.
     public init(storeURL: URL? = nil) throws {
         let rootURL = storeURL ?? Self.defaultStoreURL
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: rootURL)
 
         let db = try DatabaseConnection(url: rootURL.appendingPathComponent("manifold.db"))
         let migrator = try DatabaseMigrator(db: db)
@@ -63,10 +67,12 @@ public actor ManifoldRuntime {
         let policyStore = PolicyStore(db: db)
         let emailRuleStore = EmailRuleStore(db: db, policyStore: policyStore)
         let workBlockStore = WorkBlockStore(db: db)
+        let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
         let approvalQueue = ApprovalQueue(db: db)
+        let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let exposureStore = ExposureStore(db: db)
-        let actionHistoryStore = ActionHistoryStore(db: db)
+        let ruleStore = RuleStore(db: db)
 
         self.db = db
         self.contentStore = contentStore
@@ -79,12 +85,25 @@ public actor ManifoldRuntime {
         self.policyStore = policyStore
         self.emailRuleStore = emailRuleStore
         self.workBlockStore = workBlockStore
+        self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
         self.emailSyncEngine = emailSyncEngine
         self.approvalQueue = approvalQueue
+        self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
-        self.actionHistoryStore = actionHistoryStore
+        self.ruleStore = ruleStore
 
         runtimeLogger.info("Initialized runtime at \(rootURL.path, privacy: .public)")
+    }
+
+    /// One-shot startup work that's async and shouldn't block `init`.
+    /// Idempotent — callers may invoke repeatedly without side effects.
+    public func bootstrap() async {
+        do {
+            try await ruleStore.seedIfNeeded(RuleSeedCatalog.seeds())
+            runtimeLogger.info("Seeded rule catalog (idempotent).")
+        } catch {
+            runtimeLogger.error("Rule catalog seeding failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Returns the bridge for a connection, creating it if this is the first request for that connection.
@@ -104,8 +123,11 @@ public actor ManifoldRuntime {
             policyStore: policyStore,
             emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore,
+            fileVisibilityOverrideStore: fileVisibilityOverrideStore,
             approvalQueue: approvalQueue,
+            standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore,
+            ruleStore: ruleStore,
             targetApp: targetApp,
             serverName: "manifold",
             serverVersion: version,
@@ -332,62 +354,6 @@ public actor ManifoldRuntime {
     }
 
     /// Summarizes recent email-rule activity for one agent from the audit trail.
-    // MARK: - Undo
-
-    /// Pop the most recent undoable action, apply its inverse, and mark it
-    /// undone. Returns the reversed action so callers can surface a toast
-    /// ("Undid: shared MyDocs with Claude"). Returns nil if the history
-    /// stack is empty.
-    ///
-    /// Action kinds the runtime currently knows how to reverse:
-    ///   - `policy.grant.add`   → removeSource(from:)
-    ///   - `policy.grant.remove`→ addSource(to:)
-    ///   - `policy.nodeOverride.set` → restore prior override state
-    ///
-    /// Unknown kinds are a no-op (logged). We never guess — if the runtime
-    /// can't undo something it was asked to record, we refuse rather than
-    /// apply a lossy approximation.
-    @discardableResult
-    public func undoLastAction() async throws -> ActionRecord? {
-        guard let action = try await actionHistoryStore.peekUndoable() else {
-            return nil
-        }
-        let inverse = (try? JSONSerialization.jsonObject(with: Data(action.inverseJSON.utf8))) as? [String: String] ?? [:]
-        switch action.kind {
-        case "policy.grant.add":
-            guard let sid = inverse["sourceID"], let agentRaw = inverse["agent"],
-                  let agent = TargetApp(rawValue: agentRaw) else { return nil }
-            try await policyStore.removeSource(sid, from: agent)
-
-        case "policy.grant.remove":
-            guard let sid = inverse["sourceID"], let agentRaw = inverse["agent"],
-                  let agent = TargetApp(rawValue: agentRaw) else { return nil }
-            try await policyStore.addSource(sid, to: agent)
-
-        case "policy.nodeOverride.set":
-            guard let sid = inverse["sourceID"],
-                  let rel = inverse["relativePath"],
-                  let agentRaw = inverse["agent"],
-                  let agent = TargetApp(rawValue: agentRaw),
-                  let stateRaw = inverse["state"],
-                  let state = NodeOverrideState(rawValue: stateRaw) else { return nil }
-            try await policyStore.setNodeOverride(
-                sourceID: sid,
-                relativePath: rel,
-                agent: agent,
-                state: state
-            )
-
-        default:
-            runtimeLogger.warning(
-                "undoLastAction: unknown kind \(action.kind, privacy: .public), leaving action untouched"
-            )
-            return nil
-        }
-        try await actionHistoryStore.markUndone(actionID: action.actionID)
-        return action
-    }
-
     public func emailRuleActivitySummary(for agent: TargetApp) async throws -> EmailRuleActivitySummary {
         let ruleSet = try await emailRuleStore.ruleSet(for: agent)
         let policy = try await policyStore.policy(for: agent)

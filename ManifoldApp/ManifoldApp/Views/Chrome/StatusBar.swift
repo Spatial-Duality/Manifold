@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// StatusBar — the always-visible honest-state strip at the bottom of the
+// LedgerStatusBar — the always-visible honest-state strip at the bottom of the
 // Ledger window.
 //
 // Principle 10: honesty outranks confidence. If the runtime isn't
@@ -11,7 +11,7 @@
 import SwiftUI
 import ManifoldKit
 
-struct StatusBar: View {
+struct LedgerStatusBar: View {
     @Environment(ManifoldStore.self) private var store
 
     private var status: (AgentStatusDot.Status, String) {

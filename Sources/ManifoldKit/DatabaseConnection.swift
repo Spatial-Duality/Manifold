@@ -10,9 +10,12 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 /// Minimal SQLite wrapper. All operations are synchronous — callers use actor isolation.
 public final class DatabaseConnection: @unchecked Sendable {
     private var handle: OpaquePointer?
+    private let url: URL
 
     /// Creates a SQLite connection and applies the runtime PRAGMA defaults Manifold expects.
     public init(url: URL) throws {
+        self.url = url
+        try LocalFileProtection.ensureDirectory(at: url.deletingLastPathComponent())
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         let status = sqlite3_open_v2(url.path, &handle, flags, nil)
         guard status == SQLITE_OK else {
@@ -31,6 +34,7 @@ public final class DatabaseConnection: @unchecked Sendable {
         try execute("PRAGMA foreign_keys=ON")
         // Run SQLite's query planner optimizer on open
         try execute("PRAGMA optimize")
+        try secureDatabaseFiles()
     }
 
     /// Prepared statement cache — avoids recompiling identical SQL on every call.
@@ -166,5 +170,11 @@ public final class DatabaseConnection: @unchecked Sendable {
 
     private var errorMessage: String {
         handle.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
+    }
+
+    private func secureDatabaseFiles() throws {
+        try LocalFileProtection.secureFile(at: url)
+        try? LocalFileProtection.secureFile(at: URL(fileURLWithPath: url.path + "-wal"))
+        try? LocalFileProtection.secureFile(at: URL(fileURLWithPath: url.path + "-shm"))
     }
 }

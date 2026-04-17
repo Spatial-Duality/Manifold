@@ -101,6 +101,10 @@ public struct MaterializationEngine: Sendable {
                 guard standardized.path.hasPrefix(sourceBasePath) else { continue }
                 let relativePath = String(standardized.path.dropFirst(sourceBasePath.count))
                 let isDirectory = fileURL.hasDirectoryPath
+                if ScopedFileAccess.isBlockedGovernedEntry(at: fileURL) {
+                    if isDirectory { enumerator.skipDescendants() }
+                    continue
+                }
 
                 if shouldSkip(relativePath: relativePath) {
                     if isDirectory { enumerator.skipDescendants() }
@@ -191,7 +195,7 @@ public struct MaterializationEngine: Sendable {
         let fm = FileManager.default
         let workspaceURL = URL(fileURLWithPath: materializationRoot)
 
-        try fm.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: workspaceURL)
 
         // Size guard: estimate total before copying
         let estimate = try estimateSize(sources: sources)
@@ -250,6 +254,7 @@ public struct MaterializationEngine: Sendable {
         var manifest: [String: String] = [:]
         while let fileURL = enumerator.nextObject() as? URL {
             if fileURL.lastPathComponent == ".manifold-baseline.json" { continue }
+            if ScopedFileAccess.isBlockedGovernedEntry(at: fileURL) { continue }
 
             guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                   values.isRegularFile == true else { continue }
@@ -289,7 +294,7 @@ public struct MaterializationEngine: Sendable {
         if fm.fileExists(atPath: mountURL.path) {
             try fm.removeItem(at: mountURL)
         }
-        try fm.createDirectory(at: mountURL, withIntermediateDirectories: true)
+        try LocalFileProtection.ensureDirectory(at: mountURL)
 
         // Copy files (skip hidden files, common noise, and .manifoldignore patterns)
         var fileCount = 0
@@ -316,6 +321,10 @@ public struct MaterializationEngine: Sendable {
                 guard standardized.path.hasPrefix(sourceBasePath) else { continue }
                 let relativePath = String(standardized.path.dropFirst(sourceBasePath.count))
                 let isDirectory = fileURL.hasDirectoryPath
+                if ScopedFileAccess.isBlockedGovernedEntry(at: fileURL) {
+                    if isDirectory { enumerator.skipDescendants() }
+                    continue
+                }
 
                 // Skip noise directories
                 if shouldSkip(relativePath: relativePath) {
@@ -342,7 +351,7 @@ public struct MaterializationEngine: Sendable {
                       values.isRegularFile == true else {
                     if isDirectory {
                         let destDir = mountURL.appendingPathComponent(relativePath)
-                        try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+                        try LocalFileProtection.ensureDirectory(at: destDir)
                     }
                     continue
                 }
@@ -350,9 +359,9 @@ public struct MaterializationEngine: Sendable {
                 let destURL = mountURL.appendingPathComponent(relativePath)
                 let destDir = destURL.deletingLastPathComponent()
                 if !fm.fileExists(atPath: destDir.path) {
-                    try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+                    try LocalFileProtection.ensureDirectory(at: destDir)
                 }
-                try fm.copyItem(at: fileURL, to: destURL)
+                try LocalFileProtection.copyOwnerOnlyItem(at: fileURL, to: destURL)
 
                 fileCount += 1
                 totalBytes += Int64(values.fileSize ?? 0)
@@ -373,7 +382,7 @@ public struct MaterializationEngine: Sendable {
             options: [.prettyPrinted, .sortedKeys]
         )
         let manifestURL = mountURL.appendingPathComponent(".manifold-baseline.json")
-        try manifestData.write(to: manifestURL, options: .atomic)
+        try LocalFileProtection.writeOwnerOnly(manifestData, to: manifestURL)
 
         logger.info("Materialized \(mountName): \(fileCount) files, \(totalBytes) bytes")
 

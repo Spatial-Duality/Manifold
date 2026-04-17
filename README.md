@@ -5,9 +5,9 @@
 
 Give AI agents a copy of your project, not your whole Mac.
 
-Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac, across sessions and across vendors.
+Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac when their work goes through Manifold.
 
-It is a local macOS app and runtime for giving AI tools controlled access to the files and email you choose, with reviewable workspaces, durable history, and a clear audit trail of what was exposed.
+It is a local macOS app and runtime for giving AI tools controlled access to the files and email you choose through Manifold, with reviewable workspaces, durable history, and a clear audit trail of what was exposed.
 
 ## Can I Use It?
 
@@ -22,11 +22,12 @@ If that fits your setup, you can clone, build, and run the app locally today.
 
 ## What It Does
 
-- Lets you choose which files, folders, and emails Claude can see
-- Lets you choose separately what Codex can see
+- Lets you choose which files, folders, and emails Claude can see through Manifold
+- Lets you choose separately what Codex can see through Manifold
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
 - Keeps local version history and session context across sessions and across agents
+- Stays explicit about its boundary: native activity outside the Manifold path is outside Manifold's control
 
 <!-- TODO: Add screenshot -->
 
@@ -52,7 +53,7 @@ For the full first-run walkthrough, see [docs/getting-started.md](docs/getting-s
 
 ## Architecture
 
-Manifold combines a native SwiftUI app, a local runtime, tracked workspaces, and an MCP bridge so agent activity can be governed locally instead of flowing through unconstrained machine access.
+Manifold combines a native SwiftUI app, a local runtime, tracked workspaces, and an MCP bridge so access routed through Manifold can be governed locally instead of flowing through unconstrained machine access.
 
 ```mermaid
 flowchart LR
@@ -76,6 +77,7 @@ See [docs/architecture.md](docs/architecture.md) for the outsider-friendly syste
 ### Understand It
 
 - [docs/architecture.md](docs/architecture.md)
+- [docs/ui-map.md](docs/ui-map.md)
 - [docs/mcp-integration.md](docs/mcp-integration.md)
 - [docs/design-decisions.md](docs/design-decisions.md)
 
