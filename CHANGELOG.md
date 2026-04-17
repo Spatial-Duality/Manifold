@@ -2,6 +2,39 @@
 
 All notable changes to Manifold are documented here.
 
+## [0.5.0] - 2026-04-17
+
+### Added
+- Unified Rules system: a single `RuleRecord` grammar (`scope × matcher × action × agents × window × source`) covers files, emails, and agent behavior. New `Sources/ManifoldKit/RuleTypes.swift`, `RuleStore.swift`, `RuleEngine.swift`, and `RuleSeed.swift`.
+- Live enforcement: `ManifoldBridge.enforceFileReadRules` calls `RuleEngine.evaluate` on every governed file read. Email engine re-pointed at the same store. Agent-behavior rules gate tool invocations and session duration.
+- Seeded denies ship on by default and pin to the top of their group: `**/.env*`, `**/.ssh/**`, `**/*.pem`, `**/*.key`, `**/id_rsa*`, `**/.aws/credentials`, `**/.gnupg/**`, `**/.netrc`, `**/.npmrc`, `**/.git/config`, detected token/key patterns, and password-reset / 2FA mail shields.
+- Top-level Rules tab in the ledger (Activity / Access / Mail / Requests / Rules, ⌘1–⌘5) with a split-view authoring surface: filterable sidebar, sortable SwiftUI `Table`, inline inspector with a sentence-style `RuleBuilder`, and `MatchPreview` showing what a rule would block right now.
+- Settings ▸ Rules pane for global defaults (per-agent default policy, restore seeded rules). Authoring stays in the ledger.
+- Deny-wins + first-match precedence, with shadow warnings in the inspector when a user rule is pre-empted by a seeded rule, and an explicit user-override-allow path for rare overrides.
+- First-launch migration reads existing `EmailRuleSet` / shields and imports them into `RuleStore` tagged `source = .imported`.
+- `LocalFileProtection`: owner-only (0o700) governance directory, 0o600 file perms.
+- `ProtectedStorageCrypto`: AES-GCM at-rest encryption for sensitive payloads with the key held in the macOS Keychain and an `MNF1` magic header for future migrations.
+- `ScopedFileIdentity`: path normalization (resolves `..`, rejects symlink escapes, strips source-folder prefixes) applied before any policy check.
+- `FileVisibilityOverrideStore`: per-agent file-level visibility overrides that cohere with rule decisions.
+- `StandingWriteApprovalStore`: once vs. default answers for standing-write prompts survive session boundaries.
+- `SignedProcessVerifier`: XPC callers are checked against a code-signing requirement string before the service accepts privileged calls. Forged agent labels on unsigned binaries are rejected at the boundary.
+- `RuleEngineTests` covering precedence, combinators, per-agent filtering, and shield translation.
+
+### Changed
+- `EmailPolicyEngine.decision` refactored to consume `RuleRecord`. The old 10-step hierarchy is gone; decisions still carry reason strings so the UI does not regress.
+- `HistoryModel` audit entries include `matchedRuleID` and explanation strings. Inspector's "Recent matches" list is backed by real audit data.
+- App shell: `LedgerView` is a single `NavigationSplitView` (sidebar, detail, toolbar, status bar). Live session chip moved to `StatusBar` only — one ambient home for runtime state. Sidebar sets no `navigationTitle` (detail owns it) so rows do not render behind traffic lights on macOS 26.
+- `LedgerToolbar` keeps Start/Finish session primary actions and Refresh runtime; title-bar stays populated so macOS does not collapse it alongside a collapsed sidebar.
+- `Mail` destination renamed internally to mail review, distinguishes never-synced vs. paused vs. has-last-sync empty states honestly.
+- `Requests` sidebar no longer renders blank when empty; pending counts use `.badge(Text?)` with "99+" truncation handled in `LedgerSidebar.badgeText(for:)`.
+- Default policy per agent preserved from today: Claude (cowork) = allow-unless-blocked, Codex = block-unless-allowed. Extended from email-only to files.
+
+### Fixed
+- Sidebar rows rendering behind the title bar when the sidebar also set `.navigationTitle` (the detail column owns the window title on macOS).
+- Preview-only `RulesWindowView` replaced with real enforcement; old file kept as an empty shim so the Xcode project reference still compiles during transition.
+- Seed-deny ordering bug where user rules could accidentally open a hole by being dragged above a seeded deny — fixed by the two-phase precedence.
+- `.claude/worktrees/` and `ManifoldApp/build/` added to `.gitignore` so ~540 MB of artifacts no longer land in commits.
+
 ## [0.4.0] - 2026-04-08
 
 ### Added

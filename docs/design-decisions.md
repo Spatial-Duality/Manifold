@@ -74,6 +74,32 @@ It lets Manifold:
 
 The long-term architecture is runtime-first, not protocol-first, but MCP is the right V1 edge.
 
+## Why Rules Are One Unified System, Not Three
+
+Earlier the product had one half-finished email policy engine, a binary per-folder allow for files, and no real agent-behavior surface at all. That was three parallel systems with three mental models.
+
+We collapsed them into one `RuleRecord` grammar — the same `(scope, matcher, action, agents, window, source)` tuple works for files, emails, and agent tool invocations. One engine evaluates everything. Users learn one thing.
+
+The precedence is deliberately deny-first, then first-match within action, and seeded denies pin to the top. That means:
+
+- the security floor is the same across agents — dropping a secret into `.env` or `~/.ssh/` cannot be quietly opened up by reordering a list
+- predictability beats flexibility: the inspector can always name the winning rule
+- the Claude vs. Codex split (allow-unless-blocked for Claude cowork, block-unless-allowed for Codex) is a default policy under the rules, not an alternative rule system
+
+Previewing the grammar without enforcement was worse than shipping it smaller. We cut cost ceilings and a content-entropy secret detector out of v1 so everything the UI lets you express is something the runtime actually enforces.
+
+## Why On-Disk Protection Beyond SQLite Perms
+
+SQLite on macOS defaults to fairly permissive file modes. For a product whose promise is "the user owns the audit record," that is not enough.
+
+So the runtime layers:
+
+- owner-only (0o700) governance directory and 0o600 file perms through `LocalFileProtection`
+- AES-GCM at-rest encryption via `ProtectedStorageCrypto` with the key held in the Keychain and an `MNF1` magic header for future migrations
+- `ScopedFileIdentity` path normalization before any policy check, so symlink and `..` escapes cannot trick a rule
+
+The rule against "just trust the filesystem" is the same rule as "verify XPC callers": if the trust boundary depends on cooperation, it is not a trust boundary.
+
 ## Why History Is A Core Feature
 
 AI work is rarely one session long.

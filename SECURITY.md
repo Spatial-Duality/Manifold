@@ -17,9 +17,12 @@ We will acknowledge your report within 48 hours and aim to provide a fix or miti
 ## Scope
 
 - ManifoldRuntime policy enforcement (ManifoldBridge)
-- XPC service authentication and authorization
+- Rule engine evaluation — bypasses, precedence errors, or seed-deny shadowing in `RuleEngine`/`RuleStore`
+- XPC service authentication and authorization, including `SignedProcessVerifier` code-signing checks
 - MCP server access control
 - Unauthorized local process access to Manifold's XPC or MCP surfaces
+- `ScopedFileIdentity` path normalization — symlink, `..`, or prefix-stripping attacks that reach a governed file the rule engine would otherwise block
+- On-disk protection (`LocalFileProtection` file perms, `ProtectedStorageCrypto` AES-GCM at rest and Keychain key handling)
 - Snapshot and content store integrity
 - Workspace isolation boundaries
 - Restore and rollback safety for governed files

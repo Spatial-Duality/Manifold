@@ -104,6 +104,23 @@ Manifold uses one simple operating model throughout the app.
 
 Claude and Codex each have their own access policy. A file, folder, email source, domain, or rule can be visible to one agent, both, or neither.
 
+Defaults differ on purpose: Claude (cowork) is allow-unless-blocked for fast iteration, Codex is block-unless-allowed for security-first work. Rules refine those defaults symmetrically — the secret-deny floor is the same for both agents.
+
+### Unified Rules
+
+A single rule grammar covers files, emails, and agent behavior.
+
+- **Scope.** `file`, `email`, or `agent`.
+- **Matcher.** A typed predicate tree. Files match on globs, size, age, hidden status, and secret detection. Emails match on sender, domain, subject/body, attachments, and preset shields. Agent rules match on tool family, session duration, and audit level.
+- **Action.** `allow`, `deny`, `warn`, `redact`, `summarize`, `downgrade`, `log`.
+- **Agents.** Which agents the rule targets; empty means all.
+- **Window.** `always`, `session-only`, `until(date)`, or `expire-after(n)`.
+- **Source.** `seeded` (immutable system defaults), `user`, `user-override`, `suggested`, or `imported`.
+
+Precedence is two-phase: any matching deny wins over any matching allow (deny sweep), then first-match wins within the same action. Seeded rules pin to the top of their group. Suggestions sit below user rules and promote to user on accept.
+
+Seeded denies that ship on by default include: `**/.env*`, `**/.ssh/**`, `**/*.pem`, `**/*.key`, `**/id_rsa*`, `**/.aws/credentials`, `**/.gnupg/**`, `**/.netrc`, `**/.npmrc`, `**/.git/config`, anything matching known token/key detector patterns, and mail matching password-reset or 2FA shields.
+
 ### Standing Access
 
 Standing Access is the default access mode. It is for reading and searching, not direct editing.
@@ -146,6 +163,8 @@ Manifold helps agents understand prior work through user-owned history. It does 
 
 - File visibility by agent.
 - Email visibility by agent.
+- Unified rules across files, emails, and agent behavior — authored in Ledger ▸ Rules, live match preview shows what a rule would block right now.
+- Seeded secret denies are on by default and can only be shadowed through an explicit user-override-allow with a warning banner.
 - Sensitivity rules and filters for email access.
 - Whether access recording stays lightweight or requires richer intent summaries.
 - When to start, review, promote, restore, or discard a Tracked Work Block.
@@ -157,11 +176,19 @@ Manifold is designed to answer two questions clearly: what can this AI see right
 
 ### App Surfaces
 
-- **Overview.** Current per-agent access, connection state, coverage state, pauses, and active tracked work.
-- **Files.** Managed sources, per-agent visibility, file browsing, and Version History.
-- **Emails.** Synced email archive, visibility rules, and sensitivity controls.
-- **Activity / Versions.** Access history, Exposure Records, tracked changes, restores, drift alerts, and session timelines.
-- **Menu Bar.** Fast status, pause controls, coverage visibility, and quick access to active review or approval state.
+The main window is a single ledger with five destinations:
+
+- **Activity.** Access history, Exposure Records, tracked changes, restores, drift alerts, and session timelines.
+- **Access.** Managed sources, per-agent visibility, file browsing, session delta, and Version History.
+- **Mail.** Governed mailboxes, synced archive, visibility rules, sensitivity controls, and mail-session evidence.
+- **Requests.** Pending approvals — standing-write prompts, out-of-scope reads, and recent answers.
+- **Rules.** Live file, email, and agent-behavior rules authored against a unified `(scope, matcher, action, agents, window, source)` grammar. Seeded denies for secrets and credentials ship on by default. Every edit changes real runtime decisions.
+
+Plus supporting surfaces:
+
+- **Menu bar panel.** Fast status, pause controls, coverage visibility, and quick access to active review or approval state.
+- **Command palette.** Keyboard-first jump point for core commands.
+- **Settings window.** General, Agents, Storage, Mail, Rules (global defaults only), and Advanced panes.
 
 ### What You Can Inspect
 
@@ -228,8 +255,10 @@ Manifold is a native macOS app built around a local runtime and an agent-facing 
 - **Runtime shape:** a local runtime plus a bundled helper executable registered as a LaunchAgent
 - **IPC:** XPC between the app surface and the runtime
 - **Agent path in V1:** local MCP integration for Claude Desktop/Cowork and Codex
-- **Local identity:** XPC connections should be tied to verified local caller identity and code-signing requirements where supported
-- **Storage:** SQLite for metadata and audit records, content-addressed blobs for tracked file history
+- **Local identity:** XPC callers are verified through `SignedProcessVerifier` against a code-signing requirement; declared agent labels are not trusted on their own
+- **Rule engine:** a single `RuleStore` + `RuleEngine` evaluates file, email, and agent-behavior rules at every governed read with deny-wins precedence
+- **Storage:** SQLite for metadata and audit records, content-addressed blobs for tracked file history. Governance directory is owner-only (0o700) through `LocalFileProtection`; sensitive payloads use AES-GCM at rest via `ProtectedStorageCrypto` with the key held in the Keychain
+- **Path safety:** caller paths are normalized through `ScopedFileIdentity` before any policy check so symlink and relative-path escapes cannot fool a rule
 - **Email archive:** local read-only email storage and indexing
 - **Write model:** reviewable writes happen through tracked workspaces
 - **Drift model:** drift detection supplements the write model without claiming total control

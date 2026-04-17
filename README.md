@@ -24,9 +24,12 @@ If that fits your setup, you can clone, build, and run the app locally today.
 
 - Lets you choose which files, folders, and emails Claude can see through Manifold
 - Lets you choose separately what Codex can see through Manifold
+- Enforces a unified rule system across files, emails, and agent behavior, with seeded denies for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
 - Keeps local version history and session context across sessions and across agents
+- Stores governance data on disk with owner-only permissions and AES-GCM encryption keyed from the Keychain
+- Verifies XPC callers against code-signing requirements instead of trusting declared agent labels
 - Stays explicit about its boundary: native activity outside the Manifold path is outside Manifold's control
 
 <!-- TODO: Add screenshot -->
@@ -61,9 +64,13 @@ flowchart LR
     B["Codex app"] --> M
     U["Manifold.app"] --> X["XPC client"]
     M --> X
-    X --> R["ManifoldRuntime"]
-    R --> S["Policy, snapshots, email, history"]
+    X --> V["Signed caller check"]
+    V --> R["ManifoldRuntime"]
+    R --> E["Rule engine"]
+    E --> S["Policy, snapshots, email, history"]
 ```
+
+The main window is a single ledger with five destinations — `Activity`, `Access`, `Mail`, `Requests`, and `Rules` — all backed by the same runtime. `Rules` is not a preview; edits there change real file-read, email, and agent-behavior decisions.
 
 See [docs/architecture.md](docs/architecture.md) for the outsider-friendly system view and [ARCHITECTURE.md](ARCHITECTURE.md) for the deeper architecture document.
 

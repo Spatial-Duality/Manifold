@@ -136,17 +136,16 @@ Base-4 scale. Defined in `Components/Spacing.swift`. No ad-hoc values.
 
 ## Layout
 
-- **Tab model:** 3 tabs (Overview, Files, Emails) via segmented control in toolbar
-- **Per-tab sidebars:** Each tab owns its own NavigationSplitView
-  - Overview: Full-width dashboard, no sidebar. Two agent cards with source names, recent activity, per-agent controls.
-  - Files: Sidebar (Sources + Versions) → SourcesTableView or FilesView → VersionDetailView inspector
-  - Emails: Sidebar (Domains + Categories + Accounts) → DomainsTableView or EmailView (3-pane)
-- `.navigationSplitViewStyle(.balanced)` throughout
-- Single `.inspector()` on Files tab NavigationSplitView (version history)
-- **Toolbar:** Persistent status indicator (green/orange/red dot + text). Monochromatic. No custom background colors per WWDC25 Session 356.
-- Settings is a separate scene (⌘,), 4-tab TabView (General, AI Apps, Mail, Storage)
-- Command palette (⌘K) for keyboard-first control
-- Menu bar panel (MenuBarExtra .window style) with agent status, work block strip, quick actions
+- **Shell model:** single `NavigationSplitView` ledger with five destinations in a flat sidebar (⌘1–⌘5): Activity, Access, Mail, Requests, Rules. No per-tab mini-shells.
+- **Title ownership:** the detail column sets `.navigationTitle(destination.title)`; the sidebar sets none. Two navigation titles fight and the sidebar's first rows render behind the traffic lights on macOS 26.
+- **Sidebar:** flat `List { ForEach … }`, system `Label` rows, `.badge(Text?)` for pending counts. A one-`Section` wrapper renders as a blank column on macOS 26. Column width contract `min 220 / ideal 240 / max 280`.
+- **Session chip:** lives only in the status bar. One ambient home for runtime state — never duplicated in the toolbar.
+- **Toolbar:** primary action is Start session / Finish session (the toolbar stays populated so macOS does not collapse the title bar alongside a collapsed sidebar). Secondary action is Refresh runtime.
+- **Status bar:** honest runtime + session state, with a Reconnect button when the runtime is offline.
+- `.navigationSplitViewStyle(.balanced)` throughout.
+- Settings is a separate scene (⌘,), 6-tab TabView: General, Agents, Storage, Mail, Rules (global defaults only), Advanced.
+- Command palette (⌘K) for keyboard-first control.
+- Menu bar panel (MenuBarExtra .window style) with agent status, session strip, pending requests, quick actions.
 
 ### Column Widths
 | Column | Min | Ideal | Max |

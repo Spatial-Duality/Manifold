@@ -79,8 +79,10 @@ flowchart TD
     B --> B3["Mail"]
     B --> B4["Requests"]
     B --> B5["Rules"]
-    B --> B6["Live session chip"]
+    E --> E1["Live session chip"]
 ```
+
+The live session chip lives only in the status bar (one ambient home for runtime state).
 
 ### Sidebar destinations
 
@@ -90,7 +92,7 @@ flowchart TD
 | Access | What files are shared right now, and to whom? | [../ManifoldApp/ManifoldApp/Views/Access/AccessWindowView.swift](../ManifoldApp/ManifoldApp/Views/Access/AccessWindowView.swift) |
 | Mail | What mailboxes and threads are governed? | [../ManifoldApp/ManifoldApp/Views/Mail/MailWindowView.swift](../ManifoldApp/ManifoldApp/Views/Mail/MailWindowView.swift) |
 | Requests | What approvals are waiting on the user, especially standing-write prompts? | [../ManifoldApp/ManifoldApp/Views/Requests/RequestsWindowView.swift](../ManifoldApp/ManifoldApp/Views/Requests/RequestsWindowView.swift) |
-| Rules | What shape will future global governance authoring take? | [../ManifoldApp/ManifoldApp/Views/Rules/RulesWindowView.swift](../ManifoldApp/ManifoldApp/Views/Rules/RulesWindowView.swift) |
+| Rules | Which files, emails, and agent behaviors are allowed, denied, warned, or redacted right now? | [../ManifoldApp/ManifoldApp/Views/Rules/RulesView.swift](../ManifoldApp/ManifoldApp/Views/Rules/RulesView.swift) |
 
 ## Destination Details
 
@@ -144,13 +146,14 @@ Requests are handled in their own destination rather than a blocking modal flow.
 
 ```mermaid
 flowchart LR
-    A["RulesView"] --> B["Files rules"]
-    A --> C["Email rules"]
-    A --> D["Agent rules"]
-    A --> E["NewRuleSheet"]
+    A["RulesView"] --> B["RulesSidebar"]
+    A --> C["RuleListTable"]
+    A --> D["RuleInspector"]
+    D --> E["RuleBuilder"]
+    D --> F["MatchPreview"]
 ```
 
-`Rules` is currently a preview surface. It shows the intended grammar for future file, email, and agent governance authoring, but changes remain local preview state today.
+`Rules` is the live governance surface. The same `RuleRecord` grammar covers files, emails, and agent behavior; all evaluation runs through `RuleEngine.evaluate` on the runtime. Seeded denies for secrets, SSH keys, 2FA mail, and the like ship on by default and pin to the top of the list. Editing a rule updates real decisions the next time an agent asks, and the inspector shows a live match preview ("would block 7 files, 3 emails right now") plus shadowing warnings when a user rule is pre-empted by a seeded one.
 
 ## Supporting Windows, Sheets, And Panels
 
@@ -160,7 +163,7 @@ flowchart LR
 | Command palette | Keyboard-first jump point for core commands | [../ManifoldApp/ManifoldApp/Views/CommandPaletteView.swift](../ManifoldApp/ManifoldApp/Views/CommandPaletteView.swift) |
 | Session start sheet | Starts a session from the main window | [../ManifoldApp/ManifoldApp/Views/Session/SessionStartSheet.swift](../ManifoldApp/ManifoldApp/Views/Session/SessionStartSheet.swift) |
 | Reload drift sheet | Rehydrate a prior session context into a new session draft | [../ManifoldApp/ManifoldApp/Views/Session/SessionStartSheet.swift](../ManifoldApp/ManifoldApp/Views/Session/SessionStartSheet.swift) |
-| Settings window | General, Agents, Storage, Mail, and Advanced panes | [../ManifoldApp/ManifoldApp/Views/Settings/SettingsView.swift](../ManifoldApp/ManifoldApp/Views/Settings/SettingsView.swift) |
+| Settings window | General, Agents, Storage, Mail, Rules, and Advanced panes. Rules pane holds global defaults only (per-agent default policy, reset seeded rules) — authoring happens in Ledger ▸ Rules. | [../ManifoldApp/ManifoldApp/Views/Settings/SettingsView.swift](../ManifoldApp/ManifoldApp/Views/Settings/SettingsView.swift) |
 
 ## Screen Inventory
 
@@ -171,7 +174,7 @@ flowchart LR
 | [../ManifoldApp/ManifoldApp/ManifoldApp.swift](../ManifoldApp/ManifoldApp/ManifoldApp.swift) | App entry point, commands, main window, menu bar extra, and settings scene |
 | [../ManifoldApp/ManifoldApp/Views/RootWindowContent.swift](../ManifoldApp/ManifoldApp/Views/RootWindowContent.swift) | Switches between the first-run flow and the ledger window, and hosts global sheets |
 | [../ManifoldApp/ManifoldApp/Views/LedgerWindowView.swift](../ManifoldApp/ManifoldApp/Views/LedgerWindowView.swift) | Main ledger shell |
-| [../ManifoldApp/ManifoldApp/Views/Chrome/NavSidebar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/NavSidebar.swift) | Native sidebar navigation and live session chip |
+| [../ManifoldApp/ManifoldApp/Views/Chrome/NavSidebar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/NavSidebar.swift) | Native sidebar navigation with pending-request badge and footer runtime status |
 | [../ManifoldApp/ManifoldApp/Views/Chrome/IntegratedToolbar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/IntegratedToolbar.swift) | Window toolbar actions |
 | [../ManifoldApp/ManifoldApp/Views/Chrome/StatusBar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/StatusBar.swift) | Honest runtime and session status strip |
 
@@ -190,7 +193,7 @@ flowchart LR
 | [../ManifoldApp/ManifoldApp/Views/Access/AccessWindowView.swift](../ManifoldApp/ManifoldApp/Views/Access/AccessWindowView.swift) | Shared folders, files, session delta, and activity |
 | [../ManifoldApp/ManifoldApp/Views/Mail/MailWindowView.swift](../ManifoldApp/ManifoldApp/Views/Mail/MailWindowView.swift) | Governed mailboxes, threads, session, and activity |
 | [../ManifoldApp/ManifoldApp/Views/Requests/RequestsWindowView.swift](../ManifoldApp/ManifoldApp/Views/Requests/RequestsWindowView.swift) | Pending approvals and recent answers |
-| [../ManifoldApp/ManifoldApp/Views/Rules/RulesWindowView.swift](../ManifoldApp/ManifoldApp/Views/Rules/RulesWindowView.swift) | Files, email, and agent governance rules |
+| [../ManifoldApp/ManifoldApp/Views/Rules/RulesView.swift](../ManifoldApp/ManifoldApp/Views/Rules/RulesView.swift) | Live rules shell (sidebar + table + inspector). Sibling files: `RuleListTable.swift`, `RuleInspector.swift`, `RuleBuilder.swift`, `MatchPreview.swift`. `RulesWindowView.swift` is now an empty shim kept for the Xcode project reference. |
 
 ### Support surfaces
 

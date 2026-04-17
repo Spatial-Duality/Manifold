@@ -69,7 +69,7 @@ Relevant code:
 - `Access`: governed folders, files, session deltas, and access activity
 - `Mail`: governed mailboxes, threads, and mail-session evidence
 - `Requests`: pending approvals plus recent answers, with the current queue focused on standing-write prompts
-- `Rules`: preview-only global governance authoring
+- `Rules`: unified file, email, and agent-behavior rules that actually enforce at runtime. Seeded denies for secrets (`.env`, `.ssh/**`, private keys, API tokens) ship on by default. User rules, imported email rules, and suggestions all evaluate through the same engine.
 
 The main window also keeps two pieces of state visible all the time:
 
@@ -189,6 +189,15 @@ The runtime persists:
 - governance and audit data in SQLite
 - file activity in snapshots and content-addressed blobs
 - governed mail metadata in the local archive and rule stores
+- unified `RuleStore` entries (files + emails + agent behavior) consulted by `RuleEngine.evaluate` on every file-read, email-read, and agent-tool invocation
+- standing-write approvals (once vs. default) in `StandingWriteApprovalStore`
+- per-agent file visibility overrides in `FileVisibilityOverrideStore`
+
+On-disk governance data sits under a directory with owner-only (0o700) permissions. Files that carry sensitive payloads are written via `LocalFileProtection` (0o600) and optionally encrypted at rest with `ProtectedStorageCrypto` (AES-GCM, key held in the macOS Keychain, `MNF1` magic header). Path inputs from callers are normalized through `ScopedFileIdentity` before any policy check, so symlinks and relative walks cannot escape a governed scope.
+
+### Caller identity
+
+XPC connections are not trusted by agent label alone. `SignedProcessVerifier` checks the calling process's code-signing identity against a requirement string before the runtime accepts privileged requests. A forged `Claude` or `Codex` label on an unsigned or mismatched binary is rejected at the XPC boundary, not later in a policy check.
 
 ## What Manifold Actually Governs
 

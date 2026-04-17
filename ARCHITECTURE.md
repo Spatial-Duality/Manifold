@@ -78,12 +78,23 @@ It is responsible for:
 It is responsible for:
 
 - policy decisions
+- rule evaluation (files, emails, agent behavior) through `RuleEngine`
 - audit and exposure recording
 - workspace lifecycle
 - snapshot and restore operations
 - history and session context queries
 
 This is the real judge in the system.
+
+### Rule engine
+
+`RuleStore` + `RuleEngine` live alongside `PolicyStore` and are consulted on every governed read:
+
+- `RuleRecord` is one unified type across file, email, and agent-behavior rules. It carries `(scope, matcher, action, agents, window, priority, source)`.
+- Precedence is two-phase: seeded denies sweep first (any matching deny wins over any matching allow), then first-match-wins within the same action. Seeded rules pin to the top of their group and are overridable only via an explicit user-override-allow with a banner warning.
+- First launch imports any existing `EmailRuleSet` entries into `RuleStore` tagged `source = .imported` so the old email engine's decisions carry forward.
+- `ManifoldBridge.enforceFileReadRules` calls `RuleEngine.evaluate(.fileRead(path), ...)` before returning file bytes. The email engine is re-pointed at the same store. Agent-behavior rules gate tool invocations and session duration.
+- Each decision carries a matched rule ID and an explanation string the UI uses for "denied because rule X matched path Y" feedback.
 
 ### manifold-mcp
 
@@ -115,15 +126,23 @@ The architecture should always present that boundary honestly.
 
 ## Local Identity
 
-The runtime should trust verified local caller identity, not only a declared agent label.
+The runtime does not trust a declared agent label by itself.
 
-The intended direction is:
+- `SignedProcessVerifier` checks the calling process against a code-signing requirement string before the XPC service accepts privileged calls. A forged `Claude` or `Codex` label on an unsigned or mismatched binary is rejected at the boundary.
+- `ClientIdentityVerifier` binds callers to their XPC connection so a connection cannot silently switch identity mid-session.
+- Agent identity fed into `RuleEngine` is the verified identity, not the self-reported one.
 
-- bind callers to their XPC connection
-- apply code-signing requirements where supported by macOS XPC
-- avoid treating `"Claude"` or `"Codex"` as sufficient proof of identity by itself
+This matters because the product promise depends on the runtime being a real trust boundary, not just a cooperative protocol surface.
 
-This is especially important because the product promise depends on the runtime being a real trust boundary, not just a cooperative protocol surface.
+## On-Disk Protection
+
+Governance data is sensitive enough to deserve defense in depth beyond SQLite file perms.
+
+- `LocalFileProtection` owns the governance directory at 0o700 and writes new files at 0o600 so another local user cannot read them.
+- `ProtectedStorageCrypto` encrypts selected payloads at rest with AES-GCM. The symmetric key is stored in the macOS Keychain with an access control list bound to this app. Encrypted files carry a `MNF1` magic header so future migrations can tell encrypted payloads from legacy plaintext without guessing.
+- `ScopedFileIdentity` normalizes every caller-supplied path (resolves `..`, strips source-folder prefixes, rejects symlink escapes) before it reaches a policy check. This closes the class of bug where an agent asks for `shared/../.ssh/id_rsa` and the policy sees a "shared" path.
+- `FileVisibilityOverrideStore` records per-agent file-level overrides (hide this file from Claude but keep it for Codex, for example) so rules and manual overrides cohere instead of fighting.
+- `StandingWriteApprovalStore` holds the once vs. default answers to standing-write prompts so a user's choice in `Requests` survives session boundaries.
 
 ## Data and History
 
@@ -194,10 +213,10 @@ The repo is already moving toward the right shape:
 
 The main areas still being tightened are:
 
-- stronger XPC caller identity and attestation
 - clearer coverage visibility in the UI
 - drift detection as a supplement to tracked workflows
 - keeping MCP thin while avoiding premature adapter-framework complexity
+- agent-rule features still UI-only: cost ceilings (need a token/$ ledger), content-entropy secret detector, suggested-rule ranking
 
 ## Package Layout
 

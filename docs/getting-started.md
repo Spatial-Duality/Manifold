@@ -100,7 +100,7 @@ What each destination is for:
 - `Access`: what files are shared right now, plus file/session activity
 - `Mail`: governed mailboxes and mail-session evidence
 - `Requests`: pending approvals, especially standing-write prompts for governed files
-- `Rules`: preview-only file, email, and agent governance authoring
+- `Rules`: live file, email, and agent-behavior rules. Seeded denies (secrets, SSH keys, private keys, 2FA codes in mail) run on first launch and every rule edit here changes real runtime decisions.
 
 Supporting surfaces:
 
@@ -210,7 +210,7 @@ The normal review path in the rebuilt app is:
 1. `Activity` to see the event trail
 2. `Access` to inspect current sharing and session/file activity
 3. `Requests` to answer anything the agent asked for
-4. `Rules` if you want to explore future governance authoring; today it is a local preview surface, not the live runtime rule system
+4. `Rules` to inspect or tighten the runtime rule set. Seeded denies ship on by default. You can add user rules, override shadows, and see live match previews for what a rule would block right now.
 
 The status bar and menu bar panel should also tell you whether the runtime is healthy and whether a session is active.
 
