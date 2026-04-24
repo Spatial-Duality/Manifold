@@ -439,6 +439,7 @@ public enum ManifoldMCPError: Error, LocalizedError {
     case noAccessConfigured
     case intentRequired(String)
     case ruleDenied(ruleName: String, explanation: String)
+    case privacyReviewRequired(String)
 
     public var errorDescription: String? {
         switch self {
@@ -458,6 +459,8 @@ public enum ManifoldMCPError: Error, LocalizedError {
             return message
         case .ruleDenied(let ruleName, let explanation):
             return "Blocked by rule \"\(ruleName)\": \(explanation)"
+        case .privacyReviewRequired(let message):
+            return message
         }
     }
 }

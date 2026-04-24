@@ -29,22 +29,39 @@ extension GovernanceModel {
         pendingApprovals.compactMap { record in
             guard let agent = TargetApp(rawValue: record.agent) else { return nil }
             let kind = ApprovalRequest.Kind(rawValue: record.kind) ?? .standingWrite
+            let privacyContext = Self.privacyContext(for: record)
             return ApprovalRequest(
                 id: record.id,
                 kind: kind,
                 agent: agent,
-                operation: Self.mapOperation(record.action),
+                operation: Self.mapOperation(record.action, kind: kind, privacyContext: privacyContext),
                 target: record.path,
-                headline: Self.headline(for: agent, record: record),
-                context: Self.context(for: agent, record: record),
-                createdAt: Date(timeIntervalSince1970: record.requestedAt)
+                headline: Self.headline(for: agent, record: record, privacyContext: privacyContext),
+                context: Self.context(for: agent, record: record, privacyContext: privacyContext),
+                findingsSummary: privacyContext?.findingsSummary,
+                recommendation: privacyContext?.recommendation,
+                createdAt: Date(timeIntervalSince1970: record.requestedAt),
+                snoozedUntil: nil,
+                redactedPreview: privacyContext?.redactedPreview,
+                matchedCategories: privacyContext?.matchedCategories ?? [],
+                severity: privacyContext.map { Self.inferredSeverity(for: $0.matchedCategories) }
             )
         }
     }
 
     // MARK: - Approval mapping helpers
 
-    private static func mapOperation(_ action: String) -> ApprovalRequest.Operation {
+    private static func mapOperation(
+        _ action: String,
+        kind: ApprovalRequest.Kind,
+        privacyContext: PrivacyApprovalContext?
+    ) -> ApprovalRequest.Operation {
+        if kind == .privacyExposure {
+            if privacyContext?.contentKind == .email {
+                return .mailboxRead
+            }
+            return .readFile
+        }
         switch action {
         case "read":      return .readFile
         case "write":     return .write
@@ -56,11 +73,18 @@ extension GovernanceModel {
         }
     }
 
-    private static func headline(for agent: TargetApp, record: PendingApprovalRecord) -> String {
+    private static func headline(
+        for agent: TargetApp,
+        record: PendingApprovalRecord,
+        privacyContext: PrivacyApprovalContext?
+    ) -> String {
         let name = agent == .codex ? "Codex" : "Claude"
         switch record.kind {
         case "standing_write":
             return "\(name) wants reversible write access."
+        case "privacy_exposure":
+            let content = privacyContext?.contentKind.displayName.lowercased() ?? "content"
+            return "\(name) needs privacy review before sharing \(content)."
         default:
             break
         }
@@ -75,14 +99,44 @@ extension GovernanceModel {
         }
     }
 
-    private static func context(for agent: TargetApp, record: PendingApprovalRecord) -> String {
+    private static func context(
+        for agent: TargetApp,
+        record: PendingApprovalRecord,
+        privacyContext: PrivacyApprovalContext?
+    ) -> String {
         switch record.kind {
         case "standing_write":
             let mountLabel = record.mountName ?? "shared folder"
             return "Reads are ambient here. Once allows one reversible write to this file. Add to default allows reversible writes anywhere in \(mountLabel)."
+        case "privacy_exposure":
+            if let privacyContext {
+                return "\(privacyContext.findingsSummary). \(privacyContext.recommendation)"
+            }
+            return "Privacy Preflight flagged this payload for review."
         default:
             return "Requested outside this \(agent == .codex ? "Codex" : "Claude") session's scope. Answer or ignore."
         }
+    }
+
+    /// Severity is not persisted on `PrivacyApprovalContext`; derive from the
+    /// matched category taxonomy so the approval UI can paint a bar. Mirrors
+    /// the heuristic used by `PrivacyDecisionEngine` when classifying spans.
+    private static func inferredSeverity(for categories: [PrivacyCategory]) -> PrivacySeverity {
+        if categories.contains(.secret) { return .critical }
+        if categories.contains(.accountNumber) { return .high }
+        if categories.contains(where: { [.privatePerson, .email, .phone, .address].contains($0) }) {
+            return .medium
+        }
+        if categories.isEmpty { return .none }
+        return .low
+    }
+
+    private static func privacyContext(for record: PendingApprovalRecord) -> PrivacyApprovalContext? {
+        guard let raw = record.contextJSON,
+              let data = raw.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PrivacyApprovalContext.self, from: data)
     }
 
     /// Recent sessions, most recent first. Empty during Phase 1 — wired

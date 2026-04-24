@@ -14,6 +14,7 @@ final class MailReviewModel {
     var searchText: String = ""
     var messages: [EmailMessageRecord] = []
     var sharedEmailIDs: Set<String> = []
+    var targetAgent: TargetApp = .cowork
     var expandedThreadKeys: Set<String> = []
     var selectedThreadKey: String?
     var selectedMessageID: String?
@@ -70,7 +71,7 @@ final class MailReviewModel {
             }
         }
 
-        sharedEmailIDs = await mailAccounts.sharedEmailIDs()
+        sharedEmailIDs = await mailAccounts.sharedEmailIDs(agent: targetAgent)
         errorMessage = mailAccounts.lastQueryError
 
         guard selectedAccountID != nil else {
@@ -125,6 +126,12 @@ final class MailReviewModel {
         selectedThreadKey = nil
         selectedMessageID = nil
         await reloadVisibleMessages()
+    }
+
+    func selectTargetAgent(_ agent: TargetApp) async {
+        guard targetAgent != agent else { return }
+        targetAgent = agent
+        await refreshSharedState()
     }
 
     func setQuickFilter(_ filter: QuickFilter?) async {
@@ -185,9 +192,9 @@ final class MailReviewModel {
         guard let mailAccounts else { return }
         let ids = thread.messages.map(\.emailID)
         if isShared {
-            await mailAccounts.shareEmails(emailIDs: ids)
+            await mailAccounts.shareEmails(emailIDs: ids, for: targetAgent)
         } else {
-            await mailAccounts.unshareEmails(emailIDs: ids)
+            await mailAccounts.unshareEmails(emailIDs: ids, for: targetAgent)
         }
         await refreshSharedState()
     }
@@ -195,9 +202,9 @@ final class MailReviewModel {
     func setMessageShared(_ emailID: String, isShared: Bool) async {
         guard let mailAccounts else { return }
         if isShared {
-            await mailAccounts.shareEmails(emailIDs: [emailID])
+            await mailAccounts.shareEmails(emailIDs: [emailID], for: targetAgent)
         } else {
-            await mailAccounts.unshareEmails(emailIDs: [emailID])
+            await mailAccounts.unshareEmails(emailIDs: [emailID], for: targetAgent)
         }
         await refreshSharedState()
     }
@@ -310,7 +317,7 @@ final class MailReviewModel {
 
     private func refreshSharedState() async {
         guard let mailAccounts else { return }
-        sharedEmailIDs = await mailAccounts.sharedEmailIDs()
+        sharedEmailIDs = await mailAccounts.sharedEmailIDs(agent: targetAgent)
         errorMessage = errorMessage ?? mailAccounts.lastQueryError
     }
 

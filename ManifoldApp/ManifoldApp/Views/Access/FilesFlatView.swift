@@ -163,6 +163,16 @@ struct FilesFlatView: View {
                         guard let file = selectedFile else { return }
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
                     },
+                    onSetAllAgents: { inScope in
+                        guard let file = selectedFile else { return }
+                        Task {
+                            await bulkSetVisibility(
+                                agents: connectedAgents,
+                                decision: inScope ? .allow : .deny,
+                                files: [file]
+                            )
+                        }
+                    },
                     onReset: {
                         guard let file = selectedFile else { return }
                         Task { await resetOverrides(for: file) }
@@ -251,15 +261,25 @@ struct FilesFlatView: View {
     private var table: some View {
         Table(of: SourceFile.self, selection: $selectedFilePaths, sortOrder: $sortOrder) {
             TableColumn("Access") { file in
-                AccessChipStack(
+                AccessCheckboxStrip(
                     agents: connectedAgents,
                     visibleAgents: visibleAgents(for: file),
-                    onToggle: { agent, wasVisible in
+                    accessibilityIDPrefix: accessIdentifierPrefix(for: file),
+                    onToggleAgent: { agent, wasVisible in
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
+                    },
+                    onSetAll: { inScope in
+                        Task {
+                            await bulkSetVisibility(
+                                agents: connectedAgents,
+                                decision: inScope ? .allow : .deny,
+                                files: [file]
+                            )
+                        }
                     }
                 )
             }
-            .width(min: 60, ideal: 80, max: 160)
+            .width(min: 170, ideal: 190, max: 230)
 
             TableColumn("Name", value: \.name) { file in
                 HStack(spacing: Spacing.s2) {
@@ -365,6 +385,12 @@ struct FilesFlatView: View {
 
         if !connectedAgents.isEmpty {
             Menu("Share with") {
+                if connectedAgents.count > 1 {
+                    Button("Both") {
+                        Task { await bulkSetVisibility(agents: connectedAgents, decision: .allow, files: filesInSelection) }
+                    }
+                    Divider()
+                }
                 ForEach(connectedAgents, id: \.self) { agent in
                     Button(AgentMeta.label(agent)) {
                         Task { await bulkSetVisibility(agent: agent, decision: .allow, files: filesInSelection) }
@@ -372,6 +398,12 @@ struct FilesFlatView: View {
                 }
             }
             Menu("Unshare from") {
+                if connectedAgents.count > 1 {
+                    Button("Both") {
+                        Task { await bulkSetVisibility(agents: connectedAgents, decision: .deny, files: filesInSelection) }
+                    }
+                    Divider()
+                }
                 ForEach(connectedAgents, id: \.self) { agent in
                     Button(AgentMeta.label(agent)) {
                         Task { await bulkSetVisibility(agent: agent, decision: .deny, files: filesInSelection) }
@@ -407,7 +439,30 @@ struct FilesFlatView: View {
             Spacer()
 
             if !connectedAgents.isEmpty {
+                Button {
+                    Task { await bulkSetVisibility(agents: connectedAgents, decision: .allow, files: filesInSelection) }
+                } label: {
+                    Label("Share with Both", systemImage: "person.2.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(ManifoldPalette.selection)
+
+                Button {
+                    Task { await bulkSetVisibility(agents: connectedAgents, decision: .deny, files: filesInSelection) }
+                } label: {
+                    Label("Unshare from Both", systemImage: "person.2.slash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
                 Menu {
+                    if connectedAgents.count > 1 {
+                        Button("Both") {
+                            Task { await bulkSetVisibility(agents: connectedAgents, decision: .allow, files: filesInSelection) }
+                        }
+                        Divider()
+                    }
                     ForEach(connectedAgents, id: \.self) { agent in
                         Button(AgentMeta.label(agent)) {
                             Task { await bulkSetVisibility(agent: agent, decision: .allow, files: filesInSelection) }
@@ -420,6 +475,12 @@ struct FilesFlatView: View {
                 .controlSize(.small)
 
                 Menu {
+                    if connectedAgents.count > 1 {
+                        Button("Both") {
+                            Task { await bulkSetVisibility(agents: connectedAgents, decision: .deny, files: filesInSelection) }
+                        }
+                        Divider()
+                    }
                     ForEach(connectedAgents, id: \.self) { agent in
                         Button(AgentMeta.label(agent)) {
                             Task { await bulkSetVisibility(agent: agent, decision: .deny, files: filesInSelection) }
@@ -489,6 +550,12 @@ struct FilesFlatView: View {
         await reloadOverrides(agent: agent)
     }
 
+    private func bulkSetVisibility(agents: [TargetApp], decision: FileVisibilityOverrideDecision, files: [SourceFile]) async {
+        for agent in agents {
+            await bulkSetVisibility(agent: agent, decision: decision, files: files)
+        }
+    }
+
     private func bulkReset(files: [SourceFile]) async {
         for file in files {
             for agent in connectedAgents {
@@ -542,6 +609,10 @@ struct FilesFlatView: View {
             return desc
         }
         return ext.uppercased()
+    }
+
+    private func accessIdentifierPrefix(for file: SourceFile) -> String {
+        "access.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent)"
     }
 
     static let relativeFormatter = RelativeDateTimeFormatter()

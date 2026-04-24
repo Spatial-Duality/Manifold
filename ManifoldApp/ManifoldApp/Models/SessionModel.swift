@@ -223,7 +223,7 @@ final class SessionModel {
 
     private static func defaultSessionNoteCaptureMode() -> SessionNoteCaptureMode {
         SessionNoteCaptureMode(
-            rawValue: UserDefaults.standard.string(forKey: "manifold.sessionNotes.mode") ?? ""
+            rawValue: AppTestEnvironment.userDefaults().string(forKey: "manifold.sessionNotes.mode") ?? ""
         ) ?? .off
     }
 }

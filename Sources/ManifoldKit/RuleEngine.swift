@@ -202,6 +202,20 @@ public struct RuleEngine: Sendable {
         case .agentPayloadLargerThan(let threshold):
             guard let bytes = context.agentProbe?.payloadBytes else { return false }
             return bytes > threshold
+
+        // Privacy predicates — read from the privacy probe supplied by the
+        // runtime. A missing probe conservatively evaluates to false for
+        // positive assertions (no probe → we can't claim PII is present),
+        // except for allowlist which defaults to false as well.
+        case .privacyContainsCategory(let category):
+            return context.privacyProbe?.categories.contains(category) ?? false
+        case .privacyMatchesMyIdentity:
+            return context.privacyProbe?.matchesMyIdentity ?? false
+        case .privacyInOrgAllowlist:
+            return context.privacyProbe?.inOrgAllowlist ?? false
+        case .privacySeverityAtLeast(let threshold):
+            guard let severity = context.privacyProbe?.severity else { return false }
+            return severity >= threshold
         }
     }
 
@@ -283,6 +297,10 @@ public struct RuleEngine: Sendable {
         case .agentDelete: return "delete"
         case .agentSessionLongerThan(let t): return "session longer than \(Int(t)) s"
         case .agentPayloadLargerThan(let n): return "payload > \(n) bytes"
+        case .privacyContainsCategory(let c): return "contains \(c.displayName.lowercased())"
+        case .privacyMatchesMyIdentity: return "matches My Identity"
+        case .privacyInOrgAllowlist: return "on org allowlist"
+        case .privacySeverityAtLeast(let s): return "privacy severity ≥ \(s.rawValue)"
         case .all(let s): return s.map(summarize).joined(separator: " AND ")
         case .any(let s): return s.map(summarize).joined(separator: " OR ")
         case .not(let s): return "NOT (\(summarize(s)))"

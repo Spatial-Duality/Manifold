@@ -21,6 +21,21 @@ struct LedgerStatusBar: View {
         if !store.isRuntimeConnected {
             return (.offline, "Runtime is not connected. Check that ManifoldAgent is running.")
         }
+        if let summary = store.dataControlSummary {
+            if summary.pendingApprovalCount > 0 {
+                return (.paused, "\(summary.pendingApprovalCount) request\(summary.pendingApprovalCount == 1 ? "" : "s") waiting.")
+            }
+            if let block = summary.activeWorkBlock {
+                return (.active, "\(AgentMeta.label(block.agent)) protected run live · \(block.sourceIDs.count) folder\(block.sourceIDs.count == 1 ? "" : "s")")
+            }
+            let agentLine = summary.agents.map { agent in
+                let connection = agent.isPaused ? "paused" : (agent.isConnected ? "connected" : "offline")
+                return "\(AgentMeta.label(agent.agent)) \(connection): \(agent.defaultFileScopeCount) folders/\(agent.visibleEmailCount) emails"
+            }
+            if !agentLine.isEmpty {
+                return (summary.agents.allSatisfy(\.isPaused) ? .paused : .active, agentLine.joined(separator: " · "))
+            }
+        }
         if let session = store.activeSession {
             if session.isTrackedEdit {
                 return (.active, "Tracked session live · \(session.name)")

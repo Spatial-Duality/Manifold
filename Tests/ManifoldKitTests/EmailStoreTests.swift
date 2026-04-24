@@ -306,6 +306,40 @@ struct EmailStoreTests {
         #expect(results.count == 2) // msg-1 (domain match) + msg-2 (subject match)
     }
 
+    @Test("Privacy virtual fields join against privacy content index")
+    func ruleEnginePrivacyVirtualFields() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        _ = try await insertTestMessage(store: store, emailID: "msg-secret", subject: "Prod secret")
+        _ = try await insertTestMessage(store: store, emailID: "msg-clean", subject: "General update")
+
+        let privacyStore = PrivacyStore(db: db)
+        try await privacyStore.upsertContentIndexRecord(
+            PrivacyIndexRecord(
+                id: "email:msg-secret:body",
+                subjectKind: .emailBody,
+                emailID: "msg-secret",
+                displayName: "Prod secret",
+                extractStatus: .ready,
+                scanStatus: .scanned,
+                containsSensitive: true,
+                containsSecret: true,
+                severity: .critical,
+                matchedCategories: [.secret],
+                findingsSummary: "contains secret"
+            )
+        )
+
+        let rules = SmartMailboxRules(
+            match: .all,
+            conditions: [RuleCondition(field: "privacy_contains_secret", op: .equals, value: "true")]
+        )
+        let results = try store.smartMailboxMessages(rules: rules)
+        #expect(results.count == 1)
+        #expect(results[0].emailID == "msg-secret")
+    }
+
     @Test("SQL injection attempt in field name rejected by whitelist")
     func ruleEngineSQLInjection() async throws {
         let (store, _, tempDir) = try await makeStore()
@@ -643,7 +677,7 @@ struct EmailStoreTests {
 
     // MARK: - Shared Emails
 
-    @Test("shareEmails, isEmailShared, sharedEmailCount, and visibleEmailCount")
+    @Test("shareEmails is per-agent while legacy counts remain aggregate")
     func sharedEmailsLifecycle() async throws {
         let (store, _, tempDir) = try await makeStore()
         defer { cleanup(tempDir) }
@@ -655,13 +689,31 @@ struct EmailStoreTests {
         // Initially nothing is shared
         #expect(try store.isEmailShared(emailID: id1) == false)
         #expect(try store.sharedEmailCount() == 0)
+        #expect(try store.sharedEmailCount(agent: .cowork) == 0)
+        #expect(try store.sharedEmailCount(agent: .codex) == 0)
 
-        // Share two emails
+        // Share two emails with Claude only.
         let shareCount = try store.shareEmails(emailIDs: [id1, id2], label: "test")
         #expect(shareCount == 2)
-        #expect(try store.isEmailShared(emailID: id1) == true)
-        #expect(try store.isEmailShared(emailID: id2) == true)
+        #expect(try store.isEmailShared(emailID: id1, agent: .cowork) == true)
+        #expect(try store.isEmailShared(emailID: id1, agent: .codex) == false)
+        #expect(try store.isEmailShared(emailID: id2, agent: .cowork) == true)
         #expect(try store.sharedEmailCount() == 2)
+        #expect(try store.sharedEmailCount(agent: .cowork) == 2)
+        #expect(try store.sharedEmailCount(agent: .codex) == 0)
+
+        // Sharing the same message with Codex creates a separate per-agent grant.
+        try store.shareEmails(emailIDs: [id1], for: .codex)
+        #expect(try store.sharedEmailCount() == 3)
+        #expect(try store.sharedEmailCount(agent: .cowork) == 2)
+        #expect(try store.sharedEmailCount(agent: .codex) == 1)
+        #expect(try store.sharedEmailIDs(agent: .codex) == Set([id1]))
+        #expect(try store.sharedEmails(agent: .codex).map(\.emailID) == [id1])
+
+        try store.unshareEmails(emailIDs: [id1], for: .cowork)
+        #expect(try store.isEmailShared(emailID: id1, agent: .cowork) == false)
+        #expect(try store.isEmailShared(emailID: id1, agent: .codex) == true)
+        #expect(try store.isEmailShared(emailID: id1) == true)
 
         // visibleEmailCount excludes hidden domains
         let totalCount = try store.emailMessageCount()

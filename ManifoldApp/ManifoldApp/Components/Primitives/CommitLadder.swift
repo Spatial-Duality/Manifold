@@ -32,11 +32,13 @@ struct CommitLadder: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(ManifoldPalette.attention)
+                .accessibilityIdentifier("requests.action.notThisTime")
 
             Button("Once", action: onOnce)
                 .keyboardShortcut(.return, modifiers: .shift)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .accessibilityIdentifier("requests.action.once")
 
             if showsSessionScope {
                 Button("For this session", action: onSession)
@@ -44,6 +46,7 @@ struct CommitLadder: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(ManifoldPalette.active)
+                    .accessibilityIdentifier("requests.action.session")
             }
 
             Button("Add to default", action: onDefault)
@@ -51,6 +54,7 @@ struct CommitLadder: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(ManifoldPalette.agent(agent))
+                .accessibilityIdentifier("requests.action.default")
         }
     }
 }

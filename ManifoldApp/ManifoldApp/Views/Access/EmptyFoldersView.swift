@@ -22,17 +22,29 @@ struct EmptyFoldersView: View {
                 style: .access
             )
 
-            Button {
-                store.addSourceFromPicker()
-            } label: {
-                Label("Add a folder\u{2026}", systemImage: "folder.badge.plus")
-                    .padding(.horizontal, Spacing.s3)
-                    .padding(.vertical, Spacing.s1)
+            HStack(spacing: Spacing.s2) {
+                Button {
+                    store.addSourceFromPicker()
+                } label: {
+                    Label("Add a folder\u{2026}", systemImage: "folder.badge.plus")
+                        .padding(.horizontal, Spacing.s3)
+                        .padding(.vertical, Spacing.s1)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .accessibilityIdentifier("access.empty.addFolder")
+
+                Button {
+                    store.addFilesFromPicker()
+                } label: {
+                    Label("Add files\u{2026}", systemImage: "doc.badge.plus")
+                        .padding(.horizontal, Spacing.s3)
+                        .padding(.vertical, Spacing.s1)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("access.empty.addFiles")
             }
-            .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-            .accessibilityIdentifier("access.empty.addFolder")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)

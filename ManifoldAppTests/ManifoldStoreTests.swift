@@ -31,7 +31,9 @@ final class ManifoldStoreTests: XCTestCase {
         let request = try XCTUnwrap(store.pendingRequests.first)
         XCTAssertEqual(request.agent, .codex)
         XCTAssertEqual(request.operation, .write)
-        XCTAssertEqual(request.target, "/Users/test/shared/worklog.md")
+        XCTAssertEqual(request.kind, .standingWrite)
+        XCTAssertEqual(request.target, "shared/worklog.md")
+        XCTAssertEqual(request.headline, "Codex wants reversible write access.")
         XCTAssertNotNil(store.activeSession)
     }
 
@@ -80,7 +82,7 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertEqual(store.mailReview.selectedAccountID, "account-1")
         XCTAssertEqual(store.mailReview.selectedMailboxName, "INBOX")
         XCTAssertEqual(store.mailReview.threadRows.count, 2)
-        XCTAssertEqual(try XCTUnwrap(store.mailReview.threadRows.first).threadKey, "thread-board@example.com")
+        XCTAssertEqual(try XCTUnwrap(store.mailReview.threadRows.first).threadKey, "thread-frontier-sync@anthropic.test")
     }
 
     func testMailAccountsModelLoadsMailboxMessagesThroughProtocolExistential() async {
@@ -102,41 +104,41 @@ final class ManifoldStoreTests: XCTestCase {
             emailID: "email-root",
             accountID: "account-1",
             mailbox: "INBOX",
-            sender: "Jane Doe <jane@example.com>",
-            recipients: "you@example.com",
-            subject: "Project kickoff",
+            sender: "Dario Amodei <dario@anthropic.test>",
+            recipients: "policy@manifold.test",
+            subject: "Constitution sync",
             receivedAt: "2026-04-15T09:00:00Z",
-            messageIDHeader: "<root@example.com>"
+            messageIDHeader: "<constitution-sync@anthropic.test>"
         )
         let reply = EmailMessageRecord(
             emailID: "email-reply",
             accountID: "account-1",
             mailbox: "INBOX",
-            sender: "Mark Chen <mark@example.com>",
-            recipients: "you@example.com",
-            subject: "Re: Project kickoff",
+            sender: "Sam Altman <sam@openai.test>",
+            recipients: "policy@manifold.test",
+            subject: "Re: Constitution sync",
             receivedAt: "2026-04-15T10:00:00Z",
-            inReplyTo: "<root@example.com>",
-            referencesHeader: "<root@example.com> <reply@example.com>",
-            messageIDHeader: "<reply@example.com>"
+            inReplyTo: "<constitution-sync@anthropic.test>",
+            referencesHeader: "<constitution-sync@anthropic.test> <constitution-sync-reply@openai.test>",
+            messageIDHeader: "<constitution-sync-reply@openai.test>"
         )
         let unrelated = EmailMessageRecord(
             emailID: "email-unrelated",
             accountID: "account-1",
             mailbox: "INBOX",
-            sender: "Ops <ops@example.com>",
-            recipients: "you@example.com",
-            subject: "Digest",
+            sender: "Greg Brockman <greg@openai.test>",
+            recipients: "policy@manifold.test",
+            subject: "Operator checklist",
             receivedAt: "2026-04-15T08:00:00Z",
-            messageIDHeader: "<digest@example.com>"
+            messageIDHeader: "<operator-checklist@openai.test>"
         )
 
         let grouped = MailThreadRow.group(messages: [reply, unrelated, root])
 
         XCTAssertEqual(grouped.count, 2)
-        XCTAssertEqual(grouped[0].threadKey, "root@example.com")
+        XCTAssertEqual(grouped[0].threadKey, "constitution-sync@anthropic.test")
         XCTAssertEqual(grouped[0].messages.map(\.emailID), ["email-root", "email-reply"])
-        XCTAssertEqual(grouped[1].threadKey, "digest@example.com")
+        XCTAssertEqual(grouped[1].threadKey, "operator-checklist@openai.test")
     }
 
     func testMailBrowserShareStateRefreshesAfterPerMessageToggle() async throws {
@@ -146,16 +148,64 @@ final class ManifoldStoreTests: XCTestCase {
 
         await store.mailReview.prepare(force: true)
 
-        let boardThread = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-board@example.com" }))
+        let boardThread = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-frontier-sync@anthropic.test" }))
         XCTAssertEqual(store.mailReview.shareState(for: boardThread), .mixed)
 
         await store.mailReview.setMessageShared("email-2", isShared: true)
-        let afterSecondShare = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-board@example.com" }))
+        let afterSecondShare = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-frontier-sync@anthropic.test" }))
         XCTAssertEqual(store.mailReview.shareState(for: afterSecondShare), .mixed)
 
         await store.mailReview.setMessageShared("email-3", isShared: true)
-        let fullyShared = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-board@example.com" }))
+        let fullyShared = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-frontier-sync@anthropic.test" }))
         XCTAssertEqual(store.mailReview.shareState(for: fullyShared), .on)
+    }
+
+    func testPrivacyFixtureLoadsDiscoveryStateAndPrivacyApproval() async throws {
+        let runtime = FixtureRuntimeClient(profile: .privacy)
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .privacy))
+        let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
+
+        await store.refreshAll(force: true)
+
+        XCTAssertEqual(store.governance.privacyIdentitySuggestions.count, 1)
+        XCTAssertEqual(store.governance.privacyRecentIndex.count, 3)
+        XCTAssertEqual(store.governance.privacyIndexStatus?.failedJobs, 1)
+
+        let privacyRequest = try XCTUnwrap(store.pendingRequests.first(where: { $0.kind == .privacyExposure }))
+        XCTAssertEqual(privacyRequest.operation, .mailboxRead)
+        XCTAssertEqual(privacyRequest.matchedCategories, [.email, .secret])
+        XCTAssertEqual(privacyRequest.severity, .critical)
+        XCTAssertNotNil(privacyRequest.redactedPreview)
+    }
+
+    func testPrivacyPresetStrictRoundTripsThroughFixtureRuntime() async throws {
+        let runtime = FixtureRuntimeClient(profile: .privacy)
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .privacy))
+        let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
+
+        await store.governance.loadPolicies()
+
+        var settings = try XCTUnwrap(store.governance.privacySettings)
+        let claude = try XCTUnwrap(store.governance.claudePrivacyPolicy)
+        let codex = try XCTUnwrap(store.governance.codexPrivacyPolicy)
+        let (strictSettings, strictClaude, strictCodex) = PrivacyPreset.strict.apply(
+            to: &settings,
+            claude: claude,
+            codex: codex
+        )
+
+        await store.governance.updatePrivacySettings(strictSettings)
+        await store.governance.updatePrivacyPolicy(strictClaude)
+        await store.governance.updatePrivacyPolicy(strictCodex)
+
+        XCTAssertEqual(
+            PrivacyPreset.detect(
+                settings: store.governance.privacySettings,
+                claudePolicy: store.governance.claudePrivacyPolicy,
+                codexPolicy: store.governance.codexPrivacyPolicy
+            ),
+            .strict
+        )
     }
 
     func testFileVisibilityOverridesRoundTripThroughRuntime() async throws {
@@ -199,7 +249,19 @@ final class CommandPaletteModelTests: XCTestCase {
 
         XCTAssertEqual(
             commandCenter.filteredCommands().map(\.title),
-            ["Protect Next Session…", "Open Session Recap", "Add Folder…", "Refresh Runtime", "Settings…", "Open Manifold"]
+            [
+                "Open Activity",
+                "Open Access",
+                "Open Mail",
+                "Open Requests",
+                "Open Rules",
+                "Protect Next Session…",
+                "Open Session Recap",
+                "Add Folder…",
+                "Refresh Runtime",
+                "Settings…",
+                "Open Manifold",
+            ]
         )
     }
 
@@ -230,8 +292,34 @@ final class CommandPaletteModelTests: XCTestCase {
 
         XCTAssertEqual(
             commandCenter.filteredCommands().map(\.title),
-            ["Protect Next Session…", "Open Session Recap", "Add Folder…", "Refresh Runtime", "Settings…", "Open Manifold"]
+            [
+                "Open Activity",
+                "Open Access",
+                "Open Mail",
+                "Open Requests",
+                "Open Rules",
+                "Protect Next Session…",
+                "Open Session Recap",
+                "Add Folder…",
+                "Refresh Runtime",
+                "Settings…",
+                "Open Manifold",
+            ]
         )
+    }
+
+    func testTrackedSessionAddsFinishTrackedEditCommand() async {
+        let store = ManifoldStore(
+            runtime: FixtureRuntimeClient(profile: .trackedWork),
+            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork)),
+            startServices: false
+        )
+        let commandCenter = CommandPaletteModel()
+
+        await store.refreshAll(force: true)
+        commandCenter.bind(to: store)
+
+        XCTAssertTrue(commandCenter.filteredCommands().contains(where: { $0.id == .finishTrackedEdit }))
     }
 }
 

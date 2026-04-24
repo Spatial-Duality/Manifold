@@ -2,9 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import CryptoKit
 import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "email-sync")
+
+public struct EmailSyncEvent: Sendable, Codable, Hashable {
+    public let emailID: String
+    public let accountID: String
+    public let mailbox: String
+    public let attachmentIDs: [String]
+    public let reason: String
+
+    public init(
+        emailID: String,
+        accountID: String,
+        mailbox: String,
+        attachmentIDs: [String],
+        reason: String
+    ) {
+        self.emailID = emailID
+        self.accountID = accountID
+        self.mailbox = mailbox
+        self.attachmentIDs = attachmentIDs
+        self.reason = reason
+    }
+}
 
 /// Background sync engine for email backup.
 /// Connects to IMAP, fetches messages, and saves them as .eml files.
@@ -13,6 +36,7 @@ public actor EmailSyncEngine {
     private var connections: [String: IMAPConnection] = [:]
     private var syncTasks: [String: Task<Void, Never>] = [:]
     private var backfillTask: Task<Void, Never>?
+    private var eventContinuations: [UUID: AsyncStream<EmailSyncEvent>.Continuation] = [:]
     private var isStopped = false
 
     /// Progress of FTS5 body text backfill (0.0 to 1.0). Observable from UI.
@@ -49,6 +73,16 @@ public actor EmailSyncEngine {
     /// Trigger an immediate sync for one account.
     public func syncNow(accountID: String) async throws -> SyncResult {
         return await syncAccount(accountID: accountID)
+    }
+
+    public func events() -> AsyncStream<EmailSyncEvent> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            Task { self.addEventContinuation(continuation, id: id) }
+            continuation.onTermination = { @Sendable _ in
+                Task { await self.removeEventContinuation(id) }
+            }
+        }
     }
 
     // MARK: - FTS5 Body Text Backfill
@@ -111,6 +145,23 @@ public actor EmailSyncEngine {
         syncTasks.removeAll()
         for (_, conn) in connections { await conn.disconnect() }
         connections.removeAll()
+    }
+
+    private func emit(_ event: EmailSyncEvent) {
+        for continuation in eventContinuations.values {
+            continuation.yield(event)
+        }
+    }
+
+    private func addEventContinuation(
+        _ continuation: AsyncStream<EmailSyncEvent>.Continuation,
+        id: UUID
+    ) {
+        eventContinuations[id] = continuation
+    }
+
+    private func removeEventContinuation(_ id: UUID) {
+        eventContinuations.removeValue(forKey: id)
     }
 
     // MARK: - Periodic Sync Loop
@@ -312,8 +363,10 @@ public actor EmailSyncEngine {
                 let contentType: String?
                 let attachmentCount: Int
                 let bodyText: String?
+                let parsedEmail: MIMEParser.ParsedEmail?
                 if let data = Self.readStoredMessage(at: emlFile.path) {
                     let parsed = MIMEParser.parse(data: data)
+                    parsedEmail = parsed
                     preview = parsed.textBody.map {
                         String($0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).prefix(200))
                     }
@@ -323,6 +376,7 @@ public actor EmailSyncEngine {
                     let rawBody = parsed.textBody ?? parsed.htmlBody.map { Self.stripHTML($0) }
                     bodyText = rawBody.map { String($0.prefix(51_200)) } // 50KB cap
                 } else {
+                    parsedEmail = nil
                     preview = nil
                     contentType = nil
                     attachmentCount = 0
@@ -377,10 +431,39 @@ public actor EmailSyncEngine {
                     try emailStore.updateBodyText(emailID: emailID, bodyText: body)
                 }
 
+                var attachmentIDs: [String] = []
+                if let parsedEmail {
+                    try emailStore.deleteEmailAttachments(emailID: emailID)
+                    for (index, attachment) in parsedEmail.attachments.enumerated() {
+                        let contentHash = SHA256.hash(data: attachment.data).hexString
+                        let attachmentID = "\(emailID)-att-\(index)-\(contentHash.prefix(12))"
+                        try emailStore.upsertEmailAttachment(
+                            attachmentID: attachmentID,
+                            emailID: emailID,
+                            filename: attachment.filename,
+                            mimeType: attachment.mimeType,
+                            sizeBytes: attachment.size,
+                            contentHash: contentHash,
+                            contentID: attachment.contentID
+                        )
+                        attachmentIDs.append(attachmentID)
+                    }
+                }
+
                 // Tag messages in junk/spam folders
                 if isJunkMailbox {
                     try emailStore.updateJunkState(emailID: emailID, isJunk: true)
                 }
+
+                emit(
+                    EmailSyncEvent(
+                        emailID: emailID,
+                        accountID: accountID,
+                        mailbox: mailboxName,
+                        attachmentIDs: attachmentIDs,
+                        reason: "sync"
+                    )
+                )
 
                 newCount += 1
                 lastUID = max(lastUID, uid)

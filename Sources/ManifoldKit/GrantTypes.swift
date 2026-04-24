@@ -631,7 +631,10 @@ public struct RuleCondition: Codable, Sendable, Hashable {
         "sender", "sender_email", "sender_domain", "recipients", "cc",
         "subject", "body_text", "received_at", "is_read", "local_is_viewed",
         "is_flagged", "is_junk", "deleted_on_server_at", "attachment_count",
-        "size_bytes", "mailbox", "shared"
+        "size_bytes", "mailbox", "shared",
+        "privacy_contains_sensitive", "privacy_contains_my_info",
+        "privacy_contains_secret", "privacy_contains_third_party_private",
+        "privacy_contains_org_only", "privacy_severity", "privacy_categories"
     ]
 
     public var isValid: Bool { Self.allowedFields.contains(field) }
@@ -645,8 +648,12 @@ public struct RuleCondition: Codable, Sendable, Hashable {
         switch field {
         case "received_at", "deleted_on_server_at": return .date
         case "is_read", "is_flagged", "is_junk", "local_is_viewed", "shared": return .boolean
+        case "privacy_contains_sensitive", "privacy_contains_my_info",
+             "privacy_contains_secret", "privacy_contains_third_party_private",
+             "privacy_contains_org_only":
+            return .boolean
         case "attachment_count", "size_bytes": return .numeric
-        case "mailbox": return .enumeration
+        case "mailbox", "privacy_severity": return .enumeration
         default: return .string
         }
     }

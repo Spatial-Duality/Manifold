@@ -93,6 +93,7 @@ struct MailView: View {
             guard let delta = notification.object as? Int else { return }
             cycleTab(by: delta)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ledger.surface.mail")
     }
 

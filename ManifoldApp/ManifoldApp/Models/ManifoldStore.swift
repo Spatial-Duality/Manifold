@@ -18,6 +18,7 @@ final class ManifoldStore {
     var connectedAgent: String?
     var connectedAgents: [String] = []
     var runtimeLaunchError: String?
+    var dataControlSummary: DataControlSummary?
 
     /// Whether Claude (cowork) has an active MCP bridge connection to the runtime.
     var isClaudeConnected: Bool { connectedAgents.contains(TargetApp.cowork.rawValue) }
@@ -43,7 +44,19 @@ final class ManifoldStore {
     private var connectionMonitorTask: Task<Void, Never>?
     private var didAttemptAgentRestart = false
 
-    var menuBarIcon: String { isRuntimeConnected ? "checkmark.shield.fill" : "shield.slash" }
+    var menuBarIcon: String {
+        guard isRuntimeConnected else { return "shield.slash" }
+        if dataControlSummary?.pendingApprovalCount ?? governance.pendingApprovals.count > 0 {
+            return "hand.raised.fill"
+        }
+        if dataControlSummary?.activeWorkBlock != nil || activeSession != nil {
+            return "checkmark.shield.fill"
+        }
+        if dataControlSummary?.agents.allSatisfy(\.isPaused) == true {
+            return "pause.circle.fill"
+        }
+        return "checkmark.shield.fill"
+    }
 
     init(
         runtime: any RuntimeClientProtocol = AppRuntimeClient(),
@@ -95,6 +108,7 @@ final class ManifoldStore {
         guard pingResult.ok else {
             connectedAgent = nil
             connectedAgents = []
+            dataControlSummary = nil
             if force {
                 lastError = runtimeLaunchError ?? "Unable to connect to the Manifold runtime."
             }
@@ -146,6 +160,15 @@ final class ManifoldStore {
             governance.pendingApprovals = []
             logger.error("Failed to load pending approvals: \(error.localizedDescription)")
         }
+
+        do {
+            dataControlSummary = try await runtime.dataControlSummary()
+        } catch {
+            dataControlSummary = nil
+            logger.error("Failed to load data control summary: \(error.localizedDescription)")
+        }
+
+        await governance.loadPrivacyDiscovery()
 
         consumePendingFinderRequest()
 
@@ -268,12 +291,38 @@ final class ManifoldStore {
         return !paths.isEmpty
     }
 
+    @discardableResult
+    func addFilesFromPicker() -> Bool {
+        let filePaths = chooseFilePathsFromPicker()
+        guard !filePaths.isEmpty else { return false }
+
+        let existingPaths = Set(sources.map(\.originalRootPath))
+        let parentPaths = Set(
+            filePaths.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
+        )
+
+        for path in parentPaths where !existingPaths.contains(path) {
+            addSource(path: path)
+        }
+        return true
+    }
+
     func chooseSourcePathsFromPicker() -> [String] {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.message = "Select folders to protect through Manifold"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return [] }
+        return panel.urls.map(\.path)
+    }
+
+    func chooseFilePathsFromPicker() -> [String] {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.message = "Select files to manage through Manifold"
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return [] }
         return panel.urls.map(\.path)
     }
@@ -327,11 +376,15 @@ final class ManifoldStore {
         for source in sources {
             guard !Task.isCancelled else { return }
             let root = URL(fileURLWithPath: source.originalRootPath)
+            var didEmitSourceFile = false
             guard let enumerator = fm.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles]
-            ) else { continue }
+            ) else {
+                batch.append(contentsOf: fixtureSourceFilesIfNeeded(for: source))
+                continue
+            }
 
             let basePath = root.path + "/"
             while let url = enumerator.nextObject() as? URL {
@@ -362,11 +415,16 @@ final class ManifoldStore {
                         isGrantedToClaude: true
                     )
                 )
+                didEmitSourceFile = true
 
                 if batch.count >= batchSize {
                     await yield(batch)
                     batch.removeAll(keepingCapacity: true)
                 }
+            }
+
+            if !didEmitSourceFile {
+                batch.append(contentsOf: fixtureSourceFilesIfNeeded(for: source))
             }
         }
 
@@ -382,11 +440,15 @@ final class ManifoldStore {
         for source in sources {
             guard !Task.isCancelled else { return result }
             let root = URL(fileURLWithPath: source.originalRootPath)
+            var didAppendSourceFile = false
             guard let enumerator = fm.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles]
-            ) else { continue }
+            ) else {
+                result.append(contentsOf: fixtureSourceFilesIfNeeded(for: source))
+                continue
+            }
 
             let basePath = root.path + "/"
             while let url = enumerator.nextObject() as? URL {
@@ -415,10 +477,47 @@ final class ManifoldStore {
                     modifiedDate: values.contentModificationDate ?? .distantPast,
                     isGrantedToClaude: true
                 ))
+                didAppendSourceFile = true
+            }
+
+            if !didAppendSourceFile {
+                result.append(contentsOf: fixtureSourceFilesIfNeeded(for: source))
             }
         }
 
         return result
+    }
+
+    private nonisolated static func fixtureSourceFilesIfNeeded(for source: SourceRecord) -> [SourceFile] {
+        guard ProcessInfo.processInfo.environment[AppTestEnvironment.runtimeModeKey] == "fixture" else {
+            return []
+        }
+
+        let relativePaths: [String]
+        switch source.sourceID {
+        case "src-shared":
+            relativePaths = ["worklog.md", "Docs/ReleaseNotes.md", "archive.bin"]
+        case "src-claude":
+            relativePaths = ["marker.txt"]
+        default:
+            relativePaths = []
+        }
+
+        let root = URL(fileURLWithPath: source.originalRootPath, isDirectory: true)
+        return relativePaths.map { relativePath in
+            let url = root.appendingPathComponent(relativePath)
+            return SourceFile(
+                name: url.lastPathComponent,
+                path: url.path,
+                relativePath: relativePath,
+                sourceName: source.displayName,
+                sourceID: source.sourceID,
+                fileExtension: url.pathExtension.lowercased(),
+                sizeBytes: 0,
+                modifiedDate: Date(),
+                isGrantedToClaude: true
+            )
+        }
     }
 
     func enumerateAllFiles() async -> [SourceFile] {
@@ -508,18 +607,9 @@ final class ManifoldStore {
     }
 
     func startSession(targetApp: TargetApp = .cowork) async {
-        if session.isPreviewing {
-            session.preview = nil
-            session.previewError = nil
-            await session.startSession(
-                targetApp: targetApp,
-                onError: { [weak self] message in self?.lastError = message }
-            )
-        } else {
-            session.previewError = nil
-            await session.computePreview(targetApp: targetApp)
-        }
-        await refreshAll()
+        var draft = SessionDraft()
+        draft.agents = [targetApp]
+        try? await startProtectedRun(draft: draft)
     }
 
     func endSession() async {
@@ -803,19 +893,35 @@ final class ManifoldStore {
         let output: String
     }
 
-    static let agentLabel = "com.spatialduality.manifold.runtime"
-    static let agentPlistName = "com.spatialduality.manifold.runtime.plist"
-    static let launchAgentPlistURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/LaunchAgents/\(agentPlistName)")
+    static var agentLabel: String {
+        ManifoldRuntimeEnvironment.xpcServiceName()
+    }
+
+    static var agentPlistName: String {
+        "\(agentLabel).plist"
+    }
+
+    static var launchAgentPlistURL: URL {
+        if let override = ManifoldRuntimeEnvironment.launchAgentPlistURL() {
+            return override
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(agentPlistName)")
+    }
 
     private static func launchAgentPlist(executablePath: String) -> [String: Any] {
-        [
+        var plist: [String: Any] = [
             "Label": agentLabel,
             "ProgramArguments": [executablePath],
             "MachServices": [agentLabel: true],
             "KeepAlive": ["SuccessfulExit": false],
             "ProcessType": "Interactive",
         ]
+        let environment = ManifoldRuntimeEnvironment.helperEnvironment()
+        if !environment.isEmpty {
+            plist["EnvironmentVariables"] = environment
+        }
+        return plist
     }
 
     @discardableResult
@@ -837,12 +943,14 @@ final class ManifoldStore {
     }
 
     static var storeURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        (ManifoldRuntimeEnvironment.appSupportRootURL()
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("Manifold/store")
     }
 
     static var mcpBinaryPath: String {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        (ManifoldRuntimeEnvironment.appSupportRootURL()
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("Manifold/bin/manifold-mcp")
             .path
     }

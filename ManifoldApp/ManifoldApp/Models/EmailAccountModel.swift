@@ -225,15 +225,15 @@ final class MailAccountsModel {
         return MailboxResolver.resolve(requestedName: requestedName, imapMailboxes: mailboxes)
     }
 
-    func sharedEmailCount() async -> Int {
+    func sharedEmailCount(agent: TargetApp = .cowork) async -> Int {
         guard let client else { return 0 }
-        return (try? await client.sharedEmailCount()) ?? 0
+        return (try? await client.sharedEmailCount(agent: agent)) ?? 0
     }
 
-    func sharedEmailIDs() async -> Set<String> {
+    func sharedEmailIDs(agent: TargetApp = .cowork) async -> Set<String> {
         guard let client else { return [] }
         do {
-            let result = try await client.sharedEmailIDs()
+            let result = try await client.sharedEmailIDs(agent: agent)
             lastQueryError = nil
             return result
         } catch {
@@ -242,10 +242,10 @@ final class MailAccountsModel {
         }
     }
 
-    func sharedEmails(limit: Int = 500) async -> [EmailMessageRecord] {
+    func sharedEmails(agent: TargetApp = .cowork, limit: Int = 500) async -> [EmailMessageRecord] {
         guard let client else { return [] }
         do {
-            let result = try await client.sharedEmails(limit: limit)
+            let result = try await client.sharedEmails(agent: agent, limit: limit)
             lastQueryError = nil
             return result
         } catch {
@@ -254,20 +254,20 @@ final class MailAccountsModel {
         }
     }
 
-    func shareEmails(emailIDs: [String]) async {
+    func shareEmails(emailIDs: [String], for agent: TargetApp = .cowork) async {
         guard let client else { return }
         do {
-            try await client.shareEmails(emailIDs: emailIDs)
+            try await client.shareEmails(emailIDs: emailIDs, for: agent)
             lastQueryError = nil
         } catch {
             lastQueryError = error.localizedDescription
         }
     }
 
-    func unshareEmails(emailIDs: [String]) async {
+    func unshareEmails(emailIDs: [String], for agent: TargetApp = .cowork) async {
         guard let client else { return }
         do {
-            try await client.unshareEmails(emailIDs: emailIDs)
+            try await client.unshareEmails(emailIDs: emailIDs, for: agent)
             lastQueryError = nil
         } catch {
             lastQueryError = error.localizedDescription

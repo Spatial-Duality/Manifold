@@ -206,6 +206,9 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 "coverageEvents": try XPCJSON.object(from: coverageEvents),
             ]
 
+        case "dataControlSummary":
+            return ["summary": try XPCJSON.object(from: try await dataControlSummary())]
+
         case "pauseAgent":
             guard let agent = payload["agent"] as? String else {
                 throw ManifoldXPCError.invalidPayload
@@ -261,6 +264,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             }
             let displayName = (payload["displayName"] as? String) ?? URL(fileURLWithPath: path).lastPathComponent
             let sourceID = try await runtime.grantStore.addSource(displayName: displayName, rootPath: path)
+            try await runtime.privacyIndexCoordinator.sourceDidChange()
             guard let source = try await runtime.grantStore.source(id: sourceID) else {
                 return ["ok": true]
             }
@@ -273,6 +277,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             try await runtime.grantStore.removeSource(sourceID: sourceID)
             try await runtime.standingWriteApprovalStore.removeGrants(sourceID: sourceID)
             try await runtime.fileVisibilityOverrideStore.clearOverrides(sourceID: sourceID)
+            try await runtime.privacyIndexCoordinator.sourceDidChange()
             return ["ok": true]
 
         case "pauseSource":
@@ -280,6 +285,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 throw ManifoldXPCError.invalidPayload
             }
             try await runtime.grantStore.pauseSource(sourceID: sourceID)
+            try await runtime.privacyIndexCoordinator.sourceDidChange()
             return ["ok": true]
 
         case "resumeSource":
@@ -287,6 +293,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 throw ManifoldXPCError.invalidPayload
             }
             try await runtime.grantStore.resumeSource(sourceID: sourceID)
+            try await runtime.privacyIndexCoordinator.sourceDidChange()
             return ["ok": true]
 
         case "getPolicies":
@@ -318,6 +325,49 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 userInfo: [NSLocalizedDescriptionKey: "Unknown command: \(name)"]
             )
         }
+    }
+
+    private func dataControlSummary() async throws -> DataControlSummary {
+        await runtime.scanForActiveWorkBlockDrift()
+        let connectedAgents = await runtime.connectedAgents
+        let coverageSnapshots = await runtime.connectedClientSnapshots()
+        let activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
+        let pendingApprovals = try await runtime.approvalQueue.pending()
+        let recentEntries = try await runtime.auditStore.recentEntries(limit: 1)
+        let lastExposure = recentEntries.first.map(Self.summaryExposure)
+        let recentSessions = try await runtime.auditStore.recentSessions(limit: 5)
+
+        var agents: [DataControlSummary.Agent] = []
+        for agent in TargetApp.allCases {
+            let policy = try await runtime.policyStore.policy(for: agent)
+            let coverage = coverageSnapshots.first { $0.agent == agent.rawValue }
+            let visibleEmailCount = (try? await runtime.visibleEmailCount(for: agent)) ?? 0
+            let sharedEmailCount = (try? runtime.emailStore.sharedEmailCount(agent: agent)) ?? 0
+            agents.append(
+                DataControlSummary.Agent(
+                    agent: agent,
+                    isConnected: connectedAgents.contains(agent.rawValue),
+                    verificationStatus: coverage?.verificationStatus ?? .unknown,
+                    coverageState: coverage?.coverageState,
+                    isPaused: policy.isPaused,
+                    defaultFileScopeCount: policy.allowedSourceIDs.count,
+                    visibleEmailCount: visibleEmailCount,
+                    sharedEmailCount: sharedEmailCount,
+                    emailSensitivity: policy.emailSensitivity,
+                    defaultEmailPolicy: policy.defaultEmailPolicy
+                )
+            )
+        }
+
+        return DataControlSummary(
+            runtimeConnected: true,
+            activeBridgeCount: await runtime.activeBridgeCount,
+            agents: agents,
+            activeWorkBlock: activeWorkBlock,
+            pendingApprovalCount: pendingApprovals.count,
+            lastExposure: lastExposure,
+            recentHandoffSessions: recentSessions
+        )
     }
 
     private static func handleTool(name: String, arguments: [String: Any], bridge: ManifoldBridge) async -> [String: Any] {
@@ -767,6 +817,18 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             "sessionID": entry.sessionID as Any,
             "grantID": entry.grantID as Any,
         ]
+    }
+
+    private static func summaryExposure(_ entry: ManifoldKit.AuditEntry) -> DataControlSummary.Exposure {
+        DataControlSummary.Exposure(
+            id: entry.id,
+            timestamp: entry.timestamp,
+            agent: entry.agent.flatMap(TargetApp.init(rawValue:)),
+            action: entry.action,
+            resourcePath: entry.filePath,
+            sessionID: entry.sessionID,
+            grantID: entry.grantID
+        )
     }
 
     private static func exposureJSON(_ record: ExposureRecord) -> [String: Any] {

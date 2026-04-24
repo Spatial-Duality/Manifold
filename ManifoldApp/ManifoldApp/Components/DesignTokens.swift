@@ -125,9 +125,24 @@ enum AgentMeta {
         TargetApp(rawValue: raw)
     }
 
-    /// Ordered, known-only projection of `store.connectedAgents`.
+    /// Ordered agent list for access controls. Connection is metadata, not
+    /// permission to configure policy, so Claude/Codex remain available while
+    /// offline.
     static func connected(from raw: [String]) -> [TargetApp] {
-        raw.compactMap(resolve)
+        let connected = raw.compactMap(resolve)
+        return TargetApp.allCases.sorted { lhs, rhs in
+            let lhsConnected = connected.contains(lhs)
+            let rhsConnected = connected.contains(rhs)
+            if lhsConnected != rhsConnected { return lhsConnected && !rhsConnected }
+            return order(lhs) < order(rhs)
+        }
+    }
+
+    private static func order(_ agent: TargetApp) -> Int {
+        switch agent {
+        case .cowork: return 0
+        case .codex: return 1
+        }
     }
 }
 

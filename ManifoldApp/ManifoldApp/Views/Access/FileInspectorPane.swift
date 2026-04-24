@@ -20,6 +20,7 @@ struct FileInspectorPane: View {
     let connectedAgents: [TargetApp]
     let visibleAgents: Set<TargetApp>
     let onToggleAgent: (TargetApp, Bool) -> Void
+    let onSetAllAgents: (Bool) -> Void
     let onReset: () -> Void
 
     var body: some View {
@@ -105,35 +106,20 @@ struct FileInspectorPane: View {
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: Spacing.s1) {
-                    ForEach(connectedAgents, id: \.self) { agent in
-                        accessRow(agent: agent, isVisible: visible.contains(agent))
-                    }
-                }
+                AccessCheckboxStrip(
+                    agents: connectedAgents,
+                    visibleAgents: visible,
+                    accessibilityIDPrefix: "access.inspector.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent)",
+                    onToggleAgent: { agent, wasVisible in
+                        onToggleAgent(agent, wasVisible)
+                    },
+                    onSetAll: onSetAllAgents
+                )
             }
 
             Button("Reset to inherited", action: onReset)
                 .buttonStyle(.borderless)
                 .font(ManifoldType.caption)
-        }
-    }
-
-    @ViewBuilder
-    private func accessRow(agent: TargetApp, isVisible: Bool) -> some View {
-        HStack(spacing: Spacing.s2) {
-            GradientAvatar(agent: agent, size: .small)
-            Text(AgentMeta.label(agent))
-                .font(ManifoldType.body)
-            Spacer()
-            Toggle(isOn: Binding(
-                get: { isVisible },
-                set: { onToggleAgent(agent, $0) }
-            )) {
-                EmptyView()
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .labelsHidden()
         }
     }
 

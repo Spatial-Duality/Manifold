@@ -248,6 +248,19 @@ private struct ThreadToolbar: View {
 
                 Spacer()
 
+                Picker("Agent", selection: Binding(
+                    get: { mailReview.targetAgent },
+                    set: { agent in Task { await mailReview.selectTargetAgent(agent) } }
+                )) {
+                    ForEach(TargetApp.allCases, id: \.self) { agent in
+                        Text(AgentMeta.label(agent)).tag(agent)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 150)
+                .accessibilityIdentifier("mail.targetAgent")
+
                 Button("Sync now") {
                     Task { await mailReview.syncSelectedAccount() }
                 }
@@ -268,7 +281,7 @@ private struct ThreadToolbar: View {
         let threadCount = mailReview.threadRows.count
         let messageCount = mailReview.messages.count
         let sharedCount = mailReview.sharedEmailIDs.intersection(Set(mailReview.messages.map(\.emailID))).count
-        return "\(threadCount) conversations · \(messageCount) messages · \(sharedCount) shared"
+        return "\(threadCount) conversations · \(messageCount) messages · \(sharedCount) shared with \(AgentMeta.label(mailReview.targetAgent))"
     }
 }
 
@@ -465,7 +478,7 @@ private struct ThreadInspector: View {
                     .accessibilityIdentifier("mail.message.inspector.visibility.\(selectedMessage.emailID)")
 
                     HStack(spacing: Spacing.s2) {
-                        Button("Allow") {
+                        Button("Allow for \(AgentMeta.label(mailReview.targetAgent))") {
                             Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: true) }
                         }
                         .buttonStyle(.borderedProminent)
@@ -574,7 +587,7 @@ private struct VisibilityActionMenu: View {
     let row: MailReviewRow
 
     var body: some View {
-        Button("Allow") {
+        Button("Allow for \(AgentMeta.label(mailReview.targetAgent))") {
             Task { await mailReview.setMessageShared(row.emailID, isShared: true) }
         }
         Button("Hide") {

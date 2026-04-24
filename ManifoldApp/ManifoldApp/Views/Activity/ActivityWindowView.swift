@@ -1,15 +1,12 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// ActivityView — the 3-pane evidence ledger.
+// ActivityView — the user's readable proof trail.
 //
-// Per design/html/activity.html:
-//   [ SessionRail | EventTable | EvidenceInspector ]
-//
-// The rail lists sessions with per-session sparklines and sticky day
-// headers; the table is the dense 7-column event list with denial rows
-// getting an orange leading edge; the inspector shows the evidence for
-// whichever event is selected.
+// The page keeps the native three-pane ledger shape:
+//   [ Sessions | Activity stream | Evidence ]
+// but the center pane leads with "what happened to my data" instead of
+// exposing a raw implementation table.
 
 import SwiftUI
 import ManifoldKit
@@ -21,6 +18,10 @@ struct ActivityView: View {
     @State private var filterText = ""
     @State private var displayedEntries: [AuditEntry] = []
     @FocusState private var isSearchFocused: Bool
+
+    private var filteredEntries: [AuditEntry] {
+        displayedEntries.filter { selectedFilter.matches($0) }
+    }
 
     private var selectedSession: Session? {
         store.selectedSession
@@ -50,11 +51,14 @@ struct ActivityView: View {
             Divider()
 
             VStack(spacing: 0) {
+                ActivitySummaryStrip(
+                    entries: filteredEntries,
+                    selectedSession: selectedSession,
+                    searchText: filterText,
+                    filter: selectedFilter
+                )
+                Divider()
                 ActivityFilterBar(filter: $selectedFilter, searchText: $filterText, isSearchFocused: $isSearchFocused)
-                if let selectedSession {
-                    Divider()
-                    SessionSummaryHeader(session: selectedSession, entries: displayedEntries)
-                }
                 Divider()
                 EventTable(
                     entries: displayedEntries,
@@ -90,8 +94,10 @@ struct ActivityView: View {
             recomputeVisibleEntries()
         }
         .onChange(of: selectedSession?.id) {
-            selectedEvent = nil
             recomputeVisibleEntries()
+        }
+        .onChange(of: selectedFilter) {
+            repairSelection()
         }
         .onChange(of: filterText) {
             recomputeVisibleEntries()
@@ -102,6 +108,7 @@ struct ActivityView: View {
         .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
             isSearchFocused = true
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ledger.surface.activity")
     }
 
@@ -114,6 +121,7 @@ struct ActivityView: View {
         let trimmedQuery = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
             displayedEntries = scopedEntries
+            repairSelection()
             return
         }
         displayedEntries = scopedEntries.filter { entry in
@@ -121,6 +129,15 @@ struct ActivityView: View {
                 .joined(separator: "\n")
                 .localizedCaseInsensitiveContains(trimmedQuery)
         }
+        repairSelection()
+    }
+
+    private func repairSelection() {
+        let rows = filteredEntries
+        if let selectedEvent, rows.contains(where: { $0.id == selectedEvent }) {
+            return
+        }
+        selectedEvent = rows.first?.id
     }
 }
 
@@ -133,8 +150,13 @@ private struct ActivityFilterBar: View {
     var body: some View {
         HStack(spacing: Spacing.s2) {
             ForEach(EventTable.Filter.allCases, id: \.self) { option in
-                Button(option.label) {
+                Button {
                     filter = option
+                } label: {
+                    Label(option.label, systemImage: option.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.plain)
                 .font(ManifoldType.captionMedium)
@@ -152,61 +174,167 @@ private struct ActivityFilterBar: View {
                             lineWidth: 0.5
                         )
                 )
+                .accessibilityIdentifier("activity.filter.\(option.label.lowercased().replacingOccurrences(of: " ", with: "-"))")
             }
             Spacer()
-            TextField("Filter activity", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 240)
-                .focused($isSearchFocused)
+            HStack(spacing: Spacing.s1) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search activity", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .focused($isSearchFocused)
+                    .accessibilityIdentifier("activity.search")
+            }
+            .padding(.horizontal, Spacing.s2)
+            .padding(.vertical, 6)
+            .frame(width: 220)
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                    .fill(ManifoldPalette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+            )
         }
         .padding(.horizontal, Spacing.s3)
         .padding(.vertical, Spacing.s2)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("activity.filters")
     }
 }
 
-private struct SessionSummaryHeader: View {
-    let session: Session
+private struct ActivitySummaryStrip: View {
     let entries: [AuditEntry]
+    let selectedSession: Session?
+    let searchText: String
+    let filter: EventTable.Filter
 
-    private var deniedCount: Int {
-        entries.filter { $0.action.contains("deny") || $0.action.contains("denied") }.count
+    private var attentionCount: Int {
+        entries.filter { entry in
+            entry.action.contains("deny") ||
+            entry.action.contains("denied") ||
+            entry.action == AuditAction.sensitivityWarning.rawValue ||
+            entry.action == AuditAction.coverageWarning.rawValue
+        }.count
     }
 
-    private var restoredCount: Int {
-        entries.filter { $0.action == "restore" || $0.action.contains("manifold-restore") }.count
+    private var readCount: Int {
+        entries.filter { $0.action.contains("read") }.count
+    }
+
+    private var writeCount: Int {
+        entries.filter {
+            $0.action.contains("write") ||
+            $0.action == AuditAction.fileModified.rawValue ||
+            $0.action == AuditAction.fileCreated.rawValue ||
+            $0.action == AuditAction.fileDeleted.rawValue
+        }.count
+    }
+
+    private var lastEventDescription: String {
+        guard let entry = entries.first else { return "No matching events" }
+        return ActivityEventPresentation(entry).title
+    }
+
+    private var title: String {
+        if let selectedSession {
+            return "\(ActivityEventPresentation.agentLabel(selectedSession.agent)) session"
+        }
+        return "Activity"
+    }
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if filter != .all {
+            parts.append(filter.label)
+        }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            parts.append("matching \"\(query)\"")
+        }
+        parts.append("\(entries.count) event\(entries.count == 1 ? "" : "s")")
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        HStack(spacing: Spacing.s4) {
-            SessionSummaryMetric(label: "Reads", value: "\(session.readCount)")
-            SessionSummaryMetric(label: "Writes", value: "\(session.writeCount)")
-            SessionSummaryMetric(label: "Searches", value: "\(session.searchCount)")
-            SessionSummaryMetric(label: "Denied", value: "\(deniedCount)")
-            SessionSummaryMetric(label: "Restored", value: "\(restoredCount)")
-            Spacer()
-            Text(session.agent.capitalized)
-                .font(ManifoldType.captionMedium)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: Spacing.s3) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                    .fill(ManifoldPalette.selectionSoft)
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(ManifoldPalette.selection)
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(ManifoldType.heading)
+                    .foregroundStyle(ManifoldPalette.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(subtitle)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .frame(width: 220, alignment: .leading)
+            .layoutPriority(1)
+
+            Spacer(minLength: Spacing.s2)
+
+            ActivitySummaryMetric(label: "Review", value: "\(attentionCount)", systemImage: "shield.lefthalf.filled", tint: attentionCount > 0 ? ManifoldPalette.attention : ManifoldPalette.active)
+            ActivitySummaryMetric(label: "Reads", value: "\(readCount)", systemImage: "eye", tint: ManifoldPalette.text2)
+            ActivitySummaryMetric(label: "Writes", value: "\(writeCount)", systemImage: "pencil", tint: ManifoldPalette.selection)
+            ActivitySummaryMetric(label: "Latest", value: lastEventDescription, systemImage: "clock", tint: ManifoldPalette.text3, wide: true)
         }
         .padding(.horizontal, Spacing.s3)
         .padding(.vertical, Spacing.s2)
-        .background(ManifoldPalette.surface3.opacity(0.75))
+        .frame(height: 96)
+        .background(.bar)
+        .accessibilityIdentifier("activity.summary")
     }
 }
 
-private struct SessionSummaryMetric: View {
+private struct ActivitySummaryMetric: View {
     let label: String
     let value: String
+    let systemImage: String
+    let tint: Color
+    var wide = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label.uppercased())
-                .font(ManifoldType.tiny)
-                .foregroundStyle(.tertiary)
-                .tracking(0.4)
-            Text(value)
-                .font(ManifoldType.numericCaption.weight(.semibold))
-                .foregroundStyle(.primary)
+        HStack(spacing: Spacing.s2) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label.uppercased())
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                    .tracking(0.4)
+                    .lineLimit(1)
+                Text(value)
+                    .font(wide ? ManifoldType.captionMedium : ManifoldType.numericCaption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .monospacedDigit()
+            }
         }
+        .frame(width: wide ? 160 : 88, alignment: .leading)
+        .padding(.horizontal, Spacing.s2)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                .fill(ManifoldPalette.surface.opacity(0.76))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+        )
     }
 }

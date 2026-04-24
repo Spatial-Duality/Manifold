@@ -17,6 +17,7 @@ enum ClientIdentityVerifier {
     private static let readOnlyCLICommands: Set<String> = [
         "ping",
         "getStatus",
+        "dataControlSummary",
         "recentActivity",
         "listSources",
     ]

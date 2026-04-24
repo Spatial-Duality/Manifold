@@ -23,6 +23,7 @@ final class RulesModel {
 
     enum Filter: Hashable, Sendable, CaseIterable, Identifiable {
         case all
+        case privacy
         case scope(ManifoldKit.RuleScope)
         case seeded
         case userAuthored
@@ -31,6 +32,7 @@ final class RulesModel {
         var id: String {
             switch self {
             case .all: return "all"
+            case .privacy: return "privacy"
             case .scope(let s): return "scope-\(s.rawValue)"
             case .seeded: return "seeded"
             case .userAuthored: return "user"
@@ -39,12 +41,13 @@ final class RulesModel {
         }
 
         static var allCases: [Filter] {
-            [.all, .scope(.file), .scope(.email), .scope(.agent), .seeded, .userAuthored, .suggested]
+            [.all, .privacy, .scope(.file), .scope(.email), .scope(.agent), .seeded, .userAuthored, .suggested]
         }
 
         var title: String {
             switch self {
             case .all: return "All Rules"
+            case .privacy: return "Privacy Filter"
             case .scope(.file): return "Files"
             case .scope(.email): return "Emails"
             case .scope(.agent): return "Agents"
@@ -57,6 +60,7 @@ final class RulesModel {
         var symbol: String {
             switch self {
             case .all: return "list.bullet"
+            case .privacy: return "sparkles.rectangle.stack"
             case .scope(.file): return "folder"
             case .scope(.email): return "envelope"
             case .scope(.agent): return "sparkles"
@@ -96,6 +100,8 @@ final class RulesModel {
             switch filter {
             case .all:
                 return true
+            case .privacy:
+                return rule.isPrivacyFilterBacked
             case .scope(let s):
                 return rule.scope == s
             case .seeded:
@@ -110,10 +116,25 @@ final class RulesModel {
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             searched = base
         } else {
-            let needle = searchText.lowercased()
+            let needles = searchText
+                .lowercased()
+                .split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
+                .map(String.init)
             searched = base.filter { rule in
-                rule.name.lowercased().contains(needle)
-                    || rule.explanation.lowercased().contains(needle)
+                let agents = rule.agents
+                    .map { AgentMeta.label($0) }
+                    .joined(separator: " ")
+                let haystack = [
+                    rule.name,
+                    rule.explanation,
+                    RuleSummary.summarize(rule.matcher),
+                    rule.action.rawValue,
+                    rule.scope.displayName,
+                    rule.source.rawValue,
+                    agents,
+                    rule.isPrivacyFilterBacked ? "openai privacy filter privacy preflight model sensitive pii secret identity" : ""
+                ].joined(separator: " ").lowercased()
+                return needles.allSatisfy { haystack.contains($0) }
             }
         }
         return searched.sorted { lhs, rhs in
@@ -131,6 +152,29 @@ final class RulesModel {
         return rules.first(where: { $0.id == id })
     }
 
+    var enabledRuleCount: Int {
+        rules.filter(\.enabled).count
+    }
+
+    var privacyFilterRuleCount: Int {
+        rules.filter(\.isPrivacyFilterBacked).count
+    }
+
+    var blockingRuleCount: Int {
+        rules.filter { [.deny, .redact, .summarize, .downgrade].contains($0.action) }.count
+    }
+
+    var previewOnlyStructuralRuleCount: Int {
+        rules.filter(\.isPreviewOnlyStructuralRule).count
+    }
+
+    // MARK: - Selection
+
+    func selectFilter(_ nextFilter: Filter) {
+        filter = nextFilter
+        repairSelectionForCurrentFilter()
+    }
+
     // MARK: - Load
 
     func load() async {
@@ -140,9 +184,7 @@ final class RulesModel {
         do {
             rules = try await client.listRules(scope: nil)
             errorMessage = nil
-            if let selectedRuleID, !rules.contains(where: { $0.id == selectedRuleID }) {
-                self.selectedRuleID = nil
-            }
+            repairSelectionForCurrentFilter()
         } catch {
             rulesLogger.error("Failed to load rules: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
@@ -228,6 +270,14 @@ final class RulesModel {
         }
     }
 
+    private func repairSelectionForCurrentFilter() {
+        let visible = filteredRules
+        if let selectedRuleID, visible.contains(where: { $0.id == selectedRuleID }) {
+            return
+        }
+        selectedRuleID = visible.first?.id
+    }
+
     // MARK: - Live match preview (inspector)
 
     /// Debounces preview requests — called on selection / inspector edits.
@@ -256,7 +306,10 @@ final class RulesModel {
 
 extension RuleRecord {
     /// Constructs a user-authored file rule with sensible defaults.
-    static func newUserFileRule(name: String = "New file rule") -> RuleRecord {
+    static func newUserFileRule(
+        name: String = "New file rule",
+        action: ManifoldKit.RuleAction = .deny
+    ) -> RuleRecord {
         let iso = ISO8601DateFormatter.shared.string(from: Date())
         return RuleRecord(
             id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
@@ -264,7 +317,7 @@ extension RuleRecord {
             explanation: "",
             scope: .file,
             matcher: .pathGlob("**/new-pattern"),
-            action: .deny,
+            action: action,
             agents: [],
             window: .always,
             source: .user,
@@ -275,7 +328,10 @@ extension RuleRecord {
         )
     }
 
-    static func newUserEmailRule(name: String = "New email rule") -> RuleRecord {
+    static func newUserEmailRule(
+        name: String = "New email rule",
+        action: ManifoldKit.RuleAction = .deny
+    ) -> RuleRecord {
         let iso = ISO8601DateFormatter.shared.string(from: Date())
         return RuleRecord(
             id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
@@ -283,7 +339,7 @@ extension RuleRecord {
             explanation: "",
             scope: .email,
             matcher: .emailDomain("*.example.com"),
-            action: .deny,
+            action: action,
             agents: [],
             window: .always,
             source: .user,
@@ -294,7 +350,10 @@ extension RuleRecord {
         )
     }
 
-    static func newUserAgentRule(name: String = "New agent rule") -> RuleRecord {
+    static func newUserAgentRule(
+        name: String = "New agent rule",
+        action: ManifoldKit.RuleAction = .deny
+    ) -> RuleRecord {
         let iso = ISO8601DateFormatter.shared.string(from: Date())
         return RuleRecord(
             id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
@@ -302,7 +361,7 @@ extension RuleRecord {
             explanation: "",
             scope: .agent,
             matcher: .agentWrite,
-            action: .deny,
+            action: action,
             agents: [],
             window: .always,
             source: .user,
@@ -311,5 +370,58 @@ extension RuleRecord {
             createdAt: iso,
             updatedAt: iso
         )
+    }
+
+    static func newPrivacyFilterRule(
+        name: String = "New privacy filter rule",
+        category: PrivacyCategory = .secret,
+        action: ManifoldKit.RuleAction = .deny
+    ) -> RuleRecord {
+        let iso = ISO8601DateFormatter.shared.string(from: Date())
+        return RuleRecord(
+            id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
+            name: name,
+            explanation: "Uses the privacy filter model before content is shared with an agent.",
+            scope: .agent,
+            matcher: .privacyContainsCategory(category),
+            action: action,
+            agents: [],
+            window: .always,
+            source: .user,
+            enabled: true,
+            orderIndex: 100,
+            createdAt: iso,
+            updatedAt: iso
+        )
+    }
+}
+
+extension RuleRecord {
+    var isPrivacyFilterBacked: Bool {
+        matcher.containsPrivacyMatcher
+    }
+
+    var isRuntimeBackedByCurrentGates: Bool {
+        scope == .file || isPrivacyFilterBacked
+    }
+
+    var isPreviewOnlyStructuralRule: Bool {
+        !isRuntimeBackedByCurrentGates
+    }
+}
+
+extension RuleMatcher {
+    var containsPrivacyMatcher: Bool {
+        switch self {
+        case .privacyContainsCategory, .privacyMatchesMyIdentity,
+             .privacyInOrgAllowlist, .privacySeverityAtLeast:
+            return true
+        case .all(let children), .any(let children):
+            return children.contains { $0.containsPrivacyMatcher }
+        case .not(let child):
+            return child.containsPrivacyMatcher
+        default:
+            return false
+        }
     }
 }

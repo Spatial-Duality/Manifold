@@ -46,6 +46,7 @@ public struct DatabaseMigrator {
         if applied > 0 {
             logger.info("Migrations complete. Schema at version \(Self.migrations.last?.version ?? 0)")
         }
+        try Self.repairCurrentSchema(db)
         return applied
     }
 
@@ -53,6 +54,58 @@ public struct DatabaseMigrator {
     public func currentVersion() throws -> Int {
         let result = try db.queryScalar("SELECT MAX(version) FROM schema_migrations")
         return result.flatMap(Int.init) ?? 0
+    }
+
+    private static func repairCurrentSchema(_ db: DatabaseConnection) throws {
+        try repairFileVisibilityOverrides(db)
+        try repairRuleRecords(db)
+    }
+
+    private static func repairFileVisibilityOverrides(_ db: DatabaseConnection) throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS file_visibility_overrides (
+                agent TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                is_directory INTEGER NOT NULL DEFAULT 0,
+                decision TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(agent, source_id, relative_path, is_directory)
+            )
+        """)
+        try db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_visibility_overrides_source ON file_visibility_overrides(source_id)"
+        )
+        try db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_visibility_overrides_agent ON file_visibility_overrides(agent)"
+        )
+    }
+
+    private static func repairRuleRecords(_ db: DatabaseConnection) throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS rule_records (
+                rule_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                explanation TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL,
+                action TEXT NOT NULL,
+                matcher_json TEXT NOT NULL,
+                agents_json TEXT NOT NULL DEFAULT '[]',
+                window_json TEXT NOT NULL DEFAULT '{"kind":"always"}',
+                source TEXT NOT NULL DEFAULT 'user',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_matched_at TEXT,
+                match_count INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_rule_records_scope ON rule_records(scope)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_rule_records_source ON rule_records(source)")
+        try db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rule_records_scope_enabled_order ON rule_records(scope, enabled, order_index)"
+        )
     }
 
     // MARK: - Migration Definitions
@@ -973,6 +1026,280 @@ public struct DatabaseMigrator {
                 "CREATE INDEX IF NOT EXISTS idx_rule_records_scope_enabled_order ON rule_records(scope, enabled, order_index)"
             )
             logger.info("Migration 23: unified rule_records table")
+        },
+
+        Migration(version: 24, name: "privacy_preflight_foundation") { db in
+            let approvalTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='approval_requests'"
+            )
+            if !approvalTables.isEmpty {
+                let approvalColumns = try db.queryAll("PRAGMA table_info(approval_requests)")
+                let approvalColumnNames = Set(approvalColumns.compactMap { $0["name"] })
+                if !approvalColumnNames.contains("context_json") {
+                    try db.execute("ALTER TABLE approval_requests ADD COLUMN context_json TEXT")
+                }
+                if !approvalColumnNames.contains("resolution_action") {
+                    try db.execute("ALTER TABLE approval_requests ADD COLUMN resolution_action TEXT")
+                }
+            }
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_preflight_settings (
+                    id TEXT PRIMARY KEY,
+                    is_enabled INTEGER NOT NULL DEFAULT 0,
+                    selected_backend TEXT NOT NULL DEFAULT 'rules_only',
+                    install_state TEXT NOT NULL DEFAULT 'not_installed',
+                    model_version TEXT,
+                    storage_path TEXT,
+                    installed_at TEXT,
+                    cache_enabled INTEGER NOT NULL DEFAULT 1,
+                    unload_on_memory_pressure INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_privacy_policies (
+                    policy_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL UNIQUE,
+                    text_handling TEXT NOT NULL DEFAULT 'redact',
+                    code_handling TEXT NOT NULL DEFAULT 'ask',
+                    secret_handling TEXT NOT NULL DEFAULT 'block',
+                    enabled_categories_json TEXT NOT NULL DEFAULT '[]',
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_privacy_policies_agent ON agent_privacy_policies(agent)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_scan_cache (
+                    input_hash TEXT NOT NULL,
+                    backend TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    operating_point TEXT NOT NULL,
+                    category_set_json TEXT NOT NULL,
+                    content_kind TEXT NOT NULL,
+                    spans_json TEXT NOT NULL,
+                    redacted_text TEXT NOT NULL,
+                    findings_summary TEXT NOT NULL,
+                    elapsed_ms INTEGER NOT NULL DEFAULT 0,
+                    cached_at TEXT NOT NULL,
+                    PRIMARY KEY(input_hash, backend, model_version, operating_point, category_set_json, content_kind)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_privacy_scan_cache_cached_at ON privacy_scan_cache(cached_at)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_scan_events (
+                    id TEXT PRIMARY KEY,
+                    access_decision_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    resource_path TEXT,
+                    backend TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    content_kind TEXT NOT NULL,
+                    input_hash TEXT NOT NULL,
+                    delivered_hash TEXT,
+                    outcome TEXT NOT NULL,
+                    findings_summary TEXT NOT NULL,
+                    findings_count INTEGER NOT NULL DEFAULT 0,
+                    matched_categories_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_privacy_scan_events_decision ON privacy_scan_events(access_decision_id)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_privacy_scan_events_path ON privacy_scan_events(resource_path)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_approval_overrides (
+                    id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    resource_key TEXT NOT NULL,
+                    input_hash TEXT NOT NULL,
+                    content_kind TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_approval_overrides_lookup ON privacy_approval_overrides(agent, resource_key, input_hash, content_kind)"
+            )
+
+            logger.info("Migration 24: privacy preflight settings, cache, and approval state")
+        },
+
+        Migration(version: 25, name: "privacy_index_foundation") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_identity_registry (
+                    identity_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    value_ciphertext TEXT NOT NULL,
+                    normalized_hash TEXT NOT NULL,
+                    matching_mode TEXT NOT NULL DEFAULT 'exact',
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_privacy_identity_registry_kind_hash ON privacy_identity_registry(kind, normalized_hash)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_identity_suggestions (
+                    suggestion_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    value_ciphertext TEXT NOT NULL,
+                    normalized_hash TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_ref TEXT,
+                    confidence REAL NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    reviewed_at TEXT
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_identity_suggestions_status_kind ON privacy_identity_suggestions(status, kind)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_org_allowlist (
+                    allow_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    pattern TEXT NOT NULL,
+                    match_mode TEXT NOT NULL DEFAULT 'exact',
+                    source TEXT NOT NULL DEFAULT 'user',
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_privacy_org_allowlist_kind_pattern ON privacy_org_allowlist(kind, pattern)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_content_index (
+                    content_id TEXT PRIMARY KEY,
+                    subject_kind TEXT NOT NULL,
+                    source_id TEXT,
+                    relative_path TEXT,
+                    email_id TEXT,
+                    attachment_id TEXT,
+                    parent_content_id TEXT,
+                    display_name TEXT NOT NULL,
+                    mime_type TEXT,
+                    extractor TEXT,
+                    extract_status TEXT NOT NULL,
+                    scan_status TEXT NOT NULL,
+                    content_hash TEXT,
+                    backend TEXT,
+                    model_version TEXT,
+                    contains_sensitive INTEGER NOT NULL DEFAULT 0,
+                    contains_my_info INTEGER NOT NULL DEFAULT 0,
+                    contains_third_party_private INTEGER NOT NULL DEFAULT 0,
+                    contains_secret INTEGER NOT NULL DEFAULT 0,
+                    contains_org_only INTEGER NOT NULL DEFAULT 0,
+                    severity TEXT NOT NULL DEFAULT 'none',
+                    matched_categories_json TEXT NOT NULL DEFAULT '[]',
+                    matched_identity_ids_json TEXT NOT NULL DEFAULT '[]',
+                    matched_allow_ids_json TEXT NOT NULL DEFAULT '[]',
+                    redacted_preview TEXT,
+                    findings_summary TEXT NOT NULL DEFAULT '',
+                    span_count INTEGER NOT NULL DEFAULT 0,
+                    last_scanned_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    last_error TEXT
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_content_index_subject_source_path ON privacy_content_index(subject_kind, source_id, relative_path)"
+            )
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_content_index_subject_email ON privacy_content_index(subject_kind, email_id)"
+            )
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_content_index_flags ON privacy_content_index(contains_my_info, contains_secret, severity)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_detected_spans (
+                    span_id TEXT PRIMARY KEY,
+                    content_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    start_utf16 INTEGER NOT NULL,
+                    end_utf16 INTEGER NOT NULL,
+                    confidence REAL,
+                    source TEXT NOT NULL,
+                    placeholder TEXT,
+                    text_hash TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_detected_spans_content_category ON privacy_detected_spans(content_id, category)"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS privacy_index_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    content_id TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    priority INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    scheduled_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    last_error TEXT
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_privacy_index_jobs_status_priority_scheduled ON privacy_index_jobs(status, priority, scheduled_at)"
+            )
+
+            logger.info("Migration 25: privacy indexing tables")
+        },
+
+        Migration(version: 26, name: "per_agent_shared_emails") { db in
+            let hasSharedEmails = try !db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='shared_emails'"
+            ).isEmpty
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS shared_emails_v26 (
+                    share_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL DEFAULT 'cowork',
+                    email_id TEXT NOT NULL REFERENCES email_messages(email_id),
+                    shared_at TEXT NOT NULL,
+                    label TEXT,
+                    UNIQUE(agent, email_id)
+                )
+            """)
+
+            if hasSharedEmails {
+                try db.execute("""
+                    INSERT OR IGNORE INTO shared_emails_v26 (share_id, agent, email_id, shared_at, label)
+                    SELECT share_id, 'cowork', email_id, shared_at, label
+                    FROM shared_emails
+                """)
+            }
+
+            try db.execute("DROP TABLE IF EXISTS shared_emails")
+            try db.execute("ALTER TABLE shared_emails_v26 RENAME TO shared_emails")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_shared_emails_agent ON shared_emails(agent)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_shared_emails_email ON shared_emails(email_id)")
+
+            logger.info("Migration 26: shared emails are scoped per agent")
+        },
+
+        Migration(version: 27, name: "repair_rules_and_file_visibility_tables") { db in
+            try Self.repairCurrentSchema(db)
+            logger.info("Migration 27: repaired rules and file visibility tables")
         },
     ]
 }

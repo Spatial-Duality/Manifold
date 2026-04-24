@@ -3,8 +3,8 @@
 //
 // FoldersMatrixView — sources × agents coverage matrix.
 //
-// Columns are driven by `store.connectedAgents` so the matrix scales
-// from one agent to four. Beyond four, the per-agent columns collapse
+// Columns are driven by the app's supported agents so access can be
+// configured before Claude or Codex connect. Beyond four, columns collapse
 // into a single Access column rendering an AccessChipStack per row.
 // Cells are interactive: clicking a coverage dot toggles the source's
 // membership in that agent's default scope.
@@ -38,6 +38,10 @@ struct FoldersMatrixView: View {
             result[agent] = Set(store.governance.policy(for: agent)?.allowedSourceIDs ?? [])
         }
         return result
+    }
+
+    private func scopedAgents(for source: SourceRecord) -> Set<TargetApp> {
+        Set(connectedAgents.filter { scopeByAgent[$0]?.contains(source.sourceID) == true })
     }
 
     private var visibleSources: [SourceRecord] {
@@ -91,6 +95,9 @@ struct FoldersMatrixView: View {
     private var table: some View {
         Table(of: SourceRecord.self, selection: $selectedIDs, sortOrder: $sortOrder) {
             folderColumn
+            if connectedAgents.count > 1 {
+                allAgentsColumn
+            }
             if useChipFallback {
                 accessColumn
             } else {
@@ -124,11 +131,29 @@ struct FoldersMatrixView: View {
         }
     }
 
+    private var allAgentsColumn: TableColumn<SourceRecord, Never, some View, Text> {
+        TableColumn("Both") { (source: SourceRecord) in
+            let scoped = scopedAgents(for: source)
+            let allScoped = !connectedAgents.isEmpty && connectedAgents.allSatisfy { scoped.contains($0) }
+            CoverageDotButton(
+                state: allScoped ? .on : (scoped.isEmpty ? .off : .mixed),
+                tint: ManifoldPalette.selection,
+                accessibilityIdentifier: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent).all"
+            ) {
+                Task {
+                    await setSourceScope(sourceID: source.sourceID, agents: connectedAgents, inScope: !allScoped)
+                }
+            }
+        }
+        .width(min: 46, ideal: 56, max: 68)
+    }
+
     private func agentColumn(for agent: TargetApp) -> TableColumn<SourceRecord, Never, some View, Text> {
         TableColumn(LocalizedStringKey(AgentMeta.label(agent))) { (source: SourceRecord) in
             CoverageDotButton(
-                on: scopeByAgent[agent]?.contains(source.sourceID) == true,
-                tint: AgentMeta.color(agent)
+                state: scopeByAgent[agent]?.contains(source.sourceID) == true ? .on : .off,
+                tint: AgentMeta.color(agent),
+                accessibilityIdentifier: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent).agent.\(agent.rawValue)"
             ) {
                 let currently = scopeByAgent[agent]?.contains(source.sourceID) == true
                 Task {
@@ -141,13 +166,19 @@ struct FoldersMatrixView: View {
 
     private var accessColumn: TableColumn<SourceRecord, Never, some View, Text> {
         TableColumn("Access") { (source: SourceRecord) in
-            let visible = Set(connectedAgents.filter { scopeByAgent[$0]?.contains(source.sourceID) == true })
-            AccessChipStack(
+            let visible = scopedAgents(for: source)
+            AccessCheckboxStrip(
                 agents: connectedAgents,
                 visibleAgents: visible,
-                onToggle: { agent, wasVisible in
+                accessibilityIDPrefix: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent)",
+                onToggleAgent: { agent, wasVisible in
                     Task {
                         await store.setSourceScope(sourceID: source.sourceID, agent: agent, inScope: !wasVisible)
+                    }
+                },
+                onSetAll: { inScope in
+                    Task {
+                        await setSourceScope(sourceID: source.sourceID, agents: connectedAgents, inScope: inScope)
                     }
                 }
             )
@@ -177,7 +208,30 @@ struct FoldersMatrixView: View {
             Spacer()
 
             if !connectedAgents.isEmpty {
+                Button {
+                    Task { await bulkShare(agents: connectedAgents, inScope: true) }
+                } label: {
+                    Label("Share with Both", systemImage: "person.2.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(ManifoldPalette.selection)
+
+                Button {
+                    Task { await bulkShare(agents: connectedAgents, inScope: false) }
+                } label: {
+                    Label("Unshare from Both", systemImage: "person.2.slash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
                 Menu {
+                    if connectedAgents.count > 1 {
+                        Button("Both") {
+                            Task { await bulkShare(agents: connectedAgents, inScope: true) }
+                        }
+                        Divider()
+                    }
                     ForEach(connectedAgents, id: \.self) { agent in
                         Button(AgentMeta.label(agent)) {
                             Task { await bulkShare(agent: agent, inScope: true) }
@@ -190,6 +244,12 @@ struct FoldersMatrixView: View {
                 .controlSize(.small)
 
                 Menu {
+                    if connectedAgents.count > 1 {
+                        Button("Both") {
+                            Task { await bulkShare(agents: connectedAgents, inScope: false) }
+                        }
+                        Divider()
+                    }
                     ForEach(connectedAgents, id: \.self) { agent in
                         Button(AgentMeta.label(agent)) {
                             Task { await bulkShare(agent: agent, inScope: false) }
@@ -225,6 +285,18 @@ struct FoldersMatrixView: View {
         }
     }
 
+    private func bulkShare(agents: [TargetApp], inScope: Bool) async {
+        for id in selectedIDs {
+            await setSourceScope(sourceID: id, agents: agents, inScope: inScope)
+        }
+    }
+
+    private func setSourceScope(sourceID: String, agents: [TargetApp], inScope: Bool) async {
+        for agent in agents {
+            await store.setSourceScope(sourceID: sourceID, agent: agent, inScope: inScope)
+        }
+    }
+
     private var selectedSource: SourceRecord? {
         guard let id = selectedIDs.first else { return nil }
         return store.sources.first(where: { $0.sourceID == id })
@@ -234,19 +306,53 @@ struct FoldersMatrixView: View {
 // MARK: - CoverageDotButton
 
 private struct CoverageDotButton: View {
-    let on: Bool
+    enum State {
+        case off
+        case on
+        case mixed
+    }
+
+    let state: State
     let tint: Color
+    let accessibilityIdentifier: String?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Circle()
-                .fill(on ? tint : ManifoldPalette.surface3)
-                .overlay(Circle().strokeBorder(on ? tint.opacity(0.4) : ManifoldPalette.border, lineWidth: 0.8))
-                .frame(width: 12, height: 12)
+                .fill(state == .off ? ManifoldPalette.surface3 : tint)
+                .overlay(Circle().strokeBorder(state == .off ? ManifoldPalette.border : tint.opacity(0.4), lineWidth: 0.8))
+                .overlay {
+                    if state == .mixed {
+                        Circle()
+                            .fill(ManifoldPalette.surface)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .frame(width: 14, height: 14)
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help(on ? "In scope — click to unshare" : "Not in scope — click to share")
-        .accessibilityLabel(on ? "In scope" : "Not in scope")
+        .buttonStyle(.borderless)
+        .help(helpText)
+        .accessibilityLabel(helpText)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityIdentifier(accessibilityIdentifier ?? "")
+    }
+
+    private var helpText: String {
+        switch state {
+        case .on: return "Shared. Click to unshare."
+        case .off: return "Not shared. Click to share."
+        case .mixed: return "Partially shared. Click to share with both."
+        }
+    }
+
+    private var accessibilityValue: String {
+        switch state {
+        case .on: return "shared"
+        case .off: return "not shared"
+        case .mixed: return "partially shared"
+        }
     }
 }

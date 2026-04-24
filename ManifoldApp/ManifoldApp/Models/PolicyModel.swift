@@ -14,6 +14,15 @@ final class GovernanceModel {
     var codexPolicy: AgentAccessPolicy?
     var claudeEmailGovernance: AgentEmailGovernanceSummary?
     var codexEmailGovernance: AgentEmailGovernanceSummary?
+    var privacySettings: PrivacyPreflightSettings?
+    var claudePrivacyPolicy: AgentPrivacyPolicy?
+    var codexPrivacyPolicy: AgentPrivacyPolicy?
+    var privacyRuntimeStatus: PrivacyRuntimeStatus?
+    var privacyIndexStatus: PrivacyIndexRuntimeStatus?
+    var privacyIdentitySuggestions: [PrivacyIdentitySuggestion] = []
+    var privacyIdentities: [PrivacyIdentityRecord] = []
+    var privacyOrgAllowEntries: [PrivacyOrgAllowEntry] = []
+    var privacyRecentIndex: [PrivacyIndexRecord] = []
     var activeSessionRecord: WorkBlockRecord?
     var claudeCoverage: AgentCoverageSnapshot?
     var codexCoverage: AgentCoverageSnapshot?
@@ -46,6 +55,16 @@ final class GovernanceModel {
         } catch {
             logger.error("Failed to load policies: \(error.localizedDescription)")
         }
+        do {
+            let bundle = try await client.getPrivacySettings()
+            privacySettings = bundle.settings
+            claudePrivacyPolicy = bundle.claudePolicy
+            codexPrivacyPolicy = bundle.codexPolicy
+            privacyRuntimeStatus = try await client.privacyRuntimeStatus()
+        } catch {
+            logger.error("Failed to load privacy settings: \(error.localizedDescription)")
+        }
+        await loadPrivacyDiscovery()
         // Pull pending approvals. Failures here leave the list as-was so the
         // UI doesn't flicker on transient XPC hiccups — honest-state is
         // preserved by the LedgerStatusBar's runtime-connection indicator.
@@ -107,6 +126,11 @@ final class GovernanceModel {
         if codexPolicy?.isPaused != true { await pauseAgent(.codex) }
     }
 
+    func resumeAllAgents() async {
+        if claudePolicy?.isPaused == true { await resumeAgent(.cowork) }
+        if codexPolicy?.isPaused == true { await resumeAgent(.codex) }
+    }
+
     func removeSource(_ sourceID: String, from agent: TargetApp) async {
         guard let client else { return }
         do {
@@ -124,6 +148,154 @@ final class GovernanceModel {
             await loadPolicies()
         } catch {
             logger.error("Failed to update access recording level: \(error.localizedDescription)")
+        }
+    }
+
+    func updatePrivacySettings(_ settings: PrivacyPreflightSettings) async {
+        guard let client else { return }
+        do {
+            try await client.updatePrivacySettings(settings: settings, policy: nil)
+            privacyRuntimeStatus = try await client.privacyRuntimeStatus()
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to update privacy settings: \(error.localizedDescription)")
+        }
+    }
+
+    func updatePrivacyPolicy(_ policy: AgentPrivacyPolicy) async {
+        guard let client else { return }
+        do {
+            try await client.updatePrivacySettings(settings: nil, policy: policy)
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to update privacy policy: \(error.localizedDescription)")
+        }
+    }
+
+    func installPrivacyModel() async {
+        guard let client else { return }
+        do {
+            privacyRuntimeStatus = try await client.installPrivacyModel()
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to install privacy model: \(error.localizedDescription)")
+        }
+    }
+
+    func uninstallPrivacyModel() async {
+        guard let client else { return }
+        do {
+            privacyRuntimeStatus = try await client.uninstallPrivacyModel()
+            await loadPolicies()
+        } catch {
+            logger.error("Failed to uninstall privacy model: \(error.localizedDescription)")
+        }
+    }
+
+    func clearPrivacyCache() async {
+        guard let client else { return }
+        do {
+            _ = try await client.clearPrivacyCache()
+            privacyRuntimeStatus = try await client.privacyRuntimeStatus()
+        } catch {
+            logger.error("Failed to clear privacy cache: \(error.localizedDescription)")
+        }
+    }
+
+    func loadPrivacyDiscovery() async {
+        guard let client else { return }
+        async let identities = tryFetch { try await client.listPrivacyIdentities() }
+        async let allowlist = tryFetch { try await client.listPrivacyOrgAllowEntries() }
+        async let suggestions = tryFetch { try await client.listPrivacyIdentitySuggestions() }
+        async let indexStatus = tryFetch { try await client.privacyIndexStatus() }
+        async let recentIndex = tryFetch {
+            try await client.listPrivacyIndex(
+                scope: PrivacyIndexScope(),
+                filter: PrivacyIndexFilter(),
+                limit: 50
+            )
+        }
+        privacyIdentities = await identities ?? []
+        privacyOrgAllowEntries = await allowlist ?? []
+        privacyIdentitySuggestions = await suggestions ?? []
+        privacyIndexStatus = await indexStatus
+        privacyRecentIndex = await recentIndex ?? []
+    }
+
+    func acceptPrivacyIdentitySuggestion(id: String) async {
+        guard let client else { return }
+        do {
+            try await client.acceptPrivacyIdentitySuggestion(id: id)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to accept suggestion \(id): \(error.localizedDescription)")
+        }
+    }
+
+    func rejectPrivacyIdentitySuggestion(id: String) async {
+        guard let client else { return }
+        do {
+            try await client.rejectPrivacyIdentitySuggestion(id: id)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to reject suggestion \(id): \(error.localizedDescription)")
+        }
+    }
+
+    func upsertPrivacyIdentity(_ record: PrivacyIdentityRecord) async {
+        guard let client else { return }
+        do {
+            try await client.upsertPrivacyIdentity(record)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to upsert identity: \(error.localizedDescription)")
+        }
+    }
+
+    func upsertPrivacyOrgAllowEntry(_ entry: PrivacyOrgAllowEntry) async {
+        guard let client else { return }
+        do {
+            try await client.upsertPrivacyOrgAllowEntry(entry)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to upsert allow entry: \(error.localizedDescription)")
+        }
+    }
+
+    func deletePrivacyIdentity(id: String) async {
+        guard let client else { return }
+        do {
+            try await client.deletePrivacyIdentity(id: id)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to delete identity: \(error.localizedDescription)")
+        }
+    }
+
+    func deletePrivacyOrgAllowEntry(id: String) async {
+        guard let client else { return }
+        do {
+            try await client.deletePrivacyOrgAllowEntry(id: id)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to delete allow entry: \(error.localizedDescription)")
+        }
+    }
+
+    func rescanPrivacyContent(contentIDs: [String]) async {
+        guard let client else { return }
+        do {
+            try await client.rescanPrivacyContent(contentIDs: contentIDs)
+            await loadPrivacyDiscovery()
+        } catch {
+            logger.error("Failed to rescan privacy content: \(error.localizedDescription)")
+        }
+    }
+
+    private func tryFetch<T>(_ op: @Sendable () async throws -> T) async -> T? {
+        do { return try await op() } catch {
+            logger.debug("Privacy discovery fetch failed: \(error.localizedDescription)")
+            return nil
         }
     }
 
@@ -197,6 +369,10 @@ final class GovernanceModel {
 
     func emailGovernance(for agent: TargetApp) -> AgentEmailGovernanceSummary? {
         agent == .codex ? codexEmailGovernance : claudeEmailGovernance
+    }
+
+    func privacyPolicy(for agent: TargetApp) -> AgentPrivacyPolicy? {
+        agent == .codex ? codexPrivacyPolicy : claudePrivacyPolicy
     }
 
     var isAnyAgentPaused: Bool {

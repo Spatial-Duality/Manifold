@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
+  package-and-app-tests:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +21,8 @@ jobs:
             exit 1
           fi
 
-      - name: Test Swift package
-        run: swift test
+      - name: Test Swift package with coverage
+        run: swift test --enable-code-coverage
 
       - name: Build Xcode app
         run: |
@@ -41,7 +41,7 @@ jobs:
       - name: Validate release settings
         run: bash script/validate_release_posture.sh
 
-      - name: Run app unit and integration tests
+      - name: Run app unit and integration tests with coverage
         run: |
           xcodebuild -project Manifold.xcodeproj \
             -scheme Manifold \
@@ -49,23 +49,63 @@ jobs:
             -derivedDataPath "$GITHUB_WORKSPACE/.deriveddata-app-tests" \
             test \
             -only-testing:ManifoldAppTests \
+            -enableCodeCoverage YES \
             CODE_SIGNING_ALLOWED=NO
+
+  fixture-ui:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Run fixture-mode UI tests
         run: |
           bash script/run_ui_tests.sh \
-            --derived-data "$GITHUB_WORKSPACE/.deriveddata-ui-tests"
+            --suite fixture \
+            --derived-data "$GITHUB_WORKSPACE/.deriveddata-ui-fixture" \
+            --result-bundle-path "$GITHUB_WORKSPACE/fixture-ui.xcresult"
+
+      - name: Upload fixture UI xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-ui-xcresult
+          path: ${{ github.workspace }}/fixture-ui.xcresult
+          if-no-files-found: ignore
+
+  runtime-e2e:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run local-runtime E2E UI tests
+        run: |
+          bash script/run_ui_tests.sh \
+            --suite runtime \
+            --derived-data "$GITHUB_WORKSPACE/.deriveddata-ui-runtime" \
+            --result-bundle-path "$GITHUB_WORKSPACE/runtime-e2e.xcresult"
+
+      - name: Upload runtime E2E xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-e2e-xcresult
+          path: ${{ github.workspace }}/runtime-e2e.xcresult
+          if-no-files-found: ignore
+
+  release-build:
+    if: github.ref == 'refs/heads/main'
+    needs: [package-and-app-tests, fixture-ui, runtime-e2e]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Build app bundle (release)
-        if: github.ref == 'refs/heads/main'
         run: bash ManifoldApp/build.sh release
 
       - name: Validate release bundle
-        if: github.ref == 'refs/heads/main'
         run: bash script/validate_release_posture.sh --app ManifoldApp/build/Manifold.app
 
-      - name: Upload artifact
-        if: github.ref == 'refs/heads/main'
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: Manifold.app

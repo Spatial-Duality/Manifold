@@ -1,6 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 
+import CryptoKit
 import Foundation
 import ManifoldKit
 import ManifoldXPC
@@ -179,6 +180,7 @@ enum RuntimeClientStubError: Error, LocalizedError {
 protocol RuntimeClientProtocol: Sendable {
     func ping() async -> RuntimePingResult
     func dashboardState() async throws -> DashboardState
+    func dataControlSummary() async throws -> DataControlSummary
     func listSources() async throws -> [SourceRecord]
     func addSource(path: String, displayName: String) async throws -> SourceRecord
     func removeSource(sourceID: String) async throws
@@ -190,6 +192,24 @@ protocol RuntimeClientProtocol: Sendable {
     func addSource(_ sourceID: String, to agent: TargetApp) async throws
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws
+    func getPrivacySettings() async throws -> PrivacySettingsBundle
+    func updatePrivacySettings(settings: PrivacyPreflightSettings?, policy: AgentPrivacyPolicy?) async throws
+    func installPrivacyModel() async throws -> PrivacyRuntimeStatus
+    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus
+    func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus
+    func clearPrivacyCache() async throws -> Int
+    func privacyIndexStatus() async throws -> PrivacyIndexRuntimeStatus
+    func listPrivacyIndex(scope: PrivacyIndexScope, filter: PrivacyIndexFilter, limit: Int) async throws -> [PrivacyIndexRecord]
+    func listPrivacyIdentitySuggestions() async throws -> [PrivacyIdentitySuggestion]
+    func acceptPrivacyIdentitySuggestion(id: String) async throws
+    func rejectPrivacyIdentitySuggestion(id: String) async throws
+    func upsertPrivacyIdentity(_ record: PrivacyIdentityRecord) async throws
+    func upsertPrivacyOrgAllowEntry(_ entry: PrivacyOrgAllowEntry) async throws
+    func listPrivacyIdentities() async throws -> [PrivacyIdentityRecord]
+    func listPrivacyOrgAllowEntries() async throws -> [PrivacyOrgAllowEntry]
+    func deletePrivacyIdentity(id: String) async throws
+    func deletePrivacyOrgAllowEntry(id: String) async throws
+    func rescanPrivacyContent(contentIDs: [String]) async throws
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws
     func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary
@@ -247,11 +267,11 @@ protocol RuntimeClientProtocol: Sendable {
     func unreadCountAll() async throws -> Int
     func unreadCount(accountID: String, mailbox: String?) async throws -> Int
     func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord]
-    func sharedEmailCount() async throws -> Int
-    func sharedEmailIDs() async throws -> Set<String>
-    func sharedEmails(limit: Int) async throws -> [EmailMessageRecord]
-    func shareEmails(emailIDs: [String]) async throws
-    func unshareEmails(emailIDs: [String]) async throws
+    func sharedEmailCount(agent: TargetApp) async throws -> Int
+    func sharedEmailIDs(agent: TargetApp) async throws -> Set<String>
+    func sharedEmails(agent: TargetApp, limit: Int) async throws -> [EmailMessageRecord]
+    func shareEmails(emailIDs: [String], for agent: TargetApp) async throws
+    func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws
     func unshareAllEmails() async throws
     func updateEmailReadState(emailID: String, isRead: Bool) async throws
     func updateEmailFlagState(emailID: String, isFlagged: Bool, flagColor: String?) async throws
@@ -322,8 +342,10 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
     public let sourceID: String?
     public let mountName: String?
     public let relativePath: String?
+    public let contextJSON: String?
     public let requestedAt: Double
     public let status: String
+    public let resolutionAction: String?
 
     public init(
         id: String,
@@ -335,8 +357,10 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
         sourceID: String? = nil,
         mountName: String? = nil,
         relativePath: String? = nil,
+        contextJSON: String? = nil,
         requestedAt: Double,
-        status: String
+        status: String,
+        resolutionAction: String? = nil
     ) {
         self.id = id
         self.connectionID = connectionID
@@ -347,14 +371,17 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
         self.sourceID = sourceID
         self.mountName = mountName
         self.relativePath = relativePath
+        self.contextJSON = contextJSON
         self.requestedAt = requestedAt
         self.status = status
+        self.resolutionAction = resolutionAction
     }
 }
 
 extension RuntimeClientProtocol {
     func ping() async -> RuntimePingResult { RuntimePingResult(ok: false, agentVersion: nil) }
     func dashboardState() async throws -> DashboardState { throw RuntimeClientStubError.unimplemented("dashboardState") }
+    func dataControlSummary() async throws -> DataControlSummary { throw RuntimeClientStubError.unimplemented("dataControlSummary") }
     func listSources() async throws -> [SourceRecord] { throw RuntimeClientStubError.unimplemented("listSources") }
     func addSource(path: String, displayName: String) async throws -> SourceRecord { throw RuntimeClientStubError.unimplemented("addSource") }
     func removeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("removeSource") }
@@ -366,6 +393,35 @@ extension RuntimeClientProtocol {
     func addSource(_ sourceID: String, to agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("addSource(_:to:)") }
     func removeSource(_ sourceID: String, from agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("removeSource(_:from:)") }
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("updateAccessRecordingLevel") }
+    func getPrivacySettings() async throws -> PrivacySettingsBundle { throw RuntimeClientStubError.unimplemented("getPrivacySettings") }
+    func updatePrivacySettings(settings: PrivacyPreflightSettings?, policy: AgentPrivacyPolicy?) async throws { throw RuntimeClientStubError.unimplemented("updatePrivacySettings") }
+    func installPrivacyModel() async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("installPrivacyModel") }
+    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("uninstallPrivacyModel") }
+    func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("privacyRuntimeStatus") }
+    func clearPrivacyCache() async throws -> Int { throw RuntimeClientStubError.unimplemented("clearPrivacyCache") }
+    func privacyIndexStatus() async throws -> PrivacyIndexRuntimeStatus {
+        PrivacyIndexRuntimeStatus(
+            enabled: false,
+            queuedJobs: 0,
+            runningJobs: 0,
+            failedJobs: 0,
+            indexedItems: 0,
+            staleItems: 0,
+            watchedSources: [],
+            lastError: nil
+        )
+    }
+    func listPrivacyIndex(scope: PrivacyIndexScope, filter: PrivacyIndexFilter, limit: Int) async throws -> [PrivacyIndexRecord] { [] }
+    func listPrivacyIdentitySuggestions() async throws -> [PrivacyIdentitySuggestion] { [] }
+    func acceptPrivacyIdentitySuggestion(id: String) async throws {}
+    func rejectPrivacyIdentitySuggestion(id: String) async throws {}
+    func upsertPrivacyIdentity(_ record: PrivacyIdentityRecord) async throws { throw RuntimeClientStubError.unimplemented("upsertPrivacyIdentity") }
+    func upsertPrivacyOrgAllowEntry(_ entry: PrivacyOrgAllowEntry) async throws { throw RuntimeClientStubError.unimplemented("upsertPrivacyOrgAllowEntry") }
+    func listPrivacyIdentities() async throws -> [PrivacyIdentityRecord] { [] }
+    func listPrivacyOrgAllowEntries() async throws -> [PrivacyOrgAllowEntry] { [] }
+    func deletePrivacyIdentity(id: String) async throws {}
+    func deletePrivacyOrgAllowEntry(id: String) async throws {}
+    func rescanPrivacyContent(contentIDs: [String]) async throws {}
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet { throw RuntimeClientStubError.unimplemented("getEmailRuleSet") }
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws { throw RuntimeClientStubError.unimplemented("updateEmailRuleSet") }
     func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary { throw RuntimeClientStubError.unimplemented("getEmailRuleActivitySummary") }
@@ -408,11 +464,16 @@ extension RuntimeClientProtocol {
     func unreadCountAll() async throws -> Int { 0 }
     func unreadCount(accountID: String, mailbox: String? = nil) async throws -> Int { 0 }
     func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] { [] }
-    func sharedEmailCount() async throws -> Int { 0 }
-    func sharedEmailIDs() async throws -> Set<String> { [] }
-    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] { [] }
-    func shareEmails(emailIDs: [String]) async throws { throw RuntimeClientStubError.unimplemented("shareEmails") }
-    func unshareEmails(emailIDs: [String]) async throws { throw RuntimeClientStubError.unimplemented("unshareEmails") }
+    func sharedEmailCount(agent: TargetApp) async throws -> Int { 0 }
+    func sharedEmailIDs(agent: TargetApp) async throws -> Set<String> { [] }
+    func sharedEmails(agent: TargetApp, limit: Int = 500) async throws -> [EmailMessageRecord] { [] }
+    func shareEmails(emailIDs: [String], for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("shareEmails") }
+    func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("unshareEmails") }
+    func sharedEmailCount() async throws -> Int { try await sharedEmailCount(agent: .cowork) }
+    func sharedEmailIDs() async throws -> Set<String> { try await sharedEmailIDs(agent: .cowork) }
+    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] { try await sharedEmails(agent: .cowork, limit: limit) }
+    func shareEmails(emailIDs: [String]) async throws { try await shareEmails(emailIDs: emailIDs, for: .cowork) }
+    func unshareEmails(emailIDs: [String]) async throws { try await unshareEmails(emailIDs: emailIDs, for: .cowork) }
     func unshareAllEmails() async throws { throw RuntimeClientStubError.unimplemented("unshareAllEmails") }
     func updateEmailReadState(emailID: String, isRead: Bool) async throws { throw RuntimeClientStubError.unimplemented("updateEmailReadState") }
     func updateEmailFlagState(emailID: String, isFlagged: Bool, flagColor: String?) async throws { throw RuntimeClientStubError.unimplemented("updateEmailFlagState") }
@@ -446,16 +507,563 @@ enum AppFixtureProfile: String, Sendable {
     case emailRules = "email-rules"
     case trackedWork = "tracked-work"
     case activity
+    case privacy
+    case runtimePrivacy = "runtime-privacy"
+}
+
+enum AppRuntimeScenario: String, Sendable {
+    case privacyE2E = "privacy-e2e"
+}
+
+enum AppTestEnvironment {
+    static let runtimeModeKey = "MANIFOLD_TEST_RUNTIME_MODE"
+    static let onboardingCompletedKey = "manifold.onboarding.completed"
+
+    static func userDefaultsSuiteName(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        guard let testHome = testHomeURL(env: env) else { return nil }
+        let digest = SHA256.hash(data: Data(testHome.path.utf8)).prefix(8)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "com.spatialduality.manifold.tests.\(digest)"
+    }
+
+    static func testHomeURL(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        ManifoldRuntimeEnvironment.testHomeURL(env: env)
+    }
+
+    static func userDefaults(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> UserDefaults {
+        guard let suiteName = userDefaultsSuiteName(env: env) else { return .standard }
+        return UserDefaults(suiteName: suiteName) ?? .standard
+    }
+}
+
+enum LocalRuntimeTestBootstrap {
+    private final class ContextBox: @unchecked Sendable {
+        let scenario: AppRuntimeScenario
+        let testHome: URL
+        let runtimeStoreURL: URL
+        let grantStore: GrantStore
+        let emailStore: EmailStore
+        let privacyStore: PrivacyStore
+        let policyStore: PolicyStore
+        let workBlockStore: WorkBlockStore
+        let auditStore: AuditStore
+        let db: DatabaseConnection
+
+        init(
+            scenario: AppRuntimeScenario,
+            testHome: URL,
+            runtimeStoreURL: URL,
+            grantStore: GrantStore,
+            emailStore: EmailStore,
+            privacyStore: PrivacyStore,
+            policyStore: PolicyStore,
+            workBlockStore: WorkBlockStore,
+            auditStore: AuditStore,
+            db: DatabaseConnection
+        ) {
+            self.scenario = scenario
+            self.testHome = testHome
+            self.runtimeStoreURL = runtimeStoreURL
+            self.grantStore = grantStore
+            self.emailStore = emailStore
+            self.privacyStore = privacyStore
+            self.policyStore = policyStore
+            self.workBlockStore = workBlockStore
+            self.auditStore = auditStore
+            self.db = db
+        }
+    }
+
+    private final class ResultBox: @unchecked Sendable {
+        let semaphore = DispatchSemaphore(value: 0)
+        var error: Error?
+    }
+
+    static func prepare(
+        scenario: AppRuntimeScenario,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) throws {
+        guard let testHome = AppTestEnvironment.testHomeURL(env: env) else {
+            return
+        }
+
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: testHome.path) {
+            try fileManager.removeItem(at: testHome)
+        }
+        try fileManager.createDirectory(at: testHome, withIntermediateDirectories: true)
+
+        let defaults = AppTestEnvironment.userDefaults(env: env)
+        if let suiteName = AppTestEnvironment.userDefaultsSuiteName(env: env) {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        defaults.set(true, forKey: AppTestEnvironment.onboardingCompletedKey)
+
+        let runtimeStoreURL = ManifoldRuntimeEnvironment.runtimeStoreURL(env: env)
+            ?? testHome.appendingPathComponent("runtime-store", isDirectory: true)
+        let appSupportRoot = ManifoldRuntimeEnvironment.appSupportRootURL(env: env)
+            ?? testHome.appendingPathComponent("app-support", isDirectory: true)
+        let launchAgentRoot = (ManifoldRuntimeEnvironment.launchAgentPlistURL(env: env)
+            ?? testHome.appendingPathComponent("LaunchAgents", isDirectory: true)
+                .appendingPathComponent("\(ManifoldRuntimeEnvironment.xpcServiceName(env: env)).plist")).deletingLastPathComponent()
+
+        try fileManager.createDirectory(at: runtimeStoreURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: appSupportRoot, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: launchAgentRoot, withIntermediateDirectories: true)
+
+        let db = try DatabaseConnection(url: runtimeStoreURL.appendingPathComponent("manifold.db"))
+        try DatabaseMigrator(db: db).migrate()
+        let grantStore = GrantStore(db: db)
+        let emailStore = EmailStore(db: db)
+        let privacyStore = PrivacyStore(db: db)
+        let policyStore = PolicyStore(db: db)
+        let workBlockStore = WorkBlockStore(db: db)
+        let auditStore = try AuditStore(db: db)
+        let context = ContextBox(
+            scenario: scenario,
+            testHome: testHome,
+            runtimeStoreURL: runtimeStoreURL,
+            grantStore: grantStore,
+            emailStore: emailStore,
+            privacyStore: privacyStore,
+            policyStore: policyStore,
+            workBlockStore: workBlockStore,
+            auditStore: auditStore,
+            db: db
+        )
+
+        switch scenario {
+        case .privacyE2E:
+            let result = ResultBox()
+            Task.detached { [context, result] in
+                do {
+                    try await seedPrivacyE2E(
+                        testHome: context.testHome,
+                        runtimeStoreURL: context.runtimeStoreURL,
+                        grantStore: context.grantStore,
+                        emailStore: context.emailStore,
+                        privacyStore: context.privacyStore,
+                        policyStore: context.policyStore,
+                        workBlockStore: context.workBlockStore,
+                        auditStore: context.auditStore,
+                        db: context.db
+                    )
+                } catch {
+                    result.error = error
+                }
+                result.semaphore.signal()
+            }
+            result.semaphore.wait()
+            if let error = result.error {
+                throw error
+            }
+        }
+    }
+
+    private static func seedPrivacyE2E(
+        testHome: URL,
+        runtimeStoreURL: URL,
+        grantStore: GrantStore,
+        emailStore: EmailStore,
+        privacyStore: PrivacyStore,
+        policyStore: PolicyStore,
+        workBlockStore: WorkBlockStore,
+        auditStore: AuditStore,
+        db: DatabaseConnection
+    ) async throws {
+        let fileManager = FileManager.default
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        let sourceRoot = testHome.appendingPathComponent("sources/Privacy E2E", isDirectory: true)
+        let materializationRoot = testHome.appendingPathComponent("materialized/codex", isDirectory: true)
+        let privacyStorage = runtimeStoreURL.appendingPathComponent("privacy", isDirectory: true)
+        try fileManager.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: materializationRoot, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: privacyStorage, withIntermediateDirectories: true)
+
+        let sourceDocs = sourceRoot.appendingPathComponent("Docs", isDirectory: true)
+        try fileManager.createDirectory(at: sourceDocs, withIntermediateDirectories: true)
+
+        let sensitiveText = """
+        Customer outreach draft for Ada Example
+        Email: ada@example.com
+        Home address: 123 Market Street, London
+        API key: sk-test-1234567890abcdefghijklmnop
+        """
+        let safeText = """
+        Team notes
+        - Vendor review is scheduled for Friday.
+        - No personal identifiers are stored in this file.
+        """
+        let sensitiveURL = sourceDocs.appendingPathComponent("CustomerDraft.txt")
+        let safeURL = sourceDocs.appendingPathComponent("ReleaseNotes.md")
+        let unsupportedURL = sourceDocs.appendingPathComponent("Archive.bin")
+        try sensitiveText.write(to: sensitiveURL, atomically: true, encoding: .utf8)
+        try safeText.write(to: safeURL, atomically: true, encoding: .utf8)
+        try Data([0, 1, 2, 3, 255, 0, 42]).write(to: unsupportedURL)
+
+        let sourceID = try await grantStore.addSource(displayName: "Privacy E2E", rootPath: sourceRoot.path)
+        let grant = try await grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "ui-test-profile",
+            sourceIDs: [sourceID],
+            materializationRoot: materializationRoot.path,
+            emailSensitivity: EmailSensitivityLevel.strict.rawValue,
+            summaryFraming: "UI test runtime scenario",
+            explicitSelection: true,
+            noteCaptureMode: .basic
+        )
+        _ = try await workBlockStore.startBlock(agent: .codex, grantID: grant.grantID, sourceIDs: [sourceID])
+
+        var codexPolicy = try await policyStore.policy(for: .codex)
+        codexPolicy.allowedSourceIDs.insert(sourceID)
+        try await policyStore.updatePolicy(codexPolicy)
+
+        var coworkPolicy = try await policyStore.policy(for: .cowork)
+        coworkPolicy.allowedSourceIDs.insert(sourceID)
+        try await policyStore.updatePolicy(coworkPolicy)
+
+        let account = try emailStore.addEmailAccount(
+            displayName: "Runtime Inbox",
+            providerType: EmailProvider.gmail.rawValue,
+            server: "imap.runtime.test",
+            port: 993,
+            username: "runtime@manifold.test"
+        )
+        try emailStore.upsertIMAPMailbox(
+            accountID: account.accountID,
+            name: "INBOX",
+            delimiter: "/",
+            flags: ["\\\\Inbox"],
+            isSelectable: true
+        )
+
+        let attachmentData = Data("Account number 1234-5678 and secret sk-runtime-abcdef".utf8)
+        let attachmentHash = sha256(attachmentData)
+        let emlURL = testHome.appendingPathComponent("mail/runtime-message.eml", isDirectory: false)
+        try fileManager.createDirectory(at: emlURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runtimeEML(
+            subject: "Privacy review needed",
+            body: """
+            Hi Ada Example,
+            Please review the attached customer packet for ada@example.com before sharing it with Codex.
+            """,
+            attachmentFilename: "customer-packet.txt",
+            attachmentData: attachmentData
+        ).write(to: emlURL, atomically: true, encoding: .utf8)
+
+        try emailStore.upsertEmailMessage(
+            emailID: "runtime-email-1",
+            accountID: account.accountID,
+            mailbox: "INBOX",
+            sender: "Ops <ops@runtime.test>",
+            senderEmail: "ops@runtime.test",
+            senderDomain: "runtime.test",
+            recipients: "ada@example.com",
+            subject: "Privacy review needed",
+            receivedAt: now,
+            emlPath: emlURL.path,
+            sizeBytes: (try Data(contentsOf: emlURL)).count,
+            preview: "Please review the attached customer packet before sharing.",
+            contentType: "text/plain",
+            isRead: false,
+            isFlagged: true,
+            messageIDHeader: "<runtime-email-1@runtime.test>",
+            attachmentCount: 1
+        )
+        try emailStore.updateBodyText(
+            emailID: "runtime-email-1",
+            bodyText: """
+            Hi Ada Example,
+            Please review the attached customer packet for ada@example.com before sharing it with Codex.
+            """
+        )
+        try emailStore.upsertEmailAttachment(
+            attachmentID: "runtime-attachment-1",
+            emailID: "runtime-email-1",
+            filename: "customer-packet.txt",
+            mimeType: "text/plain",
+            sizeBytes: attachmentData.count,
+            contentHash: attachmentHash
+        )
+        try emailStore.upsertMailboxMembership(
+            accountID: account.accountID,
+            mailbox: "INBOX",
+            imapUID: 1,
+            emailID: "runtime-email-1"
+        )
+        try emailStore.shareEmails(emailIDs: ["runtime-email-1"])
+
+        let hasSecretRules = SmartMailboxRules(
+            match: .all,
+            conditions: [RuleCondition(field: "privacy_contains_secret", op: .equals, value: "true")]
+        )
+        try emailStore.createSmartMailbox(
+            displayName: "Has Secret",
+            iconName: "shield.lefthalf.filled",
+            rulesJSON: hasSecretRules.toJSON() ?? "[]"
+        )
+
+        try await privacyStore.upsertSettings(
+            PrivacyPreflightSettings(
+                isEnabled: true,
+                selectedBackend: .officialCLI,
+                installState: .installed,
+                modelVersion: "openai/privacy-filter",
+                storagePath: privacyStorage.path,
+                installedAt: now
+            )
+        )
+        try await privacyStore.upsertPolicy(
+            AgentPrivacyPolicy(agent: .cowork, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
+        )
+        try await privacyStore.upsertPolicy(
+            AgentPrivacyPolicy(agent: .codex, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
+        )
+
+        let identity = PrivacyIdentityRecord(
+            id: "privacy-identity-runtime-email",
+            kind: .email,
+            displayName: "Primary email",
+            value: "ada@example.com"
+        )
+        let suggestion = PrivacyIdentitySuggestion(
+            id: "privacy-suggestion-runtime-name",
+            kind: .personName,
+            displayName: "Ada Example",
+            value: "Ada Example",
+            sourceKind: .emailHeader,
+            sourceRef: "runtime-email-1",
+            confidence: 0.94
+        )
+        let allowEntry = PrivacyOrgAllowEntry(
+            id: "privacy-allow-runtime-domain",
+            kind: .senderDomain,
+            pattern: "runtime.test",
+            matchMode: .domainSuffix
+        )
+        try await privacyStore.upsertIdentity(identity)
+        try await privacyStore.upsertIdentitySuggestion(suggestion)
+        try await privacyStore.upsertOrgAllowEntry(allowEntry)
+
+        let sourceContentID = "source:\(sourceID):Docs/CustomerDraft.txt"
+        let emailContentID = "email:runtime-email-1:body"
+        let attachmentContentID = "attachment:runtime-attachment-1"
+        let unsupportedContentID = "source:\(sourceID):Docs/Archive.bin"
+
+        try await privacyStore.upsertContentIndexRecord(
+            PrivacyIndexRecord(
+                id: sourceContentID,
+                subjectKind: .sourceFile,
+                sourceID: sourceID,
+                relativePath: "Docs/CustomerDraft.txt",
+                displayName: "CustomerDraft.txt",
+                mimeType: "text/plain",
+                extractor: "plain-text",
+                extractStatus: .ready,
+                scanStatus: .scanned,
+                contentHash: sha256(Data(sensitiveText.utf8)),
+                backend: .officialCLI,
+                modelVersion: "openai/privacy-filter",
+                containsSensitive: true,
+                containsMyInfo: true,
+                containsSecret: true,
+                severity: .critical,
+                matchedCategories: [.email, .address, .secret],
+                matchedIdentityIDs: [identity.id],
+                redactedPreview: """
+                Customer outreach draft for [PERSON REDACTED]
+                Email: [EMAIL REDACTED]
+                Home address: [ADDRESS REDACTED]
+                API key: [SECRET REDACTED]
+                """,
+                findingsSummary: "Contains your email, address, and a secret.",
+                spanCount: 3,
+                lastScannedAt: now
+            )
+        )
+        try await privacyStore.replaceSpans(
+            for: sourceContentID,
+            spans: [
+                PrivacySpanRecord(contentID: sourceContentID, category: .email, startUTF16: 34, endUTF16: 49, confidence: 0.98, source: .identity, placeholder: PrivacyCategory.email.replacementToken),
+                PrivacySpanRecord(contentID: sourceContentID, category: .address, startUTF16: 65, endUTF16: 89, confidence: 0.91, source: .model, placeholder: PrivacyCategory.address.replacementToken),
+                PrivacySpanRecord(contentID: sourceContentID, category: .secret, startUTF16: 100, endUTF16: 132, confidence: 0.99, source: .model, placeholder: PrivacyCategory.secret.replacementToken),
+            ]
+        )
+        try await privacyStore.upsertContentIndexRecord(
+            PrivacyIndexRecord(
+                id: emailContentID,
+                subjectKind: .emailBody,
+                emailID: "runtime-email-1",
+                displayName: "Privacy review needed",
+                mimeType: "text/plain",
+                extractor: "email-body-cache",
+                extractStatus: .ready,
+                scanStatus: .scanned,
+                contentHash: sha256(Data("runtime-email-1".utf8)),
+                backend: .officialCLI,
+                modelVersion: "openai/privacy-filter",
+                containsSensitive: true,
+                containsMyInfo: true,
+                containsThirdPartyPrivate: true,
+                severity: .medium,
+                matchedCategories: [.privatePerson, .email],
+                matchedIdentityIDs: [identity.id],
+                matchedAllowIDs: [allowEntry.id],
+                redactedPreview: "Hi [PERSON REDACTED], Please review the attached customer packet for [EMAIL REDACTED] before sharing it with Codex.",
+                findingsSummary: "Email body contains your name and email address.",
+                spanCount: 2,
+                lastScannedAt: now
+            )
+        )
+        try await privacyStore.upsertContentIndexRecord(
+            PrivacyIndexRecord(
+                id: attachmentContentID,
+                subjectKind: .emailAttachment,
+                emailID: "runtime-email-1",
+                attachmentID: "runtime-attachment-1",
+                parentContentID: emailContentID,
+                displayName: "customer-packet.txt",
+                mimeType: "text/plain",
+                extractor: "email-attachment",
+                extractStatus: .ready,
+                scanStatus: .scanned,
+                contentHash: attachmentHash,
+                backend: .officialCLI,
+                modelVersion: "openai/privacy-filter",
+                containsSensitive: true,
+                containsSecret: true,
+                severity: .critical,
+                matchedCategories: [.accountNumber, .secret],
+                redactedPreview: "Account number [ACCOUNT REDACTED] and secret [SECRET REDACTED]",
+                findingsSummary: "Attachment contains an account number and a secret.",
+                spanCount: 2,
+                lastScannedAt: now
+            )
+        )
+        try await privacyStore.upsertContentIndexRecord(
+            PrivacyIndexRecord(
+                id: unsupportedContentID,
+                subjectKind: .sourceFile,
+                sourceID: sourceID,
+                relativePath: "Docs/Archive.bin",
+                displayName: "Archive.bin",
+                mimeType: "application/octet-stream",
+                extractor: "unsupported",
+                extractStatus: .unsupported,
+                scanStatus: .failed,
+                contentHash: sha256(Data([0, 1, 2, 3, 255, 0, 42])),
+                findingsSummary: "Unsupported file type for automatic privacy extraction.",
+                lastScannedAt: now,
+                lastError: "Unsupported file type for automatic privacy extraction."
+            )
+        )
+
+        let approvalContext = PrivacyApprovalContext(
+            toolName: "read_email",
+            contentKind: .email,
+            inputHash: sha256(Data("privacy-approval".utf8)),
+            findingsSummary: "Attachment contains an account number and a secret.",
+            matchedCategories: [.accountNumber, .secret],
+            redactedPreview: "Account number [ACCOUNT REDACTED] and secret [SECRET REDACTED]",
+            recommendation: "Share the redacted version unless the original is required for this session."
+        )
+        let approvalJSON = String(data: try JSONEncoder().encode(approvalContext), encoding: .utf8)
+        try db.execute(
+            """
+            INSERT INTO approval_requests (
+                id, connection_id, agent, path, action, request_kind, source_id,
+                mount_name, relative_path, context_json, requested_at, status, resolution_action
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL)
+            """,
+            params: [
+                "approval-runtime-privacy",
+                "conn-runtime-ui",
+                TargetApp.codex.rawValue,
+                "runtime-email-1",
+                "mail",
+                "privacy_exposure",
+                nil,
+                nil,
+                nil,
+                approvalJSON,
+                "\(Date().addingTimeInterval(-120).timeIntervalSince1970)",
+            ]
+        )
+
+        try await auditStore.log(
+            action: .sensitivityWarning,
+            agent: TargetApp.codex.rawValue,
+            filePath: "runtime-email-1",
+            metadata: [
+                "privacy_outcome": PrivacyOutcome.approvalRequired.rawValue,
+                "privacy_summary": "Attachment contains an account number and a secret.",
+                "privacy_categories": "account_number,secret",
+                "privacy_backend": PrivacyBackendKind.officialCLI.rawValue,
+                "privacy_model_version": "openai/privacy-filter",
+                "privacy_content_kind": PrivacyContentKind.email.rawValue,
+            ],
+            grantID: grant.grantID
+        )
+    }
+
+    private static func runtimeEML(
+        subject: String,
+        body: String,
+        attachmentFilename: String,
+        attachmentData: Data
+    ) -> String {
+        let boundary = "MANIFOLD-BOUNDARY-TEST"
+        let attachment = attachmentData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+        return """
+        From: Ops <ops@runtime.test>
+        To: ada@example.com
+        Subject: \(subject)
+        MIME-Version: 1.0
+        Content-Type: multipart/mixed; boundary="\(boundary)"
+
+        --\(boundary)
+        Content-Type: text/plain; charset="utf-8"
+
+        \(body)
+        --\(boundary)
+        Content-Type: text/plain; name="\(attachmentFilename)"
+        Content-Transfer-Encoding: base64
+        Content-Disposition: attachment; filename="\(attachmentFilename)"
+
+        \(attachment)
+        --\(boundary)--
+        """
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 enum AppTestMode: Sendable {
     case live
     case fixture(AppFixtureProfile)
+    case localRuntime(AppRuntimeScenario)
 
     static var current: AppTestMode {
         let env = ProcessInfo.processInfo.environment
-        guard env["MANIFOLD_UI_TEST_MODE"] == "1" || env["MANIFOLD_DISABLE_REAL_RUNTIME"] == "1" else {
+        let isUITest = env["MANIFOLD_UI_TEST_MODE"] == "1"
+        let isXCTestHost = env["XCTestConfigurationFilePath"] != nil
+        guard isUITest || isXCTestHost || env["MANIFOLD_DISABLE_REAL_RUNTIME"] == "1" else {
             return .live
+        }
+        if env[AppTestEnvironment.runtimeModeKey] == "local" {
+            let scenario = AppRuntimeScenario(
+                rawValue: env[ManifoldRuntimeEnvironment.testScenarioKey] ?? ""
+            ) ?? .privacyE2E
+            return .localRuntime(scenario)
         }
         let profile = AppFixtureProfile(rawValue: env["MANIFOLD_FIXTURE_PROFILE"] ?? "") ?? .dashboard
         return .fixture(profile)
@@ -470,6 +1078,14 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var codexPolicy: AgentAccessPolicy
         var claudeGovernance: AgentEmailGovernanceSummary
         var codexGovernance: AgentEmailGovernanceSummary
+        var privacySettings: PrivacyPreflightSettings
+        var claudePrivacyPolicy: AgentPrivacyPolicy
+        var codexPrivacyPolicy: AgentPrivacyPolicy
+        var privacyRuntimeStatus: PrivacyRuntimeStatus
+        var privacyIdentitySuggestions: [PrivacyIdentitySuggestion]
+        var privacyIdentities: [PrivacyIdentityRecord]
+        var privacyOrgAllowEntries: [PrivacyOrgAllowEntry]
+        var privacyIndexRecords: [PrivacyIndexRecord]
         var coverages: [AgentCoverageSnapshot]
         var coverageEvents: [CoverageEvent]
         var activeWorkBlock: WorkBlockRecord?
@@ -489,8 +1105,10 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var syncStates: [String: [SyncStateRecord]]
         var emails: [EmailMessageRecord]
         var imapMailboxes: [String: [IMAPMailboxRecord]]
-        var sharedEmailIDs: Set<String>
+        var sharedEmailIDsByAgent: [TargetApp: Set<String>]
         var fileVisibilityOverrides: [TargetApp: [FileVisibilityOverrideRecord]]
+        var rules: [RuleRecord]
+        var seededRules: [RuleRecord]
     }
 
     private var state: FixtureState
@@ -517,6 +1135,64 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             pendingApprovalCount: state.pendingApprovals.count,
             agentCoverages: state.coverages,
             coverageEvents: state.coverageEvents
+        )
+    }
+
+    func dataControlSummary() async throws -> DataControlSummary {
+        DataControlSummary(
+            runtimeConnected: true,
+            activeBridgeCount: state.connectedAgents.count,
+            agents: TargetApp.allCases.map(summaryAgent),
+            activeWorkBlock: state.activeWorkBlock,
+            pendingApprovalCount: state.pendingApprovals.count,
+            lastExposure: state.activityEntries.first.map(Self.summaryExposure),
+            recentHandoffSessions: Array(state.sessions.prefix(5))
+        )
+    }
+
+    private func summaryAgent(_ agent: TargetApp) -> DataControlSummary.Agent {
+        let policy = governance(for: agent)
+        let coverage = state.coverages.first { $0.agent == agent.rawValue }
+        let sharedIDs = state.sharedEmailIDsByAgent[agent, default: []]
+        let visibleEmailCount: Int
+        if policy.isPaused {
+            visibleEmailCount = 0
+        } else if policy.defaultEmailPolicy == .allowUnlessBlocked {
+            visibleEmailCount = state.emails.count
+        } else {
+            var visibleIDs = sharedIDs
+            let domainAllowedIDs = state.emails.compactMap { message -> String? in
+                policy.allowedEmailDomains.contains((message.senderDomain ?? "").lowercased())
+                    ? message.emailID
+                    : nil
+            }
+            visibleIDs.formUnion(domainAllowedIDs)
+            visibleEmailCount = visibleIDs.count
+        }
+
+        return DataControlSummary.Agent(
+            agent: agent,
+            isConnected: state.connectedAgents.contains(agent.rawValue),
+            verificationStatus: coverage?.verificationStatus ?? .unknown,
+            coverageState: coverage?.coverageState,
+            isPaused: policy.isPaused,
+            defaultFileScopeCount: policy.allowedSourceIDs.count,
+            visibleEmailCount: visibleEmailCount,
+            sharedEmailCount: sharedIDs.count,
+            emailSensitivity: policy.emailSensitivity,
+            defaultEmailPolicy: policy.defaultEmailPolicy
+        )
+    }
+
+    private static func summaryExposure(from entry: AuditEntry) -> DataControlSummary.Exposure {
+        DataControlSummary.Exposure(
+            id: entry.id,
+            timestamp: entry.timestamp,
+            agent: entry.agent.flatMap(TargetApp.init(rawValue:)),
+            action: entry.action,
+            resourcePath: entry.filePath,
+            sessionID: entry.sessionID,
+            grantID: entry.grantID
         )
     }
 
@@ -590,6 +1266,167 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
 
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws {
         updatePolicy(agent: agent) { $0.accessRecordingLevel = level }
+    }
+
+    func getPrivacySettings() async throws -> PrivacySettingsBundle {
+        PrivacySettingsBundle(
+            settings: state.privacySettings,
+            claudePolicy: state.claudePrivacyPolicy,
+            codexPolicy: state.codexPrivacyPolicy
+        )
+    }
+
+    func updatePrivacySettings(settings: PrivacyPreflightSettings?, policy: AgentPrivacyPolicy?) async throws {
+        if let settings {
+            state.privacySettings = settings
+        }
+        if let policy {
+            if policy.agent == .codex {
+                state.codexPrivacyPolicy = policy
+            } else {
+                state.claudePrivacyPolicy = policy
+            }
+        }
+    }
+
+    func installPrivacyModel() async throws -> PrivacyRuntimeStatus {
+        state.privacySettings.isEnabled = true
+        state.privacySettings.installState = .installed
+        state.privacySettings.selectedBackend = .officialCLI
+        state.privacySettings.modelVersion = "openai/privacy-filter"
+        state.privacyRuntimeStatus = PrivacyRuntimeStatus(
+            featureEnabled: true,
+            selectedBackend: state.privacySettings.selectedBackend,
+            effectiveBackend: .officialCLI,
+            installState: .installed,
+            modelLoaded: true,
+            cacheEntryCount: 3,
+            lastError: nil,
+            storagePath: state.privacySettings.storagePath,
+            backends: state.privacyRuntimeStatus.backends
+        )
+        return state.privacyRuntimeStatus
+    }
+
+    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus {
+        state.privacySettings.isEnabled = false
+        state.privacySettings.installState = .notInstalled
+        state.privacyRuntimeStatus = PrivacyRuntimeStatus(
+            featureEnabled: false,
+            selectedBackend: state.privacySettings.selectedBackend,
+            effectiveBackend: state.privacySettings.selectedBackend,
+            installState: .notInstalled,
+            modelLoaded: false,
+            cacheEntryCount: 0,
+            lastError: nil,
+            storagePath: state.privacySettings.storagePath,
+            backends: state.privacyRuntimeStatus.backends
+        )
+        return state.privacyRuntimeStatus
+    }
+
+    func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus {
+        state.privacyRuntimeStatus
+    }
+
+    func clearPrivacyCache() async throws -> Int {
+        let count = state.privacyRuntimeStatus.cacheEntryCount
+        state.privacyRuntimeStatus = PrivacyRuntimeStatus(
+            featureEnabled: state.privacyRuntimeStatus.featureEnabled,
+            selectedBackend: state.privacyRuntimeStatus.selectedBackend,
+            effectiveBackend: state.privacyRuntimeStatus.effectiveBackend,
+            installState: state.privacyRuntimeStatus.installState,
+            modelLoaded: state.privacyRuntimeStatus.modelLoaded,
+            cacheEntryCount: 0,
+            lastError: state.privacyRuntimeStatus.lastError,
+            storagePath: state.privacyRuntimeStatus.storagePath,
+            backends: state.privacyRuntimeStatus.backends
+        )
+        return count
+    }
+
+    func privacyIndexStatus() async throws -> PrivacyIndexRuntimeStatus {
+        let records = filteredPrivacyIndex(scope: PrivacyIndexScope(), filter: PrivacyIndexFilter())
+        return PrivacyIndexRuntimeStatus(
+            enabled: state.privacySettings.isEnabled,
+            queuedJobs: records.filter { $0.scanStatus == .queued }.count,
+            runningJobs: records.filter { $0.scanStatus == .running }.count,
+            failedJobs: records.filter { $0.scanStatus == .failed }.count,
+            indexedItems: records.filter { $0.scanStatus == .scanned }.count,
+            staleItems: records.filter { $0.scanStatus == .stale }.count,
+            watchedSources: state.sources.filter(\.isAccessible).map(\.sourceID),
+            lastError: nil
+        )
+    }
+
+    func listPrivacyIndex(scope: PrivacyIndexScope, filter: PrivacyIndexFilter, limit: Int) async throws -> [PrivacyIndexRecord] {
+        Array(filteredPrivacyIndex(scope: scope, filter: filter).prefix(limit))
+    }
+
+    func listPrivacyIdentitySuggestions() async throws -> [PrivacyIdentitySuggestion] {
+        state.privacyIdentitySuggestions.filter { $0.status == .pending }
+    }
+
+    func acceptPrivacyIdentitySuggestion(id: String) async throws {
+        guard let index = state.privacyIdentitySuggestions.firstIndex(where: { $0.id == id }) else { return }
+        var suggestion = state.privacyIdentitySuggestions[index]
+        suggestion.status = .accepted
+        suggestion.reviewedAt = ISO8601DateFormatter.shared.string(from: Date())
+        state.privacyIdentitySuggestions[index] = suggestion
+        state.privacyIdentities.append(
+            PrivacyIdentityRecord(
+                kind: suggestion.kind,
+                displayName: suggestion.displayName,
+                value: suggestion.value,
+                normalizedHash: suggestion.normalizedHash
+            )
+        )
+    }
+
+    func rejectPrivacyIdentitySuggestion(id: String) async throws {
+        guard let index = state.privacyIdentitySuggestions.firstIndex(where: { $0.id == id }) else { return }
+        var suggestion = state.privacyIdentitySuggestions[index]
+        suggestion.status = .rejected
+        suggestion.reviewedAt = ISO8601DateFormatter.shared.string(from: Date())
+        state.privacyIdentitySuggestions[index] = suggestion
+    }
+
+    func upsertPrivacyIdentity(_ record: PrivacyIdentityRecord) async throws {
+        if let index = state.privacyIdentities.firstIndex(where: { $0.id == record.id }) {
+            state.privacyIdentities[index] = record
+        } else {
+            state.privacyIdentities.append(record)
+        }
+    }
+
+    func upsertPrivacyOrgAllowEntry(_ entry: PrivacyOrgAllowEntry) async throws {
+        if let index = state.privacyOrgAllowEntries.firstIndex(where: { $0.id == entry.id }) {
+            state.privacyOrgAllowEntries[index] = entry
+        } else {
+            state.privacyOrgAllowEntries.append(entry)
+        }
+    }
+
+    func listPrivacyIdentities() async throws -> [PrivacyIdentityRecord] { state.privacyIdentities }
+
+    func listPrivacyOrgAllowEntries() async throws -> [PrivacyOrgAllowEntry] { state.privacyOrgAllowEntries }
+
+    func deletePrivacyIdentity(id: String) async throws {
+        state.privacyIdentities.removeAll { $0.id == id }
+    }
+
+    func deletePrivacyOrgAllowEntry(id: String) async throws {
+        state.privacyOrgAllowEntries.removeAll { $0.id == id }
+    }
+
+    func rescanPrivacyContent(contentIDs: [String]) async throws {
+        let rescannedAt = ISO8601DateFormatter.shared.string(from: Date())
+        for contentID in contentIDs {
+            guard let index = state.privacyIndexRecords.firstIndex(where: { $0.id == contentID }) else { continue }
+            state.privacyIndexRecords[index].scanStatus = .scanned
+            state.privacyIndexRecords[index].lastScannedAt = rescannedAt
+            state.privacyIndexRecords[index].updatedAt = rescannedAt
+        }
     }
 
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet {
@@ -725,10 +1562,17 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] {
         state.imapMailboxes[accountID] ?? []
     }
-    func sharedEmailCount() async throws -> Int { state.sharedEmailIDs.count }
-    func sharedEmailIDs() async throws -> Set<String> { state.sharedEmailIDs }
-    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] {
-        Array(state.emails.filter { state.sharedEmailIDs.contains($0.emailID) }.prefix(limit))
+    func sharedEmailCount(agent: TargetApp) async throws -> Int {
+        state.sharedEmailIDsByAgent[agent, default: []].count
+    }
+
+    func sharedEmailIDs(agent: TargetApp) async throws -> Set<String> {
+        state.sharedEmailIDsByAgent[agent, default: []]
+    }
+
+    func sharedEmails(agent: TargetApp, limit: Int = 500) async throws -> [EmailMessageRecord] {
+        let shared = state.sharedEmailIDsByAgent[agent, default: []]
+        return Array(state.emails.filter { shared.contains($0.emailID) }.prefix(limit))
     }
     func emailMessages(accountID: String? = nil, mailbox: String? = nil, ids: [String]? = nil, limit: Int = 500) async throws -> [EmailMessageRecord] {
         let filtered = state.emails.filter { email in
@@ -753,18 +1597,18 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         }
         return Array(filtered.prefix(limit))
     }
-    func shareEmails(emailIDs: [String]) async throws {
+    func shareEmails(emailIDs: [String], for agent: TargetApp) async throws {
         for emailID in emailIDs {
-            state.sharedEmailIDs.insert(emailID)
+            state.sharedEmailIDsByAgent[agent, default: []].insert(emailID)
         }
     }
-    func unshareEmails(emailIDs: [String]) async throws {
+    func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws {
         for emailID in emailIDs {
-            state.sharedEmailIDs.remove(emailID)
+            state.sharedEmailIDsByAgent[agent, default: []].remove(emailID)
         }
     }
     func unshareAllEmails() async throws {
-        state.sharedEmailIDs.removeAll()
+        state.sharedEmailIDsByAgent.removeAll()
     }
 
     func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] {
@@ -815,6 +1659,111 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         }
     }
 
+    func listRules(scope: RuleScope?) async throws -> [RuleRecord] {
+        let sortedRules = state.rules.sorted { lhs, rhs in
+            if lhs.scope != rhs.scope { return lhs.scope.rawValue < rhs.scope.rawValue }
+            if lhs.source.groupPriority != rhs.source.groupPriority {
+                return lhs.source.groupPriority < rhs.source.groupPriority
+            }
+            if lhs.orderIndex != rhs.orderIndex { return lhs.orderIndex < rhs.orderIndex }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        guard let scope else { return sortedRules }
+        return sortedRules.filter { $0.scope == scope }
+    }
+
+    func upsertRule(_ rule: RuleRecord) async throws {
+        if let index = state.rules.firstIndex(where: { $0.id == rule.id }) {
+            state.rules[index] = rule
+        } else {
+            state.rules.append(rule)
+        }
+    }
+
+    func deleteRule(id: String) async throws {
+        state.rules.removeAll { $0.id == id }
+    }
+
+    func setRuleEnabled(id: String, enabled: Bool) async throws {
+        guard let index = state.rules.firstIndex(where: { $0.id == id }) else { return }
+        state.rules[index].enabled = enabled
+    }
+
+    func reorderRules(scope: RuleScope, ids: [String]) async throws {
+        let ordered = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        for index in state.rules.indices where state.rules[index].scope == scope {
+            state.rules[index].orderIndex = ordered[state.rules[index].id] ?? state.rules[index].orderIndex
+        }
+    }
+
+    func resetSeededRules() async throws {
+        let seededIDs = Set(state.seededRules.map(\.id))
+        state.rules.removeAll { seededIDs.contains($0.id) }
+        state.rules.append(contentsOf: state.seededRules)
+    }
+
+    func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview {
+        RuleMatchPreview(
+            ruleID: rule.id,
+            fileMatches: rule.scope == .file ? 1 : 0,
+            emailMatches: rule.scope == .email ? 1 : 0,
+            agentMatches: rule.scope == .agent ? 1 : 0,
+            sample: [
+                .init(
+                    identifier: rule.scope == .email ? "runtime-email-1" : "Docs/CustomerDraft.txt",
+                    label: rule.scope == .email ? "Privacy review needed" : "Docs/CustomerDraft.txt"
+                )
+            ]
+        )
+    }
+
+    private func filteredPrivacyIndex(
+        scope: PrivacyIndexScope,
+        filter: PrivacyIndexFilter
+    ) -> [PrivacyIndexRecord] {
+        state.privacyIndexRecords.filter { record in
+            if let subjectKinds = scope.subjectKinds, !subjectKinds.contains(record.subjectKind) {
+                return false
+            }
+            if let sourceID = scope.sourceID, record.sourceID != sourceID {
+                return false
+            }
+            if let emailID = scope.emailID, record.emailID != emailID {
+                return false
+            }
+            if let attachmentID = scope.attachmentID, record.attachmentID != attachmentID {
+                return false
+            }
+
+            if let containsSensitive = filter.containsSensitive, record.containsSensitive != containsSensitive {
+                return false
+            }
+            if let containsMyInfo = filter.containsMyInfo, record.containsMyInfo != containsMyInfo {
+                return false
+            }
+            if let containsSecret = filter.containsSecret, record.containsSecret != containsSecret {
+                return false
+            }
+            if let containsThirdPartyPrivate = filter.containsThirdPartyPrivate,
+               record.containsThirdPartyPrivate != containsThirdPartyPrivate {
+                return false
+            }
+            if let containsOrgOnly = filter.containsOrgOnly, record.containsOrgOnly != containsOrgOnly {
+                return false
+            }
+            if let severity = filter.severity, record.severity != severity {
+                return false
+            }
+            if let categories = filter.categories, !Set(categories).isSubset(of: Set(record.matchedCategories)) {
+                return false
+            }
+            return true
+        }
+        .sorted { lhs, rhs in
+            (lhs.lastScannedAt ?? lhs.updatedAt) > (rhs.lastScannedAt ?? rhs.updatedAt)
+        }
+    }
+
     private func governance(for agent: TargetApp) -> AgentAccessPolicy {
         agent == .codex ? state.codexPolicy : state.claudePolicy
     }
@@ -850,25 +1799,85 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         }
     }
 
+    private static func fixtureSourceRoots() -> (shared: URL, claudeOnly: URL) {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("manifold-fixture-sources", isDirectory: true)
+            .appendingPathComponent(ProcessInfo.processInfo.globallyUniqueString, isDirectory: true)
+        let root = base.appendingPathComponent("sources", isDirectory: true)
+        return (
+            shared: root.appendingPathComponent("Shared", isDirectory: true),
+            claudeOnly: root.appendingPathComponent("Claude Only", isDirectory: true)
+        )
+    }
+
+    private static func seedFixtureSourceFiles(shared: URL, claudeOnly: URL) {
+        let fileManager = FileManager.default
+        do {
+            try fileManager.createDirectory(at: shared, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: claudeOnly, withIntermediateDirectories: true)
+            try fileManager.createDirectory(
+                at: shared.appendingPathComponent("Docs", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+
+            try "Initial shared worklog\n".write(
+                to: shared.appendingPathComponent("worklog.md"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try "Release notes fixture\n".write(
+                to: shared.appendingPathComponent("Docs/ReleaseNotes.md"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try Data([0, 1, 2, 3, 255]).write(
+                to: shared.appendingPathComponent("archive.bin")
+            )
+            try "CLAUDE_ONLY_MARKER\n".write(
+                to: claudeOnly.appendingPathComponent("marker.txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+        } catch {
+            // Fixture files are only needed for UI tests. Keep the runtime usable
+            // even if a local temp directory disappears between launches.
+        }
+    }
+
     private static func makeState(profile: AppFixtureProfile) -> FixtureState {
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        let sourceA = SourceRecord(sourceID: "src-shared", displayName: "Shared", originalRootPath: "/Users/test/shared", status: "idle", createdAt: now, updatedAt: now)
-        let sourceB = SourceRecord(sourceID: "src-claude", displayName: "Claude Only", originalRootPath: "/Users/test/claude-only", status: "idle", createdAt: now, updatedAt: now)
-        let claudePolicy = AgentAccessPolicy(agent: .cowork, allowedSourceIDs: ["src-shared", "src-claude"], allowedEmailDomains: ["example.com"], emailSensitivity: .moderate, defaultEmailPolicy: .allowUnlessBlocked, accessRecordingLevel: .summary, isPaused: false)
+        let isRuntimePrivacy = profile == .runtimePrivacy
+        let isPrivacyProfile = profile == .privacy || isRuntimePrivacy
+        let isTrackedProfile = profile == .trackedWork || isPrivacyProfile
+        let privacyEmailID = isRuntimePrivacy ? "runtime-email-1" : "email-4"
+        let privacyEmailSubject = isRuntimePrivacy ? "Privacy review needed" : "Operator smoke test"
+        let privacyEmailPreview = isRuntimePrivacy
+            ? "Please review the attached customer packet before sharing."
+            : "Quick operator-style tooling smoke test for fixture mode."
+        let privacyEmailBody = isRuntimePrivacy
+            ? "Hi Ada Example,\nPlease review the attached customer packet for ada@example.com before sharing it with Codex."
+            : "Quick operator-style tooling smoke test for fixture mode."
+        let roots = fixtureSourceRoots()
+        if profile != .onboarding {
+            seedFixtureSourceFiles(shared: roots.shared, claudeOnly: roots.claudeOnly)
+        }
+        let sourceA = SourceRecord(sourceID: "src-shared", displayName: "Shared", originalRootPath: roots.shared.path, status: "idle", createdAt: now, updatedAt: now)
+        let sourceB = SourceRecord(sourceID: "src-claude", displayName: "Claude Only", originalRootPath: roots.claudeOnly.path, status: "idle", createdAt: now, updatedAt: now)
+        let claudePolicy = AgentAccessPolicy(agent: .cowork, allowedSourceIDs: ["src-shared", "src-claude"], allowedEmailDomains: ["anthropic.test"], emailSensitivity: .moderate, defaultEmailPolicy: .allowUnlessBlocked, accessRecordingLevel: .summary, isPaused: false)
         let codexPolicy = AgentAccessPolicy(agent: .codex, allowedSourceIDs: ["src-shared"], allowedEmailDomains: [], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
         let claudeRules = EmailRuleSet(
             agent: .cowork,
-            domainRules: [EmailDomainRule(agent: .cowork, domain: "example.com", action: .allow)],
-            contactRules: [EmailContactRule(agent: .cowork, name: "Finance", email: "finance@example.com", action: .block)],
-            keywordRules: [EmailKeywordRule(agent: .cowork, pattern: "2fa", matchLocation: .subjectAndBody, action: .block, isRegex: false)],
+            domainRules: [EmailDomainRule(agent: .cowork, domain: "anthropic.test", action: .allow)],
+            contactRules: [EmailContactRule(agent: .cowork, name: "Daniela Amodei", email: "daniela@anthropic.test", action: .block)],
+            keywordRules: [EmailKeywordRule(agent: .cowork, pattern: "constitution", matchLocation: .subjectAndBody, action: .block, isRegex: false)],
             defaultPolicy: .allowUnlessBlocked,
             emailSensitivity: .moderate
         )
         let codexRules = EmailRuleSet(
             agent: .codex,
-            domainRules: [EmailDomainRule(agent: .codex, domain: "builds.example.com", action: .allow)],
+            domainRules: [EmailDomainRule(agent: .codex, domain: "openai.test", action: .allow)],
             contactRules: [],
-            keywordRules: [EmailKeywordRule(agent: .codex, pattern: "invoice", matchLocation: .subject, action: .block, isRegex: false)],
+            keywordRules: [EmailKeywordRule(agent: .codex, pattern: "operator", matchLocation: .subject, action: .block, isRegex: false)],
             defaultPolicy: .blockUnlessAllowed,
             emailSensitivity: .strict
         )
@@ -876,15 +1885,25 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         let codexGovernance = AgentEmailGovernanceSummary(agent: .codex, enabledShieldCount: codexRules.shields.filter(\.isEnabled).count, domainRuleCount: codexRules.domainRules.count, contactRuleCount: codexRules.contactRules.count, keywordRuleCount: codexRules.keywordRules.count, defaultPolicy: codexRules.defaultPolicy, emailSensitivity: codexRules.emailSensitivity)
         let coverages = [
             AgentCoverageSnapshot(agent: TargetApp.cowork.rawValue, coverageState: .manifoldRouted, verificationStatus: .verified, hostBundleIdentifier: "com.anthropic.claudefordesktop", reason: "Fixture verified"),
-            AgentCoverageSnapshot(agent: TargetApp.codex.rawValue, coverageState: profile == .trackedWork ? .trackedWorkspace : .manifoldRouted, verificationStatus: .verified, hostBundleIdentifier: "com.openai.codex", reason: "Fixture verified"),
+            AgentCoverageSnapshot(agent: TargetApp.codex.rawValue, coverageState: isTrackedProfile ? .trackedWorkspace : .manifoldRouted, verificationStatus: .verified, hostBundleIdentifier: "com.openai.codex", reason: "Fixture verified"),
         ]
         let coverageEvents = [
             CoverageEvent(id: "coverage-1", agent: TargetApp.codex.rawValue, coverageState: .outsideCoverage, eventType: "drift", message: "Original file changed outside the tracked workflow.", resourcePath: "shared/worklog.md", timestamp: now, metadata: nil),
         ]
+        let privacyActivityEntry = AuditEntry(
+            id: 3,
+            timestamp: now,
+            agent: TargetApp.codex.rawValue,
+            action: AuditAction.sensitivityWarning.rawValue,
+            filePath: privacyEmailID,
+            metadata: #"{"privacy_outcome":"approval_required","privacy_summary":"Contains sensitive account context before sharing.","privacy_categories":"email,secret","privacy_backend":"official_cli","privacy_model_version":"openai/privacy-filter","privacy_content_kind":"email"}"#,
+            sessionID: "session-2",
+            grantID: "grant-fixture"
+        )
         let activity = [
             AuditEntry(id: 1, timestamp: now, agent: TargetApp.cowork.rawValue, action: AuditAction.fileRead.rawValue, filePath: "claude-only/marker.txt", metadata: "{}", sessionID: "session-1", grantID: nil),
             AuditEntry(id: 2, timestamp: now, agent: TargetApp.codex.rawValue, action: AuditAction.contentDrift.rawValue, filePath: "shared/worklog.md", metadata: "{\"coverage_state\":\"outside_coverage\"}", sessionID: "session-2", grantID: "grant-fixture"),
-        ]
+        ] + ((profile == .activity || isTrackedProfile) ? [privacyActivityEntry] : [])
         let sessions = [
             Session(id: "session-1", agent: TargetApp.cowork.rawValue, startTime: now, endTime: now, actionCount: 4, readCount: 3, writeCount: 0, searchCount: 1),
         ]
@@ -893,7 +1912,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 SessionEvent(id: 1, timestamp: now, action: AuditAction.fileRead.rawValue, agent: TargetApp.cowork.rawValue, filePath: "shared/worklog.md", metadata: "{}"),
             ]
         ]
-        let pendingApprovals = profile == .trackedWork ? [
+        let pendingApprovals = isTrackedProfile ? [
             PendingApprovalRecord(
                 id: "approval-1",
                 connectionID: "conn-fixture",
@@ -907,7 +1926,19 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 requestedAt: Date().addingTimeInterval(-300).timeIntervalSince1970,
                 status: "pending"
             )
-        ] : []
+        ] + (isPrivacyProfile ? [
+            PendingApprovalRecord(
+                id: isRuntimePrivacy ? "approval-runtime-privacy" : "approval-privacy-1",
+                connectionID: "conn-fixture",
+                agent: TargetApp.codex.rawValue,
+                path: privacyEmailID,
+                action: "mail",
+                kind: "privacy_exposure",
+                contextJSON: #"{"toolName":"read_email","contentKind":"email","inputHash":"fixture-privacy-hash","findingsSummary":"Contains sensitive account context before sharing.","matchedCategories":["email","secret"],"redactedPreview":"Please review the attached customer packet for [EMAIL REDACTED] before sharing it with Codex.","recommendation":"Share the redacted version unless the original is required for this session."}"#,
+                requestedAt: Date().addingTimeInterval(-180).timeIntervalSince1970,
+                status: "pending"
+            )
+        ] : []) : []
         let boardRootDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-21_600))
         let boardReplyDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-7_200))
         let boardLatestDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-1_200))
@@ -918,88 +1949,88 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 emailID: "email-1",
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Jane Doe <jane@acme.com>",
-                senderEmail: "jane@acme.com",
-                senderDomain: "acme.com",
-                recipients: "you@example.com",
-                subject: "Board deck v2",
+                sender: "Dario Amodei <dario@anthropic.test>",
+                senderEmail: "dario@anthropic.test",
+                senderDomain: "anthropic.test",
+                recipients: "policy@manifold.test",
+                subject: "Frontier safety sync",
                 receivedAt: boardRootDate,
                 sizeBytes: 3_200,
-                preview: "First draft of the board deck for Thursday’s review.",
+                preview: "First pass on the frontier safety sync deck for Thursday.",
                 isRead: false,
                 isFlagged: true,
-                messageIDHeader: "<thread-board@example.com>",
+                messageIDHeader: "<thread-frontier-sync@anthropic.test>",
                 attachmentCount: 1,
-                bodyText: "First draft of the board deck for Thursday’s review."
+                bodyText: "First pass on the frontier safety sync deck for Thursday."
             ),
             EmailMessageRecord(
                 emailID: "email-2",
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Mark Chen <mark@acme.com>",
-                senderEmail: "mark@acme.com",
-                senderDomain: "acme.com",
-                recipients: "you@example.com",
-                subject: "Re: Board deck v2",
+                sender: "Mark Chen <mark@openai.test>",
+                senderEmail: "mark@openai.test",
+                senderDomain: "openai.test",
+                recipients: "policy@manifold.test",
+                subject: "Re: Frontier safety sync",
                 receivedAt: boardReplyDate,
                 sizeBytes: 2_900,
-                preview: "Added a tighter summary slide and trimmed the appendix.",
+                preview: "Added eval notes and trimmed the appendix.",
                 isRead: true,
-                inReplyTo: "<thread-board@example.com>",
-                referencesHeader: "<thread-board@example.com>",
-                messageIDHeader: "<thread-board-reply@example.com>",
-                bodyText: "Added a tighter summary slide and trimmed the appendix."
+                inReplyTo: "<thread-frontier-sync@anthropic.test>",
+                referencesHeader: "<thread-frontier-sync@anthropic.test>",
+                messageIDHeader: "<thread-frontier-sync-reply@openai.test>",
+                bodyText: "Added eval notes and trimmed the appendix."
             ),
             EmailMessageRecord(
                 emailID: "email-3",
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Jane Doe <jane@acme.com>",
-                senderEmail: "jane@acme.com",
-                senderDomain: "acme.com",
-                recipients: "you@example.com",
-                subject: "Re: Board deck v2",
+                sender: "Daniela Amodei <daniela@anthropic.test>",
+                senderEmail: "daniela@anthropic.test",
+                senderDomain: "anthropic.test",
+                recipients: "policy@manifold.test",
+                subject: "Re: Frontier safety sync",
                 receivedAt: boardLatestDate,
                 sizeBytes: 2_600,
-                preview: "Latest revenue numbers are in. This should be the final version.",
+                preview: "Latest benchmark numbers are in. This should be the final version.",
                 isRead: true,
-                inReplyTo: "<thread-board-reply@example.com>",
-                referencesHeader: "<thread-board@example.com> <thread-board-reply@example.com>",
-                messageIDHeader: "<thread-board-final@example.com>",
+                inReplyTo: "<thread-frontier-sync-reply@openai.test>",
+                referencesHeader: "<thread-frontier-sync@anthropic.test> <thread-frontier-sync-reply@openai.test>",
+                messageIDHeader: "<thread-frontier-sync-final@anthropic.test>",
                 attachmentCount: 1,
-                bodyText: "Latest revenue numbers are in. This should be the final version."
+                bodyText: "Latest benchmark numbers are in. This should be the final version."
             ),
             EmailMessageRecord(
-                emailID: "email-4",
+                emailID: privacyEmailID,
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Ops <ops@example.com>",
-                senderEmail: "ops@example.com",
-                senderDomain: "example.com",
-                recipients: "you@example.com",
-                subject: "MANIFOLD_EMAIL_TEST",
+                sender: "Greg Brockman <greg@openai.test>",
+                senderEmail: "greg@openai.test",
+                senderDomain: "openai.test",
+                recipients: "policy@manifold.test",
+                subject: privacyEmailSubject,
                 receivedAt: digestDate,
                 sizeBytes: 1_200,
-                preview: "Governed email preview",
+                preview: privacyEmailPreview,
                 isRead: false,
-                messageIDHeader: "<fixture-digest@example.com>",
+                messageIDHeader: "<operator-smoke-test@openai.test>",
                 attachmentCount: 2,
-                bodyText: "Governed body text for fixture mode."
+                bodyText: privacyEmailBody
             ),
             EmailMessageRecord(
                 emailID: "email-5",
                 accountID: "account-1",
                 mailbox: "Archive",
-                sender: "Security Team <security@example.com>",
-                senderEmail: "security@example.com",
-                senderDomain: "example.com",
-                recipients: "you@example.com",
+                sender: "Fidji Simo <fidji@openai.test>",
+                senderEmail: "fidji@openai.test",
+                senderDomain: "openai.test",
+                recipients: "policy@manifold.test",
                 subject: "Quarterly governance review",
                 receivedAt: archiveDate,
                 sizeBytes: 2_100,
                 preview: "Archived governance review summary with the approved checklist.",
                 isRead: true,
-                messageIDHeader: "<archive-governance@example.com>",
+                messageIDHeader: "<governance-review@openai.test>",
                 bodyText: "Archived governance review summary with the approved checklist."
             ),
         ]
@@ -1029,7 +2060,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 ]),
             ].compactMap { $0 },
         ]
-        let activeGrant: GrantRecord? = profile == .trackedWork ? GrantRecord(
+        let hasActiveFixtureSession = isTrackedProfile
+        let activeGrant: GrantRecord? = hasActiveFixtureSession ? GrantRecord(
             grantID: "grant-fixture",
             targetApp: TargetApp.codex.rawValue,
             profileID: "profile-fixture",
@@ -1041,17 +2073,182 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             explicitSelection: false,
             noteCaptureMode: SessionNoteCaptureMode.basic.rawValue
         ) : nil
-        let activeGrantSources = profile == .trackedWork ? [GrantSourceRecord(grantID: "grant-fixture", sourceID: "src-shared", mountName: "shared")] : []
-        let activeWorkBlock = profile == .trackedWork ? WorkBlockRecord(id: "wb-fixture", agent: .codex, grantID: "grant-fixture", sourceIDs: ["src-shared"], startedAt: now, status: .active, modifiedFileCount: 1, newFileCount: 0) : nil
-
+        let activeGrantSources = hasActiveFixtureSession ? [GrantSourceRecord(grantID: "grant-fixture", sourceID: "src-shared", mountName: "shared")] : []
+        let activeWorkBlock = hasActiveFixtureSession ? WorkBlockRecord(id: "wb-fixture", agent: .codex, grantID: "grant-fixture", sourceIDs: ["src-shared"], startedAt: now, status: .active, modifiedFileCount: 1, newFileCount: 0) : nil
+        let privacySettings = PrivacyPreflightSettings(
+            isEnabled: profile != .onboarding,
+            selectedBackend: .officialCLI,
+            installState: profile == .onboarding ? .notInstalled : .installed,
+            modelVersion: profile == .onboarding ? nil : "openai/privacy-filter",
+            storagePath: "/Users/test/Library/Application Support/Manifold/privacy",
+            installedAt: profile == .onboarding ? nil : now
+        )
+        let claudePrivacyPolicy = AgentPrivacyPolicy(agent: .cowork, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
+        let codexPrivacyPolicy = AgentPrivacyPolicy(agent: .codex, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
+        let privacyRuntimeStatus = PrivacyRuntimeStatus(
+            featureEnabled: privacySettings.isEnabled,
+            selectedBackend: .officialCLI,
+            effectiveBackend: .officialCLI,
+            installState: privacySettings.installState,
+            modelLoaded: privacySettings.isEnabled,
+            cacheEntryCount: profile == .onboarding ? 0 : 3,
+            lastError: nil,
+            storagePath: privacySettings.storagePath,
+            backends: [
+                PrivacyBackendStatus(kind: .rulesOnly, available: true, installed: privacySettings.installState == .installed, note: "Fast local heuristics."),
+                PrivacyBackendStatus(kind: .officialCLI, available: true, installed: privacySettings.installState == .installed, note: "openai/privacy-filter ready."),
+                PrivacyBackendStatus(kind: .mlx, available: false, installed: false, note: "Reserved for a later native runtime."),
+                PrivacyBackendStatus(kind: .coreML, available: false, installed: false, note: "Reserved for a later production experiment."),
+            ]
+        )
+        let privacyIdentities = [
+            PrivacyIdentityRecord(
+                id: "identity-primary-email",
+                kind: .email,
+                displayName: "Primary email",
+                value: "ada@example.com"
+            ),
+            PrivacyIdentityRecord(
+                id: "identity-home-address",
+                kind: .address,
+                displayName: "Home address",
+                value: "123 Market Street, London"
+            ),
+        ]
+        let privacyIdentitySuggestions = [
+            PrivacyIdentitySuggestion(
+                id: isRuntimePrivacy ? "privacy-suggestion-runtime-name" : "suggestion-primary-name",
+                kind: .personName,
+                displayName: "Ada Example",
+                value: "Ada Example",
+                sourceKind: .emailHeader,
+                sourceRef: privacyEmailID,
+                confidence: 0.92
+            )
+        ]
+        let privacyOrgAllowEntries = [
+            PrivacyOrgAllowEntry(
+                id: "allow-openai-test",
+                kind: .senderDomain,
+                pattern: "openai.test",
+                matchMode: .domainSuffix
+            )
+        ]
+        let privacyIndexRecords = [
+            PrivacyIndexRecord(
+                id: "email:\(privacyEmailID):body",
+                subjectKind: .emailBody,
+                emailID: privacyEmailID,
+                displayName: privacyEmailSubject,
+                mimeType: "text/plain",
+                extractor: "email-body-cache",
+                extractStatus: .ready,
+                scanStatus: .scanned,
+                backend: .officialCLI,
+                modelVersion: "openai/privacy-filter",
+                containsSensitive: true,
+                containsMyInfo: true,
+                containsThirdPartyPrivate: true,
+                severity: .critical,
+                matchedCategories: [.privatePerson, .email, .secret],
+                matchedIdentityIDs: ["identity-primary-email"],
+                matchedAllowIDs: ["allow-openai-test"],
+                redactedPreview: isRuntimePrivacy
+                    ? "Please review the attached customer packet for [EMAIL REDACTED] before sharing it with Codex."
+                    : "Quick operator-style tooling smoke test for [EMAIL REDACTED]. Secret: [SECRET REDACTED].",
+                findingsSummary: isRuntimePrivacy
+                    ? "Email body contains your name and email address."
+                    : "Contains your email plus a secret token.",
+                spanCount: 3,
+                lastScannedAt: now
+            ),
+            PrivacyIndexRecord(
+                id: "source:src-shared:worklog.md",
+                subjectKind: .sourceFile,
+                sourceID: "src-shared",
+                relativePath: "worklog.md",
+                displayName: "worklog.md",
+                mimeType: "text/plain",
+                extractor: "plain-text",
+                extractStatus: .ready,
+                scanStatus: .stale,
+                backend: .officialCLI,
+                modelVersion: "openai/privacy-filter",
+                containsSensitive: true,
+                containsMyInfo: true,
+                severity: .medium,
+                matchedCategories: [.email],
+                matchedIdentityIDs: ["identity-primary-email"],
+                redactedPreview: "Contact [EMAIL REDACTED] before sending the memo.",
+                findingsSummary: "Contains your email address.",
+                spanCount: 1,
+                lastScannedAt: now
+            ),
+            PrivacyIndexRecord(
+                id: "source:src-shared:archive.bin",
+                subjectKind: .sourceFile,
+                sourceID: "src-shared",
+                relativePath: "archive.bin",
+                displayName: "archive.bin",
+                mimeType: "application/octet-stream",
+                extractor: "unsupported",
+                extractStatus: .unsupported,
+                scanStatus: .failed,
+                findingsSummary: "Unsupported file type for automatic privacy extraction.",
+                lastScannedAt: now,
+                lastError: "Unsupported file type for automatic privacy extraction."
+            ),
+        ]
+        let seededRules = [
+            RuleRecord(
+                id: "rule-seeded-secret",
+                name: "Protect Secrets",
+                explanation: "Deny detected secrets before sharing.",
+                scope: .file,
+                matcher: .privacyContainsCategory(.secret),
+                action: .deny,
+                agents: [],
+                window: .always,
+                source: .seeded,
+                enabled: true,
+                orderIndex: 0,
+                createdAt: now,
+                updatedAt: now
+            )
+        ]
+        let rules = seededRules + [
+            RuleRecord(
+                id: "rule-email-openai",
+                name: "Allow OpenAI mail",
+                explanation: "Keep routine OpenAI digests visible.",
+                scope: .email,
+                matcher: .emailDomain("openai.test"),
+                action: .allow,
+                agents: [.codex],
+                window: .always,
+                source: .user,
+                enabled: true,
+                orderIndex: 1,
+                createdAt: now,
+                updatedAt: now
+            )
+        ]
         return FixtureState(
             sources: profile == .onboarding ? [] : [sourceA, sourceB],
             claudePolicy: claudePolicy,
             codexPolicy: codexPolicy,
             claudeGovernance: claudeGovernance,
             codexGovernance: codexGovernance,
+            privacySettings: privacySettings,
+            claudePrivacyPolicy: claudePrivacyPolicy,
+            codexPrivacyPolicy: codexPrivacyPolicy,
+            privacyRuntimeStatus: privacyRuntimeStatus,
+            privacyIdentitySuggestions: profile == .onboarding ? [] : privacyIdentitySuggestions,
+            privacyIdentities: profile == .onboarding ? [] : privacyIdentities,
+            privacyOrgAllowEntries: profile == .onboarding ? [] : privacyOrgAllowEntries,
+            privacyIndexRecords: profile == .onboarding ? [] : privacyIndexRecords,
             coverages: coverages,
-            coverageEvents: profile == .activity ? coverageEvents : (profile == .trackedWork ? coverageEvents : []),
+            coverageEvents: (profile == .activity || isTrackedProfile) ? coverageEvents : [],
             activeWorkBlock: activeWorkBlock,
             connectedAgents: profile == .onboarding ? [] : [TargetApp.cowork.rawValue, TargetApp.codex.rawValue],
             activityEntries: activity,
@@ -1065,15 +2262,20 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 .cowork: EmailRuleActivitySummary(agent: .cowork, shieldBlockedCounts: ["security": 2], recentShieldMatches: [], domainRuleHits: [.init(ruleID: claudeRules.domainRules[0].id, count: 5)], contactRuleHits: [.init(ruleID: claudeRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: claudeRules.keywordRules[0].id, count: 3)]),
                 .codex: EmailRuleActivitySummary(agent: .codex, shieldBlockedCounts: ["financial": 1], recentShieldMatches: [], domainRuleHits: [.init(ruleID: codexRules.domainRules[0].id, count: 4)], contactRuleHits: [], keywordRuleHits: [.init(ruleID: codexRules.keywordRules[0].id, count: 2)]),
             ],
-            domainCounts: ["example.com": 12, "builds.example.com": 7],
+            domainCounts: ["anthropic.test": 12, "openai.test": 7],
             trackedFiles: ["shared/worklog.md"],
             storageUsed: 24_576,
             mailAccounts: profile == .onboarding ? [] : [account],
             syncStates: ["account-1": [SyncStateRecord(accountID: "account-1", mailboxName: "INBOX", lastSyncAt: now, messageCount: 42, syncStatus: .idle)]],
             emails: profile == .onboarding ? [] : emails,
             imapMailboxes: profile == .onboarding ? [:] : imapMailboxes,
-            sharedEmailIDs: profile == .onboarding ? [] : ["email-1", "email-4"],
-            fileVisibilityOverrides: [:]
+            sharedEmailIDsByAgent: profile == .onboarding ? [:] : [
+                .cowork: ["email-1"],
+                .codex: [privacyEmailID],
+            ],
+            fileVisibilityOverrides: [:],
+            rules: rules,
+            seededRules: seededRules
         )
     }
 
@@ -1117,6 +2319,10 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func dashboardState() async throws -> DashboardState {
         try await command(name: "getStatus", as: DashboardState.self)
+    }
+
+    func dataControlSummary() async throws -> DataControlSummary {
+        try await command(name: "dataControlSummary", field: "summary", as: DataControlSummary.self)
     }
 
     func listSources() async throws -> [SourceRecord] {
@@ -1166,6 +2372,105 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws {
         _ = try await xpc.command(name: "updateAccessRecordingLevel", payload: ["level": level.rawValue, "agent": agent.rawValue])
+    }
+
+    func getPrivacySettings() async throws -> PrivacySettingsBundle {
+        try await command(name: "getPrivacySettings", field: "bundle", as: PrivacySettingsBundle.self)
+    }
+
+    func updatePrivacySettings(settings: PrivacyPreflightSettings?, policy: AgentPrivacyPolicy?) async throws {
+        var payload: [String: Any] = [:]
+        if let settings {
+            payload["settings"] = try XPCJSON.object(from: settings)
+        }
+        if let policy {
+            payload["policy"] = try XPCJSON.object(from: policy)
+        }
+        _ = try await xpc.command(name: "updatePrivacySettings", payload: payload)
+    }
+
+    func installPrivacyModel() async throws -> PrivacyRuntimeStatus {
+        try await command(name: "installPrivacyModel", field: "status", as: PrivacyRuntimeStatus.self)
+    }
+
+    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus {
+        try await command(name: "uninstallPrivacyModel", field: "status", as: PrivacyRuntimeStatus.self)
+    }
+
+    func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus {
+        try await command(name: "privacyRuntimeStatus", field: "status", as: PrivacyRuntimeStatus.self)
+    }
+
+    func clearPrivacyCache() async throws -> Int {
+        let response = try await xpc.command(name: "clearPrivacyCache", payload: [:])
+        return response["count"] as? Int ?? 0
+    }
+
+    func privacyIndexStatus() async throws -> PrivacyIndexRuntimeStatus {
+        try await command(name: "privacyIndexStatus", field: "status", as: PrivacyIndexRuntimeStatus.self)
+    }
+
+    func listPrivacyIndex(
+        scope: PrivacyIndexScope = PrivacyIndexScope(),
+        filter: PrivacyIndexFilter = PrivacyIndexFilter(),
+        limit: Int = 200
+    ) async throws -> [PrivacyIndexRecord] {
+        try await command(
+            name: "listPrivacyIndex",
+            payload: [
+                "scope": try XPCJSON.object(from: scope),
+                "filter": try XPCJSON.object(from: filter),
+                "limit": limit,
+            ],
+            field: "records",
+            as: [PrivacyIndexRecord].self
+        )
+    }
+
+    func listPrivacyIdentitySuggestions() async throws -> [PrivacyIdentitySuggestion] {
+        try await command(name: "listPrivacyIdentitySuggestions", field: "suggestions", as: [PrivacyIdentitySuggestion].self)
+    }
+
+    func acceptPrivacyIdentitySuggestion(id: String) async throws {
+        _ = try await xpc.command(name: "acceptPrivacyIdentitySuggestion", payload: ["id": id])
+    }
+
+    func rejectPrivacyIdentitySuggestion(id: String) async throws {
+        _ = try await xpc.command(name: "rejectPrivacyIdentitySuggestion", payload: ["id": id])
+    }
+
+    func upsertPrivacyIdentity(_ record: PrivacyIdentityRecord) async throws {
+        _ = try await xpc.command(
+            name: "upsertPrivacyIdentity",
+            payload: ["record": try XPCJSON.object(from: record)]
+        )
+    }
+
+    func upsertPrivacyOrgAllowEntry(_ entry: PrivacyOrgAllowEntry) async throws {
+        _ = try await xpc.command(
+            name: "upsertPrivacyOrgAllowEntry",
+            payload: ["entry": try XPCJSON.object(from: entry)]
+        )
+    }
+
+    func listPrivacyIdentities() async throws -> [PrivacyIdentityRecord] {
+        try await command(name: "listPrivacyIdentities", field: "identities", as: [PrivacyIdentityRecord].self)
+    }
+
+    func listPrivacyOrgAllowEntries() async throws -> [PrivacyOrgAllowEntry] {
+        try await command(name: "listPrivacyOrgAllowEntries", field: "entries", as: [PrivacyOrgAllowEntry].self)
+    }
+
+    func deletePrivacyIdentity(id: String) async throws {
+        _ = try await xpc.command(name: "deletePrivacyIdentity", payload: ["id": id])
+    }
+
+    func deletePrivacyOrgAllowEntry(id: String) async throws {
+        _ = try await xpc.command(name: "deletePrivacyOrgAllowEntry", payload: ["id": id])
+    }
+
+    func rescanPrivacyContent(contentIDs: [String]) async throws {
+        _ = try await xpc.command(name: "rescanPrivacyContent", payload: ["contentIDs": contentIDs])
     }
 
     func getEmailRuleSet(agent: TargetApp) async throws -> EmailRuleSet {
@@ -1430,24 +2735,29 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         try await command(name: "imapMailboxes", payload: ["accountID": accountID], field: "mailboxes", as: [IMAPMailboxRecord].self)
     }
 
-    func sharedEmailCount() async throws -> Int {
-        try await command(name: "sharedEmailCount", field: "count", as: Int.self)
+    func sharedEmailCount(agent: TargetApp) async throws -> Int {
+        try await command(name: "sharedEmailCount", payload: ["agent": agent.rawValue], field: "count", as: Int.self)
     }
 
-    func sharedEmailIDs() async throws -> Set<String> {
-        Set(try await command(name: "sharedEmailIDs", field: "ids", as: [String].self))
+    func sharedEmailIDs(agent: TargetApp) async throws -> Set<String> {
+        Set(try await command(name: "sharedEmailIDs", payload: ["agent": agent.rawValue], field: "ids", as: [String].self))
     }
 
-    func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] {
-        try await command(name: "sharedEmails", payload: ["limit": limit], field: "messages", as: [EmailMessageRecord].self)
+    func sharedEmails(agent: TargetApp, limit: Int = 500) async throws -> [EmailMessageRecord] {
+        try await command(
+            name: "sharedEmails",
+            payload: ["agent": agent.rawValue, "limit": limit],
+            field: "messages",
+            as: [EmailMessageRecord].self
+        )
     }
 
-    func shareEmails(emailIDs: [String]) async throws {
-        _ = try await xpc.command(name: "shareEmails", payload: ["emailIDs": emailIDs])
+    func shareEmails(emailIDs: [String], for agent: TargetApp) async throws {
+        _ = try await xpc.command(name: "shareEmails", payload: ["agent": agent.rawValue, "emailIDs": emailIDs])
     }
 
-    func unshareEmails(emailIDs: [String]) async throws {
-        _ = try await xpc.command(name: "unshareEmails", payload: ["emailIDs": emailIDs])
+    func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws {
+        _ = try await xpc.command(name: "unshareEmails", payload: ["agent": agent.rawValue, "emailIDs": emailIDs])
     }
 
     func unshareAllEmails() async throws {

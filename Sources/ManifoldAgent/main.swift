@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import ManifoldKit
 import ManifoldRuntime
 import ManifoldXPC
 import os
@@ -10,12 +11,16 @@ let agentLogger = Logger(subsystem: "com.spatialduality.manifold", category: "ag
 agentLogger.info("ManifoldAgent starting...")
 
 do {
-    let runtime = try ManifoldRuntime()
+    let runtime = try ManifoldRuntime(
+        storeURL: ManifoldRuntimeEnvironment.runtimeStoreURL()
+    )
     let service = ManifoldXPCService(runtime: runtime)
-    let listener = NSXPCListener(machServiceName: ManifoldXPCClient.serviceName)
+    let listener = NSXPCListener(
+        machServiceName: ManifoldRuntimeEnvironment.xpcServiceName()
+    )
     listener.delegate = service
     listener.resume()
-    agentLogger.info("ManifoldAgent ready on \(ManifoldXPCClient.serviceName, privacy: .public)")
+    agentLogger.info("ManifoldAgent ready on \(ManifoldRuntimeEnvironment.xpcServiceName(), privacy: .public)")
 
     Task {
         await runtime.bootstrap()

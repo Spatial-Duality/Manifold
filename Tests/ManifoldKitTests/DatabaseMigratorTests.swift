@@ -49,6 +49,56 @@ struct DatabaseMigratorTests {
         #expect(second == 0, "No migrations applied on second run")
     }
 
+    @Test("Migration v27 repairs missing rules table on upgraded databases")
+    func repairsMissingRulesTableOnUpgradedDatabase() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        for version in 1...26 {
+            try db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                params: ["\(version)", now]
+            )
+        }
+
+        #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
+        #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
+
+        let applied = try migrator.migrate()
+
+        #expect(applied == 1)
+        #expect(try migrator.currentVersion() == 27)
+        #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
+        #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
+    }
+
+    @Test("Schema repair runs even when database is already current")
+    func repairsMissingRulesTableOnCurrentDatabase() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        for version in 1...27 {
+            try db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                params: ["\(version)", now]
+            )
+        }
+
+        #expect(try migrator.currentVersion() == 27)
+        #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
+        #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
+
+        let applied = try migrator.migrate()
+
+        #expect(applied == 0)
+        #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
+        #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
+    }
+
     @Test("Migration v2 adds session_id to existing audit_log")
     func upgradeExistingDB() throws {
         let (db, tempDir) = try makeDB()
@@ -396,5 +446,86 @@ struct DatabaseMigratorTests {
         #expect(rules.count == 2)
         #expect(rules.allSatisfy { $0["agent"] == "cowork" && $0["action"] == "allow" })
         #expect(rules.map { $0["domain"] ?? "" } == ["alerts.example.com", "example.com"])
+    }
+
+    @Test("Migration v24 creates privacy preflight schema")
+    func privacyPreflightSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let approvalColumns = try db.queryAll("PRAGMA table_info(approval_requests)")
+        let approvalNames = Set(approvalColumns.compactMap { $0["name"] })
+        #expect(approvalNames.contains("context_json"))
+        #expect(approvalNames.contains("resolution_action"))
+
+        for table in [
+            "privacy_preflight_settings",
+            "agent_privacy_policies",
+            "privacy_scan_cache",
+            "privacy_scan_events",
+            "privacy_approval_overrides",
+        ] {
+            let rows = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='\(table)'"
+            )
+            #expect(!rows.isEmpty, "Table '\(table)' should exist after migration v24")
+        }
+    }
+
+    @Test("Migration v25 creates privacy index schema")
+    func privacyIndexSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        for table in [
+            "privacy_identity_registry",
+            "privacy_identity_suggestions",
+            "privacy_org_allowlist",
+            "privacy_content_index",
+            "privacy_detected_spans",
+            "privacy_index_jobs",
+        ] {
+            let rows = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='\(table)'"
+            )
+            #expect(!rows.isEmpty, "Table '\(table)' should exist after migration v25")
+        }
+
+        let contentIndexColumns = Set(
+            try db.queryAll("PRAGMA table_info(privacy_content_index)").compactMap { $0["name"] }
+        )
+        #expect(contentIndexColumns.contains("contains_my_info"))
+        #expect(contentIndexColumns.contains("contains_secret"))
+        #expect(contentIndexColumns.contains("matched_categories_json"))
+    }
+
+    @Test("Migration v26 makes shared emails per-agent")
+    func perAgentSharedEmailSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let columns = Set(
+            try db.queryAll("PRAGMA table_info(shared_emails)").compactMap { $0["name"] }
+        )
+        #expect(columns.contains("agent"))
+
+        let uniqueIndexes = try db.queryAll("PRAGMA index_list(shared_emails)").filter { row in
+            row["unique"] == "1"
+        }
+        let hasAgentEmailUniqueIndex = try uniqueIndexes.contains { row in
+            guard let name = row["name"] else { return false }
+            let indexedColumns = try db.queryAll("PRAGMA index_info(\(name))").compactMap { $0["name"] }
+            return indexedColumns == ["agent", "email_id"]
+        }
+        #expect(hasAgentEmailUniqueIndex)
     }
 }

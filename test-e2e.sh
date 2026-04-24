@@ -1,109 +1,160 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "=== Manifold V1 End-to-End Test ==="
-echo ""
-echo "This test validates the full loop with a real Cowork session."
-echo "Run each step manually and verify the expected outcome."
-echo ""
+MODE="print"
 
-echo "PREREQUISITES:"
-echo "  - Manifold app built and running (ManifoldApp/build.sh && open the .app)"
-echo "  - Claude Desktop installed"
-echo "  - Apple Mail running with at least one email account"
-echo ""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --checklist|--print)
+      MODE="print"
+      shift
+      ;;
+    --markdown)
+      MODE="markdown"
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 64
+      ;;
+  esac
+done
 
-echo "=== STEP 1: First Launch ==="
-echo "Expected: Onboarding wizard appears (3 screens)"
-echo "Action: Click through all 3 screens, click 'Get Started'"
-echo "Verify: Main window shows Sources view with empty state"
-echo ""
-read -p "Press Enter when done..."
+print_plain() {
+  cat <<'EOF'
+Manifold live smoke checklist
+=============================
 
-echo "=== STEP 2: Add File Sources ==="
-echo "Expected: Finder picker opens"
-echo "Action: Click 'Add files or folders', select a test directory"
-echo "Verify: Source appears in list with file count and 'Synced' badge"
-echo ""
-read -p "Press Enter when done..."
+Purpose
+- Manual or nightly validation against real integrations that CI should not depend on.
+- This is a checklist, not an automated pass/fail harness.
 
-echo "=== STEP 3: Connect Apple Mail ==="
-echo "Expected: Switch to Emails tab, click 'Connect Apple Mail'"
-echo "Action: Wait for emails to load (may take 30+ seconds)"
-echo "Verify: Email list shows with green/yellow status indicators"
-echo "Verify: Banking emails show yellow 'Banking' badge"
-echo "Verify: 2FA emails show yellow '2FA code' badge"
-echo "Verify: Summary bar shows 'N shared, M auto-hidden'"
-echo ""
-read -p "Press Enter when done..."
+Prerequisites
+- Debug or release Manifold app build available locally.
+- Real sacrificial IMAP mailbox configured for testing.
+- Privacy Filter model install path available on the test machine.
+- Manifold runtime can launch locally.
+- Optional: Codex/Claude configured to use Manifold MCP only for the final governed path check.
 
-echo "=== STEP 4: Check Access Summary ==="
-echo "Action: Click 'What Claude sees' in the toolbar"
-echo "Verify: Popover shows file count, email count, hidden count"
-echo "Verify: Shows 'No active access' when no run is active"
-echo ""
-read -p "Press Enter when done..."
+Lane 1: Runtime and model
+1. Launch Manifold and confirm the main ledger opens without fixture mode.
+2. Open Settings > Privacy.
+3. Install the configured privacy backend if needed.
+4. Verify the backend reports as loaded or ready.
+5. Confirm index status loads and no silent error state is shown.
 
-echo "=== STEP 5: Grant Access ==="
-echo "Expected: Guardrail notice appears (first time only)"
-echo "Action: Click 'I understand', then 'Grant to Claude' in Activity view"
-echo "Verify: Guardrail modal shows boundary notice"
-echo "Verify: Finder opens showing the workspace directory"
-echo "Verify: Claude Desktop opens (or attempt to open)"
-echo "Verify: Toolbar summary updates to 'Cowork access active'"
-echo "Verify: Menu bar icon changes from circle to circle.fill"
-echo ""
-read -p "Press Enter when done..."
+Lane 2: Real email sync
+1. Add or enable the sacrificial IMAP mailbox.
+2. Trigger a sync and wait for the mailbox to populate.
+3. Verify at least one email with body text and one attachment appear in Mail.
+4. Confirm privacy smart mailboxes appear:
+   - Has My Info
+   - Has Secret
+   - Third-Party Private
+   - Org Only
+   - Needs Review
+5. Confirm at least one privacy-indexed email is visible in the expected smart mailbox.
 
-echo "=== STEP 6: Agent Modifies Files ==="
-echo "Action: In Cowork, ask Claude to modify a file in the workspace"
-echo "Verify: Activity timeline shows the modification in real-time"
-echo "Verify: If the file is sensitive (.env, .pem), a macOS notification appears"
-echo ""
-read -p "Press Enter when done..."
+Lane 3: Governed privacy flow
+1. Add a source folder containing:
+   - one plain text file with personal info
+   - one document with a secret or account number
+   - one unsupported binary
+2. Wait for privacy indexing to settle.
+3. Verify Settings > Privacy shows indexed, failed, and stale counts consistent with that corpus.
+4. Verify the unsupported file is represented as failed or partial, not silently skipped.
+5. Confirm a privacy review request appears when governed content requires approval.
+6. Resolve one request as Share Redacted and verify the queue updates.
+7. Resolve one request as Share Original Once and verify it does not persist as a standing approval.
 
-echo "=== STEP 7: View Diff ==="
-echo "Action: Click on a timeline entry to expand it"
-echo "Verify: Inline diff shows with red (removed) and green (added) lines"
-echo ""
-read -p "Press Enter when done..."
+Lane 4: Activity and evidence
+1. Open Activity and filter to Privacy.
+2. Select the latest privacy event.
+3. Verify the evidence pane shows:
+   - privacy summary
+   - matched categories
+   - backend/model metadata
+4. Confirm the activity record matches the action just taken in the request queue.
 
-echo "=== STEP 8: Restore ==="
-echo "Action: Hover over a timeline entry, click 'Restore'"
-echo "Verify: File is restored to previous version"
-echo "Verify: A new 'Restored' entry appears in the timeline"
-echo ""
-read -p "Press Enter when done..."
+Lane 5: MCP-only governed path
+1. Start a fresh governed session using only Manifold MCP tooling.
+2. Perform one read or search that touches indexed content.
+3. Verify the request, decision, and resulting activity event all appear in Manifold.
+4. Confirm the delivered result matches the selected privacy action.
 
-echo "=== STEP 9: End Access ==="
-echo "Action: Click 'End Access' in Activity view"
-echo "Verify: Agent status returns to inactive"
-echo "Verify: Menu bar icon returns to circle (gray)"
-echo ""
-read -p "Press Enter when done..."
+Exit criteria
+- The app remains stable across all lanes.
+- Real email sync works end to end.
+- Privacy model install/warm status is correct.
+- Privacy requests, smart mailboxes, and evidence views stay consistent.
+- Unsupported formats remain visible as unsupported or partial.
 
-echo "=== STEP 10: Session Replay ==="
-echo "Action: Switch to 'Session Replay' tab in Activity"
-echo "Action: Select the run you just completed from the dropdown"
-echo "Verify: Shows chronological list of all modifications from that session"
-echo ""
-read -p "Press Enter when done..."
+Notes
+- Keep this checklist aligned with the app’s current navigation, accessibility IDs, and privacy terminology.
+- Do not use production inboxes or secrets for this run.
+EOF
+}
 
-echo "=== STEP 11: Profile Switch ==="
-echo "Action: Go to Profiles view"
-echo "Verify: Work, Code, Research presets are shown"
-echo "Action: Try to switch profiles (should work when no run is active)"
-echo ""
-read -p "Press Enter when done..."
+print_markdown() {
+  cat <<'EOF'
+# Manifold Live Smoke Checklist
 
-echo ""
-echo "=== ALL STEPS COMPLETE ==="
-echo ""
-echo "If all steps passed, Manifold V1 is working end-to-end."
-echo ""
-echo "Known limitations:"
-echo "  - AppleScript email fetching is slow for large mailboxes"
-echo "  - Promote diff preview is built but not wired into Activity row yet"
-echo "  - Session replay shows data from SnapshotStore, requires completed runs"
-echo ""
-echo "Run: swift test  (should show 40/40 passing)"
+## Purpose
+- Manual or nightly validation against real integrations that CI should not depend on.
+- This is a checklist, not an automated pass/fail harness.
+
+## Prerequisites
+- Debug or release Manifold app build available locally.
+- Real sacrificial IMAP mailbox configured for testing.
+- Privacy Filter model install path available on the test machine.
+- Manifold runtime can launch locally.
+- Optional: Codex/Claude configured to use Manifold MCP only for the final governed path check.
+
+## Lane 1: Runtime and model
+1. Launch Manifold and confirm the main ledger opens without fixture mode.
+2. Open Settings > Privacy.
+3. Install the configured privacy backend if needed.
+4. Verify the backend reports as loaded or ready.
+5. Confirm index status loads and no silent error state is shown.
+
+## Lane 2: Real email sync
+1. Add or enable the sacrificial IMAP mailbox.
+2. Trigger a sync and wait for the mailbox to populate.
+3. Verify at least one email with body text and one attachment appear in Mail.
+4. Confirm privacy smart mailboxes appear: `Has My Info`, `Has Secret`, `Third-Party Private`, `Org Only`, `Needs Review`.
+5. Confirm at least one privacy-indexed email is visible in the expected smart mailbox.
+
+## Lane 3: Governed privacy flow
+1. Add a source folder containing one plain text file with personal info, one document with a secret or account number, and one unsupported binary.
+2. Wait for privacy indexing to settle.
+3. Verify Settings > Privacy shows indexed, failed, and stale counts consistent with that corpus.
+4. Verify the unsupported file is represented as failed or partial, not silently skipped.
+5. Confirm a privacy review request appears when governed content requires approval.
+6. Resolve one request as `Share Redacted` and verify the queue updates.
+7. Resolve one request as `Share Original Once` and verify it does not persist as a standing approval.
+
+## Lane 4: Activity and evidence
+1. Open Activity and filter to Privacy.
+2. Select the latest privacy event.
+3. Verify the evidence pane shows privacy summary, matched categories, and backend/model metadata.
+4. Confirm the activity record matches the action just taken in the request queue.
+
+## Lane 5: MCP-only governed path
+1. Start a fresh governed session using only Manifold MCP tooling.
+2. Perform one read or search that touches indexed content.
+3. Verify the request, decision, and resulting activity event all appear in Manifold.
+4. Confirm the delivered result matches the selected privacy action.
+
+## Exit criteria
+- The app remains stable across all lanes.
+- Real email sync works end to end.
+- Privacy model install/warm status is correct.
+- Privacy requests, smart mailboxes, and evidence views stay consistent.
+- Unsupported formats remain visible as unsupported or partial.
+EOF
+}
+
+case "$MODE" in
+  print) print_plain ;;
+  markdown) print_markdown ;;
+esac

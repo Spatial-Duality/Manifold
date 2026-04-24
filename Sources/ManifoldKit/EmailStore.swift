@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import CryptoKit
 import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "email-store")
@@ -193,6 +194,52 @@ public struct EmailStore: Sendable {
         return rows.compactMap { EmailAttachmentRecord(row: $0) }
     }
 
+    public func emailAttachment(id: String) throws -> EmailAttachmentRecord? {
+        let rows = try db.queryAll(
+            "SELECT * FROM email_attachments WHERE attachment_id = ? LIMIT 1",
+            params: [id]
+        )
+        return rows.first.flatMap { EmailAttachmentRecord(row: $0) }
+    }
+
+    public func upsertEmailAttachment(
+        attachmentID: String,
+        emailID: String,
+        filename: String,
+        mimeType: String,
+        sizeBytes: Int,
+        contentHash: String,
+        contentID: String? = nil
+    ) throws {
+        try db.execute(
+            """
+            INSERT INTO email_attachments (
+                attachment_id, email_id, filename, mime_type, size_bytes, content_hash, content_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(attachment_id) DO UPDATE SET
+                email_id = excluded.email_id,
+                filename = excluded.filename,
+                mime_type = excluded.mime_type,
+                size_bytes = excluded.size_bytes,
+                content_hash = excluded.content_hash,
+                content_id = excluded.content_id
+            """,
+            params: [
+                attachmentID,
+                emailID,
+                filename,
+                mimeType,
+                "\(sizeBytes)",
+                contentHash,
+                contentID,
+            ]
+        )
+    }
+
+    public func deleteEmailAttachments(emailID: String) throws {
+        try db.execute("DELETE FROM email_attachments WHERE email_id = ?", params: [emailID])
+    }
+
     public func emailMessage(id: String) throws -> EmailMessageRecord? {
         let rows = try db.queryAll(
             "SELECT * FROM email_messages WHERE email_id = ? LIMIT 1",
@@ -254,6 +301,11 @@ public struct EmailStore: Sendable {
 
     public func removeEmailAccount(id: String) throws {
         try db.transaction {
+            try db.execute("""
+                DELETE FROM email_attachments WHERE email_id IN (
+                    SELECT email_id FROM email_messages WHERE account_id = ?
+                )
+            """, params: [id])
             try db.execute("""
                 DELETE FROM shared_emails WHERE email_id IN (
                     SELECT email_id FROM email_messages WHERE account_id = ?
@@ -665,45 +717,67 @@ public struct EmailStore: Sendable {
         return rows.compactMap { IMAPMailboxRecord(row: $0) }
     }
 
-    // MARK: - Shared Emails (persistent, grant-independent)
+    // MARK: - Shared Emails (persistent, per-agent, grant-independent)
 
     @discardableResult
-    public func shareEmails(emailIDs: [String], label: String? = nil) throws -> Int {
+    public func shareEmails(emailIDs: [String], for agent: TargetApp, label: String? = nil) throws -> Int {
         guard !emailIDs.isEmpty else { return 0 }
         let now = ISO8601DateFormatter.shared.string(from: Date())
         var count = 0
         for emailID in emailIDs {
             let shareID = "share-\(UUID().uuidString.prefix(8).lowercased())"
             try db.execute("""
-                INSERT OR IGNORE INTO shared_emails (share_id, email_id, shared_at, label)
-                VALUES (?, ?, ?, ?)
-            """, params: [shareID, emailID, now, label])
+                INSERT OR IGNORE INTO shared_emails (share_id, agent, email_id, shared_at, label)
+                VALUES (?, ?, ?, ?, ?)
+            """, params: [shareID, agent.rawValue, emailID, now, label])
             count += 1
         }
         return count
     }
 
-    public func unshareEmails(emailIDs: [String]) throws {
+    @discardableResult
+    public func shareEmails(emailIDs: [String], label: String? = nil) throws -> Int {
+        try shareEmails(emailIDs: emailIDs, for: .cowork, label: label)
+    }
+
+    public func unshareEmails(emailIDs: [String], for agent: TargetApp) throws {
         guard !emailIDs.isEmpty else { return }
         let placeholders = emailIDs.map { _ in "?" }.joined(separator: ",")
         try db.execute(
-            "DELETE FROM shared_emails WHERE email_id IN (\(placeholders))",
-            params: emailIDs
+            "DELETE FROM shared_emails WHERE agent = ? AND email_id IN (\(placeholders))",
+            params: [agent.rawValue] + emailIDs
         )
+    }
+
+    public func unshareEmails(emailIDs: [String]) throws {
+        try unshareEmails(emailIDs: emailIDs, for: .cowork)
     }
 
     public func unshareAllEmails() throws {
         try db.execute("DELETE FROM shared_emails")
     }
 
-    public func sharedEmails(limit: Int = 500) throws -> [EmailMessageRecord] {
+    public func sharedEmails(agent: TargetApp, limit: Int = 500) throws -> [EmailMessageRecord] {
         let rows = try db.queryAll("""
             SELECT em.* FROM email_messages em
             JOIN shared_emails se ON em.email_id = se.email_id
+            WHERE se.agent = ?
             ORDER BY se.shared_at DESC
             LIMIT ?
-        """, params: ["\(limit)"])
+        """, params: [agent.rawValue, "\(limit)"])
         return rows.compactMap { EmailMessageRecord(row: $0) }
+    }
+
+    public func sharedEmails(limit: Int = 500) throws -> [EmailMessageRecord] {
+        try sharedEmails(agent: .cowork, limit: limit)
+    }
+
+    public func sharedEmailCount(agent: TargetApp) throws -> Int {
+        let result = try db.queryScalar(
+            "SELECT COUNT(*) FROM shared_emails WHERE agent = ?",
+            params: [agent.rawValue]
+        )
+        return result.flatMap { Int($0) } ?? 0
     }
 
     public func sharedEmailCount() throws -> Int {
@@ -725,12 +799,28 @@ public struct EmailStore: Sendable {
         return result.flatMap { Int($0) } ?? 0
     }
 
+    public func isEmailShared(emailID: String, agent: TargetApp) throws -> Bool {
+        let result = try db.queryScalar(
+            "SELECT COUNT(*) FROM shared_emails WHERE agent = ? AND email_id = ?",
+            params: [agent.rawValue, emailID]
+        )
+        return (result.flatMap { Int($0) } ?? 0) > 0
+    }
+
     public func isEmailShared(emailID: String) throws -> Bool {
         let result = try db.queryScalar(
             "SELECT COUNT(*) FROM shared_emails WHERE email_id = ?",
             params: [emailID]
         )
         return (result.flatMap { Int($0) } ?? 0) > 0
+    }
+
+    public func sharedEmailIDs(agent: TargetApp) throws -> Set<String> {
+        let rows = try db.queryAll(
+            "SELECT email_id FROM shared_emails WHERE agent = ?",
+            params: [agent.rawValue]
+        )
+        return Set(rows.compactMap { $0["email_id"] })
     }
 
     public func sharedEmailIDs() throws -> Set<String> {
@@ -931,6 +1021,10 @@ public struct EmailStore: Sendable {
             }
         }
 
+        if let virtual = sqlForPrivacyCondition(condition) {
+            return virtual
+        }
+
         // Defense-in-depth: re-validate field even though buildConditionSQL pre-filters
         guard RuleCondition.allowedFields.contains(field) else { return nil }
         let column = "em.\(field)"
@@ -966,6 +1060,79 @@ public struct EmailStore: Sendable {
         case .isNotNull:
             return ("\(column) IS NOT NULL", [])
         }
+    }
+
+    private func sqlForPrivacyCondition(_ condition: RuleCondition) -> (String, [String?])? {
+        switch condition.field {
+        case "privacy_contains_sensitive":
+            return privacyBooleanCondition(column: "contains_sensitive", condition: condition)
+        case "privacy_contains_my_info":
+            return privacyBooleanCondition(column: "contains_my_info", condition: condition)
+        case "privacy_contains_secret":
+            return privacyBooleanCondition(column: "contains_secret", condition: condition)
+        case "privacy_contains_third_party_private":
+            return privacyBooleanCondition(column: "contains_third_party_private", condition: condition)
+        case "privacy_contains_org_only":
+            return privacyBooleanCondition(column: "contains_org_only", condition: condition)
+        case "privacy_severity":
+            guard condition.op == .equals || condition.op == .notEquals else { return nil }
+            let comparator = condition.op == .equals ? "=" : "!="
+            return (
+                """
+                em.email_id IN (
+                    SELECT email_id FROM privacy_content_index
+                    WHERE subject_kind = 'email_body' AND severity \(comparator) ?
+                )
+                """,
+                [condition.value]
+            )
+        case "privacy_categories":
+            switch condition.op {
+            case .contains, .equals:
+                return (
+                    """
+                    em.email_id IN (
+                        SELECT email_id FROM privacy_content_index
+                        WHERE subject_kind = 'email_body' AND matched_categories_json LIKE ?
+                    )
+                    """,
+                    ["%\"\(condition.value)\"%"]
+                )
+            case .notContains, .notEquals:
+                return (
+                    """
+                    em.email_id NOT IN (
+                        SELECT email_id FROM privacy_content_index
+                        WHERE subject_kind = 'email_body' AND matched_categories_json LIKE ?
+                    )
+                    """,
+                    ["%\"\(condition.value)\"%"]
+                )
+            default:
+                return nil
+            }
+        default:
+            return nil
+        }
+    }
+
+    private func privacyBooleanCondition(
+        column: String,
+        condition: RuleCondition
+    ) -> (String, [String?])? {
+        guard condition.op == .equals else { return nil }
+        let normalized = condition.value.lowercased()
+        let expected = normalized == "1" || normalized == "true" ? "1" : "0"
+        let comparator = expected == "1" ? "IN" : "NOT IN"
+        return (
+            """
+            em.email_id \(comparator) (
+                SELECT email_id FROM privacy_content_index
+                WHERE subject_kind = 'email_body' AND \(column) = 1
+            )
+            """,
+            []
+        )
     }
 
     /// Convert SearchTokens to RuleConditions.

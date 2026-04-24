@@ -50,6 +50,13 @@ struct LedgerToolbar: ToolbarContent {
                 .help(command.title)
                 .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
             }
+
+            Button {
+                commandPalette.isPresented = true
+            } label: {
+                Label("Command Palette", systemImage: "command")
+            }
+            .help("Command Palette")
         }
     }
 }

@@ -307,6 +307,7 @@ extension ManifoldXPCService {
                 )
             }
             await runtime.emailSyncEngine.register(accountID: account.accountID)
+            await runtime.privacyIndexCoordinator.bootstrap()
             return ["account": try XPCJSON.object(from: account)]
 
         case "removeEmailAccount":
@@ -316,6 +317,7 @@ extension ManifoldXPCService {
             await runtime.emailSyncEngine.unregister(accountID: accountID)
             KeychainHelper.delete(accountID: accountID)
             try runtime.emailStore.removeEmailAccount(id: accountID)
+            await runtime.privacyIndexCoordinator.bootstrap()
             return ["ok": true]
 
         case "toggleEmailSync":
@@ -329,13 +331,16 @@ extension ManifoldXPCService {
             } else {
                 await runtime.emailSyncEngine.unregister(accountID: accountID)
             }
+            await runtime.privacyIndexCoordinator.bootstrap()
             return ["ok": true]
 
         case "syncEmailNow":
             guard let accountID = payload["accountID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            return ["result": try XPCJSON.object(from: await runtime.emailSyncEngine.syncNow(accountID: accountID))]
+            let result = try await runtime.emailSyncEngine.syncNow(accountID: accountID)
+            await runtime.privacyIndexCoordinator.bootstrap()
+            return ["result": try XPCJSON.object(from: result)]
 
         case "emailMessages":
             return ["messages": try XPCJSON.object(from: try emailMessages(payload: payload))]
@@ -363,23 +368,28 @@ extension ManifoldXPCService {
             return ["mailboxes": try XPCJSON.object(from: runtime.emailStore.imapMailboxes(accountID: accountID))]
 
         case "sharedEmailCount":
-            return ["count": try runtime.emailStore.sharedEmailCount()]
+            let agent = targetApp(from: payload) ?? .cowork
+            return ["count": try runtime.emailStore.sharedEmailCount(agent: agent)]
 
         case "sharedEmailIDs":
-            return ["ids": Array(try runtime.emailStore.sharedEmailIDs()).sorted()]
+            let agent = targetApp(from: payload) ?? .cowork
+            return ["ids": Array(try runtime.emailStore.sharedEmailIDs(agent: agent)).sorted()]
 
         case "sharedEmails":
+            let agent = targetApp(from: payload) ?? .cowork
             let limit = payload["limit"] as? Int ?? 500
-            return ["messages": try XPCJSON.object(from: runtime.emailStore.sharedEmails(limit: limit))]
+            return ["messages": try XPCJSON.object(from: runtime.emailStore.sharedEmails(agent: agent, limit: limit))]
 
         case "shareEmails":
+            let agent = targetApp(from: payload) ?? .cowork
             let emailIDs = payload["emailIDs"] as? [String] ?? []
-            try runtime.emailStore.shareEmails(emailIDs: emailIDs)
+            try runtime.emailStore.shareEmails(emailIDs: emailIDs, for: agent)
             return ["ok": true]
 
         case "unshareEmails":
+            let agent = targetApp(from: payload) ?? .cowork
             let emailIDs = payload["emailIDs"] as? [String] ?? []
-            try runtime.emailStore.unshareEmails(emailIDs: emailIDs)
+            try runtime.emailStore.unshareEmails(emailIDs: emailIDs, for: agent)
             return ["ok": true]
 
         case "unshareAllEmails":
@@ -489,6 +499,115 @@ extension ManifoldXPCService {
             let rows: [ApprovalRow] = pending.map(ApprovalRow.make(from:))
             return ["requests": try XPCJSON.object(from: rows)]
 
+        case "getPrivacySettings":
+            return ["bundle": try XPCJSON.object(from: try await runtime.privacyCoordinator.settingsBundle())]
+
+        case "updatePrivacySettings":
+            if let settingsObject = payload["settings"] {
+                let settings = try XPCJSON.decode(PrivacyPreflightSettings.self, from: settingsObject)
+                try await runtime.privacyCoordinator.updateSettings(settings)
+            }
+            if let policyObject = payload["policy"] {
+                let policy = try XPCJSON.decode(AgentPrivacyPolicy.self, from: policyObject)
+                try await runtime.privacyCoordinator.updatePolicy(policy)
+            }
+            return ["ok": true]
+
+        case "installPrivacyModel":
+            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.installModel())]
+
+        case "uninstallPrivacyModel":
+            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.uninstallModel())]
+
+        case "privacyRuntimeStatus":
+            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.runtimeStatus())]
+
+        case "clearPrivacyCache":
+            return ["count": try await runtime.privacyCoordinator.clearCache()]
+
+        case "privacyIndexStatus":
+            return ["status": try XPCJSON.object(from: try await runtime.privacyIndexCoordinator.runtimeStatus())]
+
+        case "listPrivacyIndex":
+            let scope = try decodePayload(PrivacyIndexScope.self, key: "scope", from: payload, default: PrivacyIndexScope())
+            let filter = try decodePayload(PrivacyIndexFilter.self, key: "filter", from: payload, default: PrivacyIndexFilter())
+            let limit = payload["limit"] as? Int ?? 200
+            return [
+                "records": try XPCJSON.object(
+                    from: try await runtime.privacyIndexCoordinator.listIndex(scope: scope, filter: filter, limit: limit)
+                )
+            ]
+
+        case "listPrivacyIdentitySuggestions":
+            return [
+                "suggestions": try XPCJSON.object(
+                    from: try await runtime.privacyIndexCoordinator.listIdentitySuggestions()
+                )
+            ]
+
+        case "acceptPrivacyIdentitySuggestion":
+            guard let id = payload["id"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.privacyIndexCoordinator.acceptIdentitySuggestion(id: id)
+            return ["ok": true]
+
+        case "rejectPrivacyIdentitySuggestion":
+            guard let id = payload["id"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.privacyIndexCoordinator.rejectIdentitySuggestion(id: id)
+            return ["ok": true]
+
+        case "upsertPrivacyIdentity":
+            guard let recordObject = payload["record"] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let record = try XPCJSON.decode(PrivacyIdentityRecord.self, from: recordObject)
+            try await runtime.privacyIndexCoordinator.upsertIdentity(record)
+            return ["ok": true]
+
+        case "upsertPrivacyOrgAllowEntry":
+            guard let entryObject = payload["entry"] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let entry = try XPCJSON.decode(PrivacyOrgAllowEntry.self, from: entryObject)
+            try await runtime.privacyIndexCoordinator.upsertOrgAllowEntry(entry)
+            return ["ok": true]
+
+        case "listPrivacyIdentities":
+            return [
+                "identities": try XPCJSON.object(
+                    from: try await runtime.privacyIndexCoordinator.listIdentities()
+                )
+            ]
+
+        case "listPrivacyOrgAllowEntries":
+            return [
+                "entries": try XPCJSON.object(
+                    from: try await runtime.privacyIndexCoordinator.listOrgAllowEntries()
+                )
+            ]
+
+        case "deletePrivacyIdentity":
+            guard let id = payload["id"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.privacyIndexCoordinator.deleteIdentity(id: id)
+            return ["ok": true]
+
+        case "deletePrivacyOrgAllowEntry":
+            guard let id = payload["id"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.privacyIndexCoordinator.deleteOrgAllowEntry(id: id)
+            return ["ok": true]
+
+        case "rescanPrivacyContent":
+            let contentIDs = payload["contentIDs"] as? [String] ?? []
+            try await runtime.privacyIndexCoordinator.rescan(contentIDs: contentIDs)
+            return ["ok": true]
+
         case "answerApproval":
             guard let id = payload["id"] as? String,
                   let answer = payload["answer"] as? String else {
@@ -500,7 +619,7 @@ extension ManifoldXPCService {
             }
             switch answer {
             case "approve":
-                try await runtime.approvalQueue.approve(id: id)
+                try await runtime.approvalQueue.approve(id: id, resolutionAction: answer)
             case "once":
                 guard request.kind == .standingWrite,
                       let sourceID = request.sourceID,
@@ -512,14 +631,44 @@ extension ManifoldXPCService {
                     sourceID: sourceID,
                     relativePath: relativePath
                 )
-                try await runtime.approvalQueue.approve(id: id)
+                try await runtime.approvalQueue.approve(id: id, resolutionAction: answer)
             case "default":
                 guard request.kind == .standingWrite,
                       let sourceID = request.sourceID else {
                     throw ManifoldXPCError.invalidPayload
                 }
                 try await runtime.standingWriteApprovalStore.grantDefault(agent: agent, sourceID: sourceID)
-                try await runtime.approvalQueue.approve(id: id)
+                try await runtime.approvalQueue.approve(id: id, resolutionAction: answer)
+            case "shareRedacted":
+                guard request.kind == .privacyExposure,
+                      let contextJSON = request.contextJSON,
+                      let data = contextJSON.data(using: .utf8) else {
+                    throw ManifoldXPCError.invalidPayload
+                }
+                let context = try JSONDecoder().decode(PrivacyApprovalContext.self, from: data)
+                try await runtime.privacyStore.saveApprovalOverride(
+                    agent: agent,
+                    resourceKey: request.path,
+                    inputHash: context.inputHash,
+                    contentKind: context.contentKind,
+                    decision: .shareRedacted
+                )
+                try await runtime.approvalQueue.approve(id: id, resolutionAction: answer)
+            case "shareOriginalOnce":
+                guard request.kind == .privacyExposure,
+                      let contextJSON = request.contextJSON,
+                      let data = contextJSON.data(using: .utf8) else {
+                    throw ManifoldXPCError.invalidPayload
+                }
+                let context = try JSONDecoder().decode(PrivacyApprovalContext.self, from: data)
+                try await runtime.privacyStore.saveApprovalOverride(
+                    agent: agent,
+                    resourceKey: request.path,
+                    inputHash: context.inputHash,
+                    contentKind: context.contentKind,
+                    decision: .shareOriginalOnce
+                )
+                try await runtime.approvalQueue.approve(id: id, resolutionAction: answer)
             case "session":
                 throw ManifoldXPCError.invalidPayload
             case "deny", "notThisTime":
@@ -605,8 +754,10 @@ extension ManifoldXPCService {
         let sourceID: String?
         let mountName: String?
         let relativePath: String?
+        let contextJSON: String?
         let requestedAt: Double
         let status: String
+        let resolutionAction: String?
 
         static func make(from request: ApprovalQueue.PendingRequest) -> ApprovalRow {
             ApprovalRow(
@@ -619,8 +770,10 @@ extension ManifoldXPCService {
                 sourceID: request.sourceID,
                 mountName: request.mountName,
                 relativePath: request.relativePath,
+                contextJSON: request.contextJSON,
                 requestedAt: request.requestedAt,
-                status: request.status.rawValue
+                status: request.status.rawValue,
+                resolutionAction: request.resolutionAction
             )
         }
     }
@@ -633,6 +786,16 @@ extension ManifoldXPCService {
             "activeGrantSources": try XPCJSON.object(from: state.sources),
             "targetApp": state.targetApp?.rawValue as Any,
         ]
+    }
+
+    private func targetApp(from payload: [String: Any]) -> TargetApp? {
+        if let raw = payload["agent"] as? String {
+            return TargetApp(rawValue: raw)
+        }
+        if let raw = payload["targetApp"] as? String {
+            return TargetApp(rawValue: raw)
+        }
+        return nil
     }
 
     private func sessionPreviewCommand(payload: [String: Any]) async throws -> [String: Any] {
@@ -686,6 +849,10 @@ extension ManifoldXPCService {
         sensitivityOverride: EmailSensitivityFilter.Level?
     ) async throws -> [String: Any] {
         let activeSources = try await runtime.grantStore.activeSources()
+        let policy = try await runtime.policyStore.policy(for: targetApp)
+        let defaultSources = policy.isPaused
+            ? []
+            : activeSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
         let explicitScopes = normalizedScopes(fileScopes)
         let usingExplicitSelection = !explicitScopes.isEmpty || !selectedEmailIDs.isEmpty
         let activeSourceMap = Dictionary(uniqueKeysWithValues: activeSources.map { ($0.sourceID, $0) })
@@ -701,7 +868,7 @@ extension ManifoldXPCService {
                 )
             }
         } else {
-            inputs = activeSources.map { source in
+            inputs = defaultSources.map { source in
                 MaterializationEngine.MaterializationSource(
                     source: source,
                     mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased()
@@ -721,7 +888,7 @@ extension ManifoldXPCService {
             totalEmailCount = allEmails.count
             switch previewSensitivity {
             case .strict:
-                visibleEmailCount = try runtime.emailStore.sharedEmails(limit: 5_000).count
+                visibleEmailCount = try runtime.emailStore.sharedEmails(agent: targetApp, limit: 5_000).count
             case .moderate, .open:
                 let filter = EmailSensitivityFilter(level: previewSensitivity)
                 visibleEmailCount = allEmails.filter { filter.isVisible(email: $0) }.count
@@ -755,11 +922,15 @@ extension ManifoldXPCService {
         sensitivityOverride: EmailSensitivityFilter.Level?
     ) async throws -> (grant: GrantRecord, sources: [GrantSourceRecord]) {
         let activeSources = try await runtime.grantStore.activeSources()
+        let policy = try await runtime.policyStore.policy(for: targetApp)
+        let defaultSources = policy.isPaused
+            ? []
+            : activeSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
         let explicitScopes = normalizedScopes(fileScopes)
         let usingExplicitSelection = !explicitScopes.isEmpty || !selectedEmailIDs.isEmpty
         let activeSourceMap = Dictionary(uniqueKeysWithValues: activeSources.map { ($0.sourceID, $0) })
         let explicitSourceIDs = Array(Set(explicitScopes.map(\.sourceID))).sorted()
-        let sourceIDs = usingExplicitSelection ? explicitSourceIDs : activeSources.map(\.sourceID)
+        let sourceIDs = usingExplicitSelection ? explicitSourceIDs : defaultSources.map(\.sourceID)
         let emailSensitivity = (sensitivityOverride ?? (usingExplicitSelection ? .strict : .moderate)).rawValue
         let grant = try await runtime.grantStore.startGrant(
             targetApp: targetApp,
@@ -1147,7 +1318,8 @@ extension ManifoldXPCService {
         }
         let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
         if filter.level == .strict {
-            return try runtime.emailStore.sharedEmails(limit: limit)
+            let agent = TargetApp(rawValue: grant.targetApp) ?? .cowork
+            return try runtime.emailStore.sharedEmails(agent: agent, limit: limit)
         }
         return try runtime.emailStore
             .allEmailMessages(limit: limit)

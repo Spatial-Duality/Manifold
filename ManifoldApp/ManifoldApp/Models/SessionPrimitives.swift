@@ -121,6 +121,7 @@ struct SessionDraft: Hashable, Sendable {
 struct ApprovalRequest: Identifiable, Hashable, Sendable {
     enum Kind: String, Hashable, Sendable {
         case standingWrite = "standing_write"
+        case privacyExposure = "privacy_exposure"
     }
 
     let id: String
@@ -130,12 +131,27 @@ struct ApprovalRequest: Identifiable, Hashable, Sendable {
     let target: String
     let headline: String
     let context: String
+    let findingsSummary: String?
+    let recommendation: String?
     let createdAt: Date
     var snoozedUntil: Date?
+    /// Populated only for `.privacyExposure`. A short excerpt of what the
+    /// agent would see after the privacy model redacts the payload. The
+    /// original is never persisted on-disk, so this is the authoritative
+    /// surface for approval review.
+    let redactedPreview: String?
+    /// Populated only for `.privacyExposure`. The category taxonomy the
+    /// model matched against the payload (email, secret, account, …).
+    let matchedCategories: [PrivacyCategory]
+    /// Populated only for `.privacyExposure`. Severity the decision engine
+    /// assigned — drives the severity bar in the approval card.
+    let severity: PrivacySeverity?
 
     var supportsSessionScope: Bool {
         switch kind {
         case .standingWrite:
+            return false
+        case .privacyExposure:
             return false
         }
     }
@@ -160,6 +176,10 @@ enum ApprovalAnswer: Hashable, Sendable {
     case forSession(sessionID: String)
     /// Promote target to the agent's default standing scope.
     case addToDefault
+    /// Share the redacted payload one time.
+    case shareRedacted
+    /// Share the original payload one time.
+    case shareOriginalOnce
 }
 
 /// A recorded denial — feeds blast-radius charts and the pattern-detection
@@ -259,6 +279,8 @@ protocol ManifoldCommands: AnyObject {
 
     // Sessions
     func startSession(_ draft: SessionDraft) async throws
+    func previewProtectedRun(draft: SessionDraft) async throws
+    func startProtectedRun(draft: SessionDraft) async throws
     func finishActiveSession() async throws
     func reloadSession(historyID: String) async throws
 

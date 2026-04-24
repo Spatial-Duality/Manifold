@@ -175,3 +175,97 @@ public struct CoverageEvent: Sendable, Codable, Hashable, Identifiable {
         self.metadata = metadata
     }
 }
+
+public struct DataControlSummary: Sendable, Codable {
+    public struct Agent: Sendable, Codable, Hashable, Identifiable {
+        public var id: TargetApp { agent }
+        public let agent: TargetApp
+        public let isConnected: Bool
+        public let verificationStatus: ClientVerificationStatus
+        public let coverageState: CoverageState?
+        public let isPaused: Bool
+        public let defaultFileScopeCount: Int
+        public let visibleEmailCount: Int
+        public let sharedEmailCount: Int
+        public let emailSensitivity: EmailSensitivityLevel
+        public let defaultEmailPolicy: EmailDefaultPolicy
+
+        public init(
+            agent: TargetApp,
+            isConnected: Bool,
+            verificationStatus: ClientVerificationStatus,
+            coverageState: CoverageState?,
+            isPaused: Bool,
+            defaultFileScopeCount: Int,
+            visibleEmailCount: Int,
+            sharedEmailCount: Int,
+            emailSensitivity: EmailSensitivityLevel,
+            defaultEmailPolicy: EmailDefaultPolicy
+        ) {
+            self.agent = agent
+            self.isConnected = isConnected
+            self.verificationStatus = verificationStatus
+            self.coverageState = coverageState
+            self.isPaused = isPaused
+            self.defaultFileScopeCount = defaultFileScopeCount
+            self.visibleEmailCount = visibleEmailCount
+            self.sharedEmailCount = sharedEmailCount
+            self.emailSensitivity = emailSensitivity
+            self.defaultEmailPolicy = defaultEmailPolicy
+        }
+    }
+
+    public struct Exposure: Sendable, Codable, Hashable, Identifiable {
+        public let id: Int
+        public let timestamp: String
+        public let agent: TargetApp?
+        public let action: String
+        public let resourcePath: String?
+        public let sessionID: String?
+        public let grantID: String?
+
+        public init(
+            id: Int,
+            timestamp: String,
+            agent: TargetApp?,
+            action: String,
+            resourcePath: String?,
+            sessionID: String?,
+            grantID: String?
+        ) {
+            self.id = id
+            self.timestamp = timestamp
+            self.agent = agent
+            self.action = action
+            self.resourcePath = resourcePath
+            self.sessionID = sessionID
+            self.grantID = grantID
+        }
+    }
+
+    public let runtimeConnected: Bool
+    public let activeBridgeCount: Int
+    public let agents: [Agent]
+    public let activeWorkBlock: WorkBlockRecord?
+    public let pendingApprovalCount: Int
+    public let lastExposure: Exposure?
+    public let recentHandoffSessions: [Session]
+
+    public init(
+        runtimeConnected: Bool,
+        activeBridgeCount: Int,
+        agents: [Agent],
+        activeWorkBlock: WorkBlockRecord?,
+        pendingApprovalCount: Int,
+        lastExposure: Exposure?,
+        recentHandoffSessions: [Session]
+    ) {
+        self.runtimeConnected = runtimeConnected
+        self.activeBridgeCount = activeBridgeCount
+        self.agents = agents
+        self.activeWorkBlock = activeWorkBlock
+        self.pendingApprovalCount = pendingApprovalCount
+        self.lastExposure = lastExposure
+        self.recentHandoffSessions = recentHandoffSessions
+    }
+}

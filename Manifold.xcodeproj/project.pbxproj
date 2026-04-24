@@ -57,6 +57,11 @@
 		89BFB34E4852748C0F0DCAC7 /* FilesFlatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB07B2C5A1AC359E3385D3EB /* FilesFlatView.swift */; };
 		8BEBCA068A954167B09C587A /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB171CB3585C4416945094E8 /* DesignTokens.swift */; };
 		8BF2C6F2190AED8B8921E79A /* AgentCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D908A243212451B7F14F4947 /* AgentCard.swift */; };
+		PS001CA7D00000000000AAAA /* PresetCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS001CA7D00000000000BBBB /* PresetCard.swift */; };
+		CA7CH1P000000000000AAAA1 /* CategoryChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7CH1P000000000000BBBB1 /* CategoryChip.swift */; };
+		PV01FFV000000000000AAAA2 /* PrivacyDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PV01FFV000000000000BBBB2 /* PrivacyDiffView.swift */; };
+		PVSEVBR000000000000AAAA3 /* PrivacySeverityBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = PVSEVBR000000000000BBBB3 /* PrivacySeverityBar.swift */; };
+		PVPANEE000000000000AAAA4 /* Settings/PrivacySettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = PVPANEE000000000000BBBB4 /* Settings/PrivacySettingsPane.swift */; };
 		8CE45D5394B4EFC5283586D6 /* MailWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C0ACDB9610A4AA58292532E /* MailWindowView.swift */; };
 		A1B2C3D4E5F6012345678901 /* MailSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6012345678902 /* MailSessionView.swift */; };
 		A1B2C3D4E5F6012345678903 /* MailHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6012345678904 /* MailHistoryView.swift */; };
@@ -78,6 +83,7 @@
 		B858CA7D0F09836A2CCC3E46 /* ManifoldTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25000DE1F68784E45812D2B /* ManifoldTypes.swift */; };
 		BB98C6321936CEE860B90941 /* RecentAnswersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B756726566E196D882936D6 /* RecentAnswersView.swift */; };
 		BBD10003 /* EmailRulesModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD10004 /* EmailRulesModel.swift */; };
+		RULETST10001 /* RulesModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = RULETST10002 /* RulesModelTests.swift */; };
 		RULE00010001 /* RulesModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = RULE00010002 /* RulesModel.swift */; };
 		RULE00020001 /* RulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = RULE00020002 /* RulesView.swift */; };
 		RULE00030001 /* RuleListTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = RULE00030002 /* RuleListTable.swift */; };
@@ -214,11 +220,17 @@
 		D3D2A1D247044D00A8AB48FB /* Settings/SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
 		D6B4D4ECF3E7D4BFD1BBCDE5 /* RequestsWindowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RequestsWindowView.swift; sourceTree = "<group>"; };
 		D908A243212451B7F14F4947 /* AgentCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentCard.swift; sourceTree = "<group>"; };
+		PS001CA7D00000000000BBBB /* PresetCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PresetCard.swift; sourceTree = "<group>"; };
+		CA7CH1P000000000000BBBB1 /* CategoryChip.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CategoryChip.swift; sourceTree = "<group>"; };
+		PV01FFV000000000000BBBB2 /* PrivacyDiffView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PrivacyDiffView.swift; sourceTree = "<group>"; };
+		PVSEVBR000000000000BBBB3 /* PrivacySeverityBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PrivacySeverityBar.swift; sourceTree = "<group>"; };
+		PVPANEE000000000000BBBB4 /* Settings/PrivacySettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/PrivacySettingsPane.swift; sourceTree = "<group>"; };
 		DE3376AC9C43450C9456F8F5 /* Setup/AddMailAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Setup/AddMailAccountSheet.swift; sourceTree = "<group>"; };
 		DFD63A340078590E7ADB928D /* RulesWindowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RulesWindowView.swift; sourceTree = "<group>"; };
 		E10000000000000000000011 /* DashboardStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000012 /* IntegrationHealthModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationHealthModelTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000013 /* EmailRulesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesModelTests.swift; sourceTree = "<group>"; };
+		RULETST10002 /* RulesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesModelTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000014 /* ManifoldStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStoreTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000015 /* ManifoldAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldAppUITests.swift; sourceTree = "<group>"; };
 		E10000000000000000000016 /* ManifoldAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ManifoldAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -319,6 +331,10 @@
 				4447E45CA83BC457835B8215 /* PathLabel.swift */,
 				A1B2C3D4E5F6012345678911 /* QuickLookPreview.swift */,
 				A1B2C3D4E5F6012345678913 /* AccessChipStack.swift */,
+				PS001CA7D00000000000BBBB /* PresetCard.swift */,
+				CA7CH1P000000000000BBBB1 /* CategoryChip.swift */,
+				PV01FFV000000000000BBBB2 /* PrivacyDiffView.swift */,
+				PVSEVBR000000000000BBBB3 /* PrivacySeverityBar.swift */,
 			);
 			path = Primitives;
 			sourceTree = "<group>";
@@ -352,6 +368,7 @@
 				102F3788D49943BEA7D6F5ED /* Settings/AIAppsSettingsPane.swift */,
 				56386BD93074434BA8465A9E /* Settings/MailSettingsPane.swift */,
 				13E56DF2DB8A41BC8558EA2F /* Settings/StorageSettingsPane.swift */,
+				PVPANEE000000000000BBBB4 /* Settings/PrivacySettingsPane.swift */,
 				92F4DD2292FA43609BD5CB10 /* Setup/ConnectClaudeSheet.swift */,
 				0EDD40A0FC44454BB68AA8F4 /* Setup/ConnectCodexSheet.swift */,
 				DE3376AC9C43450C9456F8F5 /* Setup/AddMailAccountSheet.swift */,
@@ -476,6 +493,7 @@
 				E10000000000000000000011 /* DashboardStateTests.swift */,
 				E10000000000000000000012 /* IntegrationHealthModelTests.swift */,
 				E10000000000000000000013 /* EmailRulesModelTests.swift */,
+				RULETST10002 /* RulesModelTests.swift */,
 				E10000000000000000000014 /* ManifoldStoreTests.swift */,
 				6D1DEFECCD6E9DF9CC22D59F /* SessionPrimitivesTests.swift */,
 			);
@@ -755,6 +773,11 @@
 				557832AE5BB9FE91B0E0481D /* FileTreeInspector.swift in Sources */,
 				6A9D421FFBA15F39A581E07B /* AdvancedSettingsPane.swift in Sources */,
 				8BF2C6F2190AED8B8921E79A /* AgentCard.swift in Sources */,
+				PS001CA7D00000000000AAAA /* PresetCard.swift in Sources */,
+				CA7CH1P000000000000AAAA1 /* CategoryChip.swift in Sources */,
+				PV01FFV000000000000AAAA2 /* PrivacyDiffView.swift in Sources */,
+				PVSEVBR000000000000AAAA3 /* PrivacySeverityBar.swift in Sources */,
+				PVPANEE000000000000AAAA4 /* Settings/PrivacySettingsPane.swift in Sources */,
 				B4447E36EF9C6C483AF301AD /* PathLabel.swift in Sources */,
 				A1B2C3D4E5F6012345678910 /* QuickLookPreview.swift in Sources */,
 				A1B2C3D4E5F6012345678912 /* AccessChipStack.swift in Sources */,
@@ -769,6 +792,7 @@
 				E10000000000000000000001 /* DashboardStateTests.swift in Sources */,
 				E10000000000000000000002 /* IntegrationHealthModelTests.swift in Sources */,
 				E10000000000000000000003 /* EmailRulesModelTests.swift in Sources */,
+				RULETST10001 /* RulesModelTests.swift in Sources */,
 				E10000000000000000000004 /* ManifoldStoreTests.swift in Sources */,
 				8DA44CE1AF5BE22FE13B2133 /* SessionPrimitivesTests.swift in Sources */,
 			);

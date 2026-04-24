@@ -3,9 +3,9 @@
 //
 // SessionStartSheet — the short form for starting a new session.
 //
-// Name / duration / base-mode radio / agents / track-writes. Defaults
-// are chosen to be unsurprising: name blank, duration 2 hours, default
-// scope, Claude-only, no write tracking.
+// Starts one protected, agent-scoped run. Cross-agent continuation is a
+// ledger handoff: finish this run, then let the other agent continue from
+// the recorded recap.
 
 import SwiftUI
 import ManifoldKit
@@ -14,13 +14,24 @@ struct SessionStartSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ManifoldStore.self) private var store
     @State private var draft = SessionDraft()
+    @State private var isStarting = false
+    @State private var errorMessage: String?
+
+    private var selectedAgent: TargetApp {
+        draft.agents.first ?? .cowork
+    }
 
     private var defaultScopeSummary: String {
-        let count = store.sources.filter(\.isAccessible).count
-        if count == 0 {
-            return "Nothing is in default scope yet. Add a folder first if you want this session to start with protected access."
+        if let agent = store.dataControlSummary?.agents.first(where: { $0.agent == selectedAgent }) {
+            let folders = "\(agent.defaultFileScopeCount) folder\(agent.defaultFileScopeCount == 1 ? "" : "s")"
+            let emails = "\(agent.visibleEmailCount) email\(agent.visibleEmailCount == 1 ? "" : "s")"
+            return "\(AgentMeta.label(selectedAgent)) will start with \(folders) and \(emails) visible. Offline is okay; this config is ready for the next connection."
         }
-        return "Default scope: \(count) folder\(count == 1 ? "" : "s"). Choose Inherit default to start with the folders already shared here."
+        let count = store.governance.policy(for: selectedAgent)?.allowedSourceIDs.count ?? 0
+        if count == 0 {
+            return "\(AgentMeta.label(selectedAgent)) has no default folders yet. Add scope first if this run needs files."
+        }
+        return "\(AgentMeta.label(selectedAgent)) default scope: \(count) folder\(count == 1 ? "" : "s")."
     }
 
     var body: some View {
@@ -29,7 +40,7 @@ struct SessionStartSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Protect next session")
                         .font(ManifoldType.heading)
-                    Text("Review what Claude or Codex can access here before the session starts.")
+                    Text("Starts a protected run from that agent's current policy.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -55,44 +66,34 @@ struct SessionStartSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            FormRow(label: "Duration") {
-                HStack {
-                    Slider(value: $draft.durationHours, in: 0.5...8, step: 0.5)
-                    HStack(spacing: 0) {
-                        Text(draft.durationHours, format: .number.precision(.fractionLength(1)))
-                        Text("h")
-                    }
-                    .font(ManifoldType.numericBody)
-                    .frame(width: 44, alignment: .trailing)
-                }
-            }
-
-            FormRow(label: "Starting scope") {
-                Picker("", selection: $draft.baseMode) {
-                    Text("Inherit default").tag(SessionRecord.BaseMode.defaultScope)
-                    Text("Start blank").tag(SessionRecord.BaseMode.blank)
-                    Text("Default minus exclusions").tag(SessionRecord.BaseMode.defaultMinus)
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-            }
-
-            FormRow(label: "Agents") {
+            FormRow(label: "Agent") {
                 HStack(spacing: Spacing.s3) {
                     AgentToggle(agent: .cowork, selection: $draft.agents)
                     AgentToggle(agent: .codex, selection: $draft.agents)
                 }
             }
 
-            FormRow(label: "Track writes") {
+            FormRow(label: "Session notes") {
                 Toggle("", isOn: $draft.trackWrites)
                     .labelsHidden()
                     .toggleStyle(.switch)
                 Text(draft.trackWrites
-                     ? "Every write is snapshotted and reversible."
-                     : "Reads are logged; writes are not tracked.")
+                     ? "Agents record start and end notes into your ledger."
+                     : "Files and writes are still tracked; agent notes stay off.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Text("To hand off, finish this run and open its recap with the other AI. Grouped multi-agent sessions stay disabled until grouped grants land.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(ManifoldPalette.attention)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -101,13 +102,20 @@ struct SessionStartSheet: View {
                 Spacer()
                 Button("Start protected session") {
                     Task {
-                        try? await store.startSession(draft)
-                        dismiss()
+                        isStarting = true
+                        errorMessage = nil
+                        do {
+                            try await store.startProtectedRun(draft: draft)
+                            dismiss()
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
+                        isStarting = false
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(draft.agents.isEmpty)
+                .disabled(draft.agents.isEmpty || isStarting || !store.isRuntimeConnected)
             }
         }
         .padding(Spacing.s5)
@@ -140,7 +148,7 @@ private struct AgentToggle: View {
 
     var body: some View {
         Button {
-            if on { selection.remove(agent) } else { selection.insert(agent) }
+            selection = [agent]
         } label: {
             HStack(spacing: Spacing.s2) {
                 GradientAvatar(agent: agent, size: .small)

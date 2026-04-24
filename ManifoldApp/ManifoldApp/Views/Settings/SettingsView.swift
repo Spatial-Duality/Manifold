@@ -12,24 +12,36 @@ struct SettingsView: View {
         TabView {
             Tab("General", systemImage: "gearshape") {
                 GeneralSettingsPane()
+                    .accessibilityIdentifier("settings.tab.general")
             }
             Tab("Agents", systemImage: "sparkle") {
                 AgentsSettingsPane()
+                    .accessibilityIdentifier("settings.tab.agents")
             }
             Tab("Storage", systemImage: "externaldrive") {
                 StorageSettingsPane()
+                    .accessibilityIdentifier("settings.tab.storage")
             }
             Tab("Mail", systemImage: "envelope") {
                 MailSettingsPane()
+                    .accessibilityIdentifier("settings.tab.mail")
             }
             Tab("Rules", systemImage: "checklist") {
                 RulesSettingsPane()
+                    .accessibilityIdentifier("settings.tab.rules")
+            }
+            Tab("Privacy", systemImage: "shield.checkered") {
+                PrivacySettingsPane()
+                    .accessibilityIdentifier("settings.tab.privacy")
             }
             Tab("Advanced", systemImage: "slider.horizontal.3") {
                 AdvancedSettingsPane()
+                    .accessibilityIdentifier("settings.tab.advanced")
             }
         }
         .frame(minWidth: 580, minHeight: 500)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings.window")
     }
 }
 

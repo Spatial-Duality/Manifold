@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA_PATH="$ROOT_DIR/.deriveddata-ui-tests"
 DESTINATION="platform=macOS,arch=arm64"
+SUITE="all"
+RESULT_BUNDLE_PATH=""
 
 ONLY_TESTING=()
 SKIP_TESTING=("ManifoldAppTests")
@@ -22,6 +24,14 @@ while [[ $# -gt 0 ]]; do
       SKIP_TESTING+=("$2")
       shift 2
       ;;
+    --suite)
+      SUITE="$2"
+      shift 2
+      ;;
+    --result-bundle-path)
+      RESULT_BUNDLE_PATH="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 64
@@ -29,10 +39,28 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+case "$SUITE" in
+  fixture)
+    ONLY_TESTING+=("ManifoldAppUITests/ManifoldFixtureUITests")
+    ;;
+  runtime)
+    ONLY_TESTING+=("ManifoldAppUITests/ManifoldRuntimeE2ETests")
+    ;;
+  all)
+    ;;
+  *)
+    echo "Unknown suite: $SUITE" >&2
+    exit 64
+    ;;
+esac
+
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/tmp/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-/tmp/swiftpm-module-cache}"
 
 mkdir -p "$DERIVED_DATA_PATH"
+rm -rf \
+  "$DERIVED_DATA_PATH/Build/Products/Debug/Manifold.app" \
+  "$DERIVED_DATA_PATH/Build/Products/Debug/ManifoldAppUITests-Runner.app"
 
 echo "==> Build for testing"
 xcodebuild \
@@ -53,14 +81,28 @@ if [[ ! -d "$APP_PATH" || ! -d "$RUNNER_PATH" || -z "$XCTESTRUN_PATH" ]]; then
 fi
 
 echo "==> Re-sign app and UI runner for local execution"
+if command -v xattr >/dev/null 2>&1; then
+  xattr -dr com.apple.quarantine "$APP_PATH" "$RUNNER_PATH" 2>/dev/null || true
+fi
+
+while IFS= read -r -d '' test_bundle; do
+  codesign --force --deep -s - "$test_bundle"
+done < <(find "$RUNNER_PATH" -name '*.xctest' -print0)
+
 codesign --force --deep -s - "$APP_PATH"
 codesign --force --deep -s - "$RUNNER_PATH"
+codesign --verify --deep --strict "$APP_PATH"
+codesign --verify --deep --strict "$RUNNER_PATH"
 
 TEST_ARGS=(
   test-without-building
   -xctestrun "$XCTESTRUN_PATH"
   -destination "$DESTINATION"
 )
+
+if [[ -n "$RESULT_BUNDLE_PATH" ]]; then
+  TEST_ARGS+=("-resultBundlePath" "$RESULT_BUNDLE_PATH")
+fi
 
 if (( ${#SKIP_TESTING[@]} > 0 )); then
   for test_id in "${SKIP_TESTING[@]}"; do

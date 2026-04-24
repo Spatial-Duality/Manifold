@@ -74,8 +74,19 @@ struct EmailPolicyEngineTests {
         #expect(decision.kind == .paused)
     }
 
-    @Test("Shared email overrides lower rules")
-    func sharedEmailWins() {
+    @Test("Shared email opens block-unless-allowed default")
+    func sharedEmailOpensDefaultDeny() {
+        let email = makeEmail(subject: "project update", preview: "roadmap", body: "project update")
+        let decision = EmailPolicyEngine.decision(
+            for: email,
+            context: makeContext(sharedEmailIDs: [email.emailID])
+        )
+        #expect(decision.allowed)
+        #expect(decision.kind == .sharedEmail)
+    }
+
+    @Test("Domain blocks beat shared email grants")
+    func domainBlockBeatsSharedEmail() {
         let email = makeEmail(subject: "statement ready", preview: "transaction alert", body: "statement ready")
         let ruleSet = EmailRuleSet(
             agent: .codex,
@@ -85,8 +96,28 @@ struct EmailPolicyEngineTests {
             for: email,
             context: makeContext(ruleSet: ruleSet, sharedEmailIDs: [email.emailID])
         )
-        #expect(decision.allowed)
-        #expect(decision.kind == .sharedEmail)
+        #expect(decision.allowed == false)
+        #expect(decision.kind == .domain)
+    }
+
+    @Test("Shields beat shared email grants")
+    func shieldBeatsSharedEmail() {
+        let email = makeEmail(
+            senderDomain: "stripe.com",
+            subject: "payment received",
+            preview: "transaction alert",
+            body: "statement ready"
+        )
+        let ruleSet = EmailRuleSet(
+            agent: .codex,
+            shields: EmailShieldCatalog.defaults(enabledByDefault: true)
+        )
+        let decision = EmailPolicyEngine.decision(
+            for: email,
+            context: makeContext(ruleSet: ruleSet, sharedEmailIDs: [email.emailID])
+        )
+        #expect(decision.allowed == false)
+        #expect(decision.kind == .shield)
     }
 
     @Test("Contact rules beat keyword, domain, shield, and default")

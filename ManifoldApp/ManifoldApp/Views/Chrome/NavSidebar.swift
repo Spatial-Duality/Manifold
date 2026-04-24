@@ -129,5 +129,6 @@ private struct SidebarFooterStatus: View {
         .background(.regularMaterial)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Runtime status. \(status.1)")
+        .accessibilityIdentifier("ledger.sidebar.status")
     }
 }

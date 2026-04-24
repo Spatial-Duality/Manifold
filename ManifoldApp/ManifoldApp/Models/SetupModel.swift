@@ -12,32 +12,36 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 @Observable
 @MainActor
 final class SetupModel {
+    private let defaults: UserDefaults
+
     // Onboarding
     var hasCompletedOnboarding: Bool {
-        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "manifold.onboarding.completed") }
+        didSet { defaults.set(hasCompletedOnboarding, forKey: "manifold.onboarding.completed") }
     }
 
     // Preferences
     var launchAtLogin: Bool {
-        didSet { UserDefaults.standard.set(launchAtLogin, forKey: "manifold.launchAtLogin") }
+        didSet { defaults.set(launchAtLogin, forKey: "manifold.launchAtLogin") }
     }
     var notifyOnSessionEnd: Bool {
-        didSet { UserDefaults.standard.set(notifyOnSessionEnd, forKey: "manifold.notify.sessionEnd") }
+        didSet { defaults.set(notifyOnSessionEnd, forKey: "manifold.notify.sessionEnd") }
     }
     var notifyOnAccessDenied: Bool {
-        didSet { UserDefaults.standard.set(notifyOnAccessDenied, forKey: "manifold.notify.accessDenied") }
+        didSet { defaults.set(notifyOnAccessDenied, forKey: "manifold.notify.accessDenied") }
     }
     var sessionNotesMode: SessionNoteCaptureMode {
-        didSet { UserDefaults.standard.set(sessionNotesMode.rawValue, forKey: "manifold.sessionNotes.mode") }
+        didSet { defaults.set(sessionNotesMode.rawValue, forKey: "manifold.sessionNotes.mode") }
     }
 
     init() {
-        hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "manifold.onboarding.completed")
-        launchAtLogin = UserDefaults.standard.bool(forKey: "manifold.launchAtLogin")
-        notifyOnSessionEnd = UserDefaults.standard.object(forKey: "manifold.notify.sessionEnd") as? Bool ?? true
-        notifyOnAccessDenied = UserDefaults.standard.object(forKey: "manifold.notify.accessDenied") as? Bool ?? true
+        let defaults = AppTestEnvironment.userDefaults()
+        self.defaults = defaults
+        hasCompletedOnboarding = defaults.bool(forKey: "manifold.onboarding.completed")
+        launchAtLogin = defaults.bool(forKey: "manifold.launchAtLogin")
+        notifyOnSessionEnd = defaults.object(forKey: "manifold.notify.sessionEnd") as? Bool ?? true
+        notifyOnAccessDenied = defaults.object(forKey: "manifold.notify.accessDenied") as? Bool ?? true
         sessionNotesMode = SessionNoteCaptureMode(
-            rawValue: UserDefaults.standard.string(forKey: "manifold.sessionNotes.mode") ?? ""
+            rawValue: defaults.string(forKey: "manifold.sessionNotes.mode") ?? ""
         ) ?? .off
     }
 }

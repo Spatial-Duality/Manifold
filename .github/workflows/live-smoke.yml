@@ -1,0 +1,21 @@
+name: Live Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  checklist:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print live smoke checklist
+        run: bash test-e2e.sh --markdown > live-smoke-checklist.md
+
+      - name: Upload live smoke checklist
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-checklist
+          path: live-smoke-checklist.md

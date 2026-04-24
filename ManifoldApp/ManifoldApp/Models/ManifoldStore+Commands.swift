@@ -27,6 +27,8 @@ extension ManifoldStore: ManifoldCommands {
         case .once:               xpcAnswer = "once"
         case .forSession:         xpcAnswer = "session"
         case .addToDefault:       xpcAnswer = "default"
+        case .shareRedacted:      xpcAnswer = "shareRedacted"
+        case .shareOriginalOnce:  xpcAnswer = "shareOriginalOnce"
         }
         await governance.answerApproval(id: request.id, answer: xpcAnswer)
     }
@@ -34,11 +36,35 @@ extension ManifoldStore: ManifoldCommands {
     // MARK: - Sessions
 
     func startSession(_ draft: SessionDraft) async throws {
-        // Phase 1: reuse the existing tracked session primitive.
-        // Naming / duration / agents will be honored when SessionStore
-        // lands in a later phase.
+        try await startProtectedRun(draft: draft)
+    }
+
+    func previewProtectedRun(draft: SessionDraft) async throws {
         let target = draft.agents.first ?? .cowork
-        await startSession(targetApp: target)
+        session.previewError = nil
+        await session.computePreview(targetApp: target)
+        if let error = session.previewError {
+            throw StoreCommandError.message(error)
+        }
+        await refreshAll()
+    }
+
+    func startProtectedRun(draft: SessionDraft) async throws {
+        let target = draft.agents.first ?? .cowork
+        var capturedError: String?
+        await session.startSession(
+            targetApp: target,
+            summaryFraming: draft.name.trimmedNilIfEmpty,
+            noteCaptureMode: draft.trackWrites ? .basic : .off,
+            onError: { [weak self] message in
+                capturedError = message
+                self?.lastError = message
+            }
+        )
+        if let capturedError {
+            throw StoreCommandError.message(capturedError)
+        }
+        await refreshAll()
     }
 
     func finishActiveSession() async throws {
@@ -101,7 +127,8 @@ extension ManifoldStore: ManifoldCommands {
     var activeSession: SessionRecord? { governance.activeSession }
     var pendingRequests: [ApprovalRequest] { governance.pendingRequests }
     var recentSessionEntries: [SessionHistoryEntry] {
-        activity.sessions.compactMap(Self.historyEntry(from:))
+        (dataControlSummary?.recentHandoffSessions ?? activity.sessions)
+            .compactMap(Self.historyEntry(from:))
     }
     func drift(for entry: SessionHistoryEntry) -> SessionDrift { governance.drift(for: entry) }
 
@@ -130,3 +157,20 @@ private let logger = Logger(
     subsystem: "com.spatialduality.manifold",
     category: "store-commands"
 )
+
+private enum StoreCommandError: LocalizedError {
+    case message(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .message(let message): message
+        }
+    }
+}
+
+private extension String {
+    var trimmedNilIfEmpty: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}

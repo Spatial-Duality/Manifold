@@ -44,6 +44,12 @@ public actor ManifoldRuntime {
     public nonisolated let exposureStore: ExposureStore
     /// Unified cross-scope rule catalog (file / email / agent).
     public nonisolated let ruleStore: RuleStore
+    /// Privacy preflight settings, cache, and approval overrides.
+    public nonisolated let privacyStore: PrivacyStore
+    /// Runtime coordinator for governed privacy scans and backend selection.
+    public nonisolated let privacyCoordinator: PrivacyPreflightCoordinator
+    /// Runtime coordinator for background privacy indexing.
+    public nonisolated let privacyIndexCoordinator: PrivacyIndexCoordinator
 
     private var bridges: [String: ManifoldBridge] = [:]
     private var recordedCoverageEventKeys: Set<String> = []
@@ -73,6 +79,25 @@ public actor ManifoldRuntime {
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let exposureStore = ExposureStore(db: db)
         let ruleStore = RuleStore(db: db)
+        let privacyStore = PrivacyStore(db: db)
+        let privacyStorageURL = rootURL.appendingPathComponent("privacy")
+        let rulesOnlyBackend = RulesOnlyPrivacyBackend()
+        let officialCLIBackend = OfficialCLIPrivacyBackend(storageURL: privacyStorageURL)
+        let privacyCoordinator = PrivacyPreflightCoordinator(
+            store: privacyStore,
+            defaultStorageURL: privacyStorageURL,
+            rulesOnlyBackend: rulesOnlyBackend,
+            officialCLIBackend: officialCLIBackend
+        )
+        let privacyIndexCoordinator = PrivacyIndexCoordinator(
+            store: privacyStore,
+            grantStore: grantStore,
+            emailStore: emailStore,
+            emailSyncEngine: emailSyncEngine,
+            defaultStoragePath: privacyStorageURL.path,
+            rulesOnlyBackend: rulesOnlyBackend,
+            officialCLIBackend: officialCLIBackend
+        )
 
         self.db = db
         self.contentStore = contentStore
@@ -91,6 +116,9 @@ public actor ManifoldRuntime {
         self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
         self.ruleStore = ruleStore
+        self.privacyStore = privacyStore
+        self.privacyCoordinator = privacyCoordinator
+        self.privacyIndexCoordinator = privacyIndexCoordinator
 
         runtimeLogger.info("Initialized runtime at \(rootURL.path, privacy: .public)")
     }
@@ -104,6 +132,8 @@ public actor ManifoldRuntime {
         } catch {
             runtimeLogger.error("Rule catalog seeding failed: \(String(describing: error), privacy: .public)")
         }
+
+        await privacyIndexCoordinator.bootstrap()
     }
 
     /// Returns the bridge for a connection, creating it if this is the first request for that connection.
@@ -128,6 +158,7 @@ public actor ManifoldRuntime {
             standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore,
             ruleStore: ruleStore,
+            privacyCoordinator: privacyCoordinator,
             targetApp: targetApp,
             serverName: "manifold",
             serverVersion: version,
@@ -326,7 +357,7 @@ public actor ManifoldRuntime {
                         defaultPolicy: policy.defaultEmailPolicy,
                         emailSensitivity: policy.emailSensitivity
                     )
-                let sharedEmailIDs = (try? emailStore.sharedEmailIDs()) ?? []
+                let sharedEmailIDs = (try? emailStore.sharedEmailIDs(agent: policy.agent)) ?? []
                 let temporaryRevealIDs = Set((try? await policyStore.temporaryReveals(for: policy.agent).map(\.emailID)) ?? [])
                 let context = EmailPolicyEngine.Context(
                     agent: policy.agent,
@@ -369,6 +400,26 @@ public actor ManifoldRuntime {
     /// Returns the compact email-governance summary used by the app UI.
     public func emailGovernanceSummary(for agent: TargetApp) async throws -> AgentEmailGovernanceSummary {
         try await emailRuleStore.emailGovernanceSummary(for: agent)
+    }
+
+    /// Counts emails currently visible to an agent through the same policy engine
+    /// used by MCP reads/searches.
+    public func visibleEmailCount(for agent: TargetApp, limit: Int = 5_000) async throws -> Int {
+        let policy = try await policyStore.policy(for: agent)
+        let ruleSet = try await emailRuleStore.ruleSet(for: agent)
+        let sharedEmailIDs = try emailStore.sharedEmailIDs(agent: agent)
+        let temporaryRevealIDs = Set((try await policyStore.temporaryReveals(for: agent)).map(\.emailID))
+        let context = EmailPolicyEngine.Context(
+            agent: agent,
+            ruleSet: ruleSet,
+            policy: policy,
+            sharedEmailIDs: sharedEmailIDs,
+            temporaryRevealIDs: temporaryRevealIDs,
+            explicitGrantEmailIDs: nil,
+            sensitivity: ruleSet.emailSensitivity
+        )
+        let emails = try emailStore.allEmailMessages(limit: limit)
+        return emails.filter { EmailPolicyEngine.decision(for: $0, context: context).allowed }.count
     }
 
     /// Returns the default local storage root for the runtime.

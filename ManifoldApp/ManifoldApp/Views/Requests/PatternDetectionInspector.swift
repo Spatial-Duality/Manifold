@@ -8,34 +8,33 @@ import SwiftUI
 import ManifoldKit
 
 struct PatternDetectionInspector: View {
-    @Environment(ManifoldStore.self) private var store
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.s3) {
-                Text("Patterns")
-                    .font(ManifoldType.tiny.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .tracking(0.5)
-
-                VStack(alignment: .leading, spacing: Spacing.s2) {
-                    Image(systemName: "chart.bar.xaxis")
-                        .font(.title3)
-                        .foregroundStyle(ManifoldPalette.attention)
-                    Text("No patterns yet")
-                        .font(ManifoldType.bodyMedium)
-                    Text("When you deny the same request shape three or more times, Manifold offers to turn it into a rule. You'll see the matching files and a 14-day denial chart.")
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(ManifoldPalette.text2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(Spacing.s3)
-                .background(
-                    RoundedRectangle(cornerRadius: Spacing.r4)
-                        .fill(ManifoldPalette.attentionSoft)
-                )
+        VStack(alignment: .leading, spacing: Spacing.s3) {
+            HStack(spacing: Spacing.s2) {
+                Image(systemName: "chart.bar.xaxis")
+                    .foregroundStyle(ManifoldPalette.attention)
+                Text("No repeated denials yet")
+                    .font(ManifoldType.captionMedium)
             }
-            .padding(Spacing.s4)
+            Text("After the same request shape is denied three times, Manifold offers a suggested rule with its matching files, emails, or privacy categories.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(ManifoldPalette.text2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: Spacing.s1) {
+                Pill(text: "3x deny", variant: .attention)
+                Pill(text: "suggest rule", variant: .preview)
+            }
         }
+        .padding(Spacing.s3)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .fill(ManifoldPalette.attentionSoft.opacity(0.85))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .strokeBorder(ManifoldPalette.attention.opacity(0.18), lineWidth: 0.5)
+        )
+        .accessibilityIdentifier("requests.patterns")
     }
 }

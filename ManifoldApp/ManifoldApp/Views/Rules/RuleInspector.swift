@@ -11,6 +11,7 @@ import SwiftUI
 import ManifoldKit
 
 struct RuleInspector: View {
+    @Environment(ManifoldStore.self) private var store
     @Bindable var model: RulesModel
     @State private var draft: RuleRecord?
     @State private var validationError: String?
@@ -26,6 +27,7 @@ struct RuleInspector: View {
                         nameFocused = rule.name == "New file rule"
                             || rule.name == "New email rule"
                             || rule.name == "New agent rule"
+                            || rule.name == "New privacy filter rule"
                     }
                     .onChange(of: rule.id) { _, _ in
                         draft = rule
@@ -36,6 +38,7 @@ struct RuleInspector: View {
             }
         }
         .background(ManifoldPalette.surface2)
+        .accessibilityIdentifier("rules.inspector")
     }
 
     // MARK: - Empty
@@ -55,6 +58,7 @@ struct RuleInspector: View {
         }
         .padding(Spacing.s6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("rules.inspector.empty")
     }
 
     // MARK: - Editor
@@ -67,6 +71,10 @@ struct RuleInspector: View {
 
                 if !rule.source.isMutable {
                     seededBanner
+                }
+
+                if (draft ?? rule).isPrivacyFilterBacked {
+                    PrivacyFilterRuleBanner(status: store.governance.privacyRuntimeStatus)
                 }
 
                 Form {
@@ -83,6 +91,7 @@ struct RuleInspector: View {
                         .focused($nameFocused)
                         .disabled(!rule.source.isMutable)
                         .onSubmit { commit() }
+                        .accessibilityIdentifier("rules.inspector.name")
 
                         TextField("Explanation (optional)", text: Binding(
                             get: { draft?.explanation ?? rule.explanation },
@@ -95,6 +104,29 @@ struct RuleInspector: View {
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(2...4)
                         .disabled(!rule.source.isMutable)
+                        .accessibilityIdentifier("rules.inspector.explanation")
+                    }
+
+                    Section("What this rule does") {
+                        Picker("When matched", selection: Binding(
+                            get: { draft?.action ?? rule.action },
+                            set: { newValue in
+                                var d = draft ?? rule
+                                d.action = newValue
+                                draft = d
+                            }
+                        )) {
+                            ForEach(actionChoices(for: draft ?? rule), id: \.self) { action in
+                                Text(actionLabel(action)).tag(action)
+                            }
+                        }
+                        .disabled(!rule.source.isMutable)
+                        .accessibilityIdentifier("rules.inspector.action")
+
+                        Text(actionDescription(draft?.action ?? rule.action))
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Section("Conditions") {
@@ -110,22 +142,6 @@ struct RuleInspector: View {
                             ),
                             isEditable: rule.source.isMutable
                         )
-                    }
-
-                    Section("Action") {
-                        Picker("When matched", selection: Binding(
-                            get: { draft?.action ?? rule.action },
-                            set: { newValue in
-                                var d = draft ?? rule
-                                d.action = newValue
-                                draft = d
-                            }
-                        )) {
-                            ForEach(actionChoices(for: rule.scope), id: \.self) { action in
-                                Text(actionLabel(action)).tag(action)
-                            }
-                        }
-                        .disabled(!rule.source.isMutable)
                     }
 
                     Section("Agents") {
@@ -156,6 +172,7 @@ struct RuleInspector: View {
             .padding(.horizontal, Spacing.s4)
             .padding(.vertical, Spacing.s3)
         }
+        .accessibilityIdentifier("rules.inspector.editor")
     }
 
     // MARK: - Header
@@ -164,7 +181,7 @@ struct RuleInspector: View {
         HStack(spacing: Spacing.s3) {
             Image(systemName: rule.scope.systemImage)
                 .font(.system(size: 24, weight: .regular))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(rule.isPrivacyFilterBacked ? ManifoldPalette.selection : .secondary)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.name)
@@ -195,6 +212,7 @@ struct RuleInspector: View {
         .padding(Spacing.s3)
         .background(ManifoldPalette.pausedSoft)
         .clipShape(RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous))
+        .accessibilityIdentifier("rules.inspector.seeded")
     }
 
     // MARK: - Action bar
@@ -214,11 +232,13 @@ struct RuleInspector: View {
                 Button("Delete", role: .destructive) {
                     Task { await model.delete(id: rule.id) }
                 }
+                .accessibilityIdentifier("rules.inspector.delete")
 
                 Button("Save Changes") { commit() }
                     .buttonStyle(.borderedProminent)
                     .disabled(!isDirty(against: rule))
                     .keyboardShortcut(.return, modifiers: [.command])
+                    .accessibilityIdentifier("rules.inspector.save")
             }
         }
     }
@@ -250,8 +270,11 @@ struct RuleInspector: View {
         }
     }
 
-    private func actionChoices(for scope: RuleScope) -> [ManifoldKit.RuleAction] {
-        switch scope {
+    private func actionChoices(for rule: RuleRecord) -> [ManifoldKit.RuleAction] {
+        if rule.isPrivacyFilterBacked {
+            return [.allow, .deny, .warn, .redact, .log]
+        }
+        switch rule.scope {
         case .file:  return [.allow, .deny, .warn, .redact, .log]
         case .email: return [.allow, .deny, .warn, .redact, .summarize, .downgrade, .log]
         case .agent: return [.allow, .deny, .warn, .log]
@@ -263,11 +286,74 @@ struct RuleInspector: View {
         case .allow:     return "Allow"
         case .deny:      return "Deny"
         case .warn:      return "Warn"
-        case .redact:    return "Redact PII"
+        case .redact:    return "Redact sensitive spans"
         case .summarize: return "Summarize"
         case .downgrade: return "Metadata only"
         case .log:       return "Log only"
         }
+    }
+
+    private func actionDescription(_ action: ManifoldKit.RuleAction) -> String {
+        switch action {
+        case .allow:
+            return "Allow matching content through when no higher-priority deny blocks it."
+        case .deny:
+            return "Block matching content before it leaves Manifold."
+        case .warn:
+            return "Let matching content through, but record a warning in the ledger."
+        case .redact:
+            return "Share matching content only after privacy-sensitive spans are stripped."
+        case .summarize:
+            return "Share a summary instead of the original content."
+        case .downgrade:
+            return "Share metadata only, without the body or file contents."
+        case .log:
+            return "Do not change access; only record that the rule matched."
+        }
+    }
+}
+
+// MARK: - Privacy filter backing
+
+private struct PrivacyFilterRuleBanner: View {
+    let status: PrivacyRuntimeStatus?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.s2) {
+            Image(systemName: "sparkles.rectangle.stack")
+                .foregroundStyle(ManifoldPalette.selection)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(ManifoldType.captionMedium)
+                Text(message)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.s3)
+        .background(ManifoldPalette.selectionSoft.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous))
+        .accessibilityIdentifier("rules.inspector.privacyFilter")
+    }
+
+    private var title: String {
+        guard let status else { return "Privacy filter rule" }
+        if status.effectiveBackend == .officialCLI {
+            return "OpenAI privacy filter rule"
+        }
+        return "\(status.effectiveBackend.displayName) privacy rule"
+    }
+
+    private var message: String {
+        guard let status else {
+            return "This rule uses privacy matcher output during preflight before content is shared with Claude or Codex."
+        }
+        if status.modelLoaded {
+            return "The loaded privacy backend finds categories, identity matches, allowlist hits, and severity. This rule then decides whether to deny, redact, warn, or log the exposure."
+        }
+        return "This rule is ready, but the privacy backend is not loaded. Enable the model in Privacy settings before relying on category or severity matches."
     }
 }
 
@@ -287,6 +373,7 @@ private struct AgentPicker: View {
             ))
             .toggleStyle(.switch)
             .disabled(!isEditable)
+            .accessibilityIdentifier("rules.inspector.agents.all")
 
             if !agents.isEmpty {
                 HStack {
@@ -368,6 +455,10 @@ enum RuleSummary {
         case .agentDelete:                        return "any delete call"
         case .agentSessionLongerThan(let t):      return "session longer than \(minutes(t))"
         case .agentPayloadLargerThan(let n):      return "payload > \(bytes(n))"
+        case .privacyContainsCategory(let c):     return "contains \(c.displayName.lowercased())"
+        case .privacyMatchesMyIdentity:           return "matches My Identity"
+        case .privacyInOrgAllowlist:              return "on org allowlist"
+        case .privacySeverityAtLeast(let s):      return "privacy ≥ \(s.rawValue)"
         case .all(let children):                  return children.map(summarize).joined(separator: " AND ")
         case .any(let children):                  return children.map(summarize).joined(separator: " OR ")
         case .not(let child):                     return "NOT (\(summarize(child)))"

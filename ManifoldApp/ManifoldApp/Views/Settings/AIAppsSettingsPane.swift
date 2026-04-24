@@ -47,6 +47,29 @@ struct AgentsSettingsPane: View {
                     )
                 }
             }
+
+            if store.governance.privacySettings != nil {
+                if let claudePrivacy = store.governance.claudePrivacyPolicy {
+                    Section {
+                        AgentPrivacyPolicyEditor(policy: claudePrivacy)
+                    } header: {
+                        HStack(spacing: Spacing.s2) {
+                            Text("Privacy policy · Claude")
+                            Spacer(minLength: 0)
+                            Text("Global settings live in the Privacy pane")
+                                .font(ManifoldType.caption)
+                                .foregroundStyle(.secondary)
+                                .textCase(nil)
+                        }
+                    }
+                }
+
+                if let codexPrivacy = store.governance.codexPrivacyPolicy {
+                    Section("Privacy policy · Codex") {
+                        AgentPrivacyPolicyEditor(policy: codexPrivacy)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .task {
@@ -194,5 +217,89 @@ private struct AccessRecordingLevelPicker: View {
 
     private var currentLevel: AccessRecordingLevel {
         store.governance.policy(for: agent)?.accessRecordingLevel ?? selection
+    }
+}
+
+private struct AgentPrivacyPolicyEditor: View {
+    @Environment(ManifoldStore.self) var store
+    let policy: AgentPrivacyPolicy
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s3) {
+            Picker("Text content", selection: textHandlingBinding) {
+                ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
+            Picker("Code and diffs", selection: codeHandlingBinding) {
+                ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
+            Picker("Secrets", selection: secretHandlingBinding) {
+                ForEach(PrivacySecretHandling.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.s1) {
+                Text("Categories")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(PrivacyCategory.allCases, id: \.self) { category in
+                    Toggle(category.displayName, isOn: categoryBinding(category))
+                }
+            }
+        }
+    }
+
+    private var textHandlingBinding: Binding<PrivacyHandlingMode> {
+        Binding(
+            get: { store.governance.privacyPolicy(for: policy.agent)?.textHandling ?? policy.textHandling },
+            set: { newValue in
+                update { $0.textHandling = newValue }
+            }
+        )
+    }
+
+    private var codeHandlingBinding: Binding<PrivacyHandlingMode> {
+        Binding(
+            get: { store.governance.privacyPolicy(for: policy.agent)?.codeHandling ?? policy.codeHandling },
+            set: { newValue in
+                update { $0.codeHandling = newValue }
+            }
+        )
+    }
+
+    private var secretHandlingBinding: Binding<PrivacySecretHandling> {
+        Binding(
+            get: { store.governance.privacyPolicy(for: policy.agent)?.secretHandling ?? policy.secretHandling },
+            set: { newValue in
+                update { $0.secretHandling = newValue }
+            }
+        )
+    }
+
+    private func categoryBinding(_ category: PrivacyCategory) -> Binding<Bool> {
+        Binding(
+            get: { store.governance.privacyPolicy(for: policy.agent)?.enabledCategories.contains(category) ?? policy.enabledCategories.contains(category) },
+            set: { isEnabled in
+                update {
+                    if isEnabled {
+                        $0.enabledCategories.insert(category)
+                    } else {
+                        $0.enabledCategories.remove(category)
+                    }
+                }
+            }
+        )
+    }
+
+    private func update(_ mutate: (inout AgentPrivacyPolicy) -> Void) {
+        var updated = store.governance.privacyPolicy(for: policy.agent) ?? policy
+        mutate(&updated)
+        Task { await store.governance.updatePrivacyPolicy(updated) }
     }
 }

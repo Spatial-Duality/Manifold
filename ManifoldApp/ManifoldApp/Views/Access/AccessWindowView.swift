@@ -54,7 +54,20 @@ struct AccessView: View {
                         accessibilityIdentifier: "access.tab.\(item.rawValue)"
                     )
                 }
-            )
+            ) {
+                AccessAddControls(
+                    onAddFolder: {
+                        if store.addSourceFromPicker() {
+                            selectedSection = .folders
+                        }
+                    },
+                    onAddFiles: {
+                        if store.addFilesFromPicker() {
+                            selectedSection = .files
+                        }
+                    }
+                )
+            }
             Divider()
 
             if store.sources.isEmpty {
@@ -86,6 +99,7 @@ struct AccessView: View {
             guard let delta = notification.object as? Int else { return }
             cycleTab(by: delta)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ledger.surface.access")
     }
 
@@ -96,5 +110,30 @@ struct AccessView: View {
         withAnimation(ManifoldMotion.micro) {
             selectedSection = enabledSections[nextIndex]
         }
+    }
+}
+
+private struct AccessAddControls: View {
+    let onAddFolder: () -> Void
+    let onAddFiles: () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.s2) {
+            Button(action: onAddFolder) {
+                Label("Add Folder", systemImage: "folder.badge.plus")
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .help("Add folders Manifold can protect and share per agent")
+            .accessibilityIdentifier("access.addFolder")
+
+            Button(action: onAddFiles) {
+                Label("Add Files", systemImage: "doc.badge.plus")
+            }
+            .help("Pick files to bring their containing folders into Access")
+            .accessibilityIdentifier("access.addFiles")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .labelStyle(.titleAndIcon)
     }
 }

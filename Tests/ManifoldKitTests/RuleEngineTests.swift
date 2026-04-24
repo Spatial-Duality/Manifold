@@ -264,6 +264,55 @@ struct RuleEngineTests {
         #expect(engine.evaluate(.agentTool(tool: .read, payloadBytes: nil), against: [rule], agent: .codex, context: rCtx).action == .allow)
     }
 
+    // MARK: - Privacy matchers
+
+    @Test("Privacy category rules use the privacy probe")
+    func privacyCategoryUsesProbe() {
+        let rule = RuleRecord(
+            id: "privacy-secret",
+            name: "Block secrets",
+            scope: .file,
+            matcher: .privacyContainsCategory(.secret),
+            action: .deny,
+            source: .user
+        )
+        let context = RuleEvalContext(
+            privacyProbe: PrivacyProbe(categories: [.secret], severity: .critical)
+        )
+
+        let decision = engine.evaluate(
+            .fileRead(path: "/repo/.env"),
+            against: [rule],
+            agent: .codex,
+            context: context
+        )
+
+        #expect(decision.action == .deny)
+        #expect(decision.matchedRuleID == "privacy-secret")
+    }
+
+    @Test("Privacy rules do not fire without model findings")
+    func privacyRulesNeedProbeFindings() {
+        let rule = RuleRecord(
+            id: "privacy-high",
+            name: "Redact high privacy content",
+            scope: .email,
+            matcher: .privacySeverityAtLeast(.high),
+            action: .redact,
+            source: .user
+        )
+
+        let decision = engine.evaluate(
+            .emailRead(emailID: "m1"),
+            against: [rule],
+            agent: .cowork,
+            context: RuleEvalContext()
+        )
+
+        #expect(decision.action == .allow)
+        #expect(decision.defaultPolicyApplied == true)
+    }
+
     // MARK: - Windows
 
     @Test("sessionOnly rule ignored when no session is active")

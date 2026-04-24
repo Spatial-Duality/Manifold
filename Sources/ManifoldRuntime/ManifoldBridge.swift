@@ -27,6 +27,7 @@ public actor ManifoldBridge {
     private let standingWriteApprovalStore: StandingWriteApprovalStore?
     private let exposureStore: ExposureStore?
     private let ruleStore: RuleStore?
+    private let privacyCoordinator: PrivacyPreflightCoordinator?
     nonisolated let targetApp: TargetApp
     private let profileID: String
     private var runtimeContext: AgentRuntimeContext
@@ -48,6 +49,7 @@ public actor ManifoldBridge {
         standingWriteApprovalStore: StandingWriteApprovalStore? = nil,
         exposureStore: ExposureStore? = nil,
         ruleStore: RuleStore? = nil,
+        privacyCoordinator: PrivacyPreflightCoordinator? = nil,
         targetApp: TargetApp = .cowork,
         profileID: String = "default",
         serverName: String = "manifold",
@@ -69,6 +71,7 @@ public actor ManifoldBridge {
         self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
         self.ruleStore = ruleStore
+        self.privacyCoordinator = privacyCoordinator
         self.targetApp = targetApp
         self.profileID = profileID
         self.runtimeContext = AgentRuntimeContext(
@@ -148,6 +151,8 @@ public actor ManifoldBridge {
                 return DecisionContext(reason: "policy_denied", accessMode: "tracked_run", policySnapshot: nil)
             case .intentRequired:
                 return DecisionContext(reason: "intent_required", accessMode: "governed", policySnapshot: nil)
+            case .privacyReviewRequired:
+                return DecisionContext(reason: "privacy_review_required", accessMode: "privacy", policySnapshot: nil)
             case .noSources, .fileNotFound, .invalidPath:
                 return DecisionContext(reason: "policy_denied", accessMode: "unknown", policySnapshot: nil)
             case .ruleDenied:
@@ -241,6 +246,290 @@ public actor ManifoldBridge {
             try await exposureStore.recordExposure(exposure)
         } catch {
             logger.error("Failed to record exposure: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func classifyPrivacyContentKind(
+        toolName: String,
+        resourcePath: String?,
+        text: String
+    ) -> PrivacyContentKind {
+        switch toolName {
+        case "diff_file":
+            return .diff
+        case "read_email", "search_emails":
+            return .email
+        case "search_files":
+            return .snippet
+        case "search_structured":
+            return .structuredResult
+        case "extract_file":
+            return .archiveEntry
+        default:
+            break
+        }
+
+        let path = resourcePath?.lowercased() ?? ""
+        let ext = (path as NSString).pathExtension.lowercased()
+        let codeExtensions: Set<String> = [
+            "c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "html", "java", "js", "json",
+            "kt", "m", "mdx", "mm", "php", "pl", "py", "rb", "rs", "scss", "sh", "sql",
+            "swift", "ts", "tsx", "vue", "xml", "yaml", "yml"
+        ]
+        let logExtensions: Set<String> = ["log", "trace", "out"]
+
+        if codeExtensions.contains(ext) {
+            return .sourceCode
+        }
+        if logExtensions.contains(ext) {
+            return .log
+        }
+        if toolName == "read_range", codeExtensions.contains(ext) {
+            return .sourceCode
+        }
+        if toolName == "search_structured" {
+            return .structuredResult
+        }
+        if path.contains(".log") || text.contains("INFO ") || text.contains("ERROR ") {
+            return .log
+        }
+        return .document
+    }
+
+    private func privacyAuditMetadata(
+        for delivery: PrivacyDelivery,
+        contentKind: PrivacyContentKind
+    ) -> [String: String] {
+        [
+            "privacy_outcome": delivery.outcome.rawValue,
+            "privacy_summary": delivery.findingsSummary,
+            "privacy_backend": delivery.backend.rawValue,
+            "privacy_model_version": delivery.modelVersion,
+            "privacy_content_kind": contentKind.rawValue,
+            "privacy_categories": delivery.matchedCategories.map(\.rawValue).joined(separator: ","),
+        ]
+    }
+
+    private func logPrivacyOutcome(
+        resourcePath: String?,
+        contentKind: PrivacyContentKind,
+        delivery: PrivacyDelivery,
+        grantID: String?
+    ) async {
+        guard delivery.outcome != .clean else { return }
+        let metadata = mergedMetadata(privacyAuditMetadata(for: delivery, contentKind: contentKind))
+        try? await auditStore.log(
+            action: .sensitivityWarning,
+            agent: agentName,
+            filePath: resourcePath,
+            metadata: metadata,
+            grantID: grantID
+        )
+    }
+
+    private func applyPrivacyPreflight(
+        toolName: String,
+        resourcePath: String?,
+        text: String,
+        decisionID: String?,
+        grantID: String? = nil,
+        contentKind: PrivacyContentKind? = nil
+    ) async throws -> String {
+        guard let privacyCoordinator else { return text }
+        let resolvedContentKind = contentKind ?? classifyPrivacyContentKind(
+            toolName: toolName,
+            resourcePath: resourcePath,
+            text: text
+        )
+        let delivery = try await privacyCoordinator.preflight(
+            agent: targetApp,
+            toolName: toolName,
+            resourcePath: resourcePath,
+            text: text,
+            contentKind: resolvedContentKind,
+            accessDecisionID: decisionID
+        )
+        await logPrivacyOutcome(
+            resourcePath: resourcePath,
+            contentKind: resolvedContentKind,
+            delivery: delivery,
+            grantID: grantID
+        )
+        let governedDelivery = try await enforcePrivacyRules(
+            delivery: delivery,
+            toolName: toolName,
+            resourcePath: resourcePath,
+            contentKind: resolvedContentKind,
+            grantID: grantID
+        )
+
+        switch governedDelivery.outcome {
+        case .clean, .warning, .filtered:
+            return governedDelivery.deliveredText ?? text
+        case .blocked:
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: "Privacy Preflight",
+                explanation: "Detected secrets or sensitive identifiers and blocked the original payload."
+            )
+        case .approvalRequired:
+            let contextJSON: String?
+            if let context = governedDelivery.approvalContext,
+               let data = try? JSONEncoder().encode(context) {
+                contextJSON = String(data: data, encoding: .utf8)
+            } else {
+                contextJSON = nil
+            }
+            _ = try? await approvalQueue?.submit(
+                connectionID: runtimeContext.connectionID,
+                agent: agentName,
+                path: resourcePath ?? toolName,
+                action: "read",
+                kind: .privacyExposure,
+                contextJSON: contextJSON
+            )
+            throw ManifoldMCPError.privacyReviewRequired(
+                "Privacy Preflight needs review before sharing the original. Open Requests in Manifold to share a redacted version or approve the original once."
+            )
+        }
+    }
+
+    private func enforcePrivacyRules(
+        delivery: PrivacyDelivery,
+        toolName: String,
+        resourcePath: String?,
+        contentKind: PrivacyContentKind,
+        grantID: String?
+    ) async throws -> PrivacyDelivery {
+        guard let ruleStore else { return delivery }
+
+        switch delivery.outcome {
+        case .blocked, .approvalRequired:
+            return delivery
+        case .clean, .warning, .filtered:
+            break
+        }
+
+        let request = privacyRuleRequest(
+            toolName: toolName,
+            resourcePath: resourcePath,
+            contentKind: contentKind,
+            payloadBytes: delivery.deliveredText?.utf8.count
+        )
+        let rules: [RuleRecord]
+        do {
+            rules = try await ruleStore.rules(scope: request.scope).filter { $0.matcher.usesPrivacyProbe }
+        } catch {
+            logger.error("Privacy rule gate: failed to load rules — \(String(describing: error), privacy: .public)")
+            return delivery
+        }
+        guard !rules.isEmpty else { return delivery }
+
+        let privacyProbe = PrivacyProbe(
+            categories: Set(delivery.matchedCategories),
+            severity: delivery.severity,
+            matchesMyIdentity: false,
+            inOrgAllowlist: false
+        )
+        let context = privacyRuleContext(
+            request: request,
+            resourcePath: resourcePath,
+            payloadBytes: delivery.deliveredText?.utf8.count,
+            privacyProbe: privacyProbe
+        )
+        let decision = RuleEngine().evaluate(
+            request,
+            against: rules,
+            agent: targetApp,
+            context: context
+        )
+        guard decision.action != .allow else { return delivery }
+
+        if let ruleID = decision.matchedRuleID {
+            await ruleStore.recordMatch(id: ruleID)
+        }
+        try? await auditStore.log(
+            action: .sensitivityWarning,
+            agent: agentName,
+            filePath: resourcePath,
+            metadata: mergedMetadata([
+                "grant_id": grantID ?? "",
+                "rule_decision": decision.action.rawValue,
+                "matched_rule_id": decision.matchedRuleID ?? "",
+                "matched_rule_name": decision.matchedRuleName ?? "",
+                "privacy_backend": delivery.backend.rawValue,
+                "privacy_model": delivery.modelVersion,
+            ]),
+            grantID: grantID
+        )
+
+        switch decision.action {
+        case .deny:
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: decision.matchedRuleName ?? "Privacy rule",
+                explanation: decision.explanation
+            )
+        case .redact:
+            return delivery.replacingDeliveredText(delivery.redactedText, outcome: .filtered)
+        case .summarize:
+            return delivery.replacingDeliveredText(
+                "Privacy summary: \(delivery.findingsSummary)",
+                outcome: .filtered
+            )
+        case .downgrade:
+            let categories = delivery.matchedCategories.map(\.displayName).joined(separator: ", ")
+            return delivery.replacingDeliveredText(
+                "Privacy metadata only: \(categories.isEmpty ? "No sensitive categories" : categories)",
+                outcome: .filtered
+            )
+        case .warn, .log, .allow:
+            return delivery
+        }
+    }
+
+    private func privacyRuleRequest(
+        toolName: String,
+        resourcePath: String?,
+        contentKind: PrivacyContentKind,
+        payloadBytes: Int?
+    ) -> RuleRequest {
+        if contentKind == .email {
+            return .emailRead(emailID: resourcePath ?? toolName)
+        }
+        if let resourcePath {
+            return .fileRead(path: resourcePath)
+        }
+        return .agentTool(tool: .read, payloadBytes: payloadBytes.map(Int64.init))
+    }
+
+    private func privacyRuleContext(
+        request: RuleRequest,
+        resourcePath: String?,
+        payloadBytes: Int?,
+        privacyProbe: PrivacyProbe
+    ) -> RuleEvalContext {
+        switch request {
+        case .fileRead(let path), .fileWrite(let path):
+            return RuleEvalContext(
+                fileProbe: FileProbe(path: resourcePath ?? path),
+                privacyProbe: privacyProbe
+            )
+        case .emailRead(let emailID):
+            return RuleEvalContext(
+                emailProbe: EmailProbe(
+                    emailID: emailID,
+                    senderEmail: "",
+                    senderDomain: "",
+                    subject: ""
+                ),
+                privacyProbe: privacyProbe
+            )
+        case .agentTool(let tool, let bytes):
+            return RuleEvalContext(
+                agentProbe: AgentProbe(agent: targetApp, tool: tool, payloadBytes: bytes ?? payloadBytes.map(Int64.init)),
+                privacyProbe: privacyProbe
+            )
+        case .sessionTick:
+            return RuleEvalContext(privacyProbe: privacyProbe)
         }
     }
 
@@ -838,7 +1127,7 @@ public actor ManifoldBridge {
                 defaultPolicy: policy.defaultEmailPolicy,
                 emailSensitivity: policy.emailSensitivity
             )
-        let sharedEmailIDs = try emailStore.sharedEmailIDs()
+        let sharedEmailIDs = try emailStore.sharedEmailIDs(agent: policy.agent)
         let temporaryRevealIDs = Set((try await policyStore?.temporaryReveals(for: policy.agent) ?? []).map(\.emailID))
         return EmailPolicyEngine.Context(
             agent: policy.agent,
@@ -1316,6 +1605,13 @@ public actor ManifoldBridge {
             fileURL: identity.fileURL,
             selection: artifact?.selection
         )
+        let deliveredText = try await applyPrivacyPreflight(
+            toolName: "read_file",
+            resourcePath: canonicalPath,
+            text: read.text,
+            decisionID: decisionID,
+            grantID: grantID
+        )
 
         try? await auditStore.log(
             action: .fileRead,
@@ -1324,13 +1620,13 @@ public actor ManifoldBridge {
             metadata: mergedMetadata([
                 "grant_id": grantID,
                 "mount": mountName,
-                "bytes": "\(read.bytesRead)",
+                "bytes": "\(deliveredText.utf8.count)",
                 "truncated": read.truncated ? "true" : "false",
             ]),
             grantID: grantID
         )
-        await recordExposure(toolName: "read_file", resourcePath: canonicalPath, text: read.text, exposureType: "full_file", decisionID: decisionID, intent: intent)
-        return read.text
+        await recordExposure(toolName: "read_file", resourcePath: canonicalPath, text: deliveredText, exposureType: "full_file", decisionID: decisionID, intent: intent)
+        return deliveredText
     }
 
     /// Consults `RuleStore` / `RuleEngine` for a `fileRead` request. Throws `ManifoldMCPError.ruleDenied`
@@ -1738,19 +2034,37 @@ public actor ManifoldBridge {
                 )
             }
         }
+        var deliveredResults: [(path: String, source: String, matches: [String])] = []
         for result in results {
+            var deliveredMatches: [String] = []
             for snippet in result.matches {
-                await recordExposure(
-                    toolName: "search_files",
-                    resourcePath: result.path,
-                    text: snippet,
-                    exposureType: "snippet",
-                    decisionID: resolved.decisionID,
-                    intent: validatedIntent
-                )
+                do {
+                    let deliveredSnippet = try await applyPrivacyPreflight(
+                        toolName: "search_files",
+                        resourcePath: result.path,
+                        text: snippet,
+                        decisionID: resolved.decisionID,
+                        grantID: resolved.grantID,
+                        contentKind: .snippet
+                    )
+                    deliveredMatches.append(deliveredSnippet)
+                    await recordExposure(
+                        toolName: "search_files",
+                        resourcePath: result.path,
+                        text: deliveredSnippet,
+                        exposureType: "snippet",
+                        decisionID: resolved.decisionID,
+                        intent: validatedIntent
+                    )
+                } catch {
+                    continue
+                }
+            }
+            if !deliveredMatches.isEmpty {
+                deliveredResults.append((path: result.path, source: result.source, matches: deliveredMatches))
             }
         }
-        return results
+        return deliveredResults
     }
 
     /// Search files directly in original source paths (standing access).
@@ -1967,8 +2281,16 @@ public actor ManifoldBridge {
         }
 
         let content = try extractFromZip(archivePath: archiveURL.path, entryPath: targetEntry)
-        await recordExposure(toolName: "extract_file", resourcePath: "\(archivePath)#\(targetEntry)", text: content, exposureType: "full_file", decisionID: access.decisionID, intent: validatedIntent)
-        return content
+        let exposedResource = "\(archivePath)#\(targetEntry)"
+        let deliveredText = try await applyPrivacyPreflight(
+            toolName: "extract_file",
+            resourcePath: exposedResource,
+            text: content,
+            decisionID: access.decisionID,
+            grantID: access.grantID
+        )
+        await recordExposure(toolName: "extract_file", resourcePath: exposedResource, text: deliveredText, exposureType: "full_file", decisionID: access.decisionID, intent: validatedIntent)
+        return deliveredText
     }
 
     public func readRange(path: String, startLine: Int, endLine: Int, intent: AccessIntent? = nil) async throws -> String {
@@ -2003,6 +2325,13 @@ public actor ManifoldBridge {
             selection: ArtifactSelection(lineStart: startLine, lineEnd: endLine)
         )
         let canonicalPath = "\(resolved.mount.mountName)/\(resolved.relativePath)"
+        let deliveredText = try await applyPrivacyPreflight(
+            toolName: "read_range",
+            resourcePath: canonicalPath,
+            text: read.text,
+            decisionID: access.decisionID,
+            grantID: access.grantID
+        )
 
         try? await auditStore.log(
             action: .fileRead,
@@ -2017,8 +2346,8 @@ public actor ManifoldBridge {
             grantID: grantID
         )
 
-        await recordExposure(toolName: "read_range", resourcePath: canonicalPath, text: read.text, exposureType: "range", decisionID: access.decisionID, intent: validatedIntent)
-        return read.text
+        await recordExposure(toolName: "read_range", resourcePath: canonicalPath, text: deliveredText, exposureType: "range", decisionID: access.decisionID, intent: validatedIntent)
+        return deliveredText
     }
 
     public func diffFile(path: String, intent: AccessIntent? = nil) async throws -> String {
@@ -2089,9 +2418,17 @@ public actor ManifoldBridge {
                 return " \(line.text)"
             }
         }.joined(separator: "\n")
+        let deliveredText = try await applyPrivacyPreflight(
+            toolName: "diff_file",
+            resourcePath: canonicalPath,
+            text: rendered,
+            decisionID: access.decisionID,
+            grantID: access.grantID,
+            contentKind: .diff
+        )
 
-        await recordExposure(toolName: "diff_file", resourcePath: canonicalPath, text: rendered, exposureType: "diff", decisionID: access.decisionID, intent: validatedIntent)
-        return rendered
+        await recordExposure(toolName: "diff_file", resourcePath: canonicalPath, text: deliveredText, exposureType: "diff", decisionID: access.decisionID, intent: validatedIntent)
+        return deliveredText
     }
 
     public func searchStructured(query: String, limit: Int = 10, intent: AccessIntent? = nil) async throws -> String {
@@ -2110,31 +2447,46 @@ public actor ManifoldBridge {
             limit: limit,
             kinds: [.file, .email, .emailAttachment, .sessionSummary]
         )
-        let payload: [[String: Any]] = hits.map { hit in
-            [
-                "kind": hit.handle.kind.rawValue,
-                "path": hit.handle.path,
-                "source": hit.handle.mountName,
-                "score": hit.score,
-                "preview": hit.preview,
-                "selection": selectionJSON(hit.selection),
-            ]
+        var payload: [[String: Any]] = []
+        for hit in hits {
+            var deliveredPreview: [String] = []
+            for snippet in hit.preview {
+                do {
+                    let deliveredSnippet = try await applyPrivacyPreflight(
+                        toolName: "search_structured",
+                        resourcePath: hit.handle.path,
+                        text: snippet,
+                        decisionID: access.decisionID,
+                        grantID: access.grantID,
+                        contentKind: .structuredResult
+                    )
+                    deliveredPreview.append(deliveredSnippet)
+                    await recordExposure(
+                        toolName: "search_structured",
+                        resourcePath: hit.handle.path,
+                        text: deliveredSnippet,
+                        exposureType: "snippet",
+                        decisionID: access.decisionID,
+                        intent: validatedIntent
+                    )
+                } catch {
+                    continue
+                }
+            }
+            payload.append(
+                [
+                    "kind": hit.handle.kind.rawValue,
+                    "path": hit.handle.path,
+                    "source": hit.handle.mountName,
+                    "score": hit.score,
+                    "preview": deliveredPreview,
+                    "selection": selectionJSON(hit.selection),
+                ]
+            )
         }
 
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
         let json = String(data: data, encoding: .utf8) ?? "[]"
-        for hit in hits {
-            for snippet in hit.preview {
-                await recordExposure(
-                    toolName: "search_structured",
-                    resourcePath: hit.handle.path,
-                    text: snippet,
-                    exposureType: "snippet",
-                    decisionID: access.decisionID,
-                    intent: validatedIntent
-                )
-            }
-        }
         return json
     }
 
@@ -2394,9 +2746,17 @@ public actor ManifoldBridge {
 
             \(excerpt)
             """
+            let deliveredText = try await applyPrivacyPreflight(
+                toolName: "read_email",
+                resourcePath: id,
+                text: content,
+                decisionID: decisionID,
+                grantID: grantID,
+                contentKind: .email
+            )
             await auditEmailRead(email: email, grantID: grantID, decision: emailDecision)
-            await recordExposure(toolName: "read_email", resourcePath: id, text: content, exposureType: "email_body", decisionID: decisionID, intent: validatedIntent)
-            return content
+            await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredText, exposureType: "email_body", decisionID: decisionID, intent: validatedIntent)
+            return deliveredText
         }
 
         // Fallback: return metadata summary
@@ -2410,8 +2770,16 @@ public actor ManifoldBridge {
 
         \(email.preview ?? "(no preview available)")
         """
-        await recordExposure(toolName: "read_email", resourcePath: id, text: preview, exposureType: "email_preview", decisionID: decisionID, intent: validatedIntent)
-        return preview
+        let deliveredPreview = try await applyPrivacyPreflight(
+            toolName: "read_email",
+            resourcePath: id,
+            text: preview,
+            decisionID: decisionID,
+            grantID: grantID,
+            contentKind: .email
+        )
+        await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredPreview, exposureType: "email_preview", decisionID: decisionID, intent: validatedIntent)
+        return deliveredPreview
     }
 
     /// Searches governed email content through the runtime email policy engine.
@@ -2421,6 +2789,7 @@ public actor ManifoldBridge {
         let (context, decisionID) = try await resolveAccessForTool(toolName: "search_emails", action: "search", resourcePath: query, intent: validatedIntent)
         let results = try emailStore.searchEmailMessages(freeText: query, limit: 200)
         let visible: [EmailMessageRecord]
+        let grantID: String?
         switch context {
         case .standing(let policy, _):
             var allowed: [EmailMessageRecord] = []
@@ -2430,6 +2799,7 @@ public actor ManifoldBridge {
                 }
             }
             visible = allowed
+            grantID = nil
         case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
             var allowed: [EmailMessageRecord] = []
             for email in results {
@@ -2438,21 +2808,63 @@ public actor ManifoldBridge {
                 }
             }
             visible = allowed
+            grantID = grant.grantID
         }
+        var delivered: [EmailMessageRecord] = []
         for email in visible {
             let preview = [email.sender, email.subject, email.preview ?? ""]
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
-            await recordExposure(
-                toolName: "search_emails",
-                resourcePath: email.emailID,
-                text: preview,
-                exposureType: "email_preview",
-                decisionID: decisionID,
-                intent: validatedIntent
-            )
+            do {
+                let deliveredPreview = try await applyPrivacyPreflight(
+                    toolName: "search_emails",
+                    resourcePath: email.emailID,
+                    text: preview,
+                    decisionID: decisionID,
+                    grantID: grantID,
+                    contentKind: .email
+                )
+                let updated = EmailMessageRecord(
+                    emailID: email.emailID,
+                    accountID: email.accountID,
+                    mailbox: email.mailbox,
+                    sender: email.sender,
+                    senderEmail: email.senderEmail,
+                    senderDomain: email.senderDomain,
+                    recipients: email.recipients,
+                    cc: email.cc,
+                    subject: email.subject,
+                    receivedAt: email.receivedAt,
+                    emlPath: email.emlPath,
+                    sizeBytes: email.sizeBytes,
+                    preview: deliveredPreview,
+                    contentType: email.contentType,
+                    isRead: email.isRead,
+                    isFlagged: email.isFlagged,
+                    flagColor: email.flagColor,
+                    inReplyTo: email.inReplyTo,
+                    referencesHeader: email.referencesHeader,
+                    messageIDHeader: email.messageIDHeader,
+                    attachmentCount: email.attachmentCount,
+                    localIsViewed: email.localIsViewed,
+                    isJunk: email.isJunk,
+                    deletedOnServerAt: email.deletedOnServerAt,
+                    bodyText: email.bodyText,
+                )
+                delivered.append(updated)
+                await recordExposure(
+                    toolName: "search_emails",
+                    resourcePath: email.emailID,
+                    text: deliveredPreview,
+                    exposureType: "email_preview",
+                    decisionID: decisionID,
+                    intent: validatedIntent
+                )
+            } catch {
+                continue
+            }
         }
-        return visible
+        return delivered
     }
 
     /// Returns the durable history context for one governed file path.
@@ -2556,5 +2968,39 @@ public actor ManifoldBridge {
             decisionID: decisionID
         )
         return context
+    }
+}
+
+private extension PrivacyDelivery {
+    func replacingDeliveredText(_ text: String, outcome: PrivacyOutcome) -> PrivacyDelivery {
+        PrivacyDelivery(
+            deliveredText: text,
+            redactedText: redactedText,
+            outcome: outcome,
+            findingsSummary: findingsSummary,
+            matchedCategories: matchedCategories,
+            severity: severity,
+            backend: backend,
+            modelVersion: modelVersion,
+            inputHash: inputHash,
+            deliveredHash: SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined(),
+            approvalContext: approvalContext
+        )
+    }
+}
+
+private extension RuleMatcher {
+    var usesPrivacyProbe: Bool {
+        leafCases.contains { matcher in
+            switch matcher {
+            case .privacyContainsCategory,
+                 .privacyMatchesMyIdentity,
+                 .privacyInOrgAllowlist,
+                 .privacySeverityAtLeast:
+                return true
+            default:
+                return false
+            }
+        }
     }
 }

@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import ManifoldKit
 
 /// Thin async client for talking to the local Manifold runtime over XPC.
 public final class ManifoldXPCClient: @unchecked Sendable {
     /// Mach service name exposed by the local runtime helper.
-    public static let serviceName = "com.spatialduality.manifold.runtime"
+    public static var serviceName: String {
+        ManifoldRuntimeEnvironment.xpcServiceName()
+    }
 
     private let lock = NSLock()
     private var connection: NSXPCConnection?

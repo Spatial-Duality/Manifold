@@ -16,11 +16,14 @@ struct RuleBuilder: View {
     let isEditable: Bool
 
     var body: some View {
-        switch scope {
-        case .file:  FileBuilder(matcher: $matcher, isEditable: isEditable)
-        case .email: EmailBuilder(matcher: $matcher, isEditable: isEditable)
-        case .agent: AgentBuilder(matcher: $matcher, isEditable: isEditable)
+        Group {
+            switch scope {
+            case .file:  FileBuilder(matcher: $matcher, isEditable: isEditable)
+            case .email: EmailBuilder(matcher: $matcher, isEditable: isEditable)
+            case .agent: AgentBuilder(matcher: $matcher, isEditable: isEditable)
+            }
         }
+        .accessibilityIdentifier("rules.builder")
     }
 }
 
@@ -32,6 +35,7 @@ private struct FileBuilder: View {
 
     enum Kind: String, CaseIterable, Identifiable {
         case pathGlob, pathRegex, fileExtension, fileSizeOver, fileAgeOlderThan, fileHidden, fileBinary, fileSecretDetected, gitignored
+        case privacyContainsCategory, privacyMatchesMyIdentity, privacyInOrgAllowlist, privacySeverityAtLeast
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -44,6 +48,20 @@ private struct FileBuilder: View {
             case .fileBinary:         return "File is binary"
             case .fileSecretDetected: return "Contains a detected secret"
             case .gitignored:         return "Listed in .gitignore"
+            case .privacyContainsCategory: return "Contains privacy category"
+            case .privacyMatchesMyIdentity: return "Matches My Identity"
+            case .privacyInOrgAllowlist: return "On org allowlist"
+            case .privacySeverityAtLeast: return "Privacy severity at least"
+            }
+        }
+
+        var isPrivacy: Bool {
+            switch self {
+            case .privacyContainsCategory, .privacyMatchesMyIdentity,
+                 .privacyInOrgAllowlist, .privacySeverityAtLeast:
+                return true
+            default:
+                return false
             }
         }
     }
@@ -56,11 +74,19 @@ private struct FileBuilder: View {
                     matcher = defaultMatcher(for: newKind)
                 }
             )) {
-                ForEach(Kind.allCases) { kind in
-                    Text(kind.title).tag(kind)
+                Section("File") {
+                    ForEach(Kind.allCases.filter { !$0.isPrivacy }) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                Section("Privacy") {
+                    ForEach(Kind.allCases.filter { $0.isPrivacy }) { kind in
+                        Text(kind.title).tag(kind)
+                    }
                 }
             }
             .disabled(!isEditable)
+            .accessibilityIdentifier("rules.builder.file.condition")
 
             parameterEditor
         }
@@ -83,6 +109,9 @@ private struct FileBuilder: View {
             Text("This condition has no parameters.")
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
+        case .privacyContainsCategory, .privacyMatchesMyIdentity,
+             .privacyInOrgAllowlist, .privacySeverityAtLeast:
+            PrivacyMatcherEditor(matcher: $matcher, isEditable: isEditable)
         default:
             Text("Unsupported condition")
                 .font(ManifoldType.caption)
@@ -101,6 +130,10 @@ private struct FileBuilder: View {
         case .fileBinary:         return .fileBinary
         case .fileSecretDetected: return .fileSecretDetected
         case .gitignored:         return .gitignored
+        case .privacyContainsCategory: return .privacyContainsCategory
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist: return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast: return .privacySeverityAtLeast
         default:                  return .pathGlob
         }
     }
@@ -116,12 +149,19 @@ private struct FileBuilder: View {
         case .fileBinary:         return .fileBinary
         case .fileSecretDetected: return .fileSecretDetected
         case .gitignored:         return .gitignored
+        case .privacyContainsCategory: return .privacyContainsCategory(.secret)
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist: return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast: return .privacySeverityAtLeast(.medium)
         }
     }
 
     @ViewBuilder
-    private func stringField(_ label: String, placeholder: String, value: String, mono: Bool = false, onCommit: @escaping @Sendable (String) -> Void) -> some View {
-        TextField(placeholder, text: Binding(get: { value }, set: onCommit))
+    private func stringField(_ label: String, placeholder: String, value: String, mono: Bool = false, onCommit: @escaping (String) -> Void) -> some View {
+        TextField(placeholder, text: Binding(
+            get: { value },
+            set: { newValue in onCommit(newValue) }
+        ))
             .font(mono ? ManifoldType.monoBody : ManifoldType.body)
             .textFieldStyle(.roundedBorder)
             .disabled(!isEditable)
@@ -168,6 +208,7 @@ private struct EmailBuilder: View {
 
     enum Kind: String, CaseIterable, Identifiable {
         case emailSender, emailDomain, emailSubjectKeyword, emailBodyKeyword, emailHasAttachment, emailShield
+        case privacyContainsCategory, privacyMatchesMyIdentity, privacyInOrgAllowlist, privacySeverityAtLeast
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -177,6 +218,20 @@ private struct EmailBuilder: View {
             case .emailBodyKeyword:    return "Body contains"
             case .emailHasAttachment:  return "Has attachment"
             case .emailShield:         return "Matches shield"
+            case .privacyContainsCategory: return "Contains privacy category"
+            case .privacyMatchesMyIdentity: return "Matches My Identity"
+            case .privacyInOrgAllowlist: return "On org allowlist"
+            case .privacySeverityAtLeast: return "Privacy severity at least"
+            }
+        }
+
+        var isPrivacy: Bool {
+            switch self {
+            case .privacyContainsCategory, .privacyMatchesMyIdentity,
+                 .privacyInOrgAllowlist, .privacySeverityAtLeast:
+                return true
+            default:
+                return false
             }
         }
     }
@@ -187,11 +242,19 @@ private struct EmailBuilder: View {
                 get: { currentKind() },
                 set: { newKind in matcher = defaultMatcher(for: newKind) }
             )) {
-                ForEach(Kind.allCases) { kind in
-                    Text(kind.title).tag(kind)
+                Section("Email") {
+                    ForEach(Kind.allCases.filter { !$0.isPrivacy }) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                Section("Privacy") {
+                    ForEach(Kind.allCases.filter { $0.isPrivacy }) { kind in
+                        Text(kind.title).tag(kind)
+                    }
                 }
             }
             .disabled(!isEditable)
+            .accessibilityIdentifier("rules.builder.email.condition")
 
             parameterEditor
         }
@@ -222,6 +285,9 @@ private struct EmailBuilder: View {
                 }
             }
             .disabled(!isEditable)
+        case .privacyContainsCategory, .privacyMatchesMyIdentity,
+             .privacyInOrgAllowlist, .privacySeverityAtLeast:
+            PrivacyMatcherEditor(matcher: $matcher, isEditable: isEditable)
         default:
             Text("Unsupported condition")
                 .font(ManifoldType.caption)
@@ -237,6 +303,10 @@ private struct EmailBuilder: View {
         case .emailBodyKeyword:    return .emailBodyKeyword
         case .emailHasAttachment:  return .emailHasAttachment
         case .emailShield:         return .emailShield
+        case .privacyContainsCategory: return .privacyContainsCategory
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist: return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast: return .privacySeverityAtLeast
         default:                   return .emailDomain
         }
     }
@@ -249,12 +319,19 @@ private struct EmailBuilder: View {
         case .emailBodyKeyword:    return .emailBodyKeyword("", regex: false)
         case .emailHasAttachment:  return .emailHasAttachment
         case .emailShield:         return .emailShield(.financial)
+        case .privacyContainsCategory: return .privacyContainsCategory(.secret)
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist: return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast: return .privacySeverityAtLeast(.medium)
         }
     }
 
     @ViewBuilder
-    private func stringField(_ placeholder: String, value: String, onCommit: @escaping @Sendable (String) -> Void) -> some View {
-        TextField(placeholder, text: Binding(get: { value }, set: onCommit))
+    private func stringField(_ placeholder: String, value: String, onCommit: @escaping (String) -> Void) -> some View {
+        TextField(placeholder, text: Binding(
+            get: { value },
+            set: { newValue in onCommit(newValue) }
+        ))
             .textFieldStyle(.roundedBorder)
             .disabled(!isEditable)
     }
@@ -285,6 +362,7 @@ private struct AgentBuilder: View {
 
     enum Kind: String, CaseIterable, Identifiable {
         case agentWrite, agentDelete, agentTool, agentSessionLongerThan, agentPayloadLargerThan
+        case privacyContainsCategory, privacyMatchesMyIdentity, privacyInOrgAllowlist, privacySeverityAtLeast
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -293,6 +371,20 @@ private struct AgentBuilder: View {
             case .agentTool:               return "Specific tool"
             case .agentSessionLongerThan:  return "Session longer than"
             case .agentPayloadLargerThan:  return "Payload larger than"
+            case .privacyContainsCategory: return "Contains privacy category"
+            case .privacyMatchesMyIdentity: return "Matches My Identity"
+            case .privacyInOrgAllowlist:   return "On org allowlist"
+            case .privacySeverityAtLeast:  return "Privacy severity at least"
+            }
+        }
+
+        var isPrivacy: Bool {
+            switch self {
+            case .privacyContainsCategory, .privacyMatchesMyIdentity,
+                 .privacyInOrgAllowlist, .privacySeverityAtLeast:
+                return true
+            default:
+                return false
             }
         }
     }
@@ -303,11 +395,19 @@ private struct AgentBuilder: View {
                 get: { currentKind() },
                 set: { newKind in matcher = defaultMatcher(for: newKind) }
             )) {
-                ForEach(Kind.allCases) { kind in
-                    Text(kind.title).tag(kind)
+                Section("Agent") {
+                    ForEach(Kind.allCases.filter { !$0.isPrivacy }) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                Section("Privacy") {
+                    ForEach(Kind.allCases.filter { $0.isPrivacy }) { kind in
+                        Text(kind.title).tag(kind)
+                    }
                 }
             }
             .disabled(!isEditable)
+            .accessibilityIdentifier("rules.builder.agent.condition")
 
             parameterEditor
         }
@@ -334,6 +434,9 @@ private struct AgentBuilder: View {
             minutesField(value: t) { matcher = .agentSessionLongerThan($0) }
         case .agentPayloadLargerThan(let n):
             bytesField(value: n) { matcher = .agentPayloadLargerThan($0) }
+        case .privacyContainsCategory, .privacyMatchesMyIdentity,
+             .privacyInOrgAllowlist, .privacySeverityAtLeast:
+            PrivacyMatcherEditor(matcher: $matcher, isEditable: isEditable)
         default:
             Text("Unsupported condition")
                 .font(ManifoldType.caption)
@@ -348,6 +451,10 @@ private struct AgentBuilder: View {
         case .agentTool:               return .agentTool
         case .agentSessionLongerThan:  return .agentSessionLongerThan
         case .agentPayloadLargerThan:  return .agentPayloadLargerThan
+        case .privacyContainsCategory: return .privacyContainsCategory
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist:   return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast:  return .privacySeverityAtLeast
         default:                       return .agentWrite
         }
     }
@@ -359,6 +466,10 @@ private struct AgentBuilder: View {
         case .agentTool:               return .agentTool(.write)
         case .agentSessionLongerThan:  return .agentSessionLongerThan(60 * 60)
         case .agentPayloadLargerThan:  return .agentPayloadLargerThan(1 * 1024 * 1024)
+        case .privacyContainsCategory: return .privacyContainsCategory(.secret)
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist:   return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast:  return .privacySeverityAtLeast(.medium)
         }
     }
 
@@ -391,6 +502,65 @@ private struct AgentBuilder: View {
             Text("KB")
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Shared privacy parameter editor
+//
+// Each of the three scope builders (File/Email/Agent) surfaces the same
+// four privacy matchers, so we factor the parameter editor here. The
+// `matcher` binding arrives already in one of the four privacy cases;
+// switching between them happens via the scope builder's Kind picker.
+
+private struct PrivacyMatcherEditor: View {
+    @Binding var matcher: RuleMatcher
+    let isEditable: Bool
+
+    var body: some View {
+        switch matcher {
+        case .privacyContainsCategory(let category):
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                Picker("Category", selection: Binding(
+                    get: { category },
+                    set: { matcher = .privacyContainsCategory($0) }
+                )) {
+                    ForEach(PrivacyCategory.allCases, id: \.self) { c in
+                        Text(c.displayName).tag(c)
+                    }
+                }
+                .disabled(!isEditable)
+                Text("Matches when the privacy filter model finds content in this category.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .privacySeverityAtLeast(let severity):
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                Picker("Minimum severity", selection: Binding(
+                    get: { severity },
+                    set: { matcher = .privacySeverityAtLeast($0) }
+                )) {
+                    ForEach(PrivacySeverity.allCases, id: \.self) { s in
+                        Text(s.rawValue.capitalized).tag(s)
+                    }
+                }
+                .disabled(!isEditable)
+                Text("Matches when the privacy filter finding is at this severity or worse.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .privacyMatchesMyIdentity:
+            Text("Matches when the content references something you've registered in My Identity.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .privacyInOrgAllowlist:
+            Text("Matches when every privacy finding falls inside your org allowlist — safe to share.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        default:
+            EmptyView()
         }
     }
 }

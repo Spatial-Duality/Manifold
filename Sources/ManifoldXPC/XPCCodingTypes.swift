@@ -98,9 +98,20 @@ public enum XPCJSON {
     }
 
     public static func nsError(from error: Error) -> NSError {
-        if let nsError = error as NSError? {
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription {
+            return NSError(
+                domain: "com.spatialduality.manifold.xpc",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: description]
+            )
+        }
+
+        let nsError = error as NSError
+        if nsError.domain != NSCocoaErrorDomain || nsError.code != 0 {
             return nsError
         }
+
         return NSError(
             domain: "com.spatialduality.manifold.xpc",
             code: 1,

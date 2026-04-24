@@ -11,6 +11,7 @@ public actor ApprovalQueue {
     public struct PendingRequest: Sendable {
         public enum Kind: String, Sendable {
             case standingWrite = "standing_write"
+            case privacyExposure = "privacy_exposure"
         }
 
         public enum Status: String, Sendable {
@@ -29,8 +30,10 @@ public actor ApprovalQueue {
         public let sourceID: String?
         public let mountName: String?
         public let relativePath: String?
+        public let contextJSON: String?
         public let requestedAt: Double
         public let status: Status
+        public let resolutionAction: String?
 
         public init(
             id: String,
@@ -42,8 +45,10 @@ public actor ApprovalQueue {
             sourceID: String?,
             mountName: String?,
             relativePath: String?,
+            contextJSON: String?,
             requestedAt: Double,
-            status: Status
+            status: Status,
+            resolutionAction: String?
         ) {
             self.id = id
             self.connectionID = connectionID
@@ -54,8 +59,10 @@ public actor ApprovalQueue {
             self.sourceID = sourceID
             self.mountName = mountName
             self.relativePath = relativePath
+            self.contextJSON = contextJSON
             self.requestedAt = requestedAt
             self.status = status
+            self.resolutionAction = resolutionAction
         }
     }
 
@@ -74,8 +81,18 @@ public actor ApprovalQueue {
         kind: PendingRequest.Kind = .standingWrite,
         sourceID: String? = nil,
         mountName: String? = nil,
-        relativePath: String? = nil
+        relativePath: String? = nil,
+        contextJSON: String? = nil
     ) throws -> PendingRequest {
+        if kind == .privacyExposure,
+           let existing = try pending().first(where: {
+               $0.kind == .privacyExposure
+                   && $0.agent == agent
+                   && $0.path == path
+                   && $0.contextJSON == contextJSON
+           }) {
+            return existing
+        }
         let request = PendingRequest(
             id: UUID().uuidString,
             connectionID: connectionID,
@@ -86,15 +103,17 @@ public actor ApprovalQueue {
             sourceID: sourceID,
             mountName: mountName,
             relativePath: relativePath,
+            contextJSON: contextJSON,
             requestedAt: Date().timeIntervalSince1970,
-            status: .pending
+            status: .pending,
+            resolutionAction: nil
         )
         try db.execute(
             """
             INSERT INTO approval_requests (
                 id, connection_id, agent, path, action, request_kind,
-                source_id, mount_name, relative_path, requested_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_id, mount_name, relative_path, context_json, requested_at, status, resolution_action
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             params: [
                 request.id,
@@ -106,20 +125,22 @@ public actor ApprovalQueue {
                 request.sourceID,
                 request.mountName,
                 request.relativePath,
+                request.contextJSON,
                 String(request.requestedAt),
                 request.status.rawValue,
+                request.resolutionAction,
             ]
         )
         approvalQueueLogger.info("Queued approval request \(request.id, privacy: .public) for \(path, privacy: .public)")
         return request
     }
 
-    public func approve(id: String) throws {
-        try update(id: id, status: .approved)
+    public func approve(id: String, resolutionAction: String? = nil) throws {
+        try update(id: id, status: .approved, resolutionAction: resolutionAction)
     }
 
     public func deny(id: String) throws {
-        try update(id: id, status: .denied)
+        try update(id: id, status: .denied, resolutionAction: "deny")
     }
 
     public func pending() throws -> [PendingRequest] {
@@ -168,14 +189,14 @@ public actor ApprovalQueue {
         return count
     }
 
-    private func update(id: String, status: PendingRequest.Status) throws {
+    private func update(id: String, status: PendingRequest.Status, resolutionAction: String?) throws {
         try db.execute(
             """
             UPDATE approval_requests
-            SET status = ?, resolved_at = ?
+            SET status = ?, resolved_at = ?, resolution_action = ?
             WHERE id = ?
             """,
-            params: [status.rawValue, String(Date().timeIntervalSince1970), id]
+            params: [status.rawValue, String(Date().timeIntervalSince1970), resolutionAction, id]
         )
     }
 
@@ -203,8 +224,10 @@ public actor ApprovalQueue {
             sourceID: row["source_id"],
             mountName: row["mount_name"],
             relativePath: row["relative_path"],
+            contextJSON: row["context_json"],
             requestedAt: requestedAt,
-            status: status
+            status: status,
+            resolutionAction: row["resolution_action"]
         )
     }
 }

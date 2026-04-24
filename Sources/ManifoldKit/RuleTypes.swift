@@ -279,6 +279,17 @@ public indirect enum RuleMatcher: Sendable, Codable, Hashable, Equatable {
     case agentSessionLongerThan(TimeInterval)
     case agentPayloadLargerThan(Int64)
 
+    // Privacy predicates — scope-agnostic. Read from `PrivacyProbe`
+    // supplied at evaluation time. A privacy matcher composes cleanly with
+    // any scope-specific matcher via `.all` / `.any`, and alone it matches
+    // regardless of scope (so a rule like "deny anything with a secret"
+    // works whether the payload came from a file read, an email body, or
+    // an agent tool call).
+    case privacyContainsCategory(PrivacyCategory)
+    case privacyMatchesMyIdentity
+    case privacyInOrgAllowlist
+    case privacySeverityAtLeast(PrivacySeverity)
+
     // Combinators
     case all([RuleMatcher])                                // AND
     case any([RuleMatcher])                                // OR
@@ -315,6 +326,13 @@ public indirect enum RuleMatcher: Sendable, Codable, Hashable, Equatable {
         case .agentTool, .agentWrite, .agentDelete, .agentSessionLongerThan,
              .agentPayloadLargerThan:
             return [.agent]
+        case .privacyContainsCategory, .privacyMatchesMyIdentity,
+             .privacyInOrgAllowlist, .privacySeverityAtLeast:
+            // Privacy matchers are scope-agnostic — they apply anywhere a
+            // payload carries content, so we return an empty set and let
+            // the rule's declared scope stand. Validation treats empty
+            // as "any scope is fine" (see RuleValidator).
+            return []
         case .all(let s), .any(let s):
             return s.reduce(into: Set<RuleScope>()) { $0.formUnion($1.inferredScopes) }
         case .not(let sub):
@@ -339,6 +357,8 @@ public indirect enum RuleMatcher: Sendable, Codable, Hashable, Equatable {
         case emailShield, emailInFolder, emailAccount, emailOlderThan
         case agentTool, agentWrite, agentDelete
         case agentSessionLongerThan, agentPayloadLargerThan
+        case privacyContainsCategory, privacyMatchesMyIdentity
+        case privacyInOrgAllowlist, privacySeverityAtLeast
         case all, any, not, always, never
     }
 
@@ -392,6 +412,14 @@ public indirect enum RuleMatcher: Sendable, Codable, Hashable, Equatable {
             try c.encode(Kind.agentSessionLongerThan, forKey: .kind); try c.encode(n, forKey: .n1)
         case .agentPayloadLargerThan(let n):
             try c.encode(Kind.agentPayloadLargerThan, forKey: .kind); try c.encode(n, forKey: .n1)
+        case .privacyContainsCategory(let cat):
+            try c.encode(Kind.privacyContainsCategory, forKey: .kind); try c.encode(cat, forKey: .field)
+        case .privacyMatchesMyIdentity:
+            try c.encode(Kind.privacyMatchesMyIdentity, forKey: .kind)
+        case .privacyInOrgAllowlist:
+            try c.encode(Kind.privacyInOrgAllowlist, forKey: .kind)
+        case .privacySeverityAtLeast(let sev):
+            try c.encode(Kind.privacySeverityAtLeast, forKey: .kind); try c.encode(sev, forKey: .field)
         case .all(let children):
             try c.encode(Kind.all, forKey: .kind); try c.encode(children, forKey: .children)
         case .any(let children):
@@ -440,6 +468,12 @@ public indirect enum RuleMatcher: Sendable, Codable, Hashable, Equatable {
         case .agentDelete: self = .agentDelete
         case .agentSessionLongerThan: self = .agentSessionLongerThan(try c.decode(TimeInterval.self, forKey: .n1))
         case .agentPayloadLargerThan: self = .agentPayloadLargerThan(try c.decode(Int64.self, forKey: .n1))
+        case .privacyContainsCategory:
+            self = .privacyContainsCategory(try c.decode(PrivacyCategory.self, forKey: .field))
+        case .privacyMatchesMyIdentity: self = .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist: self = .privacyInOrgAllowlist
+        case .privacySeverityAtLeast:
+            self = .privacySeverityAtLeast(try c.decode(PrivacySeverity.self, forKey: .field))
         case .all: self = .all(try c.decode([RuleMatcher].self, forKey: .children))
         case .any: self = .any(try c.decode([RuleMatcher].self, forKey: .children))
         case .not: self = .not(try c.decode(RuleMatcher.self, forKey: .child))
@@ -549,19 +583,46 @@ public struct RuleEvalContext: Sendable {
     public var fileProbe: FileProbe?
     public var emailProbe: EmailProbe?
     public var agentProbe: AgentProbe?
+    public var privacyProbe: PrivacyProbe?
 
     public init(
         now: Date = Date(),
         sessionActive: Bool = true,
         fileProbe: FileProbe? = nil,
         emailProbe: EmailProbe? = nil,
-        agentProbe: AgentProbe? = nil
+        agentProbe: AgentProbe? = nil,
+        privacyProbe: PrivacyProbe? = nil
     ) {
         self.now = now
         self.sessionActive = sessionActive
         self.fileProbe = fileProbe
         self.emailProbe = emailProbe
         self.agentProbe = agentProbe
+        self.privacyProbe = privacyProbe
+    }
+}
+
+/// Snapshot of the privacy model's findings for the payload under evaluation.
+/// Supplied by the runtime so rule evaluation stays synchronous and cheap —
+/// the heavy lifting (classification, identity matching, allowlist lookup)
+/// happens once, then the probe carries the result to every matcher that
+/// cares about privacy.
+public struct PrivacyProbe: Sendable {
+    public let categories: Set<PrivacyCategory>
+    public let severity: PrivacySeverity
+    public let matchesMyIdentity: Bool
+    public let inOrgAllowlist: Bool
+
+    public init(
+        categories: Set<PrivacyCategory> = [],
+        severity: PrivacySeverity = .none,
+        matchesMyIdentity: Bool = false,
+        inOrgAllowlist: Bool = false
+    ) {
+        self.categories = categories
+        self.severity = severity
+        self.matchesMyIdentity = matchesMyIdentity
+        self.inOrgAllowlist = inOrgAllowlist
     }
 }
 

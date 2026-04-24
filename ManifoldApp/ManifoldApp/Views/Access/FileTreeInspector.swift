@@ -92,16 +92,22 @@ struct FileTreeInspector: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
-                AccessChipStack(
+                AccessCheckboxStrip(
                     agents: connectedAgents,
                     visibleAgents: agentsWithScope,
-                    onToggle: { agent, wasVisible in
+                    accessibilityIDPrefix: "access.inspector.folder.\(source.sourceID.manifoldAccessIdentifierComponent)",
+                    onToggleAgent: { agent, wasVisible in
                         Task {
                             await store.setSourceScope(
                                 sourceID: source.sourceID,
                                 agent: agent,
                                 inScope: !wasVisible
                             )
+                        }
+                    },
+                    onSetAll: { inScope in
+                        Task {
+                            await setSourceScope(agents: connectedAgents, inScope: inScope)
                         }
                     }
                 )
@@ -154,6 +160,7 @@ struct FileTreeInspector: View {
                         agent: effectiveAgent,
                         sourceInScope: sourceInScope(for: effectiveAgent),
                         resolver: visibilityResolver,
+                        onSetSourceScope: { inScope in await setSourceScope(inScope) },
                         onAllow: { node in await setOverride(.allow, for: node) },
                         onHide: { node in await setOverride(.deny, for: node) },
                         onReset: { node in await clearOverride(for: node) }
@@ -186,24 +193,38 @@ struct FileTreeInspector: View {
     private func setOverride(_ decision: FileVisibilityOverrideDecision, for node: TreeNode) async {
         guard let source, !node.relativePath.isEmpty else { return }
         await store.setFileVisibilityOverride(
-            agent: targetAgent,
+            agent: effectiveAgent,
             sourceID: source.sourceID,
             relativePath: node.relativePath,
             isDirectory: node.isDirectory,
             decision: decision
         )
-        overrides = await store.fileVisibilityOverrides(agent: targetAgent)
+        overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
     }
 
     private func clearOverride(for node: TreeNode) async {
         guard let source, !node.relativePath.isEmpty else { return }
         await store.clearFileVisibilityOverride(
-            agent: targetAgent,
+            agent: effectiveAgent,
             sourceID: source.sourceID,
             relativePath: node.relativePath,
             isDirectory: node.isDirectory
         )
-        overrides = await store.fileVisibilityOverrides(agent: targetAgent)
+        overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
+    }
+
+    private func setSourceScope(_ inScope: Bool) async {
+        guard let source else { return }
+        await store.setSourceScope(sourceID: source.sourceID, agent: effectiveAgent, inScope: inScope)
+        overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
+    }
+
+    private func setSourceScope(agents: [TargetApp], inScope: Bool) async {
+        guard let source else { return }
+        for agent in agents {
+            await store.setSourceScope(sourceID: source.sourceID, agent: agent, inScope: inScope)
+        }
+        overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
     }
 }
 
@@ -216,6 +237,7 @@ private struct TreeRow: View {
     let agent: TargetApp
     let sourceInScope: Bool
     let resolver: FileVisibilityResolver
+    let onSetSourceScope: @Sendable (Bool) async -> Void
     let onAllow: @Sendable (TreeNode) async -> Void
     let onHide: @Sendable (TreeNode) async -> Void
     let onReset: @Sendable (TreeNode) async -> Void
@@ -227,6 +249,7 @@ private struct TreeRow: View {
         agent: TargetApp,
         sourceInScope: Bool,
         resolver: FileVisibilityResolver,
+        onSetSourceScope: @escaping @Sendable (Bool) async -> Void,
         onAllow: @escaping @Sendable (TreeNode) async -> Void,
         onHide: @escaping @Sendable (TreeNode) async -> Void,
         onReset: @escaping @Sendable (TreeNode) async -> Void
@@ -237,6 +260,7 @@ private struct TreeRow: View {
         self.agent = agent
         self.sourceInScope = sourceInScope
         self.resolver = resolver
+        self.onSetSourceScope = onSetSourceScope
         self.onAllow = onAllow
         self.onHide = onHide
         self.onReset = onReset
@@ -259,7 +283,7 @@ private struct TreeRow: View {
     }
 
     private var canOverride: Bool {
-        !node.relativePath.isEmpty
+        source != nil
     }
 
     private var hasExplicitOverride: Bool {
@@ -290,6 +314,10 @@ private struct TreeRow: View {
                         get: { checkboxState },
                         set: { newValue in
                             guard canOverride else { return }
+                            if node.relativePath.isEmpty {
+                                Task { await onSetSourceScope(newValue != .off) }
+                                return
+                            }
                             switch newValue {
                             case .on, .mixed:
                                 Task { await onAllow(node) }
@@ -350,14 +378,23 @@ private struct TreeRow: View {
             )
             .contextMenu {
                 if canOverride {
-                    Button("Allow for \(agentLabel)") {
-                        Task { await onAllow(node) }
-                    }
-                    Button("Hide for \(agentLabel)") {
-                        Task { await onHide(node) }
-                    }
-                    Button("Reset to inherited") {
-                        Task { await onReset(node) }
+                    if node.relativePath.isEmpty {
+                        Button("Share folder with \(agentLabel)") {
+                            Task { await onSetSourceScope(true) }
+                        }
+                        Button("Hide folder from \(agentLabel)") {
+                            Task { await onSetSourceScope(false) }
+                        }
+                    } else {
+                        Button("Allow for \(agentLabel)") {
+                            Task { await onAllow(node) }
+                        }
+                        Button("Hide for \(agentLabel)") {
+                            Task { await onHide(node) }
+                        }
+                        Button("Reset to inherited") {
+                            Task { await onReset(node) }
+                        }
                     }
                     Divider()
                 }
@@ -380,6 +417,7 @@ private struct TreeRow: View {
                         agent: agent,
                         sourceInScope: sourceInScope,
                         resolver: resolver,
+                        onSetSourceScope: onSetSourceScope,
                         onAllow: onAllow,
                         onHide: onHide,
                         onReset: onReset

@@ -16,8 +16,10 @@ struct RuleListTable: View {
         Group {
             if model.filteredRules.isEmpty {
                 RulesEmptyState(filter: model.filter)
+                    .accessibilityIdentifier("rules.emptyState")
             } else {
                 table
+                    .accessibilityIdentifier("rules.table")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -51,12 +53,23 @@ struct RuleListTable: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(rule.name)
                         .font(ManifoldType.body)
+                        .accessibilityIdentifier("rules.rowTitle.\(rule.id)")
+                    if rule.isPrivacyFilterBacked {
+                        Label("Privacy filter preflight", systemImage: "sparkles.rectangle.stack")
+                            .font(ManifoldType.tiny.weight(.semibold))
+                            .foregroundStyle(ManifoldPalette.selection)
+                    }
                     Text(RuleSummary.summarize(rule.matcher))
                         .font(ManifoldType.mono)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
+
+            TableColumn("Gate") { rule in
+                RuleGatePill(rule: rule)
+            }
+            .width(124)
 
             TableColumn("Scope") { rule in
                 HStack(spacing: Spacing.s1) {
@@ -171,6 +184,37 @@ private struct SourcePill: View {
     }
 }
 
+private struct RuleGatePill: View {
+    let rule: RuleRecord
+
+    var body: some View {
+        Pill(text: text, variant: variant)
+            .help(help)
+    }
+
+    private var text: String {
+        if rule.isPrivacyFilterBacked { return "Preflight" }
+        if rule.scope == .file { return "Live" }
+        return "Preview"
+    }
+
+    private var variant: Pill.Variant {
+        if rule.isPrivacyFilterBacked { return .agent(.codex) }
+        if rule.scope == .file { return .session }
+        return .preview
+    }
+
+    private var help: String {
+        if rule.isPrivacyFilterBacked {
+            return "Runs through the privacy filter before selected content is shared."
+        }
+        if rule.scope == .file {
+            return "Enforced by the file-read gate."
+        }
+        return "Visible for planning until its structural runtime gate is complete."
+    }
+}
+
 private struct RulesEmptyState: View {
     let filter: RulesModel.Filter
 
@@ -181,7 +225,7 @@ private struct RulesEmptyState: View {
                 .foregroundStyle(.tertiary)
             Text("No rules in \(filter.title.lowercased())")
                 .font(ManifoldType.bodyMedium)
-            Text("Create a rule using the + menu in the toolbar. Rules control what agents can read, write, or see.")
+            Text(message)
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -190,6 +234,13 @@ private struct RulesEmptyState: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)
+    }
+
+    private var message: String {
+        if filter == .privacy {
+            return "Create a Privacy Filter rule to block, redact, warn, or log content found by the OpenAI privacy filter before an agent sees it."
+        }
+        return "Create a rule using the + menu in the toolbar. Rules control what agents can read, write, or see."
     }
 }
 

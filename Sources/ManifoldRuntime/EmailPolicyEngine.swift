@@ -58,17 +58,6 @@ enum EmailPolicyEngine {
             )
         }
 
-        if context.sharedEmailIDs.contains(email.emailID) {
-            return EmailRuleDecision(
-                agent: context.agent,
-                emailID: email.emailID,
-                allowed: true,
-                kind: .sharedEmail,
-                matchedValue: email.emailID,
-                message: "Email is visible because the user explicitly shared it."
-            )
-        }
-
         if let contactDecision = contactDecision(for: email, context: context) {
             return contactDecision
         }
@@ -83,6 +72,17 @@ enum EmailPolicyEngine {
 
         if let shieldDecision = shieldDecision(for: email, context: context) {
             return shieldDecision
+        }
+
+        if context.sharedEmailIDs.contains(email.emailID) {
+            return EmailRuleDecision(
+                agent: context.agent,
+                emailID: email.emailID,
+                allowed: true,
+                kind: .sharedEmail,
+                matchedValue: email.emailID,
+                message: "Email is visible because the user explicitly shared it with this agent."
+            )
         }
 
         let filter = EmailSensitivityFilter(rawValue: context.sensitivity.rawValue)

@@ -104,7 +104,7 @@ final class SessionPrimitivesTests: XCTestCase {
         )
         let drift = SessionDrift(
             historyEntry: entry,
-            pathsChangedSinceEnded: ["~/Projects/Acme/README.md"],
+            pathsChangedSinceEnded: ["~/Projects/FrontierSafety/README.md"],
             pathsRevokedSinceEnded: [],
             newlyAddedSinceEnded: []
         )
@@ -118,9 +118,10 @@ final class SessionPrimitivesTests: XCTestCase {
     }
 
     func testSuggestedRuleCarriesDenialCount() {
-        switch Rule.CreatedBy.suggested(denialCount: 5) {
-        case .suggested(let n): XCTAssertEqual(n, 5)
-        default: XCTFail("Expected .suggested")
+        if case .suggested(let denialCount) = Rule.CreatedBy.suggested(denialCount: 5) {
+            XCTAssertEqual(denialCount, 5)
+        } else {
+            XCTFail("Expected .suggested")
         }
     }
 
@@ -134,7 +135,35 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertNotEqual(a, c)
     }
 
-    func testPendingRequestsMapFolderReadsIntoSessionPrimitives() throws {
+    func testPendingRequestsMapStandingWriteIntoSessionPrimitives() throws {
+        let model = GovernanceModel()
+        model.pendingApprovals = [
+            PendingApprovalRecord(
+                id: "approval-1",
+                connectionID: "conn-1",
+                agent: TargetApp.codex.rawValue,
+                path: "shared/worklog.md",
+                action: "write",
+                kind: "standing_write",
+                mountName: "shared",
+                relativePath: "worklog.md",
+                requestedAt: 1_715_000_000,
+                status: "pending"
+            )
+        ]
+
+        let request = try XCTUnwrap(model.pendingRequests.first)
+        XCTAssertEqual(request.agent, .codex)
+        XCTAssertEqual(request.kind, .standingWrite)
+        XCTAssertEqual(request.operation, .write)
+        XCTAssertEqual(request.headline, "Codex wants reversible write access.")
+        XCTAssertEqual(
+            request.context,
+            "Reads are ambient here. Once allows one reversible write to this file. Add to default allows reversible writes anywhere in shared."
+        )
+    }
+
+    func testPendingRequestsMapFolderReadsIntoGenericSessionCopy() throws {
         let model = GovernanceModel()
         model.pendingApprovals = [
             PendingApprovalRecord(
@@ -143,6 +172,7 @@ final class SessionPrimitivesTests: XCTestCase {
                 agent: TargetApp.codex.rawValue,
                 path: "/tmp/shared",
                 action: "read_folder",
+                kind: "manual_review",
                 requestedAt: 1_715_000_000,
                 status: "pending"
             )
@@ -153,6 +183,33 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertEqual(request.operation, .readFolder)
         XCTAssertEqual(request.headline, "Codex wants to read a folder.")
         XCTAssertEqual(request.context, "Requested outside this Codex session's scope. Answer or ignore.")
+    }
+
+    func testPendingRequestsMapPrivacyExposureIntoPrivacyRequest() throws {
+        let model = GovernanceModel()
+        model.pendingApprovals = [
+            PendingApprovalRecord(
+                id: "approval-privacy-1",
+                connectionID: "conn-1",
+                agent: TargetApp.codex.rawValue,
+                path: "email-4",
+                action: "mail",
+                kind: "privacy_exposure",
+                contextJSON: #"{"toolName":"read_email","contentKind":"email","inputHash":"hash-1","findingsSummary":"Contains your email plus a secret token.","matchedCategories":["email","secret"],"redactedPreview":"Email: [EMAIL REDACTED]\nSecret: [SECRET REDACTED]","recommendation":"Share the redacted version unless the original is required for this session."}"#,
+                requestedAt: 1_715_000_000,
+                status: "pending"
+            )
+        ]
+
+        let request = try XCTUnwrap(model.pendingRequests.first)
+        XCTAssertEqual(request.kind, .privacyExposure)
+        XCTAssertEqual(request.operation, .mailboxRead)
+        XCTAssertEqual(request.headline, "Codex needs privacy review before sharing email.")
+        XCTAssertEqual(request.matchedCategories, [.email, .secret])
+        XCTAssertEqual(request.severity, .critical)
+        XCTAssertEqual(request.findingsSummary, "Contains your email plus a secret token.")
+        XCTAssertEqual(request.recommendation, "Share the redacted version unless the original is required for this session.")
+        XCTAssertTrue(request.context.contains("Contains your email plus a secret token."))
     }
 
     func testPendingRequestsIgnoreUnknownAgents() {

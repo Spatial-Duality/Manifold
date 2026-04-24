@@ -32,6 +32,9 @@ struct MenuBarPanelView: View {
     }
 
     private var panelState: PanelState {
+        if let block = store.dataControlSummary?.activeWorkBlock {
+            return (block.modifiedFileCount > 0 || block.newFileCount > 0) ? .trackedEdit : .activeWithQueue
+        }
         if let session = store.activeSession {
             return session.isTrackedEdit ? .trackedEdit : .activeWithQueue
         }
@@ -54,6 +57,11 @@ struct MenuBarPanelView: View {
                 }
             }
 
+            if store.governance.privacySettings != nil {
+                Divider()
+                PrivacyPresetChipStrip(store: store)
+            }
+
             if !store.pendingRequests.isEmpty {
                 Divider()
                 RequestsQueueSection(store: store)
@@ -73,10 +81,9 @@ struct MenuBarPanelView: View {
             FooterActions(store: store, commandPalette: commandPalette, state: panelState)
         }
         .frame(width: 360)
+        .accessibilityIdentifier("menubar.panel")
         .task {
-            await store.governance.loadPolicies()
-            await store.governance.loadActiveSession()
-            await store.activity.loadSessions()
+            await store.refreshAll()
         }
     }
 }
@@ -101,6 +108,14 @@ private struct StatusHeader: View {
         if !store.isRuntimeConnected {
             return "Manifold can't reach the runtime."
         }
+        if let block = store.dataControlSummary?.activeWorkBlock {
+            return "\(AgentMeta.label(block.agent)) protected run is live."
+        }
+        if let summary = store.dataControlSummary, !summary.agents.isEmpty {
+            return summary.agents
+                .map { "\($0.defaultFileScopeCount) folders/\($0.visibleEmailCount) emails for \(AgentMeta.label($0.agent))" }
+                .joined(separator: " · ")
+        }
         let folderCount = store.sources.filter(\.isAccessible).count
         switch state {
         case .idle:
@@ -121,6 +136,17 @@ private struct StatusHeader: View {
         if let error = store.runtimeLaunchError ?? store.lastError {
             return error
         }
+        if let summary = store.dataControlSummary {
+            if summary.pendingApprovalCount > 0 {
+                return "\(summary.pendingApprovalCount) request\(summary.pendingApprovalCount == 1 ? "" : "s") waiting on you."
+            }
+            if let exposure = summary.lastExposure {
+                return "Last exposure: \(exposureLabel(exposure))."
+            }
+            if summary.agents.allSatisfy(\.isPaused) {
+                return "All agents are paused."
+            }
+        }
         switch state {
         case .idle:
             return "Manifold is running. Add a folder or mailbox to protect your next session."
@@ -136,6 +162,12 @@ private struct StatusHeader: View {
         case .trackedEdit:
             return "All writes tracked — every change is reversible."
         }
+    }
+
+    private func exposureLabel(_ exposure: DataControlSummary.Exposure) -> String {
+        let agent = exposure.agent.map(AgentMeta.label) ?? "agent"
+        let resource = exposure.resourcePath?.lastPathComponentForDisplay ?? "data"
+        return "\(agent) \(exposure.action) \(resource)"
     }
 
     var body: some View {
@@ -236,6 +268,126 @@ private struct TrackedEditStrip: View {
     }
 }
 
+// MARK: - Privacy preset chip
+
+/// Compact "Privacy: Balanced ▾" chip. Tapping opens a menu offering the
+/// same four presets the Settings pane exposes; applying a preset calls
+/// `updatePrivacySettings` + seeds per-agent policies, keeping the menu
+/// bar and Settings perfectly in sync.
+private struct PrivacyPresetChipStrip: View {
+    let store: ManifoldStore
+
+    private var currentPreset: PrivacyPreset {
+        PrivacyPreset.detect(
+            settings: store.governance.privacySettings,
+            claudePolicy: store.governance.claudePrivacyPolicy,
+            codexPolicy: store.governance.codexPrivacyPolicy
+        )
+    }
+
+    private var presetLabel: String {
+        switch currentPreset {
+        case .off:      return "Off"
+        case .balanced: return "Balanced"
+        case .strict:   return "Strict"
+        case .custom:   return "Custom"
+        }
+    }
+
+    private var presetAccent: Color {
+        switch currentPreset {
+        case .off:      return ManifoldPalette.text3
+        case .balanced: return ManifoldPalette.selection
+        case .strict:   return ManifoldPalette.danger
+        case .custom:   return ManifoldPalette.claude
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: Spacing.s2) {
+            Image(systemName: "shield.lefthalf.filled")
+                .font(ManifoldType.caption)
+                .foregroundStyle(presetAccent)
+            Text("PRIVACY")
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.secondary)
+                .tracking(0.4)
+
+            Menu {
+                Button {
+                    apply(.off)
+                } label: {
+                    Label("Off — no filtering", systemImage: currentPreset == .off ? "checkmark" : "shield.slash")
+                }
+                .accessibilityIdentifier("menubar.privacy.apply.off")
+                Button {
+                    apply(.balanced)
+                } label: {
+                    Label("Balanced — warn personal, ask before secrets",
+                          systemImage: currentPreset == .balanced ? "checkmark" : "shield.lefthalf.filled")
+                }
+                .accessibilityIdentifier("menubar.privacy.apply.balanced")
+                Button {
+                    apply(.strict)
+                } label: {
+                    Label("Strict — redact PII, block secrets",
+                          systemImage: currentPreset == .strict ? "checkmark" : "shield.fill")
+                }
+                .accessibilityIdentifier("menubar.privacy.apply.strict")
+                Divider()
+                Button {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                } label: {
+                    Label("Open Privacy settings…", systemImage: "slider.horizontal.3")
+                }
+                .accessibilityIdentifier("menubar.privacy.openSettings")
+            } label: {
+                HStack(spacing: 4) {
+                    Text(presetLabel)
+                        .font(ManifoldType.bodyMedium)
+                        .foregroundStyle(presetAccent)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(presetAccent)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityIdentifier("menubar.privacy.menu")
+
+            Spacer(minLength: Spacing.s2)
+            if currentPreset == .custom {
+                Text("Hand-tuned")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, Spacing.s4)
+        .padding(.vertical, Spacing.s2)
+        .background(presetAccent.opacity(0.06))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Privacy preset: \(presetLabel). Tap to change.")
+        .accessibilityIdentifier("menubar.privacy.strip")
+    }
+
+    private func apply(_ preset: PrivacyPreset) {
+        guard var settings = store.governance.privacySettings,
+              let claudePolicy = store.governance.claudePrivacyPolicy,
+              let codexPolicy = store.governance.codexPrivacyPolicy else { return }
+        let (newSettings, newClaude, newCodex) = preset.apply(
+            to: &settings,
+            claude: claudePolicy,
+            codex: codexPolicy
+        )
+        Task {
+            await store.governance.updatePrivacySettings(newSettings)
+            await store.governance.updatePrivacyPolicy(newClaude)
+            await store.governance.updatePrivacyPolicy(newCodex)
+        }
+    }
+}
+
 // MARK: - Requests queue
 
 private struct RequestsQueueSection: View {
@@ -309,17 +461,32 @@ private struct RequestCard: View {
                 .italic()
                 .fixedSize(horizontal: false, vertical: true)
 
-            CommitLadder(
-                agent: request.agent,
-                showsSessionScope: request.supportsSessionScope && store.activeSession != nil,
-                onNotThisTime: { Task { await store.answer(request, with: .notThisTime) } },
-                onOnce:        { Task { await store.answer(request, with: .once) } },
-                onSession:     { Task {
-                    guard let sid = store.activeSession?.id else { return }
-                    await store.answer(request, with: .forSession(sessionID: sid))
-                } },
-                onDefault:     { Task { await store.answer(request, with: .addToDefault) } }
-            )
+            if let findings = request.findingsSummary, request.kind == .privacyExposure {
+                Text(findings)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(ManifoldPalette.attention)
+            }
+
+            switch request.kind {
+            case .standingWrite:
+                CommitLadder(
+                    agent: request.agent,
+                    showsSessionScope: request.supportsSessionScope && store.activeSession != nil,
+                    onNotThisTime: { Task { await store.answer(request, with: .notThisTime) } },
+                    onOnce:        { Task { await store.answer(request, with: .once) } },
+                    onSession:     { Task {
+                        guard let sid = store.activeSession?.id else { return }
+                        await store.answer(request, with: .forSession(sessionID: sid))
+                    } },
+                    onDefault:     { Task { await store.answer(request, with: .addToDefault) } }
+                )
+            case .privacyExposure:
+                PrivacyApprovalButtons(
+                    onDeny: { Task { await store.answer(request, with: .notThisTime) } },
+                    onShareRedacted: { Task { await store.answer(request, with: .shareRedacted) } },
+                    onShareOriginal: { Task { await store.answer(request, with: .shareOriginalOnce) } }
+                )
+            }
         }
         .padding(Spacing.s3)
         .background(
@@ -341,25 +508,56 @@ private struct AgentSummaryBlock: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let claude = store.governance.claudePolicy {
-                AgentRow(
-                    agent: .cowork,
-                    connected: store.isClaudeConnected,
-                    paused: claude.isPaused,
-                    statusText: agentStatusText(governance: claude, connected: store.isClaudeConnected),
-                    consequenceText: consequenceText(governance: claude, agent: .cowork)
-                )
-            }
-            if let codex = store.governance.codexPolicy {
-                AgentRow(
-                    agent: .codex,
-                    connected: store.isCodexConnected,
-                    paused: codex.isPaused,
-                    statusText: agentStatusText(governance: codex, connected: store.isCodexConnected),
-                    consequenceText: consequenceText(governance: codex, agent: .codex)
-                )
+            if let summary = store.dataControlSummary {
+                ForEach(summary.agents) { agent in
+                    AgentRow(
+                        agent: agent.agent,
+                        connected: agent.isConnected,
+                        paused: agent.isPaused,
+                        statusText: agentStatusText(agent),
+                        consequenceText: consequenceText(agent)
+                    )
+                }
+            } else {
+                if let claude = store.governance.claudePolicy {
+                    AgentRow(
+                        agent: .cowork,
+                        connected: store.isClaudeConnected,
+                        paused: claude.isPaused,
+                        statusText: agentStatusText(governance: claude, connected: store.isClaudeConnected),
+                        consequenceText: consequenceText(governance: claude, agent: .cowork)
+                    )
+                }
+                if let codex = store.governance.codexPolicy {
+                    AgentRow(
+                        agent: .codex,
+                        connected: store.isCodexConnected,
+                        paused: codex.isPaused,
+                        statusText: agentStatusText(governance: codex, connected: store.isCodexConnected),
+                        consequenceText: consequenceText(governance: codex, agent: .codex)
+                    )
+                }
             }
         }
+    }
+
+    private func agentStatusText(_ agent: DataControlSummary.Agent) -> String {
+        if agent.isPaused { return "paused" }
+        if !agent.isConnected { return "offline" }
+        switch agent.verificationStatus {
+        case .verified: return "verified"
+        case .unverified: return "unverified"
+        case .unknown: return "connected"
+        }
+    }
+
+    private func consequenceText(_ agent: DataControlSummary.Agent) -> String {
+        let folders = "\(agent.defaultFileScopeCount) folder\(agent.defaultFileScopeCount == 1 ? "" : "s")"
+        let emails = "\(agent.visibleEmailCount) email\(agent.visibleEmailCount == 1 ? "" : "s") visible"
+        if agent.sharedEmailCount > 0 {
+            return "\(folders) · \(emails) · \(agent.sharedEmailCount) explicit"
+        }
+        return "\(folders) · \(emails)"
     }
 
     private func agentStatusText(governance: AgentAccessPolicy, connected: Bool) -> String {
@@ -485,10 +683,22 @@ private struct FooterActions: View {
             commandFooterItem(.openManifold)
             commandFooterItem(.settings)
 
-            if state == .activeWithQueue || state == .trackedEdit {
+            if store.isRuntimeConnected {
                 FooterDivider()
-                FooterItem(icon: "pause.circle", label: "Pause all agents", shortcut: "⌘⇧P", tone: .muted) {
-                    Task { await store.governance.pauseAllAgents() }
+                FooterItem(
+                    icon: allAgentsPaused ? "play.circle" : "pause.circle",
+                    label: allAgentsPaused ? "Resume all agents" : "Pause all agents",
+                    shortcut: "⌘⇧P",
+                    tone: .muted
+                ) {
+                    Task {
+                        if allAgentsPaused {
+                            await store.governance.resumeAllAgents()
+                        } else {
+                            await store.governance.pauseAllAgents()
+                        }
+                        await store.refreshAll()
+                    }
                 }
             }
 
@@ -500,6 +710,14 @@ private struct FooterActions: View {
         .padding(.vertical, Spacing.s1)
         .padding(.horizontal, Spacing.s1)
         .background(Color.primary.opacity(0.02))
+    }
+
+    private var allAgentsPaused: Bool {
+        if let agents = store.dataControlSummary?.agents, !agents.isEmpty {
+            return agents.allSatisfy(\.isPaused)
+        }
+        return store.governance.claudePolicy?.isPaused == true
+            && store.governance.codexPolicy?.isPaused == true
     }
 
     @ViewBuilder
@@ -569,6 +787,13 @@ private struct HoverRowStyle: ButtonStyle {
             )
             .onHover { hovered = $0 }
             .opacity(configuration.isPressed ? 0.65 : 1)
+    }
+}
+
+private extension String {
+    var lastPathComponentForDisplay: String {
+        let component = URL(fileURLWithPath: self).lastPathComponent
+        return component.isEmpty ? self : component
     }
 }
 
