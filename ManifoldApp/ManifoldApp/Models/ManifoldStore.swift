@@ -39,6 +39,8 @@ final class ManifoldStore {
     let governance: GovernanceModel
     let rules: RulesModel
     let integrationHealth: IntegrationHealthModel
+    let diagnostics: DiagnosticsModel
+    let updater: UpdaterModel?
 
     let runtime: any RuntimeClientProtocol
     private var connectionMonitorTask: Task<Void, Never>?
@@ -73,6 +75,21 @@ final class ManifoldStore {
         mailReview = MailReviewModel()
         governance = GovernanceModel()
         rules = RulesModel()
+        diagnostics = DiagnosticsModel()
+        // Sparkle is only meaningful when the bundle has a feed URL and a
+        // public EdDSA key — i.e. an official build. In source builds where
+        // SPARKLE_PUBLIC_ED_KEY is empty, instantiating the controller would
+        // log a fault every time. Keep `updater` nil there; Help -> Check
+        // for Updates and the consent toggle no-op cleanly.
+        // Sparkle is only meaningful when the bundle has a public EdDSA key
+        // — i.e. an official build. In source builds where the key is empty
+        // we skip the controller entirely; Help -> Check for Updates and the
+        // consent toggle no-op cleanly.
+        if startServices, Self.sparkleConfigured() {
+            updater = UpdaterModel(diagnostics: diagnostics)
+        } else {
+            updater = nil
+        }
 
         session.configure(client: runtime)
         activity.configure(client: runtime)
@@ -85,15 +102,53 @@ final class ManifoldStore {
         integrationHealth.store = self
 
         if startServices {
+            // Diagnostics: record launch + detect any unexpected exit of the
+            // previous agent run before we start the new one.
+            diagnostics.record(.appLaunch)
+            diagnostics.checkAgentExitState()
+
+            // Sparkle: thread the agent shutdown into the updater so the
+            // app/agent versions never go out of sync across an auto-update.
+            updater?.agentShutdown = { [weak self] in self?.unregisterAgent() }
+
             registerAgent()
             requestNotificationPermission()
             startConnectionMonitor()
+            startUpdaterConsentBridge()
 
             Task {
                 await refreshAll(force: true)
                 await integrationHealth.checkAll()
             }
         }
+    }
+
+    /// Mirror the diagnostics consent toggle to Sparkle's automatic-check
+    /// preference. Polled rather than KVO'd because @Observable doesn't
+    /// expose Combine publishers and the toggle changes at human cadence.
+    private func startUpdaterConsentBridge() {
+        guard let updater else { return }
+        var lastSeen = diagnostics.updateChecksEnabled
+        Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                let current = self.diagnostics.updateChecksEnabled
+                if current != lastSeen {
+                    lastSeen = current
+                    updater.applyAutomaticCheckPreference(current)
+                }
+            }
+        }
+    }
+
+    /// True when the bundle has both a feed URL and a populated public key,
+    /// i.e. an official notarized build that can verify update signatures.
+    /// Source builds with an empty `SUPublicEDKey` skip Sparkle entirely.
+    private static func sparkleConfigured() -> Bool {
+        let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String ?? ""
+        let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String ?? ""
+        return !key.isEmpty && !feed.isEmpty
     }
 
     func refresh() async {
@@ -122,6 +177,7 @@ final class ManifoldStore {
         if let agentVersion = pingResult.agentVersion, agentVersion != appVersion, !didAttemptAgentRestart {
             didAttemptAgentRestart = true
             logger.notice("Agent version \(agentVersion) != app version \(appVersion). Restarting agent.")
+            diagnostics.record(.versionMismatchRestart(appVersion: appVersion, runtimeVersion: agentVersion))
             unregisterAgent()
             registerAgent()
             try? await Task.sleep(for: .seconds(1))
@@ -820,12 +876,15 @@ final class ManifoldStore {
     }
 
     func registerAgent() {
+        diagnostics.record(.runtimeRegistrationAttempted)
+
         let bundledAgent = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/LaunchServices/ManifoldAgent")
         guard FileManager.default.isExecutableFile(atPath: bundledAgent.path) else {
             runtimeLaunchError = "ManifoldAgent is missing from the app bundle, so the runtime cannot start."
             lastError = runtimeLaunchError
             logger.warning("ManifoldAgent not found at \(bundledAgent.path, privacy: .public)")
+            diagnostics.record(.runtimeRegistrationFailedHelperMissing)
             return
         }
 
@@ -844,6 +903,7 @@ final class ManifoldStore {
             _ = try? Self.runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(Self.agentLabel)"])
             let bootstrap = try Self.runLaunchctl(arguments: ["bootstrap", "gui/\(getuid())", Self.launchAgentPlistURL.path])
             if bootstrap.exitCode != 0 {
+                diagnostics.record(.runtimeRegistrationFailedLaunchctlBootstrap(code: bootstrap.exitCode))
                 throw RuntimeRegistrationError(
                     message: bootstrap.output.nilIfEmpty
                     ?? "launchctl bootstrap exited with status \(bootstrap.exitCode)."

@@ -16,6 +16,7 @@ struct GeneralSettingsPane: View {
 
     var body: some View {
         @Bindable var store = store
+        @Bindable var diagnostics = store.diagnostics
 
         Form {
             Section {
@@ -29,6 +30,27 @@ struct GeneralSettingsPane: View {
             Section("Notifications") {
                 Toggle("Session start and finish", isOn: $store.notifyOnSessionEnd)
                 Toggle("Access denied alerts", isOn: $store.notifyOnAccessDenied)
+            }
+
+            Section("Updates & Diagnostics") {
+                Toggle("Check for updates automatically", isOn: $diagnostics.updateChecksEnabled)
+                Toggle("Share diagnostic reports", isOn: $diagnostics.diagnosticSharingEnabled)
+                if diagnostics.diagnosticSharingEnabled {
+                    HStack {
+                        Text("Anonymous identifier")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(diagnostics.installID?.prefix(8).description ?? "—")
+                            .font(ManifoldType.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                        Button("Reset") { diagnostics.resetInstallID() }
+                            .controlSize(.small)
+                    }
+                }
+                Text("Diagnostic reports are kept on this Mac. Sending is manual — see the Advanced tab to preview, save, or send.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Data & Privacy") {

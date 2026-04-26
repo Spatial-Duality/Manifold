@@ -16,6 +16,9 @@ struct AdvancedSettingsPane: View {
     @Environment(ManifoldStore.self) var store
     @State private var gcResult: Int?
     @State private var integrityResult: Bool?
+    @State private var diagnosticsPreviewPresented = false
+    @State private var deleteConfirmationPresented = false
+    @State private var saveSheetPresented = false
 
     var body: some View {
         Form {
@@ -86,6 +89,40 @@ struct AdvancedSettingsPane: View {
                 }
             }
 
+            Section("Diagnostics") {
+                HStack {
+                    Button("Create Diagnostic Report…") {
+                        diagnosticsPreviewPresented = true
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("diagnostics.createReport")
+
+                    Button("Reveal Diagnostics in Finder") {
+                        store.diagnostics.revealDiagnosticsInFinder()
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("diagnostics.revealInFinder")
+
+                    Button("Delete Local Diagnostics", role: .destructive) {
+                        deleteConfirmationPresented = true
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("diagnostics.delete")
+                }
+                Text("Reports describe app health and runtime registration outcomes. They never include file paths, prompts, email contents, or governed data.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let receipt = store.diagnostics.lastReceiptID {
+                    LabeledContent("Last sent receipt") {
+                        Text(receipt)
+                            .font(ManifoldType.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
             Section {
                 Text("Landing here is a self-selection into engineering diagnostics. Plain-language controls live in the other panes; this one exists so you can see exactly what Manifold is doing on your Mac.")
                     .font(ManifoldType.caption)
@@ -94,6 +131,106 @@ struct AdvancedSettingsPane: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $diagnosticsPreviewPresented) {
+            DiagnosticReportPreviewSheet(
+                json: store.diagnostics.reportPreviewJSON(),
+                canSend: store.diagnostics.canSendReports,
+                onSave: { saveSheetPresented = true },
+                onSend: {
+                    // Phase C wires the actual transport. For Phase A, the
+                    // button is hidden when canSend is false.
+                },
+                onClose: { diagnosticsPreviewPresented = false }
+            )
+            .frame(minWidth: 560, minHeight: 420)
+        }
+        .fileExporter(
+            isPresented: $saveSheetPresented,
+            document: DiagnosticReportDocument(json: store.diagnostics.reportPreviewJSON()),
+            contentType: .json,
+            defaultFilename: "manifold-diagnostic-report.json"
+        ) { _ in }
+        .confirmationDialog(
+            "Delete all local diagnostics?",
+            isPresented: $deleteConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                try? store.diagnostics.deleteLocalDiagnostics()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Removes the diagnostics directory on this Mac. Consent state is unchanged. Sparkle and runtime behavior are unaffected.")
+        }
+    }
+}
+
+// MARK: - Preview sheet
+
+private struct DiagnosticReportPreviewSheet: View {
+    let json: String
+    let canSend: Bool
+    let onSave: () -> Void
+    let onSend: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            Text("Diagnostic Report")
+                .font(ManifoldType.heading)
+            Text("Preview the exact JSON that would be saved or sent. Nothing leaves your Mac unless you press Send.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                Text(json)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Spacing.s2)
+            }
+            .background(Color(NSColor.textBackgroundColor))
+            .cornerRadius(6)
+            .accessibilityIdentifier("diagnostics.preview")
+
+            HStack {
+                Spacer()
+                Button("Save to File…", action: onSave)
+                    .accessibilityIdentifier("diagnostics.saveToFile")
+                if canSend {
+                    Button("Send to Spatial Duality", action: onSend)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("diagnostics.send")
+                }
+                Button("Close", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(Spacing.s4)
+    }
+}
+
+// MARK: - Document
+
+import UniformTypeIdentifiers
+
+private struct DiagnosticReportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    let json: String
+
+    init(json: String) { self.json = json }
+
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents,
+           let text = String(data: data, encoding: .utf8) {
+            self.json = text
+        } else {
+            self.json = "{}"
+        }
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(json.utf8))
     }
 }
 

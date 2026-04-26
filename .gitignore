@@ -14,3 +14,4 @@ default.profraw
 ManifoldApp/build/
 .claude/worktrees/
 .claude/plans/
+script/__pycache__/

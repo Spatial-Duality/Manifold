@@ -215,3 +215,47 @@ struct ScopeReviewPanel: View {
         .accessibilityIdentifier("onboarding.panel.scopeReview")
     }
 }
+
+struct HelpImprovePanel: View {
+    @Bindable var diagnostics: DiagnosticsModel
+    let next: () -> Void
+    let back: () -> Void
+
+    var body: some View {
+        VStack(spacing: Spacing.s6) {
+            Spacer()
+            EmptyStateIllustration(
+                systemImage: "chart.bar.doc.horizontal",
+                title: "Help improve Manifold (optional)",
+                subtitle: "Local diagnostics are kept on this Mac. Sending is manual — Manifold never uploads automatically and never sends governed data."
+            )
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                Toggle("Share diagnostic reports when I press Send", isOn: $diagnostics.diagnosticSharingEnabled)
+                    .accessibilityIdentifier("onboarding.help.sharing")
+                Toggle("Check for app updates automatically", isOn: $diagnostics.updateChecksEnabled)
+                    .accessibilityIdentifier("onboarding.help.updates")
+                Text("You can change these later in Settings -> General. Reset the anonymous identifier any time.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(Spacing.s4)
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r5, style: .continuous)
+                    .fill(ManifoldPalette.surface2)
+            )
+
+            Spacer()
+            HStack(spacing: Spacing.s3) {
+                Button("Back", action: back)
+                    .buttonStyle(.bordered)
+                Button("Continue", action: next)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding.help.continue")
+            }
+        }
+        .padding(Spacing.s6)
+        .accessibilityIdentifier("onboarding.panel.helpImprove")
+    }
+}

@@ -108,6 +108,31 @@ struct ManifoldApp: App {
                 }
                 .keyboardShortcut("q")
             }
+
+            CommandGroup(replacing: .help) {
+                Button("Manifold Help") {
+                    if let url = URL(string: "https://github.com/amargandhi/Manifold") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Divider()
+                if let updater = store.updater {
+                    Button("Check for Updates…") {
+                        updater.checkForUpdates()
+                    }
+                    Divider()
+                }
+                Button("Reveal Diagnostics in Finder") {
+                    store.diagnostics.revealDiagnosticsInFinder()
+                }
+                Button("Create Diagnostic Report…") {
+                    // Opens Settings; user navigates to Advanced -> Diagnostics.
+                    // A future iteration can deep-link to the Diagnostics
+                    // section directly via a SceneStorage selection.
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    NotificationCenter.default.post(name: .manifoldOpenSettingsDiagnostics, object: nil)
+                }
+            }
         }
 
         MenuBarExtra("Manifold", systemImage: store.menuBarIcon) {

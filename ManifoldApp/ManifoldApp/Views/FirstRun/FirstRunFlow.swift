@@ -18,7 +18,7 @@ struct FirstRunFlow: View {
     @State private var selectedPaths: [String] = []
 
     enum Panel: Int, CaseIterable {
-        case concept, defaults, guidedAdd, scopeReview
+        case concept, defaults, helpImprove, guidedAdd, scopeReview
     }
 
     var body: some View {
@@ -28,6 +28,8 @@ struct FirstRunFlow: View {
                 ConceptPanel(next: advance)
             case .defaults:
                 DefaultsPanel(next: advance, back: back)
+            case .helpImprove:
+                HelpImprovePanel(diagnostics: store.diagnostics, next: advance, back: back)
             case .guidedAdd:
                 GuidedAddPanel(choose: chooseFirstProject, back: back)
             case .scopeReview:

@@ -9,8 +9,32 @@ jobs:
     runs-on: macos-15
     permissions:
       contents: write
+    env:
+      # Hoisted to job level so the conditional `if:` on later steps can read
+      # whether the secret is configured. The actual value is only injected
+      # into the steps that need it.
+      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for `git rev-list --count HEAD`
+
+      - name: Compute build number + assert strictly increasing vs previous tag
+        id: buildnum
+        run: |
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v '^${{ github.ref_name }}$' | head -1 || true)
+          if [[ -n "$PREV_TAG" ]]; then
+            PREV_BUILD=$(git rev-list --count "$PREV_TAG")
+            if [[ "$BUILD_NUMBER" -le "$PREV_BUILD" ]]; then
+              echo "::error::CFBundleVersion did not increase ($PREV_TAG=$PREV_BUILD, ${{ github.ref_name }}=$BUILD_NUMBER). Sparkle would silently skip this update."
+              exit 1
+            fi
+            echo "Build number OK: $PREV_TAG=$PREV_BUILD -> ${{ github.ref_name }}=$BUILD_NUMBER"
+          else
+            echo "No previous tag — first release, build number $BUILD_NUMBER"
+          fi
 
       - name: Build release
         env:
@@ -18,6 +42,7 @@ jobs:
           MANIFOLD_NOTARY_PROFILE: ${{ secrets.MANIFOLD_NOTARY_PROFILE }}
           MANIFOLD_REQUIRE_SIGNED_RELEASE: "1"
           MANIFOLD_REQUIRE_NOTARIZATION: "1"
+          MANIFOLD_BUILD_NUMBER: ${{ steps.buildnum.outputs.build_number }}
         run: bash ManifoldApp/build.sh release
 
       - name: Validate release posture
@@ -33,3 +58,74 @@ jobs:
           name: Manifold v${{ steps.version.outputs.version }}
           files: ManifoldApp/build/Manifold-*.zip
           generate_release_notes: true
+
+      # ---------- Sparkle appcast publishing ----------
+      # Skipped automatically when SPARKLE_ED_PRIVATE_KEY is unset, so first
+      # tagged release(s) before keys exist still produce a normal GitHub
+      # Release without breaking the workflow.
+      - name: Locate Sparkle tools
+        id: sparkle_tools
+        run: |
+          GENERATE_APPCAST=$(find ~/Library/Developer/Xcode/DerivedData -path "*sparkle/Sparkle/bin/generate_appcast" 2>/dev/null | head -1)
+          SIGN_UPDATE=$(find ~/Library/Developer/Xcode/DerivedData -path "*sparkle/Sparkle/bin/sign_update" 2>/dev/null | head -1)
+          if [[ -z "$GENERATE_APPCAST" || -z "$SIGN_UPDATE" ]]; then
+            xcodebuild -resolvePackageDependencies -project Manifold.xcodeproj -scheme Manifold >/dev/null
+            GENERATE_APPCAST=$(find ~/Library/Developer/Xcode/DerivedData -path "*sparkle/Sparkle/bin/generate_appcast" | head -1)
+            SIGN_UPDATE=$(find ~/Library/Developer/Xcode/DerivedData -path "*sparkle/Sparkle/bin/sign_update" | head -1)
+          fi
+          echo "generate_appcast=$GENERATE_APPCAST" >> "$GITHUB_OUTPUT"
+          echo "sign_update=$SIGN_UPDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Build + validate appcast
+        if: ${{ env.SPARKLE_ED_PRIVATE_KEY != '' }}
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          STAGING="$(mktemp -d)"
+          cp ManifoldApp/build/Manifold-*.zip "$STAGING/"
+
+          # Pull the previously published appcast (if any) so generate_appcast
+          # can append the new item rather than starting from a blank feed.
+          if curl -sfL https://updates.spatialduality.com/appcast.xml \
+              -o "$STAGING/appcast.xml"; then
+            echo "Previous appcast fetched."
+          else
+            echo "No previous appcast — this is a first release."
+          fi
+
+          # generate_appcast writes the EdDSA signing key into the env.
+          # Trailing slash on --download-url-prefix is required by Sparkle.
+          PRIVATE_KEY_FILE="$STAGING/sparkle_ed.key"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$PRIVATE_KEY_FILE"
+          chmod 600 "$PRIVATE_KEY_FILE"
+
+          "${{ steps.sparkle_tools.outputs.generate_appcast }}" \
+              --ed-key-file "$PRIVATE_KEY_FILE" \
+              --download-url-prefix "https://github.com/amargandhi/Manifold/releases/download/${{ github.ref_name }}/" \
+              "$STAGING"
+
+          # Wipe the private key file as soon as we're done.
+          rm -f "$PRIVATE_KEY_FILE"
+
+          # Validate before publishing — this is the gate that catches a
+          # broken appcast before users see it.
+          bash script/validate_appcast.sh "$STAGING/appcast.xml" \
+              --previous-feed https://updates.spatialduality.com/appcast.xml
+
+          mkdir -p .appcast-publish
+          cp "$STAGING/appcast.xml" .appcast-publish/appcast.xml
+          # CNAME tells GitHub Pages to serve at the custom domain.
+          echo "updates.spatialduality.com" > .appcast-publish/CNAME
+
+      - name: Publish appcast to gh-pages
+        if: ${{ env.SPARKLE_ED_PRIVATE_KEY != '' }}
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .appcast-publish
+          publish_branch: gh-pages
+          keep_files: false
+          commit_message: "chore(appcast): publish ${{ github.ref_name }} (build ${{ steps.buildnum.outputs.build_number }})"

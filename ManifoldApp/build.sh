@@ -12,7 +12,19 @@ NOTARY_PROFILE="${MANIFOLD_NOTARY_PROFILE:-}"
 REQUIRE_SIGNED_RELEASE="${MANIFOLD_REQUIRE_SIGNED_RELEASE:-0}"
 REQUIRE_NOTARIZATION="${MANIFOLD_REQUIRE_NOTARIZATION:-0}"
 
-echo "Building Manifold v$VERSION ($CONFIG)..."
+# CFBundleVersion must be a strictly increasing integer for Sparkle to deliver
+# updates. Derive it from git history so every commit on main bumps it without
+# manual intervention. Allow override via $MANIFOLD_BUILD_NUMBER for CI builds
+# from a tag where the rev count would be the same as the prior tag's HEAD.
+if [[ -n "${MANIFOLD_BUILD_NUMBER:-}" ]]; then
+    BUILD_NUMBER="$MANIFOLD_BUILD_NUMBER"
+elif command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+    BUILD_NUMBER="$(git rev-list --count HEAD)"
+else
+    BUILD_NUMBER="1"
+fi
+
+echo "Building Manifold v$VERSION (build $BUILD_NUMBER, $CONFIG)..."
 
 if [[ "$CONFIG" == "release" ]]; then
     SWIFT_BUILD_CONFIG="release"
@@ -31,7 +43,9 @@ xcodebuild \
     -configuration "$XCODE_CONFIGURATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     build \
-    CODE_SIGNING_ALLOWED=NO >/tmp/manifold-build-script-xcodebuild.log 2>&1
+    CODE_SIGNING_ALLOWED=NO \
+    MARKETING_VERSION="$VERSION" \
+    CURRENT_PROJECT_VERSION="$BUILD_NUMBER" >/tmp/manifold-build-script-xcodebuild.log 2>&1
 
 swift build -c "$SWIFT_BUILD_CONFIG" --product manifold-mcp
 BUILD_DIR="$PROJECT_DIR/.build/$SWIFT_BUILD_CONFIG"

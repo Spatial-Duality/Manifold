@@ -21,6 +21,7 @@ extension Notification.Name {
     static let manifoldPauseAllFromIntent = Notification.Name("manifoldPauseAllFromIntent")
     static let manifoldStartSessionFromIntent = Notification.Name("manifoldStartSessionFromIntent")
     static let manifoldOpenActivityFromIntent = Notification.Name("manifoldOpenActivityFromIntent")
+    static let manifoldOpenSettingsDiagnostics = Notification.Name("manifold.openSettingsDiagnostics")
 }
 
 struct AppRootView: View {
