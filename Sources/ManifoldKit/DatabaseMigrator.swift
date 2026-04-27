@@ -419,7 +419,12 @@ public struct DatabaseMigrator {
                 ("cc", "TEXT DEFAULT ''"),
                 ("message_id_header", "TEXT"),
             ]
+            // The migration array above is hardcoded by the migration author.
+            // `name` must be a SQL identifier (validated); `type` is a SQL type
+            // fragment that may include DEFAULT clauses, trusted because it
+            // ships with the binary and is not user-controllable.
             for (name, type) in newColumns where !columnNames.contains(name) {
+                precondition(isValidSQLIdentifier(name), "Migration v8 column name is not a valid SQL identifier: \(name)")
                 try db.execute("ALTER TABLE email_messages ADD COLUMN \(name) \(type)")
             }
 

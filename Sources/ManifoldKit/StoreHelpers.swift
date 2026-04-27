@@ -13,16 +13,41 @@ import Foundation
 ///
 /// Reads `PRAGMA table_info(table)` and runs `sql` (an `ALTER TABLE ... ADD
 /// COLUMN ...` statement) only when `column` is missing. Idempotent.
+///
+/// `table` and `column` must be valid SQL identifiers (alphanumerics +
+/// underscores, leading non-digit). The check is defense-in-depth: PRAGMA
+/// table_info accepts only an identifier and would refuse SQL fragments,
+/// but rejecting bad input early gives a clearer error and prevents future
+/// callers from passing tainted values without noticing.
 public func addColumnIfMissing(
     _ db: DatabaseConnection,
     table: String,
     column: String,
     sql: String
 ) throws {
+    precondition(isValidSQLIdentifier(table), "addColumnIfMissing: invalid SQL identifier for table: \(table)")
+    precondition(isValidSQLIdentifier(column), "addColumnIfMissing: invalid SQL identifier for column: \(column)")
     let columns = try db.queryAll("PRAGMA table_info(\(table))")
     if !columns.contains(where: { $0["name"] == column }) {
         try db.execute(sql)
     }
+}
+
+/// Returns true iff `identifier` is a safe SQL identifier (alphanumeric +
+/// underscore, leading non-digit). Used by helpers that interpolate
+/// identifiers into SQL because SQLite has no parameter binding for
+/// identifiers.
+///
+/// Internal scope: also used by `DatabaseMigrator` for ALTER TABLE column
+/// names. Any code that interpolates a SQL identifier should validate it
+/// here first.
+func isValidSQLIdentifier(_ identifier: String) -> Bool {
+    guard !identifier.isEmpty else { return false }
+    let first = identifier.unicodeScalars.first!
+    let validFirst = first.isASCII && (CharacterSet.letters.contains(first) || first == "_")
+    guard validFirst else { return false }
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
+    return identifier.unicodeScalars.allSatisfy { $0.isASCII && allowed.contains($0) }
 }
 
 /// JSON encode/decode helpers for store value-type round-tripping.
