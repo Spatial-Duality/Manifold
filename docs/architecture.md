@@ -163,7 +163,7 @@ flowchart LR
     R --> P["Policy stores"]
     R --> E["Mail archive and rules"]
     R --> S["Snapshots and content store"]
-    R --> H["Audit, exposure, and session activity"]
+    R --> H["Audit, exposure, memory, and session activity"]
 ```
 
 ### Manifold.app
@@ -190,10 +190,34 @@ The runtime persists:
 - file activity in snapshots and content-addressed blobs
 - governed mail metadata in the local archive and rule stores
 - unified `RuleStore` entries (files + emails + agent behavior) consulted by `RuleEngine.evaluate` on every file-read, email-read, and agent-tool invocation
+- Personal Data OS records: scoped memory, capability handles, tamper-evident ledger entries, tool metrics, knowledge graph nodes, and claim-verification findings
 - standing-write approvals (once vs. default) in `StandingWriteApprovalStore`
 - per-agent file visibility overrides in `FileVisibilityOverrideStore`
 
 On-disk governance data sits under a directory with owner-only (0o700) permissions. Files that carry sensitive payloads are written via `LocalFileProtection` (0o600) and optionally encrypted at rest with `ProtectedStorageCrypto` (AES-GCM, key held in the macOS Keychain, `MNF1` magic header). Path inputs from callers are normalized through `ScopedFileIdentity` before any policy check, so symlinks and relative walks cannot escape a governed scope.
+
+### Personal Data OS memory and evidence
+
+The runtime now treats reusable agent context as governed data, not as a UI preference.
+
+```mermaid
+flowchart LR
+    A["Selected files or emails"] --> E["Exposure records"]
+    E --> M["Scoped derived memory"]
+    M --> C["Future agent context"]
+    C --> V["Claim verification"]
+    V --> L["Ledger / findings"]
+```
+
+What changed:
+
+- memory has an origin: `agent_derived`, `user_authored`, or `system`
+- agent-derived memory can expire by retention and is tombstoned as `expired_by_retention`
+- amnesiac mode is enforced in the runtime, so `save_memory_note` does not persist derived memory while enabled
+- agents can only forget memory whose source/grant lineage is in their current access context
+- capability handles are checked against the current grant/source scope before sink policy is evaluated
+- claim verification uses only scoped exposures from the current connection for `supported`; loose claims are `ambiguous`, and missing evidence is `unverified`
+- new ledger entries include timestamp material in their hash; legacy rows still verify with an explicit warning
 
 ### Caller identity
 

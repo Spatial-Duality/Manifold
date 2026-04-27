@@ -134,8 +134,35 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             let args: [String: Any]
             do { args = try XPCJSON.dictionary(from: arguments) }
             catch { args = [:]; xpcLogger.warning("Malformed tool arguments for \(toolName): \(error.localizedDescription, privacy: .public)") }
+            let startedAt = Date()
             let result = await Self.handleTool(name: toolName, arguments: args, bridge: bridge)
             let isError = result["isError"] as? Bool ?? false
+            let text = Self.textContent(from: result)
+            let metricContext = await bridge.latestToolMetricContext(toolName: toolName)
+            let metric = ToolCallMetric(
+                connectionID: connectionID,
+                agent: bridge.agentName,
+                toolName: toolName,
+                durationMS: Date().timeIntervalSince(startedAt) * 1_000,
+                outputBytes: Data(text.utf8).count,
+                truncated: text.contains("[Manifold note: output truncated"),
+                isError: isError,
+                exposureID: metricContext.exposureID,
+                grantID: metricContext.grantID,
+                sessionID: metricContext.sessionID
+            )
+            do {
+                try await runtime.toolMetricsStore.record(metric)
+                try await runtime.ledgerStore.append(
+                    entryType: .toolMetric,
+                    subjectTable: "tool_call_metrics",
+                    subjectID: metric.metricID,
+                    payload: Self.canonicalJSON(metric),
+                    metadata: ["tool": toolName, "agent": bridge.agentName]
+                )
+            } catch {
+                xpcLogger.warning("Failed to record tool metric: \(error.localizedDescription, privacy: .public)")
+            }
             replyBox.reply((try? XPCJSON.data(from: result)) ?? Data(), isError)
         }
     }
@@ -246,6 +273,76 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             let entries = try await runtime.auditStore.recentEntries(limit: limit)
             return ["entries": entries.map(Self.auditJSON)]
 
+        case "recentLedgerEntries":
+            let limit = payload["limit"] as? Int ?? 20
+            return ["entries": try XPCJSON.object(from: try await runtime.ledgerStore.recent(limit: limit))]
+
+        case "verifyLedger":
+            return ["result": try XPCJSON.object(from: try await runtime.ledgerStore.verifyChain())]
+
+        case "toolCostReport":
+            let limit = payload["limit"] as? Int ?? 200
+            return ["report": try XPCJSON.object(from: try await runtime.toolMetricsStore.report(limit: limit))]
+
+        case "listMemory":
+            let limit = payload["limit"] as? Int ?? 100
+            let includeDeleted = payload["includeDeleted"] as? Bool ?? false
+            _ = try await runtime.memoryStore.expireDerivedMemory()
+            return ["items": try XPCJSON.object(from: try await runtime.memoryStore.list(limit: limit, includeDeleted: includeDeleted))]
+
+        case "listMemorySources":
+            _ = try await runtime.memoryStore.expireDerivedMemory()
+            return ["sources": try XPCJSON.object(from: try await runtime.memoryStore.sourceSummaries())]
+
+        case "getMemorySettings":
+            return ["settings": try XPCJSON.object(from: try await runtime.memoryStore.settings())]
+
+        case "updateMemorySettings":
+            guard let settingsObject = payload["settings"] else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let settings = try XPCJSON.decode(MemorySettings.self, from: settingsObject)
+            try await runtime.memoryStore.upsertSettings(settings)
+            return ["settings": try XPCJSON.object(from: try await runtime.memoryStore.settings())]
+
+        case "forgetMemory":
+            guard let memoryID = payload["memoryID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let deleted = try await runtime.memoryStore.forget(memoryID: memoryID)
+            guard deleted else {
+                return ["ok": false, "message": "Memory not found"]
+            }
+            try await runtime.ledgerStore.append(
+                entryType: .memoryChange,
+                subjectTable: "memory_items",
+                subjectID: memoryID,
+                payload: "forget:\(memoryID)",
+                metadata: ["status": MemoryStatus.deletedByUser.rawValue]
+            )
+            return ["ok": true]
+
+        case "listSkills":
+            let limit = payload["limit"] as? Int ?? 50
+            return ["skills": try XPCJSON.object(from: try await runtime.skillStore.list(limit: limit))]
+
+        case "recentExecRuns":
+            let limit = payload["limit"] as? Int ?? 50
+            return ["runs": try XPCJSON.object(from: try await runtime.execRunStore.recent(limit: limit))]
+
+        case "listCapabilityHandles":
+            let limit = payload["limit"] as? Int ?? 50
+            return ["handles": try XPCJSON.object(from: try await runtime.capabilityHandleStore.list(limit: limit))]
+
+        case "queryGraphNodes":
+            let query = payload["query"] as? String ?? ""
+            let limit = payload["limit"] as? Int ?? 50
+            return ["nodes": try XPCJSON.object(from: try await runtime.knowledgeGraphStore.query(query, limit: limit))]
+
+        case "recentFabricationFindings":
+            let limit = payload["limit"] as? Int ?? 50
+            return ["findings": try XPCJSON.object(from: try await runtime.fabricationFindingStore.recent(limit: limit))]
+
         case "exposureLog":
             guard let connectionID = payload["connectionID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
@@ -275,6 +372,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 throw ManifoldXPCError.invalidPayload
             }
             try await runtime.grantStore.removeSource(sourceID: sourceID)
+            _ = try await runtime.memoryStore.tombstoneMemories(contributingSourceID: sourceID)
             try await runtime.standingWriteApprovalStore.removeGrants(sourceID: sourceID)
             try await runtime.fileVisibilityOverrideStore.clearOverrides(sourceID: sourceID)
             try await runtime.privacyIndexCoordinator.sourceDidChange()
@@ -548,6 +646,123 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 let limit = intArgument(arguments["limit"]) ?? 10
                 return textResult(try await bridge.searchStructured(query: query, limit: limit, intent: intent))
 
+            case "tool_cost_report":
+                let limit = intArgument(arguments["limit"]) ?? 100
+                return textResult(try await bridge.toolCostReport(limit: limit))
+
+            case "was_exposed_before":
+                let contentHash = arguments["content_hash"] as? String
+                let path = arguments["path"] as? String
+                let limit = intArgument(arguments["limit"]) ?? 10
+                return textResult(try await bridge.wasExposedBefore(contentHash: contentHash, path: path, limit: limit))
+
+            case "reuse_prior_context":
+                let query = arguments["query"] as? String
+                let path = arguments["path"] as? String
+                let limit = intArgument(arguments["limit"]) ?? 8
+                return textResult(try await bridge.reusePriorContext(query: query, path: path, limit: limit))
+
+            case "verify_ledger_entry":
+                return textResult(try await bridge.verifyLedgerEntry(entryID: arguments["entry_id"] as? String))
+
+            case "recall_memory":
+                let query = arguments["query"] as? String
+                let limit = intArgument(arguments["limit"]) ?? 10
+                return textResult(try await bridge.recallMemory(query: query, limit: limit))
+
+            case "save_memory_note":
+                guard let title = arguments["title"] as? String,
+                      let body = arguments["body"] as? String else {
+                    return errorResult("'title' and 'body' parameters required")
+                }
+                let kind = (arguments["kind"] as? String).flatMap(MemoryKind.init(rawValue:)) ?? .note
+                return textResult(try await bridge.saveMemoryNote(title: title, body: body, kind: kind))
+
+            case "list_memory_sources":
+                return textResult(try await bridge.listMemorySources())
+
+            case "forget_memory":
+                guard let memoryID = arguments["memory_id"] as? String else {
+                    return errorResult("'memory_id' parameter required")
+                }
+                return textResult(try await bridge.forgetMemory(memoryID: memoryID))
+
+            case "what_changed_since":
+                let path = arguments["path"] as? String
+                let limit = intArgument(arguments["limit"]) ?? 20
+                return textResult(try await bridge.whatChangedSince(path: path, limit: limit))
+
+            case "create_value_handle":
+                guard let origin = arguments["origin"] as? String,
+                      let sensitivity = arguments["sensitivity"] as? String,
+                      let trustLevel = arguments["trust_level"] as? String else {
+                    return errorResult("'origin', 'sensitivity', and 'trust_level' parameters required")
+                }
+                let allowedSinks = (arguments["allowed_sinks"] as? [String])
+                    ?? (arguments["allowed_sinks"] as? String)?
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                    ?? ["model_context"]
+                return textResult(try await bridge.createValueHandle(
+                    origin: origin,
+                    sensitivity: sensitivity,
+                    trustLevel: trustLevel,
+                    allowedSinks: allowedSinks
+                ))
+
+            case "check_capability_flow":
+                guard let handleID = arguments["handle_id"] as? String,
+                      let sink = arguments["sink"] as? String else {
+                    return errorResult("'handle_id' and 'sink' parameters required")
+                }
+                let untrustedInput = boolArgument(arguments["untrusted_input"]) ?? false
+                let stateChangingAction = boolArgument(arguments["state_changing_action"]) ?? false
+                return textResult(try await bridge.checkCapabilityFlow(
+                    handleID: handleID,
+                    sink: sink,
+                    untrustedInput: untrustedInput,
+                    stateChangingAction: stateChangingAction
+                ))
+
+            case "run_code":
+                guard let code = arguments["code"] as? String else {
+                    return errorResult("'code' parameter required")
+                }
+                let language = arguments["language"] as? String
+                return textResult(Self.prettyJSON(try await bridge.runCode(code: code, language: language)))
+
+            case "list_skills":
+                let limit = intArgument(arguments["limit"]) ?? 50
+                return textResult(try await bridge.listSkills(limit: limit))
+
+            case "save_skill":
+                guard let name = arguments["name"] as? String,
+                      let manifestJSON = arguments["manifest_json"] as? String else {
+                    return errorResult("'name' and 'manifest_json' parameters required")
+                }
+                return textResult(try await bridge.saveSkill(name: name, manifestJSON: manifestJSON))
+
+            case "invoke_skill":
+                guard let name = arguments["name"] as? String else {
+                    return errorResult("'name' parameter required")
+                }
+                return textResult(Self.prettyJSON(try await bridge.invokeSkill(name: name)))
+
+            case "query_graph":
+                guard let query = arguments["query"] as? String else {
+                    return errorResult("'query' parameter required")
+                }
+                let limit = intArgument(arguments["limit"]) ?? 10
+                return textResult(try await bridge.queryGraph(query: query, limit: limit))
+
+            case "verify_claimed_actions":
+                guard let claimsJSON = arguments["claims_json"] as? String else {
+                    return errorResult("'claims_json' parameter required")
+                }
+                let sessionID = arguments["session_id"] as? String
+                return textResult(try await bridge.verifyClaimedActions(claimsJSON: claimsJSON, sessionID: sessionID))
+
             default:
                 return errorResult("Unknown tool: \(name)")
             }
@@ -568,6 +783,43 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         if let intValue = value as? Int { return intValue }
         if let stringValue = value as? String { return Int(stringValue) }
         return nil
+    }
+
+    private static func boolArgument(_ value: Any?) -> Bool? {
+        if let boolValue = value as? Bool { return boolValue }
+        if let stringValue = value as? String {
+            switch stringValue.lowercased() {
+            case "true", "1", "yes": return true
+            case "false", "0", "no": return false
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    private static func textContent(from result: [String: Any]) -> String {
+        guard let content = result["content"] as? [[String: Any]] else { return "" }
+        return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    private static func canonicalJSON<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value),
+              let string = String(data: data, encoding: .utf8) else {
+            return "\(value)"
+        }
+        return string
+    }
+
+    private static func prettyJSON<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(value),
+              let string = String(data: data, encoding: .utf8) else {
+            return "\(value)"
+        }
+        return string
     }
 
     private static func accessIntent(from arguments: [String: Any]) -> AccessIntent? {

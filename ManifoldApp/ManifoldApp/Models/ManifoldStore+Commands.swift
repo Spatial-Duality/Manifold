@@ -72,7 +72,13 @@ extension ManifoldStore: ManifoldCommands {
     }
 
     func reloadSession(historyID: String) async throws {
-        logger.info("reloadSession(\(historyID)): preview-only surface, runtime pipeline not wired")
+        if activity.sessions.isEmpty {
+            await activity.loadSessions()
+        }
+        guard let session = activity.sessions.first(where: { $0.id == historyID }) else {
+            throw StoreCommandError.message("Session \(historyID) is no longer available.")
+        }
+        await activity.selectSession(session)
     }
 
     // MARK: - Scope
@@ -90,23 +96,44 @@ extension ManifoldStore: ManifoldCommands {
     // MARK: - Rules
 
     func createRule(_ rule: Rule) async throws {
-        logger.info("createRule(\(rule.id)): preview-only Rules surface")
+        try await runtime.upsertRule(RuleRecord(legacyRule: rule))
+        await rules.load()
     }
 
     func setRule(_ ruleID: String, enabled: Bool) async throws {
-        logger.info("setRule(\(ruleID), \(enabled)): preview-only Rules surface")
+        try await runtime.setRuleEnabled(id: ruleID, enabled: enabled)
+        await rules.load()
     }
 
     func deleteRule(_ ruleID: String) async throws {
-        logger.info("deleteRule(\(ruleID)): preview-only Rules surface")
+        try await runtime.deleteRule(id: ruleID)
+        await rules.load()
     }
 
     // MARK: - Revert
 
     func revert(filePath: String, toSnapshot: String) async -> RevertOutcome {
-        // Phase 1: shape-only. Phase 2 (Activity) + Phase 3 (Access Files)
-        // wire to the real revertFile / forceRevertFile paths.
-        .error(message: "Revert surfaces land in Phase 2 (Activity).")
+        let targetSnapshotID = Int(toSnapshot)
+        guard let event = activity.sessionEvents.first(where: { event in
+            guard event.filePath == filePath else { return false }
+            if let targetSnapshotID {
+                return event.snapshotID == targetSnapshotID
+            }
+            return event.afterHash == toSnapshot || event.beforeHash == toSnapshot
+        }) else {
+            return .missingSnapshot
+        }
+
+        switch await revertFile(event: event) {
+        case .success:
+            return .reverted(filePath: filePath, toVersion: toSnapshot)
+        case .blobPruned:
+            return .missingSnapshot
+        case .contentDrift:
+            return .conflictWithCurrentEdit
+        case .error(let message):
+            return .error(message: message)
+        }
     }
 
     // MARK: - Agent lifecycle (bridges to GovernanceModel)
@@ -164,6 +191,66 @@ private enum StoreCommandError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .message(let message): message
+        }
+    }
+}
+
+private extension RuleRecord {
+    init(legacyRule rule: Rule) {
+        self.init(
+            id: rule.id,
+            name: "\(rule.verb.rawValue.capitalized) \(rule.subject)",
+            explanation: rule.object,
+            scope: rule.domain.ruleScope,
+            matcher: rule.domain.matcher(for: rule.pattern),
+            action: rule.verb.ruleAction,
+            source: rule.createdBy.ruleSource,
+            enabled: rule.enabled,
+            orderIndex: 100,
+            createdAt: ISO8601DateFormatter.shared.string(from: rule.createdAt),
+            updatedAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+    }
+}
+
+private extension Rule.Domain {
+    var ruleScope: RuleScope {
+        switch self {
+        case .files: return .file
+        case .email: return .email
+        case .agents: return .agent
+        }
+    }
+
+    func matcher(for pattern: String) -> RuleMatcher {
+        let cleaned = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch self {
+        case .files:
+            return cleaned.isEmpty ? .always : .pathGlob(cleaned)
+        case .email:
+            return cleaned.isEmpty ? .always : .emailDomain(cleaned)
+        case .agents:
+            return .agentWrite
+        }
+    }
+}
+
+private extension Rule.Verb {
+    var ruleAction: ManifoldKit.RuleAction {
+        switch self {
+        case .allow: return .allow
+        case .deny: return .deny
+        case .warn: return .warn
+        }
+    }
+}
+
+private extension Rule.CreatedBy {
+    var ruleSource: RuleSource {
+        switch self {
+        case .user: return .user
+        case .seeded: return .seeded
+        case .suggested: return .suggested
         }
     }
 }

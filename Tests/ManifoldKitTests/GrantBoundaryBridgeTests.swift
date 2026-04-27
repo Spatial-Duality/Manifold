@@ -16,6 +16,14 @@ struct GrantBoundaryBridgeTests {
         let grantStore: GrantStore
         let emailStore: EmailStore
         let artifactIndex: ArtifactIndex
+        let exposureStore: ExposureStore
+        let ledgerStore: LedgerStore
+        let memoryStore: MemoryStore
+        let skillStore: SkillStore
+        let capabilityHandleStore: CapabilityHandleStore
+        let execRunStore: ExecRunStore
+        let knowledgeGraphStore: KnowledgeGraphStore
+        let fabricationFindingStore: FabricationFindingStore
         let bridge: ManifoldBridge
         let tempDir: URL
         let targetApp: TargetApp
@@ -35,6 +43,14 @@ struct GrantBoundaryBridgeTests {
         let grantStore = GrantStore(db: db)
         let emailStore = EmailStore(db: db)
         let artifactIndex = try ArtifactIndex(db: db)
+        let exposureStore = ExposureStore(db: db)
+        let ledgerStore = try LedgerStore(db: db)
+        let memoryStore = try MemoryStore(db: db)
+        let skillStore = try SkillStore(db: db)
+        let capabilityHandleStore = try CapabilityHandleStore(db: db)
+        let execRunStore = try ExecRunStore(db: db)
+        let knowledgeGraphStore = try KnowledgeGraphStore(db: db)
+        let fabricationFindingStore = try FabricationFindingStore(db: db)
         let bridge = ManifoldBridge(
             db: db,
             auditStore: auditStore,
@@ -43,6 +59,14 @@ struct GrantBoundaryBridgeTests {
             emailStore: emailStore,
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
+            exposureStore: exposureStore,
+            ledgerStore: ledgerStore,
+            memoryStore: memoryStore,
+            skillStore: skillStore,
+            capabilityHandleStore: capabilityHandleStore,
+            execRunStore: execRunStore,
+            knowledgeGraphStore: knowledgeGraphStore,
+            fabricationFindingStore: fabricationFindingStore,
             targetApp: targetApp
         )
         return Harness(
@@ -53,6 +77,14 @@ struct GrantBoundaryBridgeTests {
             grantStore: grantStore,
             emailStore: emailStore,
             artifactIndex: artifactIndex,
+            exposureStore: exposureStore,
+            ledgerStore: ledgerStore,
+            memoryStore: memoryStore,
+            skillStore: skillStore,
+            capabilityHandleStore: capabilityHandleStore,
+            execRunStore: execRunStore,
+            knowledgeGraphStore: knowledgeGraphStore,
+            fabricationFindingStore: fabricationFindingStore,
             bridge: bridge,
             tempDir: tempDir,
             targetApp: targetApp
@@ -152,6 +184,229 @@ struct GrantBoundaryBridgeTests {
                 data: try Data(contentsOf: url)
             )
         }
+    }
+
+    @Test("Bridge ManifoldExec runs safe JSON plans and refuses dangerous ops")
+    func bridgeManifoldExecPlan() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(
+            in: harness.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "invoice schema amount vendor date"]
+        )
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        _ = try await harness.memoryStore.save(
+            kind: .sourceSchema,
+            title: "Invoice schema",
+            body: "amount, vendor, date",
+            contributingSourceIDs: [sourceID]
+        )
+
+        let result = try await harness.bridge.runCode(
+            code: #"{"steps":[{"op":"recall_memory","query":"schema","limit":5}]}"#,
+            language: "json"
+        )
+        #expect(result.status == ExecRunStatus.completed.rawValue)
+        #expect(result.output?.contains("Invoice schema") == true)
+
+        let refused = try await harness.bridge.runCode(
+            code: #"{"steps":[{"op":"shell","command":"cat secrets"}]}"#,
+            language: "json"
+        )
+        #expect(refused.status == ExecRunStatus.refused.rawValue)
+        #expect(refused.reason.contains("refused op shell"))
+    }
+
+    @Test("Bridge invokes executable skills and applies Rule of Two")
+    func bridgeExecutableSkills() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "routine"])
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        _ = try await harness.memoryStore.save(
+            kind: .routine,
+            title: "Weekly invoice routine",
+            body: "search, summarize, cite",
+            contributingSourceIDs: [sourceID]
+        )
+
+        _ = try await harness.bridge.saveSkill(
+            name: "Recall routine",
+            manifestJSON: #"{"steps":[{"op":"recall_memory","query":"routine","limit":5}]}"#
+        )
+        let completed = try await harness.bridge.invokeSkill(name: "Recall routine")
+        #expect(completed.status == ExecRunStatus.completed.rawValue)
+        #expect(completed.output?.contains("Weekly invoice routine") == true)
+
+        _ = try await harness.bridge.saveSkill(
+            name: "Unsafe send",
+            manifestJSON: #"{"untrusted_input":true,"sensitive_data":true,"state_changing":true,"steps":[{"op":"recall_memory","query":"routine"}]}"#
+        )
+        let gated = try await harness.bridge.invokeSkill(name: "Unsafe send")
+        #expect(gated.status == ExecRunStatus.needsApproval.rawValue)
+    }
+
+    @Test("Bridge verifies claimed actions against exposure ground truth")
+    func bridgeClaimVerification() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "original"])
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        #expect(source != nil)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        _ = try await harness.bridge.readFile(path: "alpha/notes.md")
+        let exposure = try #require(try await harness.exposureStore.latestExposure(resourcePath: "alpha/notes.md"))
+        try await harness.exposureStore.recordExposure(
+            ExposureRecord(
+                connectionID: "other-connection",
+                agent: "cowork",
+                toolName: "read_file",
+                resourcePath: "beta/secret.md",
+                byteCount: 6,
+                contentHash: "otherhash",
+                exposureType: "full_file",
+                accessDecisionID: "other-decision"
+            )
+        )
+
+        let verification = try await harness.bridge.verifyClaimedActions(
+            claimsJSON: """
+            [
+              {"tool_name":"read_file","resource_path":"alpha/notes.md","content_hash":"\(exposure.contentHash)"},
+              {"tool_name":"read_file","resource_path":"missing.md"},
+              {"tool_name":"read_file"},
+              "I read alpha/notes.md",
+              {"tool_name":"read_file","resource_path":"beta/secret.md","content_hash":"otherhash"}
+            ]
+            """
+        )
+
+        #expect(verification.contains("supported: tool=read_file resource=alpha/notes.md hash="))
+        #expect(verification.contains("unverified: tool=read_file resource=missing.md"))
+        #expect(verification.contains("ambiguous: tool=read_file"))
+        #expect(verification.contains("ambiguous: I read alpha/notes.md"))
+        #expect(verification.contains("unverified: tool=read_file resource=beta/secret.md hash=otherhash"))
+    }
+
+    @Test("Bridge forget_memory is scoped to current grant/source lineage")
+    func bridgeForgetMemoryIsScoped() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceAURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "alpha"])
+        let sourceBURL = try createSource(in: harness.tempDir, name: "Beta", files: ["notes.md": "beta"])
+        let sourceAID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceAURL.path)
+        let sourceBID = try await harness.grantStore.addSource(displayName: "Beta", rootPath: sourceBURL.path)
+        let sourceA = try await harness.grantStore.source(id: sourceAID)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA!)])
+
+        let inScope = try await harness.memoryStore.save(
+            kind: .note,
+            title: "Alpha note",
+            body: "alpha memory",
+            contributingSourceIDs: [sourceAID]
+        )
+        let outOfScope = try await harness.memoryStore.save(
+            kind: .note,
+            title: "Beta note",
+            body: "beta memory",
+            contributingSourceIDs: [sourceBID]
+        )
+        let unscoped = try await harness.memoryStore.save(
+            kind: .note,
+            title: "Unscoped note",
+            body: "no lineage"
+        )
+
+        let deniedOutOfScope = try await harness.bridge.forgetMemory(memoryID: outOfScope.memoryID)
+        let deniedUnscoped = try await harness.bridge.forgetMemory(memoryID: unscoped.memoryID)
+        let deniedMissing = try await harness.bridge.forgetMemory(memoryID: "mem-missing")
+        let allowed = try await harness.bridge.forgetMemory(memoryID: inScope.memoryID)
+
+        #expect(deniedOutOfScope == "Memory is unavailable in the current session scope.")
+        #expect(deniedUnscoped == deniedOutOfScope)
+        #expect(deniedMissing == deniedOutOfScope)
+        #expect(allowed.contains("marked deleted"))
+        #expect(try await harness.memoryStore.memory(id: outOfScope.memoryID)?.status == MemoryStatus.active.rawValue)
+        #expect(try await harness.memoryStore.memory(id: unscoped.memoryID)?.status == MemoryStatus.active.rawValue)
+        #expect(try await harness.memoryStore.memory(id: inScope.memoryID)?.status == MemoryStatus.deletedByUser.rawValue)
+    }
+
+    @Test("Bridge save_memory_note obeys amnesiac mode")
+    func bridgeSaveMemoryNoteObeysAmnesiacMode() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "alpha"])
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await harness.grantStore.source(id: sourceID)
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+
+        try await harness.memoryStore.upsertSettings(MemorySettings(amnesiacMode: true, derivedRetentionDays: 90))
+        let response = try await harness.bridge.saveMemoryNote(title: "Do not persist", body: "sensitive derived note")
+        let memories = try await harness.memoryStore.list(limit: 10, includeDeleted: true)
+        let ledgerEntries = try await harness.ledgerStore.recent(limit: 10)
+
+        #expect(response == "Memory not saved because amnesiac mode is enabled.")
+        #expect(!memories.contains { $0.title == "Do not persist" })
+        #expect(ledgerEntries.contains { $0.subjectTable == "memory_settings" && $0.metadataJSON?.contains("amnesiac_mode") == true })
+    }
+
+    @Test("Bridge check_capability_flow is scoped before sink evaluation")
+    func bridgeCapabilityHandlesAreScoped() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceAURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "alpha"])
+        let sourceBURL = try createSource(in: harness.tempDir, name: "Beta", files: ["notes.md": "beta"])
+        let sourceAID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceAURL.path)
+        let sourceBID = try await harness.grantStore.addSource(displayName: "Beta", rootPath: sourceBURL.path)
+        let sourceA = try await harness.grantStore.source(id: sourceAID)
+        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA!)])
+
+        let inScope = try await harness.capabilityHandleStore.save(ValueHandle(
+            origin: "alpha",
+            sensitivity: "sensitive",
+            trustLevel: "untrusted",
+            allowedSinks: ["model_context", "write_file"],
+            grantID: grant.grantID,
+            lineage: [LineageRef(kind: "source", id: sourceAID)]
+        ))
+        let outOfScope = try await harness.capabilityHandleStore.save(ValueHandle(
+            origin: "beta",
+            sensitivity: "sensitive",
+            trustLevel: "untrusted",
+            allowedSinks: ["model_context"],
+            grantID: "grant-other",
+            lineage: [LineageRef(kind: "source", id: sourceBID)]
+        ))
+
+        let denied = try await harness.bridge.checkCapabilityFlow(handleID: outOfScope.handleID, sink: "model_context")
+        let allowed = try await harness.bridge.checkCapabilityFlow(handleID: inScope.handleID, sink: "model_context")
+        let ruleOfTwo = try await harness.bridge.checkCapabilityFlow(
+            handleID: inScope.handleID,
+            sink: "write_file",
+            untrustedInput: true,
+            stateChangingAction: true
+        )
+
+        #expect(denied.contains(#""allowed":false"#))
+        #expect(denied.contains("Capability handle is unavailable in the current session scope."))
+        #expect(allowed.contains(#""allowed":true"#))
+        #expect(ruleOfTwo.contains(#""allowed":false"#))
+        #expect(ruleOfTwo.contains(#""ruleOfTwoTriggered":true"#))
     }
 
     @Test("Bridge write_file creates snapshots and canonical audit entries")
@@ -566,5 +821,8 @@ struct GrantBoundaryBridgeTests {
         #expect(result.contains("email-needle"))
         #expect(result.contains("\"kind\" : \"session_summary\""))
         #expect(result.contains("_sessions"))
+        #expect(result.contains("\"retrieval\""))
+        #expect(result.contains("contextual_chunk"))
+        #expect(result.contains("\"content_hash\""))
     }
 }

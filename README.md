@@ -28,6 +28,8 @@ If that fits your setup, you can clone, build, and run the app locally today.
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
 - Keeps local version history and session context across sessions and across agents
+- Lets agents build scoped, user-governed memory from selected files and emails, with amnesiac mode and retention enforced by the runtime
+- Verifies structured agent claims against scoped exposure records so weak text-only claims stay ambiguous instead of being treated as proof
 - Stores governance data on disk with owner-only permissions and AES-GCM encryption keyed from the Keychain
 - Verifies XPC callers against code-signing requirements instead of trusting declared agent labels
 - Stays explicit about its boundary: native activity outside the Manifold path is outside Manifold's control
@@ -67,10 +69,12 @@ flowchart LR
     X --> V["Signed caller check"]
     V --> R["ManifoldRuntime"]
     R --> E["Rule engine"]
-    E --> S["Policy, snapshots, email, history"]
+    E --> S["Policy, snapshots, email, memory, history"]
 ```
 
 The main window is a single ledger with five destinations — `Activity`, `Access`, `Mail`, `Requests`, and `Rules` — all backed by the same runtime. `Rules` is not a preview; edits there change real file-read, email, and agent-behavior decisions.
+
+The Personal Data OS layer now treats memory, capability handles, ledger entries, and claimed-action verification as runtime-governed data. Agents can only forget memory or evaluate capability handles that belong to their current grant/source scope, derived memory honors runtime retention policy, and ledger verification reports whether older rows predate timestamp-covered hashes.
 
 See [docs/architecture.md](docs/architecture.md) for the outsider-friendly system view and [ARCHITECTURE.md](ARCHITECTURE.md) for the deeper architecture document.
 

@@ -81,6 +81,11 @@ struct ManifoldMCPServer {
             MCPResource(name: "Approved Files", uri: "manifold://files", description: "List of files in workspace"),
             MCPResource(name: "Shared Emails", uri: "manifold://emails", description: "Emails available to agent"),
             MCPResource(name: "Session History", uri: "manifold://sessions", description: "Past session summaries"),
+            MCPResource(name: "Provenance Ledger", uri: "manifold://ledger", description: "Hash-chain ledger verification and recent entries"),
+            MCPResource(name: "Owned Memory", uri: "manifold://memory", description: "Memory available to the current session scope"),
+            MCPResource(name: "Saved Skills", uri: "manifold://skills", description: "Saved skill manifests"),
+            MCPResource(name: "Exec Status", uri: "manifold://exec/status", description: "ManifoldExec sandbox status"),
+            MCPResource(name: "Knowledge Graph", uri: "manifold://graph", description: "Scoped graph query status"),
         ]) { uri in
             guard let connectionID = await connectionState.get() else {
                 return "Runtime connection not initialized."
@@ -102,6 +107,16 @@ struct ManifoldMCPServer {
                 return await toolText("list_emails")
             case "manifold://sessions":
                 return await toolText("list_sessions", arguments: ["limit": "10"])
+            case "manifold://ledger":
+                return await toolText("verify_ledger_entry")
+            case "manifold://memory":
+                return await toolText("recall_memory", arguments: ["limit": 10])
+            case "manifold://skills":
+                return await toolText("list_skills", arguments: ["limit": 20])
+            case "manifold://exec/status":
+                return await toolText("run_code", arguments: ["code": "", "language": "status"])
+            case "manifold://graph":
+                return await toolText("query_graph", arguments: ["query": "", "limit": 10])
             default:
                 return ""
             }

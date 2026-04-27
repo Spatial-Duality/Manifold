@@ -63,7 +63,7 @@ struct SessionScopeChange: Identifiable, Hashable, Sendable {
     enum Kind: Hashable, Sendable { case file, folder, mailbox }
 }
 
-/// A past session indexed for the Recent / reload-preview list.
+/// A past session indexed for the Recent / review list.
 struct SessionHistoryEntry: Identifiable, Hashable, Sendable {
     let id: String
     let name: String

@@ -2,6 +2,27 @@
 
 All notable changes to Manifold are documented here.
 
+## [Unreleased]
+
+### Added
+- Personal Data OS stores for scoped memory, ledger entries, tool metrics, capability handles, knowledge graph nodes, saved skills, exec runs, and fabrication findings.
+- Runtime-backed memory settings: `amnesiacMode`, `derivedRetentionDays`, memory origins, and retention expiry via `expired_by_retention`.
+- XPC/app commands for reading and updating memory settings, with Access and Storage surfaces bound to runtime state instead of local UI-only preferences.
+- Strict claimed-action verification against scoped exposure records. Structured `content_hash` or `tool_name + resource_path` claims can be `supported`; weak text-only claims are `ambiguous`; missing scoped evidence is `unverified`.
+- Regression coverage for scoped memory deletion, scoped capability handles, memory retention, amnesiac mode, timestamp-covered ledger hashes, legacy ledger verification, and strict claim verification.
+
+### Changed
+- `forget_memory` now loads the memory item and checks source/grant lineage before tombstoning. Missing and out-of-scope memory IDs return the same generic denial.
+- `check_capability_flow` now scopes value handles before evaluating sinks or Rule-of-Two policy.
+- New ledger entries include stable timestamp material in their tamper-evident hash. Legacy no-timestamp rows still verify, with a warning that reports how many rows are not timestamp-covered.
+- Memory recall, prior-context reuse, graph queries, and app memory listing expire derived memory before returning results.
+- MCP tool documentation now describes structured claim proof semantics and scoped memory/capability behavior.
+
+### Fixed
+- Privacy controls for memory are no longer cosmetic: amnesiac mode blocks derived-memory writes and retention tombstones expired derived memory.
+- Claim verification no longer marks loose global ledger/exposure text matches as proof.
+- Out-of-scope memory and capability IDs can no longer be mutated or queried merely because the caller has some active Manifold access.
+
 ## [0.5.0] - 2026-04-17
 
 ### Added

@@ -13,7 +13,8 @@ The architecture follows the product spec, not the other way around.
 - **Per-Agent Access Policy**: Claude and Codex can have different file and email visibility.
 - **Standing Access**: read and search through Manifold.
 - **Tracked Work Block**: reviewable edits inside an isolated workspace.
-- **History Layer**: Access Decisions, Exposure Records, Version History, and Session Context.
+- **Personal Data OS**: scoped memory, exposure evidence, capability handles, and claim verification for agent-visible context.
+- **History Layer**: Access Decisions, Exposure Records, Version History, Memory, Ledger Entries, and Session Context.
 
 The key rule is simple:
 
@@ -146,11 +147,12 @@ Governance data is sensitive enough to deserve defense in depth beyond SQLite fi
 
 ## Data and History
 
-The runtime persists four kinds of product data:
+The runtime persists five kinds of product data:
 
 - **Policy data**: what Claude and Codex are allowed to see
 - **Exposure data**: what content was actually returned through Manifold
 - **Workspace and snapshot data**: tracked edits, baselines, restores, promotions
+- **Personal Data OS data**: scoped memory, capability handles, tool metrics, knowledge graph records, and fabrication findings
 - **Session context**: nearby files, emails, and audit events that explain what a change was part of
 
 At the storage level, that maps roughly to:
@@ -158,6 +160,18 @@ At the storage level, that maps roughly to:
 - SQLite for metadata, policy, audit records, and indexes
 - content-addressed blobs for tracked file history
 - local email archive and indexing for message history
+
+## Personal Data OS Trust Layer
+
+The Personal Data OS layer is the part of Manifold that turns selected files and emails into reusable agent context without silently widening authority.
+
+- `MemoryStore` keeps user-owned memory with source/grant lineage. Agent-derived memory has an origin and optional retention expiry. Amnesiac mode blocks new agent-derived memory writes; retention tombstones expired derived memory as `expired_by_retention` instead of deleting history.
+- `forget_memory` is scoped. The bridge loads the memory item first and only allows agent deletion when the memory belongs to the current grant or every source in its lineage is available in the current access context. Missing and out-of-scope IDs return the same denial.
+- `CapabilityHandleStore` records sensitive value handles and allowed sinks. `check_capability_flow` now loads the handle before evaluation and rejects out-of-scope handles before sink or Rule-of-Two checks run.
+- `LedgerStore` hashes new entries with stable timestamp material. Old entries that used the legacy no-timestamp hash still verify, but verification reports how many legacy rows are not timestamp-covered.
+- `verify_claimed_actions` is strict. Only structured claims backed by scoped current-connection exposures can be `supported`; text-only, tool-only, resource-only, or loose-overlap claims are `ambiguous`; claims with no scoped evidence are `unverified`.
+
+This keeps Manifold's claim narrow but strong: the runtime can prove what passed through Manifold, preserve the lineage of derived context, and refuse cross-scope mutation or capability checks.
 
 ## Read Path
 

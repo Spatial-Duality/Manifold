@@ -139,13 +139,13 @@ extension GovernanceModel {
         return try? JSONDecoder().decode(PrivacyApprovalContext.self, from: data)
     }
 
-    /// Recent sessions, most recent first. Empty during Phase 1 — wired
-    /// when SessionHistory ships in Phase 3.
+    /// Recent sessions, most recent first. The app-level store supplies
+    /// runtime-backed history; this policy-only model has no session client.
     var recentSessions: [SessionHistoryEntry] { [] }
 
     /// Compute drift between a past session and current scope state.
-    /// Phase-1 stub returns a clean drift; Phase 3 replaces with real
-    /// comparison against PolicyStore + SnapshotStore.
+    /// Policy-only callers get a neutral drift; app-level history uses the
+    /// runtime-backed store path.
     func drift(for entry: SessionHistoryEntry) -> SessionDrift {
         SessionDrift(
             historyEntry: entry,

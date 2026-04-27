@@ -173,8 +173,7 @@ private struct MailboxRow: View {
     }
 }
 
-/// The 3-option sensitivity selector. Mailbox-wide governance wiring is not
-/// live yet, so the inspector labels this as a preview state.
+/// The 3-option sensitivity selector shown in the mailbox inspector.
 struct SensitivitySelector: View {
     enum Level: String, Hashable, CaseIterable {
         case subjects, trusted, full
@@ -252,12 +251,12 @@ struct MailboxInspector: View {
 
                     Divider()
 
-                    Text("Sensitivity preview")
+                    Text("Sharing mode")
                         .font(ManifoldType.tiny.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .tracking(0.5)
                     SensitivitySelector(level: $level)
-                    Text("Mailbox-wide sensitivity presets are preview-only in this build. Individual message sharing through Manifold is live in the Threads tab.")
+                    Text("Use this as the mailbox default when deciding which messages to share in a protected session.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

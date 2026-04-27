@@ -117,6 +117,61 @@ public actor ExposureStore {
         return rows.compactMap(Self.exposure(from:))
     }
 
+    /// Returns recent exposure records for one content hash. This is the core
+    /// primitive that lets later sessions avoid rereading bytes they already saw.
+    public func exposures(contentHash: String, limit: Int) throws -> [ExposureRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM exposure_records
+            WHERE content_hash = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            params: [contentHash, String(limit)]
+        )
+        return rows.compactMap(Self.exposure(from:))
+    }
+
+    /// Returns recent exposure records across the governed history.
+    public func recentExposures(limit: Int) throws -> [ExposureRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM exposure_records
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            params: [String(limit)]
+        )
+        return rows.compactMap(Self.exposure(from:))
+    }
+
+    public func latestExposure(resourcePath: String) throws -> ExposureRecord? {
+        try exposures(resourcePath: resourcePath, limit: 1).first
+    }
+
+    public func latestExposure(connectionID: String, toolName: String) throws -> ExposureRecord? {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM exposure_records
+            WHERE connection_id = ? AND tool_name = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            params: [connectionID, toolName]
+        )
+        return rows.first.flatMap(Self.exposure(from:))
+    }
+
+    public func wasExposedBefore(contentHash: String, before timestamp: Double? = nil) throws -> Bool {
+        var sql = "SELECT COUNT(*) FROM exposure_records WHERE content_hash = ?"
+        var params: [String?] = [contentHash]
+        if let timestamp {
+            sql += " AND timestamp < ?"
+            params.append(String(timestamp))
+        }
+        return (Int(try db.queryScalar(sql, params: params) ?? "0") ?? 0) > 0
+    }
+
     /// Returns aggregate exposure counts for one runtime connection.
     public func totalExposure(connectionID: String) throws -> (fileCount: Int, totalBytes: Int) {
         let fileCount = Int(

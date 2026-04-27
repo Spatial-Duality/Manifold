@@ -38,11 +38,26 @@ At a high level, the tool surface covers:
 - governed file listing and reads
 - governed email listing, reads, and search
 - tracked work and activity/context queries
+- scoped memory recall, memory notes, memory-source summaries, and scoped memory deletion
+- capability handles and sink-flow checks for sensitive values
+- strict claimed-action verification against scoped exposure evidence
 
 See:
 
 - [../Sources/ManifoldMCP/ToolDefinitions.swift](../Sources/ManifoldMCP/ToolDefinitions.swift)
 - [../Sources/ManifoldMCP/ManifoldMCPServer.swift](../Sources/ManifoldMCP/ManifoldMCPServer.swift)
+
+## Memory, Capability, And Proof Semantics
+
+MCP tools are authority-bearing only when the runtime can tie them back to the current access context.
+
+- `save_memory_note` creates agent-derived memory only when runtime memory settings allow it. Amnesiac mode returns a clear "not saved" response and records a memory-policy ledger event.
+- `recall_memory`, `reuse_prior_context`, and `query_graph` expire derived memory before returning context so retention is not a cosmetic UI control.
+- `forget_memory` loads the memory item first and only tombstones it when the item belongs to the current grant or every source in its lineage is available in the current scope. Missing and out-of-scope memory IDs receive the same denial.
+- `check_capability_flow` loads the value handle first. Grant-backed handles must match the current grant; standing handles must have non-empty source lineage that is a subset of the current scope.
+- `verify_claimed_actions` expects structured claims. A claim is `supported` only when a scoped current-connection exposure matches either `content_hash` or the same `tool_name + resource_path`. Text-only, tool-only, resource-only, and loose-overlap claims are `ambiguous`; claims without scoped evidence are `unverified`.
+
+This is intentionally stricter than a convenience audit search. It prevents one agent session from proving, deleting, or querying artifacts that belong to another grant or source set.
 
 ## Claude Desktop
 

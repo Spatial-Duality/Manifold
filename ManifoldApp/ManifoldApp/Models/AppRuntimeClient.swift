@@ -242,6 +242,19 @@ protocol RuntimeClientProtocol: Sendable {
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult
     func trackedFiles() async throws -> [String]
     func storageStats() async throws -> StorageStatsSnapshot
+    func recentLedgerEntries(limit: Int) async throws -> [LedgerEntry]
+    func verifyLedger() async throws -> LedgerVerificationResult
+    func toolCostReport(limit: Int) async throws -> ToolCostReport
+    func listMemory(limit: Int, includeDeleted: Bool) async throws -> [MemoryItem]
+    func listMemorySources() async throws -> [MemorySourceSummary]
+    func getMemorySettings() async throws -> MemorySettings
+    func updateMemorySettings(_ settings: MemorySettings) async throws -> MemorySettings
+    func forgetMemory(id: String) async throws
+    func listSkills(limit: Int) async throws -> [SkillRecord]
+    func recentExecRuns(limit: Int) async throws -> [ExecRunRecord]
+    func listCapabilityHandles(limit: Int) async throws -> [ValueHandle]
+    func queryGraphNodes(query: String, limit: Int) async throws -> [KnowledgeGraphNode]
+    func recentFabricationFindings(limit: Int) async throws -> [FabricationFinding]
     func fileHistory(filePath: String) async throws -> [SnapshotRecord]
     func fileHistoryContext(filePath: String, limit: Int) async throws -> FileHistoryContext
     func sessionContext(sessionID: String, agent: TargetApp?) async throws -> SessionContextDetail
@@ -446,6 +459,23 @@ extension RuntimeClientProtocol {
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult { throw RuntimeClientStubError.unimplemented("revertSessionEvent") }
     func trackedFiles() async throws -> [String] { [] }
     func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: 0) }
+    func recentLedgerEntries(limit: Int) async throws -> [LedgerEntry] { [] }
+    func verifyLedger() async throws -> LedgerVerificationResult {
+        LedgerVerificationResult(verified: true, checkedEntries: 0, firstBrokenEntryID: nil, message: "Ledger is empty.")
+    }
+    func toolCostReport(limit: Int) async throws -> ToolCostReport {
+        ToolCostReport(totalCalls: 0, totalOutputBytes: 0, averageDurationMS: 0, callsByTool: [:], recent: [])
+    }
+    func listMemory(limit: Int, includeDeleted: Bool) async throws -> [MemoryItem] { [] }
+    func listMemorySources() async throws -> [MemorySourceSummary] { [] }
+    func getMemorySettings() async throws -> MemorySettings { MemorySettings() }
+    func updateMemorySettings(_ settings: MemorySettings) async throws -> MemorySettings { settings }
+    func forgetMemory(id: String) async throws {}
+    func listSkills(limit: Int) async throws -> [SkillRecord] { [] }
+    func recentExecRuns(limit: Int) async throws -> [ExecRunRecord] { [] }
+    func listCapabilityHandles(limit: Int) async throws -> [ValueHandle] { [] }
+    func queryGraphNodes(query: String, limit: Int) async throws -> [KnowledgeGraphNode] { [] }
+    func recentFabricationFindings(limit: Int) async throws -> [FabricationFinding] { [] }
     func fileHistory(filePath: String) async throws -> [SnapshotRecord] { [] }
     func fileHistoryContext(filePath: String, limit: Int) async throws -> FileHistoryContext { throw RuntimeClientStubError.unimplemented("fileHistoryContext") }
     func sessionContext(sessionID: String, agent: TargetApp?) async throws -> SessionContextDetail { throw RuntimeClientStubError.unimplemented("sessionContext") }
@@ -1093,6 +1123,16 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var activityEntries: [AuditEntry]
         var sessions: [Session]
         var sessionEvents: [String: [SessionEvent]]
+        var ledgerEntries: [LedgerEntry]
+        var ledgerVerification: LedgerVerificationResult
+        var toolCostReport: ToolCostReport
+        var memorySettings: MemorySettings
+        var memoryItems: [MemoryItem]
+        var skills: [SkillRecord]
+        var execRuns: [ExecRunRecord]
+        var capabilityHandles: [ValueHandle]
+        var graphNodes: [KnowledgeGraphNode]
+        var fabricationFindings: [FabricationFinding]
         var activeGrant: GrantRecord?
         var activeGrantSources: [GrantSourceRecord]
         var pendingApprovals: [PendingApprovalRecord]
@@ -1535,6 +1575,126 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { state.sessionEvents[sessionID] ?? [] }
     func trackedFiles() async throws -> [String] { state.trackedFiles }
     func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: state.storageUsed) }
+    func recentLedgerEntries(limit: Int) async throws -> [LedgerEntry] { Array(state.ledgerEntries.prefix(limit)) }
+    func verifyLedger() async throws -> LedgerVerificationResult { state.ledgerVerification }
+    func toolCostReport(limit: Int) async throws -> ToolCostReport {
+        ToolCostReport(
+            totalCalls: state.toolCostReport.totalCalls,
+            totalOutputBytes: state.toolCostReport.totalOutputBytes,
+            averageDurationMS: state.toolCostReport.averageDurationMS,
+            callsByTool: state.toolCostReport.callsByTool,
+            recent: Array(state.toolCostReport.recent.prefix(limit))
+        )
+    }
+    func listMemory(limit: Int, includeDeleted: Bool) async throws -> [MemoryItem] {
+        let items = includeDeleted
+            ? state.memoryItems
+            : state.memoryItems.filter { $0.status != MemoryStatus.deletedByUser.rawValue }
+        return Array(items.prefix(limit))
+    }
+    func listMemorySources() async throws -> [MemorySourceSummary] {
+        var counts: [String: (active: Int, tombstoned: Int, deleted: Int)] = [:]
+        for item in state.memoryItems {
+            for sourceID in item.contributingSourceIDs {
+                var current = counts[sourceID, default: (0, 0, 0)]
+                switch MemoryStatus(rawValue: item.status) {
+                case .active:
+                    current.active += 1
+                case .hiddenByScope, .tombstonedByRevocation, .expiredByRetention:
+                    current.tombstoned += 1
+                case .deletedByUser:
+                    current.deleted += 1
+                case nil:
+                    break
+                }
+                counts[sourceID] = current
+            }
+        }
+        return counts.keys.sorted().map { sourceID in
+            let count = counts[sourceID, default: (0, 0, 0)]
+            return MemorySourceSummary(
+                sourceID: sourceID,
+                activeCount: count.active,
+                tombstonedCount: count.tombstoned,
+                deletedCount: count.deleted
+            )
+        }
+    }
+    func getMemorySettings() async throws -> MemorySettings {
+        state.memorySettings
+    }
+    func updateMemorySettings(_ settings: MemorySettings) async throws -> MemorySettings {
+        state.memorySettings = MemorySettings(
+            settingsID: settings.settingsID,
+            amnesiacMode: settings.amnesiacMode,
+            derivedRetentionDays: settings.derivedRetentionDays,
+            updatedAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+        return state.memorySettings
+    }
+    func forgetMemory(id: String) async throws {
+        guard let index = state.memoryItems.firstIndex(where: { $0.memoryID == id }) else { return }
+        let item = state.memoryItems[index]
+        state.memoryItems[index] = MemoryItem(
+            memoryID: item.memoryID,
+            kind: MemoryKind(rawValue: item.kind) ?? .note,
+            status: .deletedByUser,
+            origin: MemoryOrigin(rawValue: item.origin) ?? .agentDerived,
+            title: item.title,
+            body: item.body,
+            contributingSourceIDs: item.contributingSourceIDs,
+            contributingGrantIDs: item.contributingGrantIDs,
+            contributingExposureIDs: item.contributingExposureIDs,
+            contributingContentHashes: item.contributingContentHashes,
+            createdSessionID: item.createdSessionID,
+            expiresAt: item.expiresAt,
+            createdAt: item.createdAt,
+            updatedAt: Date().timeIntervalSince1970
+        )
+        let sequence = (state.ledgerEntries.map(\.sequence).max() ?? 0) + 1
+        let previousHash = state.ledgerEntries.first?.entryHash
+        let entry = LedgerEntry(
+            entryID: "ledger-fixture-forget-\(id)",
+            sequence: sequence,
+            timestamp: Date().timeIntervalSince1970,
+            entryType: LedgerEntryType.memoryChange.rawValue,
+            subjectTable: "memory_items",
+            subjectID: id,
+            previousHash: previousHash,
+            payloadHash: "fixture-memory-forget-\(id)",
+            entryHash: "fixture-ledger-\(sequence)",
+            metadataJSON: #"{"status":"deleted_by_user"}"#
+        )
+        state.ledgerEntries.insert(entry, at: 0)
+        state.ledgerVerification = LedgerVerificationResult(
+            verified: true,
+            checkedEntries: state.ledgerEntries.count,
+            firstBrokenEntryID: nil,
+            message: "Ledger chain verified."
+        )
+    }
+    func listSkills(limit: Int) async throws -> [SkillRecord] {
+        Array(state.skills.prefix(limit))
+    }
+    func recentExecRuns(limit: Int) async throws -> [ExecRunRecord] {
+        Array(state.execRuns.prefix(limit))
+    }
+    func listCapabilityHandles(limit: Int) async throws -> [ValueHandle] {
+        Array(state.capabilityHandles.prefix(limit))
+    }
+    func queryGraphNodes(query: String, limit: Int) async throws -> [KnowledgeGraphNode] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nodes = trimmed.isEmpty
+            ? state.graphNodes
+            : state.graphNodes.filter {
+                $0.label.localizedCaseInsensitiveContains(trimmed)
+                    || $0.kind.localizedCaseInsensitiveContains(trimmed)
+            }
+        return Array(nodes.prefix(limit))
+    }
+    func recentFabricationFindings(limit: Int) async throws -> [FabricationFinding] {
+        Array(state.fabricationFindings.prefix(limit))
+    }
     func listEmailAccounts() async throws -> [EmailAccountRecord] { state.mailAccounts }
     func syncStates(accountID: String) async throws -> [SyncStateRecord] { state.syncStates[accountID] ?? [] }
     func emailMessageCount() async throws -> Int { state.emails.count }
@@ -2233,6 +2393,217 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 updatedAt: now
             )
         ]
+        let nowSeconds = Date().timeIntervalSince1970
+        let memorySettings = MemorySettings(
+            amnesiacMode: false,
+            derivedRetentionDays: 90,
+            updatedAt: now
+        )
+        let memoryItems = profile == .onboarding ? [] : [
+            MemoryItem(
+                memoryID: "mem-fixture-invoice-schema",
+                kind: .sourceSchema,
+                title: "Shared folder schema",
+                body: "Docs contain release notes, worklog summaries, and redacted customer review packets.",
+                contributingSourceIDs: ["src-shared"],
+                contributingGrantIDs: ["grant-fixture"],
+                contributingExposureIDs: ["exposure-fixture-worklog"],
+                contributingContentHashes: ["hash-fixture-worklog"],
+                createdSessionID: "session-2",
+                createdAt: nowSeconds - 3_600,
+                updatedAt: nowSeconds - 600
+            ),
+            MemoryItem(
+                memoryID: "mem-fixture-review-routine",
+                kind: .routine,
+                title: "Review routine",
+                body: "Start with search_structured, compare against prior context, then read only the cited range before answering.",
+                contributingSourceIDs: ["src-shared"],
+                contributingGrantIDs: ["grant-fixture"],
+                contributingExposureIDs: ["exposure-fixture-search"],
+                contributingContentHashes: ["hash-fixture-search"],
+                createdSessionID: "session-2",
+                createdAt: nowSeconds - 2_400,
+                updatedAt: nowSeconds - 300
+            ),
+            MemoryItem(
+                memoryID: "mem-fixture-claude-only",
+                kind: .summary,
+                status: .hiddenByScope,
+                title: "Claude-only marker",
+                body: "Hidden in this session because the active Codex grant does not include the Claude Only source.",
+                contributingSourceIDs: ["src-claude"],
+                contributingGrantIDs: ["grant-claude-previous"],
+                contributingExposureIDs: ["exposure-fixture-claude"],
+                contributingContentHashes: ["hash-fixture-claude"],
+                createdSessionID: "session-1",
+                createdAt: nowSeconds - 86_400,
+                updatedAt: nowSeconds - 86_000
+            ),
+        ]
+        let toolMetrics = profile == .onboarding ? [] : [
+            ToolCallMetric(
+                metricID: "metric-fixture-search",
+                connectionID: "conn-fixture",
+                agent: TargetApp.codex.rawValue,
+                toolName: "search_structured",
+                durationMS: 42.5,
+                outputBytes: 2_048,
+                truncated: false,
+                isError: false,
+                exposureID: "exposure-fixture-search",
+                grantID: "grant-fixture",
+                sessionID: "session-2",
+                timestamp: nowSeconds - 180
+            ),
+            ToolCallMetric(
+                metricID: "metric-fixture-read",
+                connectionID: "conn-fixture",
+                agent: TargetApp.codex.rawValue,
+                toolName: "read_range",
+                durationMS: 31.2,
+                outputBytes: 1_224,
+                truncated: false,
+                isError: false,
+                exposureID: "exposure-fixture-worklog",
+                grantID: "grant-fixture",
+                sessionID: "session-2",
+                timestamp: nowSeconds - 120
+            ),
+        ]
+        let toolCostReport = ToolCostReport(
+            totalCalls: toolMetrics.count,
+            totalOutputBytes: toolMetrics.reduce(0) { $0 + $1.outputBytes },
+            averageDurationMS: toolMetrics.isEmpty ? 0 : toolMetrics.reduce(0.0) { $0 + $1.durationMS } / Double(toolMetrics.count),
+            callsByTool: toolMetrics.reduce(into: [String: Int]()) { counts, metric in
+                counts[metric.toolName, default: 0] += 1
+            },
+            recent: toolMetrics.sorted { $0.timestamp > $1.timestamp }
+        )
+        let ledgerEntries = profile == .onboarding ? [] : [
+            LedgerEntry(
+                entryID: "ledger-fixture-6",
+                sequence: 6,
+                timestamp: nowSeconds - 90,
+                entryType: LedgerEntryType.memoryItem.rawValue,
+                subjectTable: "memory_items",
+                subjectID: "mem-fixture-review-routine",
+                previousHash: "fixture-ledger-5",
+                payloadHash: "fixture-payload-6",
+                entryHash: "fixture-ledger-6",
+                metadataJSON: #"{"kind":"routine"}"#
+            ),
+            LedgerEntry(
+                entryID: "ledger-fixture-5",
+                sequence: 5,
+                timestamp: nowSeconds - 120,
+                entryType: LedgerEntryType.toolMetric.rawValue,
+                subjectTable: "tool_call_metrics",
+                subjectID: "metric-fixture-read",
+                previousHash: "fixture-ledger-4",
+                payloadHash: "fixture-payload-5",
+                entryHash: "fixture-ledger-5",
+                metadataJSON: #"{"tool":"read_range"}"#
+            ),
+            LedgerEntry(
+                entryID: "ledger-fixture-4",
+                sequence: 4,
+                timestamp: nowSeconds - 180,
+                entryType: LedgerEntryType.exposure.rawValue,
+                subjectTable: "exposure_records",
+                subjectID: "exposure-fixture-search",
+                previousHash: "fixture-ledger-3",
+                payloadHash: "fixture-payload-4",
+                entryHash: "fixture-ledger-4",
+                metadataJSON: #"{"contentHash":"hash-fixture-search"}"#
+            ),
+            LedgerEntry(
+                entryID: "ledger-fixture-3",
+                sequence: 3,
+                timestamp: nowSeconds - 240,
+                entryType: LedgerEntryType.accessDecision.rawValue,
+                subjectTable: "access_decisions",
+                subjectID: "decision-fixture-src-shared",
+                previousHash: "fixture-ledger-2",
+                payloadHash: "fixture-payload-3",
+                entryHash: "fixture-ledger-3",
+                metadataJSON: #"{"grantID":"grant-fixture"}"#
+            ),
+        ]
+        let ledgerVerification = LedgerVerificationResult(
+            verified: true,
+            checkedEntries: ledgerEntries.count,
+            firstBrokenEntryID: nil,
+            message: ledgerEntries.isEmpty ? "Ledger is empty." : "Ledger chain verified."
+        )
+        let skills = profile == .onboarding ? [] : [
+            SkillRecord(
+                skillID: "skill-fixture-recall-routine",
+                name: "Recall review routine",
+                manifestHash: "fixture-skill-review-routine-hash",
+                manifestJSON: #"{"steps":[{"op":"recall_memory","query":"routine","limit":5}]}"#,
+                createdAt: nowSeconds - 1_600,
+                updatedAt: nowSeconds - 1_000
+            )
+        ]
+        let execRuns = profile == .onboarding ? [] : [
+            ExecRunRecord(
+                runID: "exec-fixture-recall-routine",
+                status: ExecRunStatus.completed.rawValue,
+                reason: "ManifoldExec plan completed.",
+                suggestedAlternative: nil,
+                outputPreview: "Step 1 recall_memory\n- [mem-fixture-review-routine] routine Review routine: Start with search_structured...",
+                createdAt: nowSeconds - 980
+            ),
+            ExecRunRecord(
+                runID: "exec-fixture-refused-shell",
+                status: ExecRunStatus.refused.rawValue,
+                reason: "ManifoldExec refused op shell.",
+                suggestedAlternative: "Use governed MCP tools directly for state-changing actions.",
+                outputPreview: nil,
+                createdAt: nowSeconds - 4_200
+            )
+        ]
+        let capabilityHandles = profile == .onboarding ? [] : [
+            ValueHandle(
+                handleID: "handle-fixture-sensitive-email",
+                origin: "email:customer-review",
+                sensitivity: "sensitive",
+                trustLevel: "untrusted",
+                allowedSinks: ["model_context"],
+                grantID: "grant-fixture",
+                lineage: [LineageRef(kind: "source", id: "src-shared")],
+                createdAt: nowSeconds - 1_200
+            )
+        ]
+        let graphNodes = profile == .onboarding ? [] : [
+            KnowledgeGraphNode(
+                nodeID: "node-fixture-routine",
+                kind: "routine",
+                label: "Review routine uses search_structured before read_range",
+                lineage: [LineageRef(kind: "source", id: "src-shared")],
+                createdAt: nowSeconds - 1_100,
+                updatedAt: nowSeconds - 900
+            ),
+            KnowledgeGraphNode(
+                nodeID: "node-fixture-skill",
+                kind: "skill",
+                label: "Recall review routine",
+                lineage: [],
+                createdAt: nowSeconds - 1_000,
+                updatedAt: nowSeconds - 1_000
+            )
+        ]
+        let fabricationFindings = profile == .onboarding ? [] : [
+            FabricationFinding(
+                findingID: "finding-fixture-supported-read",
+                sessionID: "session-2",
+                claimText: "I used search_structured before reading the worklog.",
+                status: "supported",
+                evidenceJSON: #"{"evidence":"matching exposure exposure-fixture-search"}"#,
+                createdAt: nowSeconds - 840
+            )
+        ]
         return FixtureState(
             sources: profile == .onboarding ? [] : [sourceA, sourceB],
             claudePolicy: claudePolicy,
@@ -2254,6 +2625,16 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             activityEntries: activity,
             sessions: sessions,
             sessionEvents: sessionEvents,
+            ledgerEntries: ledgerEntries,
+            ledgerVerification: ledgerVerification,
+            toolCostReport: toolCostReport,
+            memorySettings: memorySettings,
+            memoryItems: memoryItems,
+            skills: skills,
+            execRuns: execRuns,
+            capabilityHandles: capabilityHandles,
+            graphNodes: graphNodes,
+            fabricationFindings: fabricationFindings,
             activeGrant: activeGrant,
             activeGrantSources: activeGrantSources,
             pendingApprovals: pendingApprovals,
@@ -2622,6 +3003,103 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func storageStats() async throws -> StorageStatsSnapshot {
         try await command(name: "storageStats", field: "stats", as: StorageStatsSnapshot.self)
+    }
+
+    func recentLedgerEntries(limit: Int = 50) async throws -> [LedgerEntry] {
+        try await command(
+            name: "recentLedgerEntries",
+            payload: ["limit": limit],
+            field: "entries",
+            as: [LedgerEntry].self
+        )
+    }
+
+    func verifyLedger() async throws -> LedgerVerificationResult {
+        try await command(name: "verifyLedger", field: "result", as: LedgerVerificationResult.self)
+    }
+
+    func toolCostReport(limit: Int = 200) async throws -> ToolCostReport {
+        try await command(
+            name: "toolCostReport",
+            payload: ["limit": limit],
+            field: "report",
+            as: ToolCostReport.self
+        )
+    }
+
+    func listMemory(limit: Int = 100, includeDeleted: Bool = false) async throws -> [MemoryItem] {
+        try await command(
+            name: "listMemory",
+            payload: ["limit": limit, "includeDeleted": includeDeleted],
+            field: "items",
+            as: [MemoryItem].self
+        )
+    }
+
+    func listMemorySources() async throws -> [MemorySourceSummary] {
+        try await command(name: "listMemorySources", field: "sources", as: [MemorySourceSummary].self)
+    }
+
+    func getMemorySettings() async throws -> MemorySettings {
+        try await command(name: "getMemorySettings", field: "settings", as: MemorySettings.self)
+    }
+
+    func updateMemorySettings(_ settings: MemorySettings) async throws -> MemorySettings {
+        try await command(
+            name: "updateMemorySettings",
+            payload: ["settings": try XPCJSON.object(from: settings)],
+            field: "settings",
+            as: MemorySettings.self
+        )
+    }
+
+    func forgetMemory(id: String) async throws {
+        _ = try await xpc.command(name: "forgetMemory", payload: ["memoryID": id])
+    }
+
+    func listSkills(limit: Int = 50) async throws -> [SkillRecord] {
+        try await command(
+            name: "listSkills",
+            payload: ["limit": limit],
+            field: "skills",
+            as: [SkillRecord].self
+        )
+    }
+
+    func recentExecRuns(limit: Int = 50) async throws -> [ExecRunRecord] {
+        try await command(
+            name: "recentExecRuns",
+            payload: ["limit": limit],
+            field: "runs",
+            as: [ExecRunRecord].self
+        )
+    }
+
+    func listCapabilityHandles(limit: Int = 50) async throws -> [ValueHandle] {
+        try await command(
+            name: "listCapabilityHandles",
+            payload: ["limit": limit],
+            field: "handles",
+            as: [ValueHandle].self
+        )
+    }
+
+    func queryGraphNodes(query: String = "", limit: Int = 50) async throws -> [KnowledgeGraphNode] {
+        try await command(
+            name: "queryGraphNodes",
+            payload: ["query": query, "limit": limit],
+            field: "nodes",
+            as: [KnowledgeGraphNode].self
+        )
+    }
+
+    func recentFabricationFindings(limit: Int = 50) async throws -> [FabricationFinding] {
+        try await command(
+            name: "recentFabricationFindings",
+            payload: ["limit": limit],
+            field: "findings",
+            as: [FabricationFinding].self
+        )
     }
 
     func fileHistory(filePath: String) async throws -> [SnapshotRecord] {

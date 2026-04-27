@@ -68,8 +68,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 1)
-        #expect(try migrator.currentVersion() == 27)
+        #expect(applied == 4)
+        #expect(try migrator.currentVersion() == 30)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
     }
@@ -81,14 +81,14 @@ struct DatabaseMigratorTests {
 
         let migrator = try DatabaseMigrator(db: db)
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        for version in 1...27 {
+        for version in 1...30 {
             try db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 params: ["\(version)", now]
             )
         }
 
-        #expect(try migrator.currentVersion() == 27)
+        #expect(try migrator.currentVersion() == 30)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
 
@@ -527,5 +527,53 @@ struct DatabaseMigratorTests {
             return indexedColumns == ["agent", "email_id"]
         }
         #expect(hasAgentEmailUniqueIndex)
+    }
+
+    @Test("Migration v29 adds contextual retrieval chunk schema")
+    func contextualRetrievalChunkSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let chunkTable = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_chunks'"
+        )
+        let chunkSearchTable = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_chunk_search'"
+        )
+        let columns = Set(
+            try db.queryAll("PRAGMA table_info(artifact_chunks)")
+                .compactMap { $0["name"] }
+        )
+
+        #expect(!chunkTable.isEmpty)
+        #expect(!chunkSearchTable.isEmpty)
+        #expect(columns.contains("content_hash"))
+        #expect(columns.contains("context"))
+        #expect(columns.contains("line_start"))
+        #expect(columns.contains("line_end"))
+    }
+
+    @Test("Migration v30 adds memory settings and retention columns")
+    func memorySettingsAndRetentionSchema() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let settingsTable = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_settings'"
+        )
+        let memoryColumns = Set(
+            try db.queryAll("PRAGMA table_info(memory_items)")
+                .compactMap { $0["name"] }
+        )
+
+        #expect(!settingsTable.isEmpty)
+        #expect(memoryColumns.contains("origin"))
+        #expect(memoryColumns.contains("expires_at"))
     }
 }

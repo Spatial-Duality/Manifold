@@ -11,6 +11,7 @@ class ManifoldUITestCase: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         Self.terminateExistingAppIfNeeded()
+        NSWorkspace.shared.hideOtherApplications()
     }
 
     override func tearDown() {
@@ -187,6 +188,9 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 5))
 
         app.buttons["Continue"].click()
+        XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))
+
+        app.buttons["Continue"].click()
         XCTAssertTrue(app.buttons["Choose folder…"].waitForExistence(timeout: 5))
 
         app.buttons["Skip setup"].click()
@@ -206,6 +210,10 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 8))
         openSidebarDestination("ledger.sidebar.requests", expectedSurface: "ledger.surface.requests", in: app)
         openSidebarDestination("ledger.sidebar.rules", expectedSurface: "ledger.surface.rules", in: app)
+        openSidebarDestination("ledger.sidebar.provenance", expectedSurface: "ledger.surface.provenance", in: app)
+        XCTAssertTrue(element(in: app, id: "ledger.provenance.verified").waitForExistence(timeout: 8))
+        openSidebarDestination("ledger.sidebar.agentOS", expectedSurface: "ledger.surface.agentOS", in: app)
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.summary").waitForExistence(timeout: 8))
     }
 
     func testMailFixtureLoadsCurrentReviewSurfaceAndInspector() {
@@ -255,6 +263,30 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(waitForValue("shared", in: element(in: app, id: "access.file.src-claude.marker-txt.agent.codex"), timeout: 5))
     }
 
+    func testAccessMemoryFixtureShowsOwnedMemoryAndLineage() {
+        let app = launchFixture(profile: "tracked-work")
+
+        openSidebarDestination("ledger.sidebar.access", expectedSurface: "ledger.surface.access", in: app)
+        clickElement(in: app, id: "access.tab.memory", fallbackButtonTitle: "Memory")
+
+        XCTAssertTrue(element(in: app, id: "access.memory.summary").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "access.memory.source.src-shared").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "access.memory.item.mem-fixture-review-routine").waitForExistence(timeout: 8))
+    }
+
+    func testAgentOSFixtureShowsLatePhaseArtifacts() {
+        let app = launchFixture(profile: "tracked-work")
+
+        openSidebarDestination("ledger.sidebar.agentOS", expectedSurface: "ledger.surface.agentOS", in: app)
+
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.summary").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.skill.skill-fixture-recall-routine").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.exec.exec-fixture-recall-routine").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.handle.handle-fixture-sensitive-email").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.node.node-fixture-routine").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.agentOS.finding.finding-fixture-supported-read").waitForExistence(timeout: 8))
+    }
+
     func testRequestsQueueCanResolveFixtureApproval() {
         let app = launchFixture(profile: "tracked-work")
 
@@ -280,7 +312,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         let palette = element(in: app, id: "commandPalette.sheet")
         XCTAssertTrue(palette.waitForExistence(timeout: 8))
 
-        let searchField = app.textFields.firstMatch
+        let searchField = elementOrTextField(in: app, id: "commandPalette.search", fallbackPlaceholder: "Search commands...")
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.click()
         searchField.typeText("settings")
@@ -310,7 +342,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 8))
         clickElement(in: app, id: "activity.filter.privacy", fallbackButtonTitle: "Privacy")
 
-        let privacyRow = element(in: app, id: "activity.event.3")
+        let privacyRow = element(in: app, labelContaining: "Contains sensitive account context")
         XCTAssertTrue(privacyRow.waitForExistence(timeout: 8))
         privacyRow.click()
 

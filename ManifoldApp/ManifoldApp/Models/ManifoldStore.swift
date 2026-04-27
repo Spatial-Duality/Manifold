@@ -38,6 +38,7 @@ final class ManifoldStore {
     let mailReview: MailReviewModel
     let governance: GovernanceModel
     let rules: RulesModel
+    let personalDataOS: PersonalDataOSModel
     let integrationHealth: IntegrationHealthModel
     let diagnostics: DiagnosticsModel
     let updater: UpdaterModel?
@@ -75,6 +76,7 @@ final class ManifoldStore {
         mailReview = MailReviewModel()
         governance = GovernanceModel()
         rules = RulesModel()
+        personalDataOS = PersonalDataOSModel()
         diagnostics = DiagnosticsModel()
         // Sparkle is only meaningful when the bundle has a feed URL and a
         // public EdDSA key — i.e. an official build. In source builds where
@@ -98,6 +100,7 @@ final class ManifoldStore {
         mailReview.configure(mailAccounts: mailAccounts)
         governance.configure(client: runtime)
         rules.configure(client: runtime)
+        personalDataOS.configure(client: runtime)
 
         integrationHealth.store = self
 
@@ -233,6 +236,7 @@ final class ManifoldStore {
         await session.refreshGrantState()
         await storage.loadStorageStats()
         await storage.loadTrackedFiles()
+        await personalDataOS.loadOverview()
         await mailAccounts.loadAccounts()
         await rules.load()
     }
@@ -1013,6 +1017,161 @@ final class ManifoldStore {
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("Manifold/bin/manifold-mcp")
             .path
+    }
+}
+
+@Observable
+@MainActor
+final class PersonalDataOSModel {
+    var ledgerEntries: [LedgerEntry] = []
+    var ledgerVerification: LedgerVerificationResult?
+    var toolCostReport: ToolCostReport?
+    var memorySettings = MemorySettings()
+    var memoryItems: [MemoryItem] = []
+    var memorySources: [MemorySourceSummary] = []
+    var skills: [SkillRecord] = []
+    var execRuns: [ExecRunRecord] = []
+    var capabilityHandles: [ValueHandle] = []
+    var graphNodes: [KnowledgeGraphNode] = []
+    var fabricationFindings: [FabricationFinding] = []
+    var isLoadingLedger = false
+    var isLoadingMemory = false
+    var isLoadingAgentOS = false
+    var lastError: String?
+
+    private var client: (any RuntimeClientProtocol)?
+
+    func configure(client: any RuntimeClientProtocol) {
+        self.client = client
+    }
+
+    func loadOverview() async {
+        await loadLedger()
+        await loadMemory()
+        await loadAgentOS()
+    }
+
+    func loadLedger() async {
+        guard let client else { return }
+        isLoadingLedger = true
+        defer { isLoadingLedger = false }
+        do {
+            async let entries = client.recentLedgerEntries(limit: 50)
+            async let verification = client.verifyLedger()
+            async let costReport = client.toolCostReport(limit: 200)
+            ledgerEntries = try await entries
+            ledgerVerification = try await verification
+            toolCostReport = try await costReport
+            lastError = nil
+        } catch {
+            ledgerEntries = []
+            ledgerVerification = nil
+            toolCostReport = nil
+            lastError = error.localizedDescription
+            logger.error("Failed to load personal data ledger: \(error.localizedDescription)")
+        }
+    }
+
+    func loadMemory() async {
+        guard let client else { return }
+        isLoadingMemory = true
+        defer { isLoadingMemory = false }
+        do {
+            async let settings = client.getMemorySettings()
+            async let items = client.listMemory(limit: 100, includeDeleted: false)
+            async let sources = client.listMemorySources()
+            memorySettings = try await settings
+            memoryItems = try await items
+            memorySources = try await sources
+            lastError = nil
+        } catch {
+            memorySettings = MemorySettings()
+            memoryItems = []
+            memorySources = []
+            lastError = error.localizedDescription
+            logger.error("Failed to load owned memory: \(error.localizedDescription)")
+        }
+    }
+
+    func updateMemorySettings(amnesiacMode: Bool? = nil, derivedRetentionDays: Int? = nil) async {
+        guard let client else { return }
+        var updated = memorySettings
+        if let amnesiacMode {
+            updated.amnesiacMode = amnesiacMode
+        }
+        if let derivedRetentionDays {
+            updated.derivedRetentionDays = derivedRetentionDays
+        }
+        do {
+            memorySettings = try await client.updateMemorySettings(updated)
+            await loadMemory()
+        } catch {
+            lastError = error.localizedDescription
+            logger.error("Failed to update memory settings: \(error.localizedDescription)")
+        }
+    }
+
+    func forgetMemory(_ item: MemoryItem) async {
+        guard let client else { return }
+        do {
+            try await client.forgetMemory(id: item.memoryID)
+            await loadMemory()
+            await loadLedger()
+        } catch {
+            lastError = error.localizedDescription
+            logger.error("Failed to forget memory \(item.memoryID): \(error.localizedDescription)")
+        }
+    }
+
+    func loadAgentOS() async {
+        guard let client else { return }
+        isLoadingAgentOS = true
+        defer { isLoadingAgentOS = false }
+        do {
+            async let loadedSkills = client.listSkills(limit: 50)
+            async let loadedRuns = client.recentExecRuns(limit: 50)
+            async let loadedHandles = client.listCapabilityHandles(limit: 50)
+            async let loadedNodes = client.queryGraphNodes(query: "", limit: 50)
+            async let loadedFindings = client.recentFabricationFindings(limit: 50)
+            skills = try await loadedSkills
+            execRuns = try await loadedRuns
+            capabilityHandles = try await loadedHandles
+            graphNodes = try await loadedNodes
+            fabricationFindings = try await loadedFindings
+            lastError = nil
+        } catch {
+            skills = []
+            execRuns = []
+            capabilityHandles = []
+            graphNodes = []
+            fabricationFindings = []
+            lastError = error.localizedDescription
+            logger.error("Failed to load Agent OS surfaces: \(error.localizedDescription)")
+        }
+    }
+
+    var activeMemoryCount: Int {
+        memoryItems.filter { $0.status == MemoryStatus.active.rawValue }.count
+    }
+
+    var hiddenMemoryCount: Int {
+        memoryItems.filter {
+            $0.status == MemoryStatus.hiddenByScope.rawValue
+                || $0.status == MemoryStatus.tombstonedByRevocation.rawValue
+                || $0.status == MemoryStatus.expiredByRetention.rawValue
+        }.count
+    }
+
+    var blockedExecRunCount: Int {
+        execRuns.filter {
+            $0.status == ExecRunStatus.refused.rawValue
+                || $0.status == ExecRunStatus.needsApproval.rawValue
+                || $0.status == ExecRunStatus.failed.rawValue
+        }.count
+    }
+
+    var supportedFindingCount: Int {
+        fabricationFindings.filter { $0.status == "supported" }.count
     }
 }
 

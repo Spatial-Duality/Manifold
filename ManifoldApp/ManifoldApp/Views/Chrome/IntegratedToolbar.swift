@@ -57,6 +57,7 @@ struct LedgerToolbar: ToolbarContent {
                 Label("Command Palette", systemImage: "command")
             }
             .help("Command Palette")
+            .keyboardShortcut("k", modifiers: .command)
         }
     }
 }

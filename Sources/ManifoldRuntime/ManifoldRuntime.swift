@@ -42,6 +42,22 @@ public actor ManifoldRuntime {
     public nonisolated let standingWriteApprovalStore: StandingWriteApprovalStore
     /// Access decision and exposure record store.
     public nonisolated let exposureStore: ExposureStore
+    /// Tamper-evident ledger for provenance, memory, and tool metrics.
+    public nonisolated let ledgerStore: LedgerStore
+    /// Per-tool cost metrics used to measure context and latency reductions.
+    public nonisolated let toolMetricsStore: ToolMetricsStore
+    /// User-owned derived memory with lineage and retention state.
+    public nonisolated let memoryStore: MemoryStore
+    /// Saved skill manifests. Invocation is gated until ManifoldExec is enabled.
+    public nonisolated let skillStore: SkillStore
+    /// Capability handles used by high-risk dataflow checks.
+    public nonisolated let capabilityHandleStore: CapabilityHandleStore
+    /// Deterministic ManifoldExec run records.
+    public nonisolated let execRunStore: ExecRunStore
+    /// Scoped knowledge graph nodes and edges.
+    public nonisolated let knowledgeGraphStore: KnowledgeGraphStore
+    /// Findings from model-claimed action verification.
+    public nonisolated let fabricationFindingStore: FabricationFindingStore
     /// Unified cross-scope rule catalog (file / email / agent).
     public nonisolated let ruleStore: RuleStore
     /// Privacy preflight settings, cache, and approval overrides.
@@ -78,6 +94,14 @@ public actor ManifoldRuntime {
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let exposureStore = ExposureStore(db: db)
+        let ledgerStore = try LedgerStore(db: db)
+        let toolMetricsStore = try ToolMetricsStore(db: db)
+        let memoryStore = try MemoryStore(db: db)
+        let skillStore = try SkillStore(db: db)
+        let capabilityHandleStore = try CapabilityHandleStore(db: db)
+        let execRunStore = try ExecRunStore(db: db)
+        let knowledgeGraphStore = try KnowledgeGraphStore(db: db)
+        let fabricationFindingStore = try FabricationFindingStore(db: db)
         let ruleStore = RuleStore(db: db)
         let privacyStore = PrivacyStore(db: db)
         let privacyStorageURL = rootURL.appendingPathComponent("privacy")
@@ -115,6 +139,14 @@ public actor ManifoldRuntime {
         self.approvalQueue = approvalQueue
         self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
+        self.ledgerStore = ledgerStore
+        self.toolMetricsStore = toolMetricsStore
+        self.memoryStore = memoryStore
+        self.skillStore = skillStore
+        self.capabilityHandleStore = capabilityHandleStore
+        self.execRunStore = execRunStore
+        self.knowledgeGraphStore = knowledgeGraphStore
+        self.fabricationFindingStore = fabricationFindingStore
         self.ruleStore = ruleStore
         self.privacyStore = privacyStore
         self.privacyCoordinator = privacyCoordinator
@@ -157,6 +189,13 @@ public actor ManifoldRuntime {
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore,
+            ledgerStore: ledgerStore,
+            memoryStore: memoryStore,
+            skillStore: skillStore,
+            capabilityHandleStore: capabilityHandleStore,
+            execRunStore: execRunStore,
+            knowledgeGraphStore: knowledgeGraphStore,
+            fabricationFindingStore: fabricationFindingStore,
             ruleStore: ruleStore,
             privacyCoordinator: privacyCoordinator,
             targetApp: targetApp,

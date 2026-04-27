@@ -26,6 +26,7 @@ struct StandingAccessTests {
         let approvalQueue: ApprovalQueue
         let standingWriteApprovalStore: StandingWriteApprovalStore
         let exposureStore: ExposureStore
+        let capabilityHandleStore: CapabilityHandleStore
         let bridge: ManifoldBridge
         let tempDir: URL
         let connectionID: String
@@ -52,6 +53,7 @@ struct StandingAccessTests {
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let exposureStore = ExposureStore(db: db)
+        let capabilityHandleStore = try CapabilityHandleStore(db: db)
         let connectionID = "standing-test-\(UUID().uuidString)"
 
         let bridge = ManifoldBridge(
@@ -69,6 +71,7 @@ struct StandingAccessTests {
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore,
+            capabilityHandleStore: capabilityHandleStore,
             targetApp: targetApp,
             connectionID: connectionID
         )
@@ -80,7 +83,8 @@ struct StandingAccessTests {
             workBlockStore: workBlockStore, fileVisibilityOverrideStore: fileVisibilityOverrideStore,
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
-            exposureStore: exposureStore, bridge: bridge, tempDir: tempDir,
+            exposureStore: exposureStore, capabilityHandleStore: capabilityHandleStore,
+            bridge: bridge, tempDir: tempDir,
             connectionID: connectionID
         )
     }
@@ -177,6 +181,40 @@ struct StandingAccessTests {
         #expect(status.message.contains("standing access"))
         #expect(status.message.contains("MyApp"))
         #expect(status.fileCount > 0)
+    }
+
+    @Test("Standing capability handles are scoped by source lineage")
+    func standingCapabilityHandleScope() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let allowedSourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        let blockedSourceID = try await createAndRegisterSource(harness: h, name: "OtherApp")
+        try await h.policyStore.addSource(allowedSourceID, to: .cowork)
+
+        let allowedHandle = try await h.capabilityHandleStore.save(ValueHandle(
+            origin: "standing:myapp",
+            sensitivity: "internal",
+            trustLevel: "trusted",
+            allowedSinks: ["model_context"],
+            grantID: nil,
+            lineage: [LineageRef(kind: "source", id: allowedSourceID)]
+        ))
+        let blockedHandle = try await h.capabilityHandleStore.save(ValueHandle(
+            origin: "standing:otherapp",
+            sensitivity: "internal",
+            trustLevel: "trusted",
+            allowedSinks: ["model_context"],
+            grantID: nil,
+            lineage: [LineageRef(kind: "source", id: blockedSourceID)]
+        ))
+
+        let allowed = try await h.bridge.checkCapabilityFlow(handleID: allowedHandle.handleID, sink: "model_context")
+        let denied = try await h.bridge.checkCapabilityFlow(handleID: blockedHandle.handleID, sink: "model_context")
+
+        #expect(allowed.contains(#""allowed":true"#))
+        #expect(denied.contains(#""allowed":false"#))
+        #expect(denied.contains("Capability handle is unavailable in the current session scope."))
     }
 
     @Test("Status shows paused when agent is paused")

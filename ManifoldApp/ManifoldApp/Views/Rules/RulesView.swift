@@ -7,10 +7,8 @@
 // All rules live in a single `RuleStore` on the runtime; this view
 // reads/writes through `RulesModel` via `AppRuntimeClient`.
 //
-// Per design principle 10: this replaces the Phase 11 preview surface.
-// File rules and privacy-preflight rules are runtime-backed today. Email
-// and agent structural rules keep their preview affordances visible until
-// equivalent gates are wired end to end.
+// File, email, and agent rules share the runtime-backed `RuleStore`; the
+// inspector keeps the policy surface consistent across scopes.
 
 import SwiftUI
 import ManifoldKit
@@ -100,7 +98,7 @@ private struct RulesPolicyHeader: View {
                     tint: ManifoldPalette.attention
                 )
                 RulesMetric(
-                    title: "Preview-only",
+                    title: "Advisory",
                     value: "\(model.previewOnlyStructuralRuleCount)",
                     symbol: "eye",
                     tint: ManifoldPalette.text3
@@ -118,9 +116,9 @@ private struct RulesPolicyHeader: View {
             return "File rules are enforced live. Privacy rules use the selected privacy filter when its runtime status is loaded."
         }
         if privacyStatus.modelLoaded {
-            return "\(privacyBackendLabel(for: privacyStatus)) feeds privacy matchers. File gates and privacy preflight rules run before sharing; non-privacy email and agent rules remain labeled as preview-only."
+            return "\(privacyBackendLabel(for: privacyStatus)) feeds privacy matchers. File and email rules run before sharing; agent behavior rules are tracked as advisory policies."
         }
-        return "File rules are enforced live. Privacy filter rules will enforce during preflight after the model is enabled."
+        return "File and email rules are enforced live. Privacy filter rules enforce during preflight after the model is enabled."
     }
 }
 

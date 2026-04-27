@@ -402,7 +402,7 @@ extension RuleRecord {
     }
 
     var isRuntimeBackedByCurrentGates: Bool {
-        scope == .file || isPrivacyFilterBacked
+        scope == .file || scope == .email || isPrivacyFilterBacked
     }
 
     var isPreviewOnlyStructuralRule: Bool {

@@ -172,16 +172,18 @@ private struct AgentToggle: View {
     }
 }
 
-/// ReloadDriftSheet — preview-only drift review for a future session reload flow.
+/// ReloadDriftSheet — drift review before reopening a historical session.
 struct ReloadDriftSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ManifoldStore.self) private var store
     let historyEntry: SessionHistoryEntry
+    @State private var isOpening = false
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s4) {
             HStack {
-                Text("Session reload preview").font(ManifoldType.heading)
+                Text("Session review").font(ManifoldType.heading)
                 Spacer()
                 Button("Close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -189,10 +191,10 @@ struct ReloadDriftSheet: View {
 
             let drift = store.drift(for: historyEntry)
             VStack(alignment: .leading, spacing: Spacing.s2) {
-                Label("Preview only", systemImage: "eye")
+                Label("Drift check", systemImage: "arrow.triangle.2.circlepath")
                     .font(ManifoldType.captionMedium)
-                    .foregroundStyle(ManifoldPalette.preview)
-                Text("Session reload is still a preview surface. This shows the drift Manifold would review before a future reload flow is wired end to end.")
+                    .foregroundStyle(ManifoldPalette.active)
+                Text("Manifold compares this historical run with the current scope before you reuse its context.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -200,7 +202,7 @@ struct ReloadDriftSheet: View {
             .padding(Spacing.s3)
             .background(
                 RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                    .fill(ManifoldPalette.previewSoft)
+                    .fill(ManifoldPalette.activeSoft)
             )
 
             DriftBanner(drift: drift)
@@ -215,10 +217,30 @@ struct ReloadDriftSheet: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(ManifoldPalette.attention)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Spacer()
-                Button("Close") { dismiss() }
-                    .buttonStyle(.borderedProminent)
+                Button("Open in Activity") {
+                    Task {
+                        isOpening = true
+                        errorMessage = nil
+                        do {
+                            try await store.reloadSession(historyID: historyEntry.id)
+                            dismiss()
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
+                        isOpening = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isOpening)
                 .keyboardShortcut(.defaultAction)
             }
         }

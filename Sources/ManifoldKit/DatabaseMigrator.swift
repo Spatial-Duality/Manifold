@@ -59,6 +59,7 @@ public struct DatabaseMigrator {
     private static func repairCurrentSchema(_ db: DatabaseConnection) throws {
         try repairFileVisibilityOverrides(db)
         try repairRuleRecords(db)
+        try MemoryStore.ensureSchema(db)
     }
 
     private static func repairFileVisibilityOverrides(_ db: DatabaseConnection) throws {
@@ -1300,6 +1301,91 @@ public struct DatabaseMigrator {
         Migration(version: 27, name: "repair_rules_and_file_visibility_tables") { db in
             try Self.repairCurrentSchema(db)
             logger.info("Migration 27: repaired rules and file visibility tables")
+        },
+
+        Migration(version: 28, name: "personal_data_os_foundation") { db in
+            try LedgerStore.ensureSchema(db)
+            try ToolMetricsStore.ensureSchema(db)
+            try MemoryStore.ensureSchema(db)
+            try SkillStore.ensureSchema(db)
+            try CapabilityHandleStore.ensureSchema(db)
+            try ExecRunStore.ensureSchema(db)
+            try KnowledgeGraphStore.ensureSchema(db)
+            try FabricationFindingStore.ensureSchema(db)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS value_handles (
+                    handle_id TEXT PRIMARY KEY,
+                    origin TEXT NOT NULL,
+                    sensitivity TEXT NOT NULL,
+                    trust_level TEXT NOT NULL,
+                    allowed_sinks_json TEXT NOT NULL,
+                    grant_id TEXT,
+                    lineage_json TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_value_handles_grant ON value_handles(grant_id)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS exec_runs (
+                    run_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    suggested_alternative TEXT,
+                    output_preview TEXT,
+                    created_at REAL NOT NULL
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_graph_nodes (
+                    node_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    lineage_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_kind ON knowledge_graph_nodes(kind)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+                    edge_id TEXT PRIMARY KEY,
+                    from_node_id TEXT NOT NULL,
+                    to_node_id TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    lineage_json TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_from ON knowledge_graph_edges(from_node_id)")
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_to ON knowledge_graph_edges(to_node_id)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS fabrication_findings (
+                    finding_id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    claim_text TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_fabrication_session ON fabrication_findings(session_id)")
+
+            logger.info("Migration 28: personal data OS foundation")
+        },
+
+        Migration(version: 29, name: "contextual_retrieval_chunks") { db in
+            try ArtifactIndex.ensureRetrievalSchema(db)
+            logger.info("Migration 29: contextual retrieval chunks")
+        },
+
+        Migration(version: 30, name: "memory_settings_and_retention") { db in
+            try MemoryStore.ensureSchema(db)
+            logger.info("Migration 30: memory settings and derived-memory retention")
         },
     ]
 }

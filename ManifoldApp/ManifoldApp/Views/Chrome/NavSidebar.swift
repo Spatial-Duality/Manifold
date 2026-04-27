@@ -46,6 +46,8 @@ struct LedgerSidebar: View {
                 ForEach(LedgerDestination.allCases) { destination in
                     NavRow(destination: destination, pendingCount: badgeText(for: destination))
                         .tag(destination)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("ledger.sidebar.\(destination.id)")
                 }
             }
             .listStyle(.sidebar)

@@ -156,12 +156,29 @@ public struct SearchHit: Sendable, Hashable {
     public let preview: [String]
     public let score: Double
     public let selection: ArtifactSelection?
+    public let context: String?
+    public let chunkID: String?
+    public let contentHash: String?
+    public let retrievalMode: String
 
-    public init(handle: ArtifactHandle, preview: [String], score: Double, selection: ArtifactSelection?) {
+    public init(
+        handle: ArtifactHandle,
+        preview: [String],
+        score: Double,
+        selection: ArtifactSelection?,
+        context: String? = nil,
+        chunkID: String? = nil,
+        contentHash: String? = nil,
+        retrievalMode: String = "artifact"
+    ) {
         self.handle = handle
         self.preview = preview
         self.score = score
         self.selection = selection
+        self.context = context
+        self.chunkID = chunkID
+        self.contentHash = contentHash
+        self.retrievalMode = retrievalMode
     }
 }
 
@@ -169,6 +186,21 @@ private struct IndexedSearchCandidate: Sendable {
     let handle: ArtifactHandle
     let snippet: String?
     let score: Double
+    let selection: ArtifactSelection?
+    let context: String?
+    let chunkID: String?
+    let chunkHash: String?
+    let retrievalMode: String
+}
+
+private struct RetrievalChunk: Sendable {
+    let index: Int
+    let lineStart: Int?
+    let lineEnd: Int?
+    let context: String
+    let text: String
+    let tokenEstimate: Int
+    let contentHash: String
 }
 
 public actor ArtifactIndex {
@@ -212,6 +244,41 @@ public actor ArtifactIndex {
                 artifact_id UNINDEXED,
                 grant_id UNINDEXED,
                 canonical_path,
+                content,
+                tokenize='unicode61 remove_diacritics 2'
+            )
+        """)
+        try Self.ensureRetrievalSchema(db)
+    }
+
+    public static func ensureRetrievalSchema(_ db: DatabaseConnection) throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS artifact_chunks (
+                chunk_id TEXT PRIMARY KEY,
+                grant_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                canonical_path TEXT NOT NULL,
+                line_start INTEGER,
+                line_end INTEGER,
+                content_hash TEXT NOT NULL,
+                context TEXT NOT NULL,
+                text TEXT NOT NULL,
+                token_estimate INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_artifact_chunks_grant_kind ON artifact_chunks(grant_id, kind)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_artifact_chunks_artifact ON artifact_chunks(artifact_id)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_artifact_chunks_path ON artifact_chunks(grant_id, canonical_path)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_artifact_chunks_hash ON artifact_chunks(content_hash)")
+        try db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS artifact_chunk_search USING fts5(
+                chunk_id UNINDEXED,
+                grant_id UNINDEXED,
+                canonical_path,
+                context,
                 content,
                 tokenize='unicode61 remove_diacritics 2'
             )
@@ -300,9 +367,9 @@ public actor ArtifactIndex {
 
         return candidates.compactMap { candidate in
             var preview = candidate.snippet.map { [$0] } ?? []
-            var selection: ArtifactSelection?
+            var selection = candidate.selection
 
-            if candidate.handle.kind == .file {
+            if selection == nil, candidate.handle.kind == .file {
                 let matches = ContextEngine.searchMatches(
                     query: query,
                     fileURL: URL(fileURLWithPath: candidate.handle.absolutePath)
@@ -321,7 +388,11 @@ public actor ArtifactIndex {
                 handle: candidate.handle.withSelection(selection),
                 preview: preview,
                 score: candidate.score,
-                selection: selection
+                selection: selection,
+                context: candidate.context,
+                chunkID: candidate.chunkID,
+                contentHash: candidate.chunkHash ?? candidate.handle.hash,
+                retrievalMode: candidate.retrievalMode
             )
         }
     }
@@ -686,6 +757,86 @@ public actor ArtifactIndex {
                 INSERT INTO artifact_search (artifact_id, grant_id, canonical_path, content)
                 VALUES (?, ?, ?, ?)
             """, params: [artifactID, grantID, canonicalPath, searchContent ?? preview ?? ""])
+
+            try replaceChunks(
+                artifactID: artifactID,
+                grantID: grantID,
+                mount: mount,
+                kind: kind,
+                canonicalPath: canonicalPath,
+                fileExtension: fileExtension,
+                searchContent: searchContent ?? preview,
+                isBinary: isBinary
+            )
+        }
+    }
+
+    private func replaceChunks(
+        artifactID: String,
+        grantID: String,
+        mount: ArtifactMount,
+        kind: ArtifactKind,
+        canonicalPath: String,
+        fileExtension: String,
+        searchContent: String?,
+        isBinary: Bool
+    ) throws {
+        let oldChunkIDs = try db.queryAll(
+            "SELECT chunk_id FROM artifact_chunks WHERE artifact_id = ? AND grant_id = ?",
+            params: [artifactID, grantID]
+        ).compactMap { $0["chunk_id"] }
+        for chunkID in oldChunkIDs {
+            try db.execute(
+                "DELETE FROM artifact_chunk_search WHERE chunk_id = ? AND grant_id = ?",
+                params: [chunkID, grantID]
+            )
+        }
+        try db.execute(
+            "DELETE FROM artifact_chunks WHERE artifact_id = ? AND grant_id = ?",
+            params: [artifactID, grantID]
+        )
+
+        guard isBinary == false,
+              kind != .directory,
+              let searchContent,
+              searchContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return
+        }
+
+        let chunks = buildChunks(
+            kind: kind,
+            mountName: mount.mountName,
+            canonicalPath: canonicalPath,
+            fileExtension: fileExtension,
+            text: searchContent
+        )
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        for chunk in chunks {
+            let chunkID = "\(artifactID)-chunk-\(chunk.index)"
+            try db.execute("""
+                INSERT OR REPLACE INTO artifact_chunks (
+                    chunk_id, grant_id, artifact_id, source_id, kind, canonical_path,
+                    line_start, line_end, content_hash, context, text, token_estimate, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, params: [
+                chunkID,
+                grantID,
+                artifactID,
+                mount.sourceID,
+                kind.rawValue,
+                canonicalPath,
+                chunk.lineStart.map(String.init),
+                chunk.lineEnd.map(String.init),
+                chunk.contentHash,
+                chunk.context,
+                chunk.text,
+                "\(chunk.tokenEstimate)",
+                now,
+            ])
+            try db.execute("""
+                INSERT INTO artifact_chunk_search (chunk_id, grant_id, canonical_path, context, content)
+                VALUES (?, ?, ?, ?, ?)
+            """, params: [chunkID, grantID, canonicalPath, chunk.context, chunk.text])
         }
     }
 
@@ -762,6 +913,16 @@ public actor ArtifactIndex {
             return ftsCandidates
         }
 
+        if let chunkCandidates = try? chunkLikeCandidates(
+            grantID: grantID,
+            query: trimmed,
+            limit: limit,
+            kinds: normalizedKinds
+        ),
+           !chunkCandidates.isEmpty {
+            return chunkCandidates
+        }
+
         return try likeCandidates(
             grantID: grantID,
             query: trimmed,
@@ -776,6 +937,16 @@ public actor ArtifactIndex {
         limit: Int,
         kinds: [ArtifactKind]
     ) throws -> [IndexedSearchCandidate] {
+        if let chunkCandidates = try? chunkFTSCandidates(
+            grantID: grantID,
+            query: query,
+            limit: limit,
+            kinds: kinds
+        ),
+           !chunkCandidates.isEmpty {
+            return chunkCandidates
+        }
+
         let kindPlaceholders = kinds.map { _ in "?" }.joined(separator: ",")
         let kindParams = kinds.map { Optional($0.rawValue) }
         let rows = try db.queryAll("""
@@ -794,7 +965,94 @@ public actor ArtifactIndex {
         return rows.compactMap { row in
             guard let handle = ArtifactHandle(row: row) else { return nil }
             let score = Double(row["score"] ?? "0") ?? 0
-            return IndexedSearchCandidate(handle: handle, snippet: row["snippet"]?.nilIfEmpty, score: score)
+            return IndexedSearchCandidate(
+                handle: handle,
+                snippet: row["snippet"]?.nilIfEmpty,
+                score: score,
+                selection: nil,
+                context: nil,
+                chunkID: nil,
+                chunkHash: nil,
+                retrievalMode: "artifact_fts"
+            )
+        }
+    }
+
+    private func chunkFTSCandidates(
+        grantID: String,
+        query: String,
+        limit: Int,
+        kinds: [ArtifactKind]
+    ) throws -> [IndexedSearchCandidate] {
+        let kindPlaceholders = kinds.map { _ in "?" }.joined(separator: ",")
+        let kindParams = kinds.map { Optional($0.rawValue) }
+        let rows = try db.queryAll("""
+            SELECT ai.artifact_id, ai.kind, ai.source_id, ai.mount_name, ai.canonical_path, ai.absolute_path,
+                   ai.content_hash, ai.size_bytes, ai.token_estimate, ai.line_count, ai.parent_path,
+                   ai.last_modified, ai.file_extension, ai.is_binary, ai.preview,
+                   ac.chunk_id, ac.content_hash AS chunk_hash, ac.context, ac.line_start, ac.line_end,
+                   snippet(artifact_chunk_search, 4, '', '', '...', 18) AS snippet,
+                   bm25(artifact_chunk_search) AS score
+            FROM artifact_chunk_search
+            JOIN artifact_chunks ac ON ac.chunk_id = artifact_chunk_search.chunk_id
+            JOIN artifact_index ai ON ai.artifact_id = ac.artifact_id
+            WHERE artifact_chunk_search MATCH ? AND ai.grant_id = ? AND ai.kind IN (\(kindPlaceholders))
+            ORDER BY score ASC
+            LIMIT ?
+        """, params: [quotedFTSQuery(query) as String?, grantID as String?] + kindParams + ["\(limit)" as String?])
+
+        return rows.compactMap { row in
+            guard let handle = ArtifactHandle(row: row) else { return nil }
+            let score = Double(row["score"] ?? "0") ?? 0
+            let selection = chunkSelection(from: row)
+            return IndexedSearchCandidate(
+                handle: handle,
+                snippet: contextualSnippet(context: row["context"], snippet: row["snippet"]),
+                score: score,
+                selection: selection,
+                context: row["context"]?.nilIfEmpty,
+                chunkID: row["chunk_id"],
+                chunkHash: row["chunk_hash"],
+                retrievalMode: "contextual_chunk_fts"
+            )
+        }
+    }
+
+    private func chunkLikeCandidates(
+        grantID: String,
+        query: String,
+        limit: Int,
+        kinds: [ArtifactKind]
+    ) throws -> [IndexedSearchCandidate] {
+        let pattern = "%\(query.lowercased())%"
+        let kindPlaceholders = kinds.map { _ in "?" }.joined(separator: ",")
+        let kindParams = kinds.map { Optional($0.rawValue) }
+        let rows = try db.queryAll("""
+            SELECT ai.artifact_id, ai.kind, ai.source_id, ai.mount_name, ai.canonical_path, ai.absolute_path,
+                   ai.content_hash, ai.size_bytes, ai.token_estimate, ai.line_count, ai.parent_path,
+                   ai.last_modified, ai.file_extension, ai.is_binary, ai.preview,
+                   ac.chunk_id, ac.content_hash AS chunk_hash, ac.context, ac.text AS snippet,
+                   ac.line_start, ac.line_end
+            FROM artifact_chunks ac
+            JOIN artifact_index ai ON ai.artifact_id = ac.artifact_id
+            WHERE ac.grant_id = ? AND ai.kind IN (\(kindPlaceholders))
+              AND (LOWER(ac.canonical_path) LIKE ? OR LOWER(ac.context) LIKE ? OR LOWER(ac.text) LIKE ?)
+            ORDER BY ac.canonical_path ASC, ac.line_start ASC
+            LIMIT ?
+        """, params: [grantID as String?] + kindParams + [pattern as String?, pattern as String?, pattern as String?, "\(limit)" as String?])
+
+        return rows.compactMap { row in
+            guard let handle = ArtifactHandle(row: row) else { return nil }
+            return IndexedSearchCandidate(
+                handle: handle,
+                snippet: contextualSnippet(context: row["context"], snippet: row["snippet"]),
+                score: 0,
+                selection: chunkSelection(from: row),
+                context: row["context"]?.nilIfEmpty,
+                chunkID: row["chunk_id"],
+                chunkHash: row["chunk_hash"],
+                retrievalMode: "contextual_chunk_like"
+            )
         }
     }
 
@@ -820,7 +1078,16 @@ public actor ArtifactIndex {
 
         return rows.compactMap { row in
             guard let handle = ArtifactHandle(row: row) else { return nil }
-            return IndexedSearchCandidate(handle: handle, snippet: handle.preview, score: 0)
+            return IndexedSearchCandidate(
+                handle: handle,
+                snippet: handle.preview,
+                score: 0,
+                selection: nil,
+                context: nil,
+                chunkID: nil,
+                chunkHash: nil,
+                retrievalMode: "artifact_like"
+            )
         }
     }
 
@@ -914,6 +1181,111 @@ public actor ArtifactIndex {
                     + "*"
             }
             .joined(separator: " ")
+    }
+
+    private func buildChunks(
+        kind: ArtifactKind,
+        mountName: String,
+        canonicalPath: String,
+        fileExtension: String,
+        text: String
+    ) -> [RetrievalChunk] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let lines = trimmed.components(separatedBy: .newlines)
+        let chunkSize = kind == .file ? 64 : 40
+        let overlap = kind == .file ? 8 : 4
+        var chunks: [RetrievalChunk] = []
+        var start = 0
+
+        while start < lines.count {
+            let end = min(start + chunkSize, lines.count)
+            let chunkLines = Array(lines[start..<end])
+            let chunkText = chunkLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !chunkText.isEmpty {
+                let lineStart = kind == .file || kind == .sessionSummary ? start + 1 : nil
+                let lineEnd = kind == .file || kind == .sessionSummary ? end : nil
+                let context = contextualPrefix(
+                    kind: kind,
+                    mountName: mountName,
+                    canonicalPath: canonicalPath,
+                    fileExtension: fileExtension,
+                    lineStart: lineStart,
+                    lineEnd: lineEnd,
+                    heading: nearestHeading(in: lines, before: start)
+                )
+                chunks.append(
+                    RetrievalChunk(
+                        index: chunks.count,
+                        lineStart: lineStart,
+                        lineEnd: lineEnd,
+                        context: context,
+                        text: chunkText,
+                        tokenEstimate: ContextEngine.estimateTokens(forText: context + "\n" + chunkText),
+                        contentHash: SHA256.hash(data: Data((context + "\n" + chunkText).utf8)).hexString
+                    )
+                )
+            }
+            if end == lines.count { break }
+            start = max(end - overlap, start + 1)
+        }
+
+        return chunks
+    }
+
+    private func contextualPrefix(
+        kind: ArtifactKind,
+        mountName: String,
+        canonicalPath: String,
+        fileExtension: String,
+        lineStart: Int?,
+        lineEnd: Int?,
+        heading: String?
+    ) -> String {
+        var parts = [
+            "Source: \(mountName)",
+            "Kind: \(kind.rawValue)",
+            "Path: \(canonicalPath)",
+        ]
+        if !fileExtension.isEmpty {
+            parts.append("Extension: \(fileExtension)")
+        }
+        if let lineStart, let lineEnd {
+            parts.append("Lines: \(lineStart)-\(lineEnd)")
+        }
+        if let heading, !heading.isEmpty {
+            parts.append("Nearest heading: \(heading)")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private func nearestHeading(in lines: [String], before start: Int) -> String? {
+        guard !lines.isEmpty else { return nil }
+        let upper = min(start, lines.count - 1)
+        for index in stride(from: upper, through: 0, by: -1) {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#") || trimmed.hasPrefix("// MARK:") || trimmed.hasSuffix(":") {
+                return String(trimmed.prefix(120))
+            }
+        }
+        return nil
+    }
+
+    private func contextualSnippet(context: String?, snippet: String?) -> String? {
+        guard let snippet = snippet?.nilIfEmpty else { return context?.nilIfEmpty }
+        guard let context = context?.nilIfEmpty else { return snippet }
+        return "\(context)\n---\n\(snippet)"
+    }
+
+    private func chunkSelection(from row: [String: String]) -> ArtifactSelection? {
+        guard let startRaw = row["line_start"],
+              let endRaw = row["line_end"],
+              let lineStart = Int(startRaw),
+              let lineEnd = Int(endRaw) else {
+            return nil
+        }
+        return ArtifactSelection(lineStart: lineStart, lineEnd: lineEnd)
     }
 
     private func listZipContents(atPath path: String) -> [String]? {

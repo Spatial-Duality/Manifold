@@ -26,6 +26,13 @@ public actor ManifoldBridge {
     private let approvalQueue: ApprovalQueue?
     private let standingWriteApprovalStore: StandingWriteApprovalStore?
     private let exposureStore: ExposureStore?
+    private let ledgerStore: LedgerStore?
+    private let memoryStore: MemoryStore?
+    private let skillStore: SkillStore?
+    private let capabilityHandleStore: CapabilityHandleStore?
+    private let execRunStore: ExecRunStore?
+    private let knowledgeGraphStore: KnowledgeGraphStore?
+    private let fabricationFindingStore: FabricationFindingStore?
     private let ruleStore: RuleStore?
     private let privacyCoordinator: PrivacyPreflightCoordinator?
     nonisolated let targetApp: TargetApp
@@ -48,6 +55,13 @@ public actor ManifoldBridge {
         approvalQueue: ApprovalQueue? = nil,
         standingWriteApprovalStore: StandingWriteApprovalStore? = nil,
         exposureStore: ExposureStore? = nil,
+        ledgerStore: LedgerStore? = nil,
+        memoryStore: MemoryStore? = nil,
+        skillStore: SkillStore? = nil,
+        capabilityHandleStore: CapabilityHandleStore? = nil,
+        execRunStore: ExecRunStore? = nil,
+        knowledgeGraphStore: KnowledgeGraphStore? = nil,
+        fabricationFindingStore: FabricationFindingStore? = nil,
         ruleStore: RuleStore? = nil,
         privacyCoordinator: PrivacyPreflightCoordinator? = nil,
         targetApp: TargetApp = .cowork,
@@ -70,6 +84,13 @@ public actor ManifoldBridge {
         self.approvalQueue = approvalQueue
         self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
+        self.ledgerStore = ledgerStore
+        self.memoryStore = memoryStore
+        self.skillStore = skillStore
+        self.capabilityHandleStore = capabilityHandleStore
+        self.execRunStore = execRunStore
+        self.knowledgeGraphStore = knowledgeGraphStore
+        self.fabricationFindingStore = fabricationFindingStore
         self.ruleStore = ruleStore
         self.privacyCoordinator = privacyCoordinator
         self.targetApp = targetApp
@@ -84,6 +105,16 @@ public actor ManifoldBridge {
     }
 
     public nonisolated var agentName: String { targetApp.rawValue }
+
+    private static func canonicalJSON<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value),
+              let string = String(data: data, encoding: .utf8) else {
+            return "\(value)"
+        }
+        return string
+    }
 
     private func mergedMetadata(_ metadata: [String: String] = [:]) -> [String: String] {
         runtimeContext.eventContextMetadata.merging(metadata) { _, new in new }
@@ -190,6 +221,18 @@ public actor ManifoldBridge {
         )
         do {
             try await exposureStore.recordDecision(decision)
+            try await ledgerStore?.append(
+                entryType: .accessDecision,
+                subjectTable: "access_decisions",
+                subjectID: decision.id,
+                payload: Self.canonicalJSON(decision),
+                metadata: [
+                    "connection_id": decision.connectionID,
+                    "agent": decision.agent,
+                    "tool": decision.toolName,
+                    "allowed": decision.allowed ? "true" : "false",
+                ]
+            )
             return decision.id
         } catch {
             logger.error("Failed to record access decision: \(error.localizedDescription, privacy: .public)")
@@ -197,6 +240,7 @@ public actor ManifoldBridge {
         }
     }
 
+    @discardableResult
     private func recordExposure(
         toolName: String,
         resourcePath: String?,
@@ -204,9 +248,9 @@ public actor ManifoldBridge {
         exposureType: String,
         decisionID: String?,
         intent: AccessIntent? = nil
-    ) async {
-        guard decisionID != nil else { return }
-        await recordExposure(
+    ) async -> ExposureRecord? {
+        guard decisionID != nil else { return nil }
+        return await recordExposure(
             toolName: toolName,
             resourcePath: resourcePath,
             data: Data(text.utf8),
@@ -216,6 +260,7 @@ public actor ManifoldBridge {
         )
     }
 
+    @discardableResult
     private func recordExposure(
         toolName: String,
         resourcePath: String?,
@@ -223,8 +268,8 @@ public actor ManifoldBridge {
         exposureType: String,
         decisionID: String?,
         intent: AccessIntent? = nil
-    ) async {
-        guard let exposureStore, let decisionID else { return }
+    ) async -> ExposureRecord? {
+        guard let exposureStore, let decisionID else { return nil }
         let hash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
         let previewText = "[redacted \(exposureType), \(data.count) bytes]"
         let exposure = ExposureRecord(
@@ -244,8 +289,22 @@ public actor ManifoldBridge {
         )
         do {
             try await exposureStore.recordExposure(exposure)
+            try await ledgerStore?.append(
+                entryType: .exposure,
+                subjectTable: "exposure_records",
+                subjectID: exposure.id,
+                payload: Self.canonicalJSON(exposure),
+                metadata: [
+                    "connection_id": exposure.connectionID,
+                    "agent": exposure.agent,
+                    "tool": exposure.toolName,
+                    "content_hash": exposure.contentHash,
+                ]
+            )
+            return exposure
         } catch {
             logger.error("Failed to record exposure: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
 
@@ -1694,6 +1753,82 @@ public actor ManifoldBridge {
         }
     }
 
+    /// Applies unified RuleStore email rules to governed email reads after
+    /// mailbox sensitivity checks and before any message body is delivered.
+    private func enforceEmailReadRules(email: EmailMessageRecord, grantID: String?) async throws {
+        guard let ruleStore else { return }
+        let rules: [RuleRecord]
+        do {
+            rules = try await ruleStore.rules(scope: .email)
+        } catch {
+            logger.error("Rule gate: failed to load email rules — \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard !rules.isEmpty else { return }
+
+        let receivedAt = ISO8601DateFormatter.shared.date(from: email.receivedAt) ?? Date()
+        let probe = EmailProbe(
+            emailID: email.emailID,
+            senderEmail: email.senderEmail ?? email.sender,
+            senderDomain: email.senderDomain ?? "",
+            subject: email.subject,
+            bodyText: email.bodyText ?? email.preview ?? "",
+            folder: email.mailbox,
+            accountID: email.accountID,
+            hasAttachment: email.attachmentCount > 0,
+            receivedAt: receivedAt
+        )
+        let decision = RuleEngine().evaluate(
+            .emailRead(emailID: email.emailID),
+            against: rules,
+            agent: targetApp,
+            context: RuleEvalContext(emailProbe: probe)
+        )
+
+        switch decision.action {
+        case .deny:
+            if let ruleID = decision.matchedRuleID {
+                await ruleStore.recordMatch(id: ruleID)
+            }
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: agentName,
+                filePath: email.emailID,
+                metadata: mergedMetadata([
+                    "grant_id": grantID ?? "",
+                    "rule_scope": "email",
+                    "rule_decision": "deny",
+                    "matched_rule_id": decision.matchedRuleID ?? "",
+                    "matched_rule_name": decision.matchedRuleName ?? "",
+                ]),
+                grantID: grantID
+            )
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: decision.matchedRuleName ?? "email rule",
+                explanation: decision.explanation
+            )
+        case .warn, .redact, .summarize, .downgrade, .log:
+            if let ruleID = decision.matchedRuleID {
+                await ruleStore.recordMatch(id: ruleID)
+            }
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: agentName,
+                filePath: email.emailID,
+                metadata: mergedMetadata([
+                    "grant_id": grantID ?? "",
+                    "rule_scope": "email",
+                    "rule_decision": decision.action.rawValue,
+                    "matched_rule_id": decision.matchedRuleID ?? "",
+                    "matched_rule_name": decision.matchedRuleName ?? "",
+                ]),
+                grantID: grantID
+            )
+        case .allow:
+            return
+        }
+    }
+
     /// Builds a lazy `FileProbe` for a file URL. `sizeBytes`, `isHidden`, and `containsSecret`
     /// are computed on demand so rules that never need them don't pay the cost.
     nonisolated private static func makeFileProbe(url: URL, canonicalPath: String) -> FileProbe {
@@ -2481,6 +2616,12 @@ public actor ManifoldBridge {
                     "score": hit.score,
                     "preview": deliveredPreview,
                     "selection": selectionJSON(hit.selection),
+                    "retrieval": [
+                        "mode": hit.retrievalMode,
+                        "chunk_id": (hit.chunkID as Any?) ?? NSNull(),
+                        "content_hash": (hit.contentHash as Any?) ?? NSNull(),
+                        "context": (hit.context as Any?) ?? NSNull(),
+                    ],
                 ]
             )
         }
@@ -2733,6 +2874,8 @@ public actor ManifoldBridge {
             grantID = grant.grantID
         }
 
+        try await enforceEmailReadRules(email: email, grantID: grantID)
+
         // Read from .eml file on disk
         if let emlPath = email.emlPath,
            let data = EmailSyncEngine.readStoredMessage(at: emlPath) {
@@ -2968,6 +3111,939 @@ public actor ManifoldBridge {
             decisionID: decisionID
         )
         return context
+    }
+
+    // MARK: - Personal Data OS Tools
+
+    public func latestToolMetricContext(toolName: String) async -> ToolMetricContext {
+        let exposure: ExposureRecord?
+        if let exposureStore {
+            exposure = try? await exposureStore.latestExposure(connectionID: runtimeContext.connectionID, toolName: toolName)
+        } else {
+            exposure = nil
+        }
+        let grantID = try? await grantStore.activeGrant(targetApp: targetApp, profileID: profileID)?.grantID
+        let sessionID: String?
+        if let grantID {
+            sessionID = (try? await auditStore.entriesByGrant(grantID: grantID, limit: 1).first?.sessionID) ?? nil
+        } else {
+            sessionID = nil
+        }
+        return ToolMetricContext(exposureID: exposure?.id, grantID: grantID, sessionID: sessionID)
+    }
+
+    public func toolCostReport(limit: Int = 100) async throws -> String {
+        let (_, decisionID) = try await resolveAccessForTool(toolName: "tool_cost_report", action: "read")
+        let report = try await ToolMetricsStore(db: db).report(limit: limit)
+        let calls = report.callsByTool
+            .sorted { lhs, rhs in lhs.key < rhs.key }
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: ", ")
+        let text = """
+        Tool cost report
+        Calls: \(report.totalCalls)
+        Output bytes: \(report.totalOutputBytes)
+        Average duration: \(String(format: "%.1f", report.averageDurationMS)) ms
+        Calls by tool: \(calls.isEmpty ? "none" : calls)
+        """
+        await recordExposure(toolName: "tool_cost_report", resourcePath: nil, text: text, exposureType: "metrics", decisionID: decisionID)
+        return text
+    }
+
+    public func verifyLedgerEntry(entryID: String? = nil) async throws -> String {
+        let (_, decisionID) = try await resolveAccessForTool(toolName: "verify_ledger_entry", action: "read", resourcePath: entryID)
+        guard let ledgerStore else {
+            return "Ledger store unavailable."
+        }
+        if let entryID, !entryID.isEmpty {
+            guard let entry = try await ledgerStore.entry(id: entryID) else {
+                return "No ledger entry found for \(entryID)."
+            }
+            let text = """
+            Ledger entry \(entry.entryID)
+            Sequence: \(entry.sequence)
+            Type: \(entry.entryType)
+            Subject: \(entry.subjectTable ?? "none")/\(entry.subjectID ?? "none")
+            Previous hash: \(entry.previousHash ?? "genesis")
+            Payload hash: \(entry.payloadHash)
+            Entry hash: \(entry.entryHash)
+            """
+            await recordExposure(toolName: "verify_ledger_entry", resourcePath: entryID, text: text, exposureType: "ledger", decisionID: decisionID)
+            return text
+        }
+        let verification = try await ledgerStore.verifyChain()
+        let recent = try await ledgerStore.recent(limit: 10)
+            .map { "#\($0.sequence) \($0.entryType) \($0.subjectTable ?? "-")/\($0.subjectID ?? "-") \(String($0.entryHash.prefix(12)))" }
+            .joined(separator: "\n")
+        let text = """
+        \(verification.message)
+        Checked entries: \(verification.checkedEntries)
+        Recent entries:
+        \(recent.isEmpty ? "none" : recent)
+        """
+        await recordExposure(toolName: "verify_ledger_entry", resourcePath: nil, text: text, exposureType: "ledger", decisionID: decisionID)
+        return text
+    }
+
+    public func wasExposedBefore(contentHash: String? = nil, path: String? = nil, limit: Int = 10) async throws -> String {
+        let (_, decisionID) = try await resolveAccessForTool(
+            toolName: "was_exposed_before",
+            action: "history",
+            resourcePath: path ?? contentHash
+        )
+        guard let exposureStore else {
+            return "Exposure store unavailable."
+        }
+        let exposures: [ExposureRecord]
+        if let contentHash, !contentHash.isEmpty {
+            exposures = try await exposureStore.exposures(contentHash: contentHash, limit: limit)
+        } else if let path, !path.isEmpty {
+            exposures = try await exposureStore.exposures(resourcePath: path, limit: limit)
+        } else {
+            throw ManifoldMCPError.invalidPath("Provide content_hash or path.")
+        }
+        let rows = exposures.map {
+            "- \($0.id) \($0.toolName) \($0.exposureType) \(String($0.contentHash.prefix(12))) \(ISO8601DateFormatter.shared.string(from: Date(timeIntervalSince1970: $0.timestamp)))"
+        }.joined(separator: "\n")
+        let text = exposures.isEmpty ? "No prior exposure found." : "Prior exposures:\n\(rows)"
+        await recordExposure(toolName: "was_exposed_before", resourcePath: path ?? contentHash, text: text, exposureType: "history_lookup", decisionID: decisionID)
+        return text
+    }
+
+    public func reusePriorContext(query: String? = nil, path: String? = nil, limit: Int = 8) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(
+            toolName: "reuse_prior_context",
+            action: "history",
+            resourcePath: path ?? query
+        )
+        try await expireDerivedMemoryIfNeeded()
+        let allowedSourceIDs = sourceIDs(in: context)
+        let memories = (try? await memoryStore?.recall(query: query, allowedSourceIDs: allowedSourceIDs, limit: limit)) ?? []
+        let exposures: [ExposureRecord]
+        if let path, !path.isEmpty {
+            exposures = (try? await exposureStore?.exposures(resourcePath: path, limit: limit)) ?? []
+        } else if let hash = memories.first?.contributingContentHashes.first {
+            exposures = (try? await exposureStore?.exposures(contentHash: hash, limit: limit)) ?? []
+        } else {
+            exposures = []
+        }
+        let memoryText = memories.map { "- [\($0.memoryID)] \($0.title): \($0.body)" }.joined(separator: "\n")
+        let exposureText = exposures.map { "- [\($0.id)] \($0.toolName) \(String($0.contentHash.prefix(12))) \($0.payloadPreview ?? "")" }.joined(separator: "\n")
+        let text = """
+        Reusable context
+        Memory:
+        \(memoryText.isEmpty ? "none" : memoryText)
+
+        Prior exposures:
+        \(exposureText.isEmpty ? "none" : exposureText)
+        """
+        await recordExposure(toolName: "reuse_prior_context", resourcePath: path ?? query, text: text, exposureType: "history_context", decisionID: decisionID)
+        return text
+    }
+
+    public func recallMemory(query: String? = nil, limit: Int = 10) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "recall_memory", action: "memory", resourcePath: query)
+        guard let memoryStore else {
+            return "Memory store unavailable."
+        }
+        try await expireDerivedMemoryIfNeeded()
+        let items = try await memoryStore.recall(query: query, allowedSourceIDs: sourceIDs(in: context), limit: limit)
+        let text = items.isEmpty
+            ? "No memory matched the current session scope."
+            : items.map { "- [\($0.memoryID)] \($0.kind) \(String($0.title.prefix(120))): \($0.body)" }.joined(separator: "\n")
+        await recordExposure(toolName: "recall_memory", resourcePath: query, text: text, exposureType: "memory", decisionID: decisionID)
+        return text
+    }
+
+    public func saveMemoryNote(title: String, body: String, kind: MemoryKind = .note) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "save_memory_note", action: "memory_write", resourcePath: title)
+        guard let memoryStore else {
+            return "Memory store unavailable."
+        }
+        let settings = try await memoryStore.settings()
+        if settings.amnesiacMode {
+            try await ledgerStore?.append(
+                entryType: .memoryChange,
+                subjectTable: "memory_settings",
+                subjectID: settings.settingsID,
+                payload: "amnesiac_mode:not_saved:\(title)",
+                metadata: ["status": "not_saved", "reason": "amnesiac_mode"]
+            )
+            let text = "Memory not saved because amnesiac mode is enabled."
+            await recordExposure(toolName: "save_memory_note", resourcePath: title, text: text, exposureType: "memory_policy", decisionID: decisionID)
+            return text
+        }
+        let sourceIDs = Array(sourceIDs(in: context)).sorted()
+        let grantID = grantID(in: context)
+        let expiresAt = Date().timeIntervalSince1970 + Double(settings.derivedRetentionDays) * 86_400
+        let item = try await memoryStore.save(
+            kind: kind,
+            title: title,
+            body: body,
+            origin: .agentDerived,
+            contributingSourceIDs: sourceIDs,
+            contributingGrantIDs: grantID.map { [$0] } ?? [],
+            createdSessionID: nil,
+            expiresAt: expiresAt
+        )
+        try await ledgerStore?.append(
+            entryType: .memoryItem,
+            subjectTable: "memory_items",
+            subjectID: item.memoryID,
+            payload: Self.canonicalJSON(item),
+            metadata: ["kind": item.kind, "status": item.status]
+        )
+        let text = "Saved memory \(item.memoryID) with \(sourceIDs.count) source lineage item(s)."
+        await recordExposure(toolName: "save_memory_note", resourcePath: item.memoryID, text: text, exposureType: "memory", decisionID: decisionID)
+        return text
+    }
+
+    public func listMemorySources() async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "list_memory_sources", action: "memory")
+        guard let memoryStore else {
+            return "Memory store unavailable."
+        }
+        try await expireDerivedMemoryIfNeeded()
+        let allowed = sourceIDs(in: context)
+        let summaries = try await memoryStore.sourceSummaries()
+            .filter { allowed.contains($0.sourceID) }
+        let text = summaries.isEmpty
+            ? "No memory is available for the current session scope."
+            : summaries.map { "- \($0.sourceID): active \($0.activeCount), tombstoned \($0.tombstonedCount), deleted \($0.deletedCount)" }.joined(separator: "\n")
+        await recordExposure(toolName: "list_memory_sources", resourcePath: nil, text: text, exposureType: "memory", decisionID: decisionID)
+        return text
+    }
+
+    public func forgetMemory(memoryID: String) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "forget_memory", action: "memory_delete", resourcePath: memoryID)
+        guard let memoryStore else {
+            return "Memory store unavailable."
+        }
+        guard let item = try await memoryStore.memory(id: memoryID),
+              canAccessMemory(item, in: context) else {
+            let text = "Memory is unavailable in the current session scope."
+            await recordExposure(toolName: "forget_memory", resourcePath: memoryID, text: text, exposureType: "memory", decisionID: decisionID)
+            return text
+        }
+        try await memoryStore.forget(memoryID: memoryID)
+        try await ledgerStore?.append(
+            entryType: .memoryChange,
+            subjectTable: "memory_items",
+            subjectID: memoryID,
+            payload: "forget:\(memoryID)",
+            metadata: ["status": MemoryStatus.deletedByUser.rawValue]
+        )
+        let text = "Memory \(memoryID) marked deleted by user."
+        await recordExposure(toolName: "forget_memory", resourcePath: memoryID, text: text, exposureType: "memory", decisionID: decisionID)
+        return text
+    }
+
+    public func whatChangedSince(path: String? = nil, limit: Int = 20) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "what_changed_since", action: "history", resourcePath: path)
+        let activeGrantID = grantID(in: context)
+        let entries = try await auditStore.recentEntries(limit: max(limit * 4, 50))
+            .filter { entry in
+                if let activeGrantID, entry.grantID != activeGrantID {
+                    return false
+                }
+                guard let path, !path.isEmpty else { return true }
+                return entry.filePath == path
+            }
+            .prefix(limit)
+        let changeText = entries.isEmpty
+            ? "No recent changes recorded for the current session scope."
+            : entries.map { "- [\($0.timestamp)] \($0.action) \($0.filePath ?? "") grant=\($0.grantID ?? "none")" }.joined(separator: "\n")
+
+        var sourceText = "No active grant source manifests."
+        if let activeGrantID {
+            let grantSources = try await grantStore.grantSources(grantID: activeGrantID)
+            sourceText = grantSources.isEmpty
+                ? "No active grant source manifests."
+                : grantSources
+                    .map { "- \($0.mountName) source=\($0.sourceID) baseline=\($0.baselineManifestHash ?? "none")" }
+                    .joined(separator: "\n")
+        }
+
+        var exposureText = "Provide a path to compare prior exposures."
+        if let path, !path.isEmpty, let exposureStore {
+            let exposures = (try? await exposureStore.exposures(resourcePath: path, limit: min(limit, 10))) ?? []
+            exposureText = exposures.isEmpty
+                ? "No prior exposures recorded for \(path)."
+                : exposures
+                    .map { "- \($0.toolName) \(String($0.contentHash.prefix(12))) \(ISO8601DateFormatter.shared.string(from: Date(timeIntervalSince1970: $0.timestamp)))" }
+                    .joined(separator: "\n")
+
+            if let activeGrantID,
+               let current = try? await artifactIndex.artifact(grantID: activeGrantID, canonicalPath: path),
+               let currentHash = current.hash,
+               let priorHash = exposures.first?.contentHash {
+                let status = currentHash == priorHash ? "unchanged_since_last_exposure" : "changed_since_last_exposure"
+                exposureText += "\nCurrent hash: \(String(currentHash.prefix(12))) (\(status))"
+            }
+        }
+
+        var summaryText = "No session summaries for the current grant."
+        if let activeGrantID {
+            let summaries = (try? await grantStore.summaries(grantID: activeGrantID)) ?? []
+            summaryText = summaries.isEmpty
+                ? "No session summaries for the current grant."
+                : summaries
+                    .prefix(5)
+                    .map { "- \($0.summaryKind) \(String($0.summaryID.prefix(12))) hash=\($0.summaryJSONHash ?? "none")" }
+                    .joined(separator: "\n")
+        }
+
+        let text = """
+        Changes
+        \(changeText)
+
+        Source manifests
+        \(sourceText)
+
+        Prior exposures
+        \(exposureText)
+
+        Session summaries
+        \(summaryText)
+        """
+        await recordExposure(toolName: "what_changed_since", resourcePath: path, text: text, exposureType: "history_context", decisionID: decisionID)
+        return text
+    }
+
+    public func createValueHandle(
+        origin: String,
+        sensitivity: String,
+        trustLevel: String,
+        allowedSinks: [String]
+    ) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "create_value_handle", action: "capability", resourcePath: origin)
+        guard let capabilityHandleStore else {
+            return "Capability handle store unavailable."
+        }
+        let grantID = grantID(in: context)
+        let lineage = sourceIDs(in: context).sorted().map { LineageRef(kind: "source", id: $0) }
+        let handle = try await capabilityHandleStore.save(
+            ValueHandle(
+                origin: origin,
+                sensitivity: sensitivity,
+                trustLevel: trustLevel,
+                allowedSinks: allowedSinks,
+                grantID: grantID,
+                lineage: lineage
+            )
+        )
+        try await ledgerStore?.append(
+            entryType: .valueHandle,
+            subjectTable: "value_handles",
+            subjectID: handle.handleID,
+            payload: Self.canonicalJSON(handle),
+            metadata: ["origin": origin, "sensitivity": sensitivity, "trust_level": trustLevel]
+        )
+        let text = "Created value handle \(handle.handleID) for \(origin). Allowed sinks: \(allowedSinks.joined(separator: ", "))."
+        await recordExposure(toolName: "create_value_handle", resourcePath: origin, text: text, exposureType: "capability", decisionID: decisionID)
+        return text
+    }
+
+    public func checkCapabilityFlow(
+        handleID: String,
+        sink: String,
+        untrustedInput: Bool = false,
+        stateChangingAction: Bool = false
+    ) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "check_capability_flow", action: "capability", resourcePath: handleID)
+        guard let capabilityHandleStore else {
+            return "Capability handle store unavailable."
+        }
+        let result: CapabilityFlowResult
+        if let handle = try await capabilityHandleStore.handle(id: handleID),
+           canAccessValueHandle(handle, in: context) {
+            result = await capabilityHandleStore.checkFlow(
+                handle: handle,
+                sink: sink,
+                untrustedInput: untrustedInput,
+                stateChangingAction: stateChangingAction
+            )
+        } else {
+            result = CapabilityFlowResult(
+                allowed: false,
+                reason: "Capability handle is unavailable in the current session scope.",
+                handleID: handleID,
+                sink: sink
+            )
+        }
+        let text = Self.canonicalJSON(result)
+        await recordExposure(toolName: "check_capability_flow", resourcePath: handleID, text: text, exposureType: "capability", decisionID: decisionID)
+        return text
+    }
+
+    public func runCode(code: String, language: String? = nil) async throws -> ExecRunResult {
+        let (_, decisionID) = try await resolveAccessForTool(toolName: "run_code", action: "exec")
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || language?.lowercased() == "status" {
+            return await persistExecResult(
+                ExecRunResult(
+                    status: .completed,
+                    reason: "ManifoldExec deterministic JSON-plan runtime is enabled.",
+                    output: """
+                    Supported language: manifoldexec-json
+                    Supported ops: recall_memory, reuse_prior_context, was_exposed_before, what_changed_since, search_structured, query_graph, list_skills, tool_cost_report, verify_ledger_entry
+                    Denied inside Exec: shell, network, raw filesystem, write_file, read_file, read_email, save_memory_note, forget_memory, save_skill
+                    """
+                ),
+                toolName: "run_code",
+                resourcePath: "status",
+                decisionID: decisionID
+            )
+        }
+
+        guard Self.isSupportedExecLanguage(language) else {
+            return await persistExecResult(
+                ExecRunResult(
+                    status: .refused,
+                    reason: "ManifoldExec only accepts deterministic JSON plans, not arbitrary \(language ?? "code").",
+                    suggestedAlternative: "Pass JSON like {\"steps\":[{\"op\":\"recall_memory\",\"query\":\"invoice\"}]}."
+                ),
+                toolName: "run_code",
+                resourcePath: "unsupported-language",
+                decisionID: decisionID
+            )
+        }
+
+        let steps: [[String: Any]]
+        do {
+            steps = try Self.execSteps(from: trimmed)
+        } catch {
+            return await persistExecResult(
+                ExecRunResult(
+                    status: .refused,
+                    reason: "ManifoldExec refused non-plan input: \(error.localizedDescription)",
+                    suggestedAlternative: "Use a JSON object with a steps array. Raw Python, shell, JavaScript, network, and filesystem access are not accepted."
+                ),
+                toolName: "run_code",
+                resourcePath: "invalid-plan",
+                decisionID: decisionID
+            )
+        }
+
+        if let refusal = Self.staticExecRefusal(for: steps) {
+            return await persistExecResult(refusal, toolName: "run_code", resourcePath: "refused-plan", decisionID: decisionID)
+        }
+
+        do {
+            let output = try await executeExecSteps(steps)
+            return await persistExecResult(
+                ExecRunResult(status: .completed, reason: "ManifoldExec plan completed.", output: output),
+                toolName: "run_code",
+                resourcePath: "plan",
+                decisionID: decisionID
+            )
+        } catch {
+            return await persistExecResult(
+                ExecRunResult(status: .failed, reason: error.localizedDescription),
+                toolName: "run_code",
+                resourcePath: "failed-plan",
+                decisionID: decisionID
+            )
+        }
+    }
+
+    public func listSkills(limit: Int = 50) async throws -> String {
+        let (_, decisionID) = try await resolveAccessForTool(toolName: "list_skills", action: "skill")
+        let skills = (try? await skillStore?.list(limit: limit)) ?? []
+        let text = skills.isEmpty
+            ? "No saved skills."
+            : skills.map { "- [\($0.skillID)] \($0.name) manifest=\(String($0.manifestHash.prefix(12))) executable=json-plan" }.joined(separator: "\n")
+        await recordExposure(toolName: "list_skills", resourcePath: nil, text: text, exposureType: "skill", decisionID: decisionID)
+        return text
+    }
+
+    public func saveSkill(name: String, manifestJSON: String) async throws -> String {
+        let (_, decisionID) = try await resolveAccessForTool(toolName: "save_skill", action: "skill_write", resourcePath: name)
+        guard let skillStore else {
+            return "Skill store unavailable."
+        }
+        let skill = try await skillStore.save(name: name, manifestJSON: manifestJSON)
+        try await ledgerStore?.append(
+            entryType: .skill,
+            subjectTable: "skill_records",
+            subjectID: skill.skillID,
+            payload: Self.canonicalJSON(skill),
+            metadata: ["name": skill.name, "manifest_hash": skill.manifestHash]
+        )
+        _ = try? await knowledgeGraphStore?.upsertNode(
+            kind: "skill",
+            label: "\(skill.name) \(skill.manifestHash)",
+            lineage: []
+        )
+        let text = "Saved skill \(skill.name) with manifest \(skill.manifestHash). JSON-plan invocation is enabled; scope or sink changes require a new manifest hash."
+        await recordExposure(toolName: "save_skill", resourcePath: skill.skillID, text: text, exposureType: "skill", decisionID: decisionID)
+        return text
+    }
+
+    public func invokeSkill(name: String) async throws -> ExecRunResult {
+        let (_, decisionID) = try await resolveAccessForTool(toolName: "invoke_skill", action: "skill", resourcePath: name)
+        guard let skillStore else {
+            return ExecRunResult(status: .failed, reason: "Skill store unavailable.")
+        }
+        guard let skill = try await skillStore.skill(named: name) else {
+            return await persistExecResult(
+                ExecRunResult(status: .failed, reason: "No saved skill named \(name)."),
+                toolName: "invoke_skill",
+                resourcePath: name,
+                decisionID: decisionID
+            )
+        }
+
+        if Self.ruleOfTwoTriggered(in: skill.manifestJSON) {
+            return await persistExecResult(
+                ExecRunResult(
+                    status: .needsApproval,
+                    reason: "Rule of Two requires explicit approval because the skill combines untrusted input, sensitive data, and a state-changing action.",
+                    suggestedAlternative: "Split the skill into a read-only extraction step and a separate approved write/send step."
+                ),
+                toolName: "invoke_skill",
+                resourcePath: name,
+                decisionID: decisionID
+            )
+        }
+
+        do {
+            let steps = try Self.execSteps(from: skill.manifestJSON)
+            if let refusal = Self.staticExecRefusal(for: steps) {
+                return await persistExecResult(refusal, toolName: "invoke_skill", resourcePath: name, decisionID: decisionID)
+            }
+            let output = try await executeExecSteps(steps)
+            return await persistExecResult(
+                ExecRunResult(
+                    status: .completed,
+                    reason: "Skill \(skill.name) completed with manifest \(skill.manifestHash).",
+                    output: output
+                ),
+                toolName: "invoke_skill",
+                resourcePath: name,
+                decisionID: decisionID
+            )
+        } catch {
+            return await persistExecResult(
+                ExecRunResult(
+                    status: .failed,
+                    reason: "Skill \(skill.name) manifest is not an executable JSON plan: \(error.localizedDescription).",
+                    suggestedAlternative: "Save a manifest shaped like {\"steps\":[{\"op\":\"recall_memory\",\"query\":\"invoice\"}]}."
+                ),
+                toolName: "invoke_skill",
+                resourcePath: name,
+                decisionID: decisionID
+            )
+        }
+    }
+
+    public func queryGraph(query: String, limit: Int = 10) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "query_graph", action: "graph", resourcePath: query)
+        try await expireDerivedMemoryIfNeeded()
+        let memories = (try? await memoryStore?.recall(query: query, allowedSourceIDs: sourceIDs(in: context), limit: limit)) ?? []
+        let graphNodes = (try? await knowledgeGraphStore?.query(query, allowedSourceIDs: sourceIDs(in: context), limit: limit)) ?? []
+        let skills = ((try? await skillStore?.list(limit: 100)) ?? [])
+            .filter { skill in
+                query.isEmpty || skill.name.localizedCaseInsensitiveContains(query) || skill.manifestJSON.localizedCaseInsensitiveContains(query)
+            }
+            .prefix(limit)
+        let exposures = ((try? await exposureStore?.recentExposures(limit: 200)) ?? [])
+            .filter { exposure in
+                guard let resourcePath = exposure.resourcePath else { return false }
+                return isResourcePath(resourcePath, inScopeOf: context)
+                    && (query.isEmpty || resourcePath.localizedCaseInsensitiveContains(query) || exposure.toolName.localizedCaseInsensitiveContains(query))
+            }
+            .prefix(limit)
+
+        var sections: [String] = []
+        if !graphNodes.isEmpty {
+            sections.append("Graph nodes\n" + graphNodes.map { "- \($0.kind):\($0.nodeID) \($0.label)" }.joined(separator: "\n"))
+        }
+        if !memories.isEmpty {
+            sections.append("Memory nodes\n" + memories.map { "- memory:\($0.memoryID) \($0.title)" }.joined(separator: "\n"))
+        }
+        if !skills.isEmpty {
+            sections.append("Skill nodes\n" + skills.map { "- skill:\($0.skillID) \($0.name) manifest=\(String($0.manifestHash.prefix(12)))" }.joined(separator: "\n"))
+        }
+        if !exposures.isEmpty {
+            sections.append("Exposure nodes\n" + exposures.map { "- exposure:\($0.id) \($0.toolName) \($0.resourcePath ?? "-") hash=\(String($0.contentHash.prefix(12)))" }.joined(separator: "\n"))
+        }
+        let text = sections.isEmpty ? "No scoped graph result matched the query." : sections.joined(separator: "\n\n")
+        try await ledgerStore?.append(
+            entryType: .graph,
+            subjectTable: "knowledge_graph_nodes",
+            subjectID: query.isEmpty ? "query" : query,
+            payload: text,
+            metadata: ["query": String(query.prefix(120))]
+        )
+        await recordExposure(toolName: "query_graph", resourcePath: query, text: text, exposureType: "graph", decisionID: decisionID)
+        return text
+    }
+
+    public func verifyClaimedActions(claimsJSON: String, sessionID: String? = nil) async throws -> String {
+        let (context, decisionID) = try await resolveAccessForTool(toolName: "verify_claimed_actions", action: "verify", resourcePath: sessionID)
+        let claims = Self.claims(from: claimsJSON)
+        guard !claims.isEmpty else {
+            return "No claims parsed. Provide a JSON array of strings or objects with tool_name/resource_path/content_hash."
+        }
+        let scopedExposures = ((try? await exposureStore?.exposures(connectionID: runtimeContext.connectionID, limit: 500)) ?? [])
+            .filter { isExposure($0, inScopeOf: context) }
+        var rows: [String] = []
+        for claim in claims {
+            let evidence = evidence(for: claim, exposures: scopedExposures)
+            let status = evidence["status"] ?? "unverified"
+            let finding = try await fabricationFindingStore?.save(
+                sessionID: sessionID,
+                claimText: claim.text,
+                status: status,
+                evidence: evidence
+            )
+            if let finding {
+                try await ledgerStore?.append(
+                    entryType: .fabricationFinding,
+                    subjectTable: "fabrication_findings",
+                    subjectID: finding.findingID,
+                    payload: Self.canonicalJSON(finding),
+                    metadata: ["status": status]
+                )
+            }
+            rows.append("- \(status): \(claim.text) \(evidence["evidence"] ?? "")")
+        }
+        let text = "Claim verification\n" + rows.joined(separator: "\n")
+        await recordExposure(toolName: "verify_claimed_actions", resourcePath: sessionID, text: text, exposureType: "fabrication_check", decisionID: decisionID)
+        return text
+    }
+
+    private func persistExecResult(
+        _ result: ExecRunResult,
+        toolName: String,
+        resourcePath: String?,
+        decisionID: String?
+    ) async -> ExecRunResult {
+        let record = try? await execRunStore?.save(result: result)
+        if let record {
+            _ = try? await ledgerStore?.append(
+                entryType: .execRun,
+                subjectTable: "exec_runs",
+                subjectID: record.runID,
+                payload: Self.canonicalJSON(record),
+                metadata: ["status": record.status, "tool": toolName]
+            )
+        }
+        let exposureText = result.output ?? result.reason
+        await recordExposure(
+            toolName: toolName,
+            resourcePath: resourcePath,
+            text: exposureText,
+            exposureType: "exec_result",
+            decisionID: decisionID
+        )
+        return result
+    }
+
+    private func executeExecSteps(_ steps: [[String: Any]]) async throws -> String {
+        var output: [String] = []
+        for (index, step) in steps.prefix(20).enumerated() {
+            guard let op = (step["op"] as? String)?.lowercased() else {
+                output.append("Step \(index + 1): refused missing op")
+                continue
+            }
+            let limit = Self.intValue(step["limit"]) ?? 10
+            let text: String
+            switch op {
+            case "recall_memory":
+                text = try await recallMemory(query: Self.stringValue(step["query"]), limit: limit)
+            case "reuse_prior_context":
+                text = try await reusePriorContext(
+                    query: Self.stringValue(step["query"]),
+                    path: Self.stringValue(step["path"]),
+                    limit: limit
+                )
+            case "was_exposed_before":
+                text = try await wasExposedBefore(
+                    contentHash: Self.stringValue(step["content_hash"]),
+                    path: Self.stringValue(step["path"]),
+                    limit: limit
+                )
+            case "what_changed_since":
+                text = try await whatChangedSince(path: Self.stringValue(step["path"]), limit: limit)
+            case "search_structured":
+                guard let query = Self.stringValue(step["query"]) else {
+                    text = "Step \(index + 1): refused search_structured without query"
+                    break
+                }
+                text = try await searchStructured(query: query, limit: limit, intent: nil)
+            case "query_graph":
+                text = try await queryGraph(query: Self.stringValue(step["query"]) ?? "", limit: limit)
+            case "list_skills":
+                text = try await listSkills(limit: limit)
+            case "tool_cost_report":
+                text = try await toolCostReport(limit: limit)
+            case "verify_ledger_entry":
+                text = try await verifyLedgerEntry(entryID: Self.stringValue(step["entry_id"]))
+            default:
+                text = "Step \(index + 1): refused unsupported op \(op)"
+            }
+            output.append("Step \(index + 1) \(op)\n\(Self.clipped(text, maxCharacters: 4_000))")
+        }
+        if steps.count > 20 {
+            output.append("Plan truncated after 20 steps.")
+        }
+        return output.joined(separator: "\n\n")
+    }
+
+    private static func isSupportedExecLanguage(_ language: String?) -> Bool {
+        guard let language, !language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return true
+        }
+        return ["json", "plan", "manifoldexec", "manifoldexec-json", "status"].contains(language.lowercased())
+    }
+
+    private static func execSteps(from json: String) throws -> [[String: Any]] {
+        guard let data = json.data(using: .utf8) else {
+            throw ManifoldError.materialization("Plan is not valid UTF-8.")
+        }
+        let object = try JSONSerialization.jsonObject(with: data)
+        if let steps = object as? [[String: Any]] {
+            return steps
+        }
+        guard let dictionary = object as? [String: Any] else {
+            throw ManifoldError.materialization("Plan must be a JSON object or array.")
+        }
+        if dictionary["op"] is String {
+            return [dictionary]
+        }
+        if let steps = dictionary["steps"] as? [[String: Any]] {
+            return steps
+        }
+        if let exec = dictionary["exec"] as? [String: Any],
+           let steps = exec["steps"] as? [[String: Any]] {
+            return steps
+        }
+        throw ManifoldError.materialization("Plan must include a steps array.")
+    }
+
+    private static func staticExecRefusal(for steps: [[String: Any]]) -> ExecRunResult? {
+        let deniedOps: Set<String> = [
+            "shell", "bash", "sh", "zsh", "python", "javascript", "node",
+            "curl", "fetch", "network", "http", "read_file", "read_email",
+            "write_file", "send_email", "save_memory_note", "forget_memory", "save_skill", "run_code",
+        ]
+        let ops = steps.compactMap { ($0["op"] as? String)?.lowercased() }
+        if let denied = ops.first(where: deniedOps.contains) {
+            return ExecRunResult(
+                status: .refused,
+                reason: "ManifoldExec refused op \(denied). Exec is read-oriented and has no raw filesystem, shell, network, or state-changing primitives.",
+                suggestedAlternative: "Use governed MCP tools directly for state-changing actions so approval, provenance, and drift checks remain explicit."
+            )
+        }
+        if steps.count > 50 {
+            return ExecRunResult(
+                status: .needsApproval,
+                reason: "ManifoldExec plans over 50 steps require explicit approval.",
+                suggestedAlternative: "Split the plan into smaller scoped runs."
+            )
+        }
+        return nil
+    }
+
+    private static func ruleOfTwoTriggered(in json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return false
+        }
+        let flags = Self.flattenedBooleans(object)
+        let untrusted = flags["untrusted_input"] == true || flags["untrusted"] == true
+        let sensitive = flags["sensitive_data"] == true || flags["sensitive"] == true
+        let stateChanging = flags["state_changing"] == true || flags["state_changing_action"] == true
+        return untrusted && sensitive && stateChanging
+    }
+
+    private static func flattenedBooleans(_ value: Any) -> [String: Bool] {
+        var result: [String: Bool] = [:]
+        if let dictionary = value as? [String: Any] {
+            for (key, child) in dictionary {
+                if let bool = child as? Bool {
+                    result[key] = bool
+                }
+                result.merge(flattenedBooleans(child)) { current, _ in current }
+            }
+        } else if let array = value as? [Any] {
+            for child in array {
+                result.merge(flattenedBooleans(child)) { current, _ in current }
+            }
+        }
+        return result
+    }
+
+    private struct ClaimedAction {
+        let text: String
+        let toolName: String?
+        let resourcePath: String?
+        let contentHash: String?
+        let isStructured: Bool
+    }
+
+    private static func claims(from json: String) -> [ClaimedAction] {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? [] : [ClaimedAction(text: trimmed, toolName: nil, resourcePath: nil, contentHash: nil, isStructured: false)]
+        }
+        let values: [Any]
+        if let array = object as? [Any] {
+            values = array
+        } else {
+            values = [object]
+        }
+        return values.compactMap { value in
+            if let string = value as? String {
+                return ClaimedAction(text: string, toolName: nil, resourcePath: nil, contentHash: nil, isStructured: false)
+            }
+            guard let dictionary = value as? [String: Any] else { return nil }
+            let toolName = stringValue(dictionary["tool_name"]) ?? stringValue(dictionary["tool"])
+            let resourcePath = stringValue(dictionary["resource_path"]) ?? stringValue(dictionary["path"])
+            let contentHash = stringValue(dictionary["content_hash"]) ?? stringValue(dictionary["hash"])
+            let text = stringValue(dictionary["claim"]) ?? [
+                toolName.map { "tool=\($0)" },
+                resourcePath.map { "resource=\($0)" },
+                contentHash.map { "hash=\($0)" },
+            ].compactMap { $0 }.joined(separator: " ")
+            return ClaimedAction(text: text.isEmpty ? "\(dictionary)" : text, toolName: toolName, resourcePath: resourcePath, contentHash: contentHash, isStructured: true)
+        }
+    }
+
+    private func evidence(
+        for claim: ClaimedAction,
+        exposures: [ExposureRecord]
+    ) -> [String: String] {
+        if let contentHash = claim.contentHash, !contentHash.isEmpty {
+            if let match = exposures.first(where: { exposure in
+                exposure.contentHash == contentHash
+                    && (claim.toolName.map { $0 == exposure.toolName } ?? true)
+                    && (claim.resourcePath.map { $0 == exposure.resourcePath } ?? true)
+            }) {
+                return ["status": "supported", "evidence": "exposure \(match.id) matched content hash \(String(contentHash.prefix(12)))"]
+            }
+            return ["status": "unverified", "evidence": "no scoped exposure matched content hash \(String(contentHash.prefix(12)))"]
+        }
+
+        if let toolName = claim.toolName,
+           let resourcePath = claim.resourcePath,
+           let match = exposures.first(where: { $0.toolName == toolName && $0.resourcePath == resourcePath }) {
+            return ["status": "supported", "evidence": "exposure \(match.id) matched \(match.toolName) \(match.resourcePath ?? "-")"]
+        }
+        if claim.toolName != nil, claim.resourcePath != nil {
+            return ["status": "unverified", "evidence": "no scoped exposure matched tool_name + resource_path"]
+        }
+
+        let claimLower = claim.text.lowercased()
+        if let match = exposures.first(where: { exposure in
+            claimLower.contains(exposure.toolName.lowercased())
+                || exposure.resourcePath.map { claimLower.contains($0.lowercased()) } == true
+                || claimLower.contains(exposure.contentHash.lowercased())
+        }) {
+            return ["status": "ambiguous", "evidence": "claim text only loosely matched scoped exposure \(match.id); provide tool_name + resource_path or content_hash for support"]
+        }
+
+        if !claim.isStructured || claim.toolName != nil || claim.resourcePath != nil {
+            return ["status": "ambiguous", "evidence": "structured tool_name + resource_path or content_hash is required for support"]
+        }
+
+        return ["status": "unverified", "evidence": "no matching scoped exposure"]
+    }
+
+    private func isResourcePath(_ path: String, inScopeOf context: AccessContext) -> Bool {
+        let lower = path.lowercased()
+        return scopeLabels(in: context).contains { label in
+            let scoped = label.lowercased()
+            return lower == scoped || lower.hasPrefix(scoped + "/") || lower.contains(scoped)
+        }
+    }
+
+    private func isExposure(_ exposure: ExposureRecord, inScopeOf context: AccessContext) -> Bool {
+        if exposure.exposureType.hasPrefix("email") {
+            return true
+        }
+        guard let resourcePath = exposure.resourcePath else {
+            return false
+        }
+        return isResourcePath(resourcePath, inScopeOf: context)
+    }
+
+    private func expireDerivedMemoryIfNeeded() async throws {
+        if let memoryStore {
+            _ = try await memoryStore.expireDerivedMemory()
+        }
+    }
+
+    private func canAccessMemory(_ item: MemoryItem, in context: AccessContext) -> Bool {
+        if let currentGrantID = grantID(in: context),
+           item.contributingGrantIDs.contains(currentGrantID) {
+            return true
+        }
+
+        let lineageSources = Set(item.contributingSourceIDs)
+        return !lineageSources.isEmpty && lineageSources.isSubset(of: sourceIDs(in: context))
+    }
+
+    private func canAccessValueHandle(_ handle: ValueHandle, in context: AccessContext) -> Bool {
+        if let handleGrantID = handle.grantID {
+            return handleGrantID == grantID(in: context)
+        }
+
+        let lineageSources = Set(handle.lineage.filter { $0.kind == "source" }.map(\.id))
+        return !lineageSources.isEmpty && lineageSources.isSubset(of: sourceIDs(in: context))
+    }
+
+    private func scopeLabels(in context: AccessContext) -> [String] {
+        switch context {
+        case .standing(_, let sources):
+            return sources.flatMap { [$0.sourceID, $0.displayName] }
+        case .workBlock(_, let grantSources, _), .legacyGrant(_, let grantSources):
+            return grantSources.flatMap { [$0.sourceID, $0.mountName] }
+        }
+    }
+
+    private static func clipped(_ text: String, maxCharacters: Int) -> String {
+        guard text.count > maxCharacters else { return text }
+        return String(text.prefix(maxCharacters)) + "\n[truncated]"
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let number = value as? NSNumber {
+            return number.stringValue
+        }
+        return nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let string = value as? String { return Int(string) }
+        if let number = value as? NSNumber { return number.intValue }
+        return nil
+    }
+
+    private func sourceIDs(in context: AccessContext) -> Set<String> {
+        switch context {
+        case .standing(_, let sources):
+            return Set(sources.map(\.sourceID))
+        case .workBlock(_, let grantSources, _), .legacyGrant(_, let grantSources):
+            return Set(grantSources.map(\.sourceID))
+        }
+    }
+
+    private func grantID(in context: AccessContext) -> String? {
+        switch context {
+        case .standing:
+            return nil
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            return grant.grantID
+        }
     }
 }
 

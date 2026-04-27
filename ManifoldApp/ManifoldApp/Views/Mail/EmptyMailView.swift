@@ -6,8 +6,12 @@
 // is the power-user alt.
 
 import SwiftUI
+import ManifoldKit
 
 struct EmptyMailView: View {
+    @Environment(ManifoldStore.self) private var store
+    @State private var selectedProvider: EmailProvider?
+
     var body: some View {
         VStack(spacing: Spacing.s6) {
             EmptyStateIllustration(
@@ -19,37 +23,40 @@ struct EmptyMailView: View {
             )
 
             HStack(spacing: Spacing.s2) {
-                ProviderChip(name: "Gmail",   systemImage: "g.circle.fill")
-                ProviderChip(name: "iCloud",  systemImage: "icloud.fill")
-                ProviderChip(name: "Outlook", systemImage: "o.circle.fill")
-                ProviderChip(name: "Other\u{00A0}IMAP", systemImage: "envelope.circle")
+                ProviderChip(name: "Gmail", systemImage: "g.circle.fill") {
+                    selectedProvider = .gmail
+                }
+                ProviderChip(name: "iCloud", systemImage: "icloud.fill") {
+                    selectedProvider = .icloud
+                }
+                ProviderChip(name: "Outlook", systemImage: "o.circle.fill") {
+                    selectedProvider = .outlook
+                }
+                ProviderChip(name: "Other\u{00A0}IMAP", systemImage: "envelope.circle") {
+                    selectedProvider = .other
+                }
             }
-
-            Text("Or drop an .mbox file here")
-                .font(ManifoldType.caption)
-                .foregroundStyle(.tertiary)
-                .padding(Spacing.s3)
-                .frame(maxWidth: 320)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                        .strokeBorder(ManifoldPalette.border2, style: .init(lineWidth: 1, dash: [5, 3]))
-                )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)
         .background(ManifoldPalette.bg)
         .accessibilityIdentifier("mail.empty")
+        .sheet(item: $selectedProvider) { provider in
+            EmailAccountSetupView(provider: provider) {
+                selectedProvider = nil
+            }
+            .environment(store)
+        }
     }
 }
 
 private struct ProviderChip: View {
     let name: String
     let systemImage: String
+    let action: () -> Void
 
     var body: some View {
-        Button {
-            // Phase 7 wires the provider picker + OAuth flow.
-        } label: {
+        Button(action: action) {
             VStack(spacing: Spacing.s1) {
                 Image(systemName: systemImage)
                     .font(.title2)

@@ -22,6 +22,7 @@ struct RuleListTable: View {
                     .accessibilityIdentifier("rules.table")
             }
         }
+        .id("\(model.filter.id)-\(model.searchText)")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(ManifoldPalette.surface)
     }

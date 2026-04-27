@@ -1,8 +1,8 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// AccessHistoryView — past sessions grouped by day with a reload-preview
-// action per row. The row opens a read-only drift preview sheet.
+// AccessHistoryView — past sessions grouped by day with a drift review
+// action per row. The row can reopen the session in Activity.
 
 import SwiftUI
 import ManifoldKit
@@ -22,7 +22,7 @@ struct AccessHistoryView: View {
                     EmptyStateIllustration(
                         systemImage: "clock.arrow.circlepath",
                         title: "No past sessions yet",
-                        subtitle: "When you finish a session it lands here with the scope it used and the evidence it produced. Reload previews will appear here as that flow hardens."
+                        subtitle: "When you finish a session it lands here with the scope it used and the evidence it produced."
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.s8)
@@ -59,7 +59,7 @@ private struct SessionHistoryRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Reload Preview") {
+            Button("Review") {
                 onPreview()
             }
             .buttonStyle(.bordered)

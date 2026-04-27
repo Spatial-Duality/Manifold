@@ -154,11 +154,146 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "search_structured",
-                description: "Search approved files and return structured JSON hits with previews.",
+                description: "Search approved files, emails, and session notes through contextual chunks. Prefer this before list/read loops; it returns scoped previews, line ranges, content hashes, and retrieval metadata.",
                 inputSchema: objectSchema(properties: withAccessIntent([
                     "query": ["type": "string", "description": "Text to search for"],
                     "limit": ["type": "integer", "description": "Maximum number of hits (default 10)"],
                 ]), required: ["query"])
+            ),
+            MCPTool(
+                name: "tool_cost_report",
+                description: "Report recent Manifold tool-call counts, output bytes, truncation, and latency.",
+                inputSchema: objectSchema(properties: [
+                    "limit": ["type": "integer", "description": "Maximum number of recent tool calls to summarize (default 100)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "was_exposed_before",
+                description: "Check whether Manifold has previously exposed a content hash or governed path.",
+                inputSchema: objectSchema(properties: [
+                    "content_hash": ["type": "string", "description": "SHA-256 content hash to look up"],
+                    "path": ["type": "string", "description": "Governed resource path to look up"],
+                    "limit": ["type": "integer", "description": "Maximum matching exposure records (default 10)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "reuse_prior_context",
+                description: "Return scoped prior memories and exposure summaries so the model can avoid rereading data.",
+                inputSchema: objectSchema(properties: [
+                    "query": ["type": "string", "description": "Optional memory query"],
+                    "path": ["type": "string", "description": "Optional governed path"],
+                    "limit": ["type": "integer", "description": "Maximum memory/exposure rows (default 8)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "verify_ledger_entry",
+                description: "Verify the Manifold hash-chain ledger, or inspect one ledger entry by ID.",
+                inputSchema: objectSchema(properties: [
+                    "entry_id": ["type": "string", "description": "Optional ledger entry ID"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "recall_memory",
+                description: "Recall user-owned memory whose lineage is allowed by the current session scope.",
+                inputSchema: objectSchema(properties: [
+                    "query": ["type": "string", "description": "Optional memory query"],
+                    "limit": ["type": "integer", "description": "Maximum memory rows (default 10)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "save_memory_note",
+                description: "Save a user-owned memory note with lineage to the current session scope.",
+                inputSchema: objectSchema(properties: [
+                    "title": ["type": "string", "description": "Short memory title"],
+                    "body": ["type": "string", "description": "Memory body"],
+                    "kind": ["type": "string", "description": "summary, decision, evidence, stale_risk, routine, source_schema, or note"],
+                ], required: ["title", "body"])
+            ),
+            MCPTool(
+                name: "list_memory_sources",
+                description: "List memory counts for sources available in the current session scope.",
+                inputSchema: emptySchema
+            ),
+            MCPTool(
+                name: "forget_memory",
+                description: "Mark a memory item deleted by user while preserving the immutable audit ledger.",
+                inputSchema: objectSchema(properties: [
+                    "memory_id": ["type": "string", "description": "Memory ID returned by recall_memory"],
+                ], required: ["memory_id"])
+            ),
+            MCPTool(
+                name: "what_changed_since",
+                description: "Summarize recent governed changes, optionally scoped to one path.",
+                inputSchema: objectSchema(properties: [
+                    "path": ["type": "string", "description": "Optional governed path"],
+                    "limit": ["type": "integer", "description": "Maximum recent changes (default 20)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "create_value_handle",
+                description: "Create a capability handle for sensitive data with origin, trust, and allowed sink labels.",
+                inputSchema: objectSchema(properties: [
+                    "origin": ["type": "string", "description": "Data origin label"],
+                    "sensitivity": ["type": "string", "description": "Sensitivity label such as public, private, sensitive, restricted, or secret"],
+                    "trust_level": ["type": "string", "description": "Trust label such as trusted or untrusted"],
+                    "allowed_sinks": ["type": "string", "description": "Comma-separated allowed sinks, default model_context"],
+                ], required: ["origin", "sensitivity", "trust_level"])
+            ),
+            MCPTool(
+                name: "check_capability_flow",
+                description: "Check whether a value handle may flow into a sink and apply Rule-of-Two blocking.",
+                inputSchema: objectSchema(properties: [
+                    "handle_id": ["type": "string", "description": "Value handle ID"],
+                    "sink": ["type": "string", "description": "Destination sink, for example model_context, write_file, email_output, external_url, exec_output"],
+                    "untrusted_input": ["type": "string", "description": "Optional true/false flag"],
+                    "state_changing_action": ["type": "string", "description": "Optional true/false flag"],
+                ], required: ["handle_id", "sink"])
+            ),
+            MCPTool(
+                name: "run_code",
+                description: "Run a deterministic ManifoldExec JSON plan near governed data. No shell, network, raw filesystem, or state-changing ops are available.",
+                inputSchema: objectSchema(properties: [
+                    "code": ["type": "string", "description": "JSON plan, for example {\"steps\":[{\"op\":\"recall_memory\",\"query\":\"invoice\"}]}"],
+                    "language": ["type": "string", "description": "Optional: manifoldexec-json, json, plan, or status"],
+                ], required: ["code"])
+            ),
+            MCPTool(
+                name: "list_skills",
+                description: "List saved executable JSON-plan skill manifests.",
+                inputSchema: objectSchema(properties: [
+                    "limit": ["type": "integer", "description": "Maximum skills (default 50)"],
+                ], required: [])
+            ),
+            MCPTool(
+                name: "save_skill",
+                description: "Save a versioned skill manifest by hash.",
+                inputSchema: objectSchema(properties: [
+                    "name": ["type": "string", "description": "Skill name"],
+                    "manifest_json": ["type": "string", "description": "Skill manifest JSON"],
+                ], required: ["name", "manifest_json"])
+            ),
+            MCPTool(
+                name: "invoke_skill",
+                description: "Invoke a saved executable JSON-plan skill. Manifest hashes gate changed scope or sinks.",
+                inputSchema: objectSchema(properties: [
+                    "name": ["type": "string", "description": "Skill name"],
+                ], required: ["name"])
+            ),
+            MCPTool(
+                name: "query_graph",
+                description: "Query the scoped knowledge graph. Falls back to scoped memory until the graph index is built.",
+                inputSchema: objectSchema(properties: [
+                    "query": ["type": "string", "description": "Graph query"],
+                    "limit": ["type": "integer", "description": "Maximum results (default 10)"],
+                ], required: ["query"])
+            ),
+            MCPTool(
+                name: "verify_claimed_actions",
+                description: "Strictly compare structured claimed model actions against scoped Manifold exposure ground truth. Results are supported, ambiguous, or unverified.",
+                inputSchema: objectSchema(properties: [
+                    "claims_json": ["type": "string", "description": "JSON array of claim objects. Provide content_hash, or both tool_name and resource_path, for supported proof."],
+                    "session_id": ["type": "string", "description": "Optional session ID to attach to findings"],
+                ], required: ["claims_json"])
             ),
         ]
     }

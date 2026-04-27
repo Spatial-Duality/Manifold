@@ -52,8 +52,11 @@ struct AddMailAccountSheet: View {
             .padding(Spacing.edge)
         }
         .frame(width: 460, height: 440)
-        .sheet(item: $selectedProvider) { _ in
-            EmailAccountSetupView()
+        .sheet(item: $selectedProvider) { provider in
+            EmailAccountSetupView(provider: provider) {
+                selectedProvider = nil
+                dismiss()
+            }
                 .environment(store)
         }
     }
