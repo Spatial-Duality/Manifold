@@ -197,9 +197,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "invoice schema amount vendor date"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
         _ = try await harness.memoryStore.save(
             kind: .sourceSchema,
             title: "Invoice schema",
@@ -229,9 +228,8 @@ struct GrantBoundaryBridgeTests {
 
         let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "routine"])
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
         _ = try await harness.memoryStore.save(
             kind: .routine,
             title: "Weekly invoice routine",
@@ -262,9 +260,8 @@ struct GrantBoundaryBridgeTests {
 
         let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "original"])
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         _ = try await harness.bridge.readFile(path: "alpha/notes.md")
         let exposure = try #require(try await harness.exposureStore.latestExposure(resourcePath: "alpha/notes.md"))
@@ -309,8 +306,8 @@ struct GrantBoundaryBridgeTests {
         let sourceBURL = try createSource(in: harness.tempDir, name: "Beta", files: ["notes.md": "beta"])
         let sourceAID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceAURL.path)
         let sourceBID = try await harness.grantStore.addSource(displayName: "Beta", rootPath: sourceBURL.path)
-        let sourceA = try await harness.grantStore.source(id: sourceAID)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA!)])
+        let sourceA = try #require(await harness.grantStore.source(id: sourceAID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA)])
 
         let inScope = try await harness.memoryStore.save(
             kind: .note,
@@ -351,8 +348,8 @@ struct GrantBoundaryBridgeTests {
 
         let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "alpha"])
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         try await harness.memoryStore.upsertSettings(MemorySettings(amnesiacMode: true, derivedRetentionDays: 90))
         let response = try await harness.bridge.saveMemoryNote(title: "Do not persist", body: "sensitive derived note")
@@ -360,7 +357,7 @@ struct GrantBoundaryBridgeTests {
         let ledgerEntries = try await harness.ledgerStore.recent(limit: 10)
 
         #expect(response == "Memory not saved because amnesiac mode is enabled.")
-        #expect(!memories.contains { $0.title == "Do not persist" })
+        #expect(memories.contains { $0.title == "Do not persist" } == false)
         #expect(ledgerEntries.contains { $0.subjectTable == "memory_settings" && $0.metadataJSON?.contains("amnesiac_mode") == true })
     }
 
@@ -373,8 +370,8 @@ struct GrantBoundaryBridgeTests {
         let sourceBURL = try createSource(in: harness.tempDir, name: "Beta", files: ["notes.md": "beta"])
         let sourceAID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceAURL.path)
         let sourceBID = try await harness.grantStore.addSource(displayName: "Beta", rootPath: sourceBURL.path)
-        let sourceA = try await harness.grantStore.source(id: sourceAID)
-        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA!)])
+        let sourceA = try #require(await harness.grantStore.source(id: sourceAID))
+        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA)])
 
         let inScope = try await harness.capabilityHandleStore.save(ValueHandle(
             origin: "alpha",
@@ -420,9 +417,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
-        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         let result = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated")
         #expect(result.message.contains("alpha/notes.md"))
@@ -452,9 +448,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
-        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        let grant = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated by codex")
 
@@ -494,9 +489,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated with context")
         await harness.bridge.recordDisconnection()
@@ -533,11 +527,10 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
+        let source = try #require(await harness.grantStore.source(id: sourceID))
         let grant = try await startMaterializedGrant(
             harness: harness,
-            sources: [(sourceID, source!)],
+            sources: [(sourceID, source)],
             noteCaptureMode: .verbose
         )
 
@@ -565,11 +558,10 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
+        let source = try #require(await harness.grantStore.source(id: sourceID))
         let grant = try await startMaterializedGrant(
             harness: harness,
-            sources: [(sourceID, source!)],
+            sources: [(sourceID, source)],
             noteCaptureMode: .basic
         )
 
@@ -593,11 +585,11 @@ struct GrantBoundaryBridgeTests {
         let sourceBURL = try createSource(in: harness.tempDir, name: "Beta", files: ["notes.md": "beta"])
         let sourceAID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceAURL.path)
         let sourceBID = try await harness.grantStore.addSource(displayName: "Beta", rootPath: sourceBURL.path)
-        let sourceA = try await harness.grantStore.source(id: sourceAID)
-        let sourceB = try await harness.grantStore.source(id: sourceBID)
+        let sourceA = try #require(await harness.grantStore.source(id: sourceAID))
+        let sourceB = try #require(await harness.grantStore.source(id: sourceBID))
         _ = try await startMaterializedGrant(
             harness: harness,
-            sources: [(sourceAID, sourceA!), (sourceBID, sourceB!)]
+            sources: [(sourceAID, sourceA), (sourceBID, sourceB)]
         )
 
         await #expect(throws: ManifoldMCPError.self) {
@@ -616,8 +608,7 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        #expect(source != nil)
+        let source = try #require(await harness.grantStore.source(id: sourceID))
         let grant = try await harness.grantStore.startGrant(
             targetApp: .cowork,
             profileID: "default",
@@ -634,7 +625,7 @@ struct GrantBoundaryBridgeTests {
         let grantSources = try await harness.grantStore.grantSources(grantID: grant.grantID)
         _ = try MaterializationEngine.materialize(
             grantID: grant.grantID,
-            sources: [(source: source!, mountName: grantSources[0].mountName)],
+            sources: [(source: source, mountName: grantSources[0].mountName)],
             materializationRoot: grant.materializationRoot
         )
 
@@ -654,8 +645,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "line one\nneedle before\nline three"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         let beforeHits = try await harness.bridge.searchFiles(query: "before")
         #expect(beforeHits.count == 1)
@@ -683,8 +674,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "one\ntwo\nthree\nfour"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         let excerpt = try await harness.bridge.readRange(path: "alpha/notes.md", startLine: 2, endLine: 3)
         #expect(excerpt == "two\nthree")
@@ -701,8 +692,8 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "original"]
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await harness.grantStore.source(id: sourceID)
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source!)])
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
         _ = try await harness.bridge.writeFile(path: "alpha/notes.md", content: "updated")
         let diff = try await harness.bridge.diffFile(path: "alpha/notes.md")
