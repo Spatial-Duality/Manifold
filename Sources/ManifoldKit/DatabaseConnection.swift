@@ -37,38 +37,8 @@ public final class DatabaseConnection: @unchecked Sendable {
         try secureDatabaseFiles()
     }
 
-    /// Prepared statement cache — avoids recompiling identical SQL on every call.
-    /// sqlite.org: "sqlite3_prepare_v2() is a significant consumer of CPU time."
-    private var stmtCache: [String: OpaquePointer] = [:]
-
     deinit {
-        // Finalize all cached statements before closing
-        for (_, stmt) in stmtCache {
-            sqlite3_finalize(stmt)
-        }
-        stmtCache.removeAll()
         sqlite3_close(handle)
-    }
-
-    private func cachedStmt(_ sql: String) throws -> OpaquePointer {
-        if let cached = stmtCache[sql] {
-            sqlite3_reset(cached)
-            sqlite3_clear_bindings(cached)
-            return cached
-        }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw ManifoldError.database(errorMessage)
-        }
-        guard let preparedStatement = stmt else {
-            throw ManifoldError.database("SQLite prepared a nil statement for query: \(sql)")
-        }
-        // Only cache deterministic queries (not PRAGMA, not CREATE)
-        let upper = sql.trimmingCharacters(in: .whitespaces).uppercased()
-        if upper.hasPrefix("SELECT") || upper.hasPrefix("INSERT") || upper.hasPrefix("UPDATE") || upper.hasPrefix("DELETE") {
-            stmtCache[sql] = preparedStatement
-        }
-        return preparedStatement
     }
 
     /// Executes a SQL statement with optional string parameters.
