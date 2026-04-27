@@ -22,42 +22,28 @@ Implemented via `EmailSensitivityFilter.swift`, migration v11, `GrantStore`/`Man
 
 ---
 
-## Deferred from /plan-eng-review on 2026-04-27 (commit 93b12fc)
+## Completed from /plan-eng-review on 2026-04-27 (commit 93b12fc)
 
-These came out of the Personal Data OS eng review. The demo-critical pieces
-(hero shot E2E test, tool descriptions, paginated ledger verify, SQL push-down
-on memory recall, store helpers consolidation, claim-verification extraction)
-were all implemented. The remaining items below were deemed too risky to land
-3 days before the Thu 2026-04-30 launch.
+All Personal Data OS eng-review items shipped, including the full bridge
+file-level split that was originally flagged as risky pre-launch:
 
-### Full ManifoldBridge file-level split
+- Hero shot E2E test (cross-agent recall_memory / reuse_prior_context /
+  was_exposed_before through two ManifoldBridge instances over the same stores)
+- Tool descriptions explicitly mention cross-agent visibility
+- StoreHelpers.swift consolidates addColumnIfMissing + StoreJSON
+- Paginated LedgerStore.verifyChain (500/page)
+- MemoryStore.recall scope filter pushed into SQL via json_each
+- ClaimVerification.swift extracts pure parse/grade helpers
+- ManifoldBridge split along 4 responsibility files:
+  - ManifoldBridge+Capability.swift (create_value_handle, check_capability_flow)
+  - ManifoldBridge+SkillsAndExec.swift (run_code, save_skill, invoke_skill,
+    list_skills)
+  - ManifoldBridge+Memory.swift (reuse_prior_context, recall_memory,
+    save_memory_note, list_memory_sources, forget_memory)
+  - ManifoldBridge+History.swift (file_history_context, session_context,
+    tool_cost_report, verify_ledger_entry, was_exposed_before,
+    what_changed_since, query_graph, verify_claimed_actions,
+    latest_tool_metric_context)
 
-**What:** `ManifoldBridge` is currently 4005 lines in one file. Existing
-`// MARK:` sections give it logical organization, and `ClaimVerification.swift`
-already lifts the pure parsing/grading helpers out. The next step is moving
-the public methods into multiple `extension ManifoldBridge` files grouped by
-responsibility:
-- `ManifoldBridge+Memory.swift` — recall, save, list_sources, forget, prior_context
-- `ManifoldBridge+Capability.swift` — create_value_handle, check_capability_flow
-- `ManifoldBridge+SkillsAndExec.swift` — run_code, save_skill, invoke_skill, list_skills
-- `ManifoldBridge+History.swift` — was_exposed_before, what_changed_since,
-  verify_ledger_entry, file_history_context, query_graph
-
-**Why:** A 4000-line actor file is hostile to navigation and code review.
-File-level split makes the responsibility boundaries enforceable.
-
-**Cost:** Bridge's `private let` properties (db, stores, runtimeContext) and
-several private helpers (`resolveAccessForTool`, `recordExposure`,
-`expireDerivedMemoryIfNeeded`, `sourceIDs(in:)`, `grantID(in:)`,
-`canAccessMemory`, `decisionContext`, `recordAccessDecision`,
-`Self.canonicalJSON`) need to be bumped from `private` to default-internal so
-extensions in sibling files can reach them. This expands their visibility
-within the `ManifoldRuntime` module but stays inside the module boundary.
-
-**Why deferred:** Touches the demo-critical bridge surface 3 days before launch.
-The minimal-viable claim-verification extraction (Apr 27) demonstrates the
-pattern is safe; the full split needs more time to land carefully.
-
-**Where to start:** Pick the smallest group first (likely
-`ManifoldBridge+Capability.swift` — only 2 methods, ~100 lines). Bump
-the necessary properties, run `swift test` after each move, commit per move.
+ManifoldBridge.swift dropped from 4082 → 3302 lines (-780).
+Verified: 420/420 swift test, xcodebuild Manifold BUILD SUCCEEDED.
