@@ -7,7 +7,31 @@ import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "database")
 
-/// Minimal SQLite wrapper. All operations are synchronous — callers use actor isolation.
+/// Minimal SQLite wrapper.
+///
+/// ## Concurrency model
+///
+/// Multiple actors in the runtime (LedgerStore, MemoryStore,
+/// CapabilityHandleStore, KnowledgeGraphStore, etc.) share a single
+/// `DatabaseConnection` per `ManifoldRuntime`. Each actor's isolation
+/// serializes calls *within* that actor, but actors do not serialize
+/// across each other. Concurrent calls from different actors can land
+/// on the same connection at the same time.
+///
+/// The `@unchecked Sendable` claim is justified by **`SQLITE_OPEN_FULLMUTEX`**
+/// in `init` (the SERIALIZED threading mode in SQLite parlance): the C
+/// library puts a mutex around the connection so concurrent calls from
+/// any thread are safe. See https://sqlite.org/threadsafe.html.
+///
+/// What this rules out:
+/// - **Adding mutable Swift state** (caches, buffers) to this class
+///   without an explicit lock. Swift `Dictionary`/`Array` mutation is
+///   not protected by SQLite's mutex.
+/// - Using a different open mode (`SQLITE_OPEN_NOMUTEX`) without
+///   reworking the surrounding actors.
+///
+/// All public operations are synchronous so actors can call them inside
+/// their isolated bodies without `await`.
 public final class DatabaseConnection: @unchecked Sendable {
     private var handle: OpaquePointer?
     private let url: URL
