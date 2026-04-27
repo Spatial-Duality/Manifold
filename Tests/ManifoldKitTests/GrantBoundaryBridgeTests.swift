@@ -931,8 +931,7 @@ struct GrantBoundaryBridgeTests {
             files: ["notes.md": "manifold cross-agent demo content"]
         )
         let sourceID = try await h.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
-        let source = try await h.grantStore.source(id: sourceID)
-        #expect(source != nil)
+        let source = try #require(await h.grantStore.source(id: sourceID), "GrantStore must persist the just-added source")
 
         // Codex grant comes first — represents Codex working in the folder.
         let codexMaterializationRoot = h.tempDir.appendingPathComponent("materialized/codex-\(UUID().uuidString)")
@@ -946,7 +945,7 @@ struct GrantBoundaryBridgeTests {
         let codexGrantSources = try await h.grantStore.grantSources(grantID: codexGrant.grantID)
         let codexMountInputs = codexGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
             guard gs.sourceID == sourceID else { return nil }
-            return (source!, gs.mountName)
+            return (source, gs.mountName)
         }
         let codexResults = try MaterializationEngine.materialize(
             grantID: codexGrant.grantID,
@@ -988,7 +987,7 @@ struct GrantBoundaryBridgeTests {
         let coworkGrantSources = try await h.grantStore.grantSources(grantID: coworkGrant.grantID)
         let coworkMountInputs = coworkGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
             guard gs.sourceID == sourceID else { return nil }
-            return (source!, gs.mountName)
+            return (source, gs.mountName)
         }
         let coworkResults = try MaterializationEngine.materialize(
             grantID: coworkGrant.grantID,
@@ -1025,5 +1024,93 @@ struct GrantBoundaryBridgeTests {
         let exposureLookup = try await h.coworkBridge.wasExposedBefore(path: coworkPath)
         #expect(exposureLookup.contains("Prior exposures"),
                 "Cowork's was_exposed_before must surface Codex's prior read. Got:\n\(exposureLookup)")
+    }
+
+    /// Scope isolation negative: when Cowork's grant is over a DIFFERENT
+    /// source than Codex's grant, Cowork must NOT see Codex's saved memory.
+    /// This guards against regressions that would silently widen scope past
+    /// the lineage check (e.g. if MemoryStore.recall stopped filtering by
+    /// allowedSourceIDs, the positive hero-shot test would still pass).
+    @Test("Cross-agent: Cowork over different source sees no memory from Codex")
+    func crossAgentScopeIsolation() async throws {
+        let h = try makeCrossAgentHarness()
+        defer { cleanup(h.tempDir) }
+
+        // TWO source folders. Codex gets one, Cowork gets the other.
+        let codexSourceURL = try createSource(
+            in: h.tempDir,
+            name: "CodexSource",
+            files: ["notes.md": "codex-only content"]
+        )
+        let coworkSourceURL = try createSource(
+            in: h.tempDir,
+            name: "CoworkSource",
+            files: ["notes.md": "cowork-only content"]
+        )
+        let codexSourceID = try await h.grantStore.addSource(displayName: "CodexSource", rootPath: codexSourceURL.path)
+        let coworkSourceID = try await h.grantStore.addSource(displayName: "CoworkSource", rootPath: coworkSourceURL.path)
+        let codexSource = try #require(await h.grantStore.source(id: codexSourceID), "GrantStore must persist Codex's source")
+        let coworkSource = try #require(await h.grantStore.source(id: coworkSourceID), "GrantStore must persist Cowork's source")
+
+        // Codex grant over CodexSource only.
+        let codexMaterializationRoot = h.tempDir.appendingPathComponent("materialized/codex-iso-\(UUID().uuidString)")
+        let codexGrant = try await h.grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "default",
+            sourceIDs: [codexSourceID],
+            materializationRoot: codexMaterializationRoot.path,
+            noteCaptureMode: .off
+        )
+        let codexGrantSources = try await h.grantStore.grantSources(grantID: codexGrant.grantID)
+        let codexMountInputs = codexGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
+            guard gs.sourceID == codexSourceID else { return nil }
+            return (codexSource, gs.mountName)
+        }
+        let codexResults = try MaterializationEngine.materialize(
+            grantID: codexGrant.grantID,
+            sources: codexMountInputs,
+            materializationRoot: codexGrant.materializationRoot
+        )
+        for r in codexResults {
+            try await h.grantStore.setBaselineHash(grantID: codexGrant.grantID, sourceID: r.sourceID, hash: r.manifestHash)
+        }
+
+        let codexMountName = codexGrantSources.first?.mountName ?? "CodexSource"
+        _ = try await h.codexBridge.readFile(path: "\(codexMountName)/notes.md")
+        _ = try await h.codexBridge.saveMemoryNote(
+            title: "Codex private schema",
+            body: "should not leak to cowork over a different source"
+        )
+        try await h.grantStore.endGrant(grantID: codexGrant.grantID)
+
+        // Cowork grant over CoworkSource only — DIFFERENT source from Codex.
+        let coworkMaterializationRoot = h.tempDir.appendingPathComponent("materialized/cowork-iso-\(UUID().uuidString)")
+        let coworkGrant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [coworkSourceID],
+            materializationRoot: coworkMaterializationRoot.path,
+            noteCaptureMode: .off
+        )
+        let coworkGrantSources = try await h.grantStore.grantSources(grantID: coworkGrant.grantID)
+        let coworkMountInputs = coworkGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
+            guard gs.sourceID == coworkSourceID else { return nil }
+            return (coworkSource, gs.mountName)
+        }
+        let coworkResults = try MaterializationEngine.materialize(
+            grantID: coworkGrant.grantID,
+            sources: coworkMountInputs,
+            materializationRoot: coworkGrant.materializationRoot
+        )
+        for r in coworkResults {
+            try await h.grantStore.setBaselineHash(grantID: coworkGrant.grantID, sourceID: r.sourceID, hash: r.manifestHash)
+        }
+
+        // Cowork must NOT see Codex's memory (lineage scope mismatch).
+        let recall = try await h.coworkBridge.recallMemory(query: "schema")
+        #expect(recall.contains("Codex private schema") == false,
+                "Cowork's recall_memory leaked memory from a source it has no grant over. Got:\n\(recall)")
+        #expect(recall.contains("No memory matched") || recall.isEmpty || recall.contains("Codex") == false,
+                "Cowork must report empty/scope-mismatch result, not Codex content. Got:\n\(recall)")
     }
 }
