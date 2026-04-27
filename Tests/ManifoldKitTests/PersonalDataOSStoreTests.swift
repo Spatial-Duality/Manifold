@@ -54,7 +54,7 @@ struct PersonalDataOSStoreTests {
 
         try db.execute("UPDATE ledger_entries SET payload_hash = ? WHERE entry_id = ?", params: ["tampered", first.entryID])
         let broken = try await ledger.verifyChain()
-        #expect(!broken.verified)
+        #expect(broken.verified == false)
         #expect(broken.firstBrokenEntryID == first.entryID)
     }
 
@@ -77,7 +77,7 @@ struct PersonalDataOSStoreTests {
         )
 
         let broken = try await ledger.verifyChain()
-        #expect(!broken.verified)
+        #expect(broken.verified == false)
         #expect(broken.firstBrokenEntryID == entry.entryID)
     }
 
@@ -134,7 +134,7 @@ struct PersonalDataOSStoreTests {
         )
 
         #expect(try await store.wasExposedBefore(contentHash: "hash-1"))
-        #expect(!(try await store.wasExposedBefore(contentHash: "missing")))
+        #expect(try await store.wasExposedBefore(contentHash: "missing") == false)
         #expect(try await store.exposures(contentHash: "hash-1", limit: 10).first?.resourcePath == "Docs/readme.md")
     }
 
@@ -242,7 +242,7 @@ struct PersonalDataOSStoreTests {
         ))
 
         let deniedSink = try await store.checkFlow(handleID: handle.handleID, sink: "external_url")
-        #expect(!deniedSink.allowed)
+        #expect(deniedSink.allowed == false)
 
         let deniedRuleOfTwo = try await store.checkFlow(
             handleID: handle.handleID,
@@ -250,7 +250,7 @@ struct PersonalDataOSStoreTests {
             untrustedInput: true,
             stateChangingAction: true
         )
-        #expect(!deniedRuleOfTwo.allowed)
+        #expect(deniedRuleOfTwo.allowed == false)
         #expect(deniedRuleOfTwo.ruleOfTwoTriggered)
 
         let allowed = try await store.checkFlow(handleID: handle.handleID, sink: "model_context")
