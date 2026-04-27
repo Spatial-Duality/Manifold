@@ -10,6 +10,20 @@ import os
 /// Dual-path access: standing access via PolicyStore, work block via grant materialization.
 /// Fail-closed: no policy and no grant = no access.
 public actor ManifoldBridge {
+    // MARK: - Internal state — only for ManifoldBridge+* extensions
+    //
+    // These properties are `internal` (Swift's default access) so that the
+    // sibling-file extensions (ManifoldBridge+Memory, +History, +Capability,
+    // +SkillsAndExec) can reach them. Swift has no "extension-only" access
+    // level; the cost of file-level extension splitting is that anything in
+    // the ManifoldRuntime module can technically reach these.
+    //
+    // Convention: only ManifoldBridge.swift and ManifoldBridge+*.swift may
+    // touch these directly. Other files in ManifoldRuntime/ should treat
+    // them as if they were `private`. New tool surfaces should land as a
+    // ManifoldBridge+<Group>.swift extension, not as a free function that
+    // grabs at bridge state.
+
     static let maxExposurePreviewCharacters = 512
     let logger = Logger(subsystem: "com.spatialduality.manifold", category: "runtime")
     let db: DatabaseConnection
