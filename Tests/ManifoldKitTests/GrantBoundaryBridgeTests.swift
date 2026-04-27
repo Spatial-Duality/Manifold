@@ -825,4 +825,205 @@ struct GrantBoundaryBridgeTests {
         #expect(result.contains("contextual_chunk"))
         #expect(result.contains("\"content_hash\""))
     }
+
+    // MARK: - Cross-agent hero shot
+
+    struct CrossAgentHarness {
+        let db: DatabaseConnection
+        let contentStore: ContentStore
+        let snapshotStore: SnapshotStore
+        let auditStore: AuditStore
+        let grantStore: GrantStore
+        let emailStore: EmailStore
+        let artifactIndex: ArtifactIndex
+        let exposureStore: ExposureStore
+        let ledgerStore: LedgerStore
+        let memoryStore: MemoryStore
+        let skillStore: SkillStore
+        let capabilityHandleStore: CapabilityHandleStore
+        let execRunStore: ExecRunStore
+        let knowledgeGraphStore: KnowledgeGraphStore
+        let fabricationFindingStore: FabricationFindingStore
+        let codexBridge: ManifoldBridge
+        let coworkBridge: ManifoldBridge
+        let tempDir: URL
+    }
+
+    func makeCrossAgentHarness() throws -> CrossAgentHarness {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("manifold-bridge-cross-agent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let contentStore = try ContentStore(rootURL: tempDir)
+        let db = try DatabaseConnection(url: tempDir.appendingPathComponent("manifold.db"))
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+        let snapshotStore = try SnapshotStore(db: db, contentStore: contentStore)
+        let auditStore = try AuditStore(db: db)
+        let grantStore = GrantStore(db: db)
+        let emailStore = EmailStore(db: db)
+        let artifactIndex = try ArtifactIndex(db: db)
+        let exposureStore = ExposureStore(db: db)
+        let ledgerStore = try LedgerStore(db: db)
+        let memoryStore = try MemoryStore(db: db)
+        let skillStore = try SkillStore(db: db)
+        let capabilityHandleStore = try CapabilityHandleStore(db: db)
+        let execRunStore = try ExecRunStore(db: db)
+        let knowledgeGraphStore = try KnowledgeGraphStore(db: db)
+        let fabricationFindingStore = try FabricationFindingStore(db: db)
+
+        func makeBridge(targetApp: TargetApp) -> ManifoldBridge {
+            ManifoldBridge(
+                db: db,
+                auditStore: auditStore,
+                contentStore: contentStore,
+                grantStore: grantStore,
+                emailStore: emailStore,
+                snapshotStore: snapshotStore,
+                artifactIndex: artifactIndex,
+                exposureStore: exposureStore,
+                ledgerStore: ledgerStore,
+                memoryStore: memoryStore,
+                skillStore: skillStore,
+                capabilityHandleStore: capabilityHandleStore,
+                execRunStore: execRunStore,
+                knowledgeGraphStore: knowledgeGraphStore,
+                fabricationFindingStore: fabricationFindingStore,
+                targetApp: targetApp
+            )
+        }
+
+        return CrossAgentHarness(
+            db: db,
+            contentStore: contentStore,
+            snapshotStore: snapshotStore,
+            auditStore: auditStore,
+            grantStore: grantStore,
+            emailStore: emailStore,
+            artifactIndex: artifactIndex,
+            exposureStore: exposureStore,
+            ledgerStore: ledgerStore,
+            memoryStore: memoryStore,
+            skillStore: skillStore,
+            capabilityHandleStore: capabilityHandleStore,
+            execRunStore: execRunStore,
+            knowledgeGraphStore: knowledgeGraphStore,
+            fabricationFindingStore: fabricationFindingStore,
+            codexBridge: makeBridge(targetApp: .codex),
+            coworkBridge: makeBridge(targetApp: .cowork),
+            tempDir: tempDir
+        )
+    }
+
+    /// Hero shot: Codex reads a file and saves a memory; Cowork (Claude) then
+    /// surfaces both via reuse_prior_context, recall_memory, and was_exposed_before.
+    /// This is the demo's "What did Codex just do?" payoff. If this test fails,
+    /// the launch demo's pitch beat doesn't work.
+    @Test("Hero shot: Cowork surfaces Codex's prior reads and memory across agents")
+    func crossAgentHeroShotEndToEnd() async throws {
+        let h = try makeCrossAgentHarness()
+        defer { cleanup(h.tempDir) }
+
+        // ONE shared source folder. Both agents have grants over it.
+        let sourceURL = try createSource(
+            in: h.tempDir,
+            name: "Alpha",
+            files: ["notes.md": "manifold cross-agent demo content"]
+        )
+        let sourceID = try await h.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try await h.grantStore.source(id: sourceID)
+        #expect(source != nil)
+
+        // Codex grant comes first — represents Codex working in the folder.
+        let codexMaterializationRoot = h.tempDir.appendingPathComponent("materialized/codex-\(UUID().uuidString)")
+        let codexGrant = try await h.grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: codexMaterializationRoot.path,
+            noteCaptureMode: .off
+        )
+        let codexGrantSources = try await h.grantStore.grantSources(grantID: codexGrant.grantID)
+        let codexMountInputs = codexGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
+            guard gs.sourceID == sourceID else { return nil }
+            return (source!, gs.mountName)
+        }
+        let codexResults = try MaterializationEngine.materialize(
+            grantID: codexGrant.grantID,
+            sources: codexMountInputs,
+            materializationRoot: codexGrant.materializationRoot
+        )
+        for r in codexResults {
+            try await h.grantStore.setBaselineHash(grantID: codexGrant.grantID, sourceID: r.sourceID, hash: r.manifestHash)
+            try await baselineSnapshotMount(
+                snapshotStore: h.snapshotStore,
+                grantID: codexGrant.grantID,
+                sourceID: r.sourceID,
+                mountName: r.mountName,
+                mountPath: r.mountPath
+            )
+        }
+
+        // Codex reads the file and saves a memory note.
+        let codexMountName = codexGrantSources.first?.mountName ?? "Alpha"
+        _ = try await h.codexBridge.readFile(path: "\(codexMountName)/notes.md")
+        _ = try await h.codexBridge.saveMemoryNote(
+            title: "Cross-agent demo schema",
+            body: "Codex captured the manifold cross-agent demo content here."
+        )
+
+        // Codex ends its grant. The demo can have Codex disconnected at this point;
+        // Cowork should still see Codex's traces because exposures + memory persist.
+        try await h.grantStore.endGrant(grantID: codexGrant.grantID)
+
+        // Cowork (Claude) starts its own grant on the SAME source.
+        let coworkMaterializationRoot = h.tempDir.appendingPathComponent("materialized/cowork-\(UUID().uuidString)")
+        let coworkGrant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: coworkMaterializationRoot.path,
+            noteCaptureMode: .off
+        )
+        let coworkGrantSources = try await h.grantStore.grantSources(grantID: coworkGrant.grantID)
+        let coworkMountInputs = coworkGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
+            guard gs.sourceID == sourceID else { return nil }
+            return (source!, gs.mountName)
+        }
+        let coworkResults = try MaterializationEngine.materialize(
+            grantID: coworkGrant.grantID,
+            sources: coworkMountInputs,
+            materializationRoot: coworkGrant.materializationRoot
+        )
+        for r in coworkResults {
+            try await h.grantStore.setBaselineHash(grantID: coworkGrant.grantID, sourceID: r.sourceID, hash: r.manifestHash)
+            try await baselineSnapshotMount(
+                snapshotStore: h.snapshotStore,
+                grantID: coworkGrant.grantID,
+                sourceID: r.sourceID,
+                mountName: r.mountName,
+                mountPath: r.mountPath
+            )
+        }
+
+        // The demo question: "What did Codex just do?"
+        // 1. reuse_prior_context with Codex's path should return Codex's exposure + memory.
+        let coworkMountName = coworkGrantSources.first?.mountName ?? "Alpha"
+        let coworkPath = "\(coworkMountName)/notes.md"
+        let priorContext = try await h.coworkBridge.reusePriorContext(path: coworkPath)
+        #expect(priorContext.contains("Cross-agent demo schema"),
+                "Cowork's reuse_prior_context must surface the memory Codex saved in the same source scope. Got:\n\(priorContext)")
+        #expect(priorContext.contains("read_file") || priorContext.contains("save_memory_note"),
+                "Cowork's reuse_prior_context must include Codex's prior tool exposure. Got:\n\(priorContext)")
+
+        // 2. recall_memory should surface Codex's memory because both grants share the source.
+        let recall = try await h.coworkBridge.recallMemory(query: "demo")
+        #expect(recall.contains("Cross-agent demo schema"),
+                "Cowork's recall_memory must return memory Codex saved in the same source scope. Got:\n\(recall)")
+
+        // 3. was_exposed_before by path must show Codex's read of notes.md.
+        let exposureLookup = try await h.coworkBridge.wasExposedBefore(path: coworkPath)
+        #expect(exposureLookup.contains("Prior exposures"),
+                "Cowork's was_exposed_before must surface Codex's prior read. Got:\n\(exposureLookup)")
+    }
 }

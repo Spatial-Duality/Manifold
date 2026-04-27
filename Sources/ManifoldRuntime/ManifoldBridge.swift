@@ -3682,7 +3682,7 @@ public actor ManifoldBridge {
 
     public func verifyClaimedActions(claimsJSON: String, sessionID: String? = nil) async throws -> String {
         let (context, decisionID) = try await resolveAccessForTool(toolName: "verify_claimed_actions", action: "verify", resourcePath: sessionID)
-        let claims = Self.claims(from: claimsJSON)
+        let claims = ClaimEvidence.parse(json: claimsJSON)
         guard !claims.isEmpty else {
             return "No claims parsed. Provide a JSON array of strings or objects with tool_name/resource_path/content_hash."
         }
@@ -3690,7 +3690,7 @@ public actor ManifoldBridge {
             .filter { isExposure($0, inScopeOf: context) }
         var rows: [String] = []
         for claim in claims {
-            let evidence = evidence(for: claim, exposures: scopedExposures)
+            let evidence = ClaimEvidence.evidence(for: claim, exposures: scopedExposures)
             let status = evidence["status"] ?? "unverified"
             let finding = try await fabricationFindingStore?.save(
                 sessionID: sessionID,
@@ -3874,83 +3874,6 @@ public actor ManifoldBridge {
             }
         }
         return result
-    }
-
-    private struct ClaimedAction {
-        let text: String
-        let toolName: String?
-        let resourcePath: String?
-        let contentHash: String?
-        let isStructured: Bool
-    }
-
-    private static func claims(from json: String) -> [ClaimedAction] {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) else {
-            let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? [] : [ClaimedAction(text: trimmed, toolName: nil, resourcePath: nil, contentHash: nil, isStructured: false)]
-        }
-        let values: [Any]
-        if let array = object as? [Any] {
-            values = array
-        } else {
-            values = [object]
-        }
-        return values.compactMap { value in
-            if let string = value as? String {
-                return ClaimedAction(text: string, toolName: nil, resourcePath: nil, contentHash: nil, isStructured: false)
-            }
-            guard let dictionary = value as? [String: Any] else { return nil }
-            let toolName = stringValue(dictionary["tool_name"]) ?? stringValue(dictionary["tool"])
-            let resourcePath = stringValue(dictionary["resource_path"]) ?? stringValue(dictionary["path"])
-            let contentHash = stringValue(dictionary["content_hash"]) ?? stringValue(dictionary["hash"])
-            let text = stringValue(dictionary["claim"]) ?? [
-                toolName.map { "tool=\($0)" },
-                resourcePath.map { "resource=\($0)" },
-                contentHash.map { "hash=\($0)" },
-            ].compactMap { $0 }.joined(separator: " ")
-            return ClaimedAction(text: text.isEmpty ? "\(dictionary)" : text, toolName: toolName, resourcePath: resourcePath, contentHash: contentHash, isStructured: true)
-        }
-    }
-
-    private func evidence(
-        for claim: ClaimedAction,
-        exposures: [ExposureRecord]
-    ) -> [String: String] {
-        if let contentHash = claim.contentHash, !contentHash.isEmpty {
-            if let match = exposures.first(where: { exposure in
-                exposure.contentHash == contentHash
-                    && (claim.toolName.map { $0 == exposure.toolName } ?? true)
-                    && (claim.resourcePath.map { $0 == exposure.resourcePath } ?? true)
-            }) {
-                return ["status": "supported", "evidence": "exposure \(match.id) matched content hash \(String(contentHash.prefix(12)))"]
-            }
-            return ["status": "unverified", "evidence": "no scoped exposure matched content hash \(String(contentHash.prefix(12)))"]
-        }
-
-        if let toolName = claim.toolName,
-           let resourcePath = claim.resourcePath,
-           let match = exposures.first(where: { $0.toolName == toolName && $0.resourcePath == resourcePath }) {
-            return ["status": "supported", "evidence": "exposure \(match.id) matched \(match.toolName) \(match.resourcePath ?? "-")"]
-        }
-        if claim.toolName != nil, claim.resourcePath != nil {
-            return ["status": "unverified", "evidence": "no scoped exposure matched tool_name + resource_path"]
-        }
-
-        let claimLower = claim.text.lowercased()
-        if let match = exposures.first(where: { exposure in
-            claimLower.contains(exposure.toolName.lowercased())
-                || exposure.resourcePath.map { claimLower.contains($0.lowercased()) } == true
-                || claimLower.contains(exposure.contentHash.lowercased())
-        }) {
-            return ["status": "ambiguous", "evidence": "claim text only loosely matched scoped exposure \(match.id); provide tool_name + resource_path or content_hash for support"]
-        }
-
-        if !claim.isStructured || claim.toolName != nil || claim.resourcePath != nil {
-            return ["status": "ambiguous", "evidence": "structured tool_name + resource_path or content_hash is required for support"]
-        }
-
-        return ["status": "unverified", "evidence": "no matching scoped exposure"]
     }
 
     private func isResourcePath(_ path: String, inScopeOf context: AccessContext) -> Bool {

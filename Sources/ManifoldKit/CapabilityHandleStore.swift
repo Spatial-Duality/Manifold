@@ -42,9 +42,9 @@ public actor CapabilityHandleStore {
             handle.origin,
             handle.sensitivity,
             handle.trustLevel,
-            try Self.jsonString(handle.allowedSinks),
+            try StoreJSON.encode(handle.allowedSinks),
             handle.grantID,
-            try Self.jsonString(handle.lineage),
+            try StoreJSON.encode(handle.lineage),
             "\(handle.createdAt)",
         ])
         return handle
@@ -140,9 +140,9 @@ public actor CapabilityHandleStore {
             origin: origin,
             sensitivity: sensitivity,
             trustLevel: trustLevel,
-            allowedSinks: decode([String].self, from: row["allowed_sinks_json"]) ?? [],
+            allowedSinks: StoreJSON.decode([String].self, from: row["allowed_sinks_json"]) ?? [],
             grantID: row["grant_id"]?.nilIfEmpty,
-            lineage: decode([LineageRef].self, from: row["lineage_json"]) ?? [],
+            lineage: StoreJSON.decode([LineageRef].self, from: row["lineage_json"]) ?? [],
             createdAt: createdAt
         )
     }
@@ -151,15 +151,4 @@ public actor CapabilityHandleStore {
         ["secret", "high", "restricted", "sensitive", "private"].contains(sensitivity.lowercased())
     }
 
-    private static func jsonString<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
-        return String(data: data, encoding: .utf8) ?? "null"
-    }
-
-    private static func decode<T: Decodable>(_ type: T.Type, from raw: String?) -> T? {
-        guard let raw, let data = raw.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
-    }
 }

@@ -50,7 +50,7 @@ public actor LedgerStore {
         let timestamp = Date().timeIntervalSince1970
         let timestampString = Self.stableTimestamp(timestamp)
         let payloadHash = Self.sha256(payload)
-        let metadataJSON = try Self.jsonString(metadata)
+        let metadataJSON = try StoreJSON.encode(metadata: metadata)
         let entryHash = Self.entryHash(
             sequence: nextSequence,
             timestamp: timestampString,
@@ -119,40 +119,46 @@ public actor LedgerStore {
         return rows.compactMap(Self.entry(from:))
     }
 
+    /// Page size used by `verifyChain` to bound peak memory on large ledgers.
+    private static let verifyChainPageSize = 500
+
+    /// Verifies the tamper-evident hash chain in pages of `verifyChainPageSize`
+    /// entries so peak memory stays bounded as the ledger grows.
     public func verifyChain() throws -> LedgerVerificationResult {
-        let entries = try db.queryAll("""
-            SELECT *, printf('%.6f', timestamp) AS timestamp_material
-            FROM ledger_entries
-            ORDER BY sequence ASC
-        """)
-            .compactMap { row -> (entry: LedgerEntry, timestampMaterial: String)? in
-                guard let entry = Self.entry(from: row) else { return nil }
-                return (entry, row["timestamp_material"] ?? Self.stableTimestamp(entry.timestamp))
-            }
         var previousHash: String?
         var legacyEntryCount = 0
-        for (entry, timestampMaterial) in entries {
-            if entry.previousHash != previousHash {
-                return LedgerVerificationResult(
-                    verified: false,
-                    checkedEntries: entries.count,
-                    firstBrokenEntryID: entry.entryID,
-                    message: "Ledger chain is broken before entry \(entry.entryID)."
-                )
-            }
-            let expectedHash = Self.entryHash(
-                sequence: entry.sequence,
-                timestamp: timestampMaterial,
-                entryType: entry.entryType,
-                subjectTable: entry.subjectTable,
-                subjectID: entry.subjectID,
-                previousHash: entry.previousHash,
-                payloadHash: entry.payloadHash,
-                metadataJSON: entry.metadataJSON
-            )
-            if expectedHash != entry.entryHash {
-                let legacyHash = Self.legacyEntryHash(
+        var checkedEntries = 0
+        var lastSequence = 0
+        let pageSize = Self.verifyChainPageSize
+
+        while true {
+            let rows = try db.queryAll("""
+                SELECT *, printf('%.6f', timestamp) AS timestamp_material
+                FROM ledger_entries
+                WHERE sequence > ?
+                ORDER BY sequence ASC
+                LIMIT ?
+            """, params: ["\(lastSequence)", "\(pageSize)"])
+
+            if rows.isEmpty { break }
+
+            for row in rows {
+                guard let entry = Self.entry(from: row) else { continue }
+                let timestampMaterial = row["timestamp_material"] ?? Self.stableTimestamp(entry.timestamp)
+                checkedEntries += 1
+                lastSequence = entry.sequence
+
+                if entry.previousHash != previousHash {
+                    return LedgerVerificationResult(
+                        verified: false,
+                        checkedEntries: checkedEntries,
+                        firstBrokenEntryID: entry.entryID,
+                        message: "Ledger chain is broken before entry \(entry.entryID)."
+                    )
+                }
+                let expectedHash = Self.entryHash(
                     sequence: entry.sequence,
+                    timestamp: timestampMaterial,
                     entryType: entry.entryType,
                     subjectTable: entry.subjectTable,
                     subjectID: entry.subjectID,
@@ -160,21 +166,35 @@ public actor LedgerStore {
                     payloadHash: entry.payloadHash,
                     metadataJSON: entry.metadataJSON
                 )
-                if legacyHash == entry.entryHash {
-                    legacyEntryCount += 1
-                } else {
-                    return LedgerVerificationResult(
-                        verified: false,
-                        checkedEntries: entries.count,
-                        firstBrokenEntryID: entry.entryID,
-                        message: "Ledger entry \(entry.entryID) hash does not match its stored hash material."
+                if expectedHash != entry.entryHash {
+                    let legacyHash = Self.legacyEntryHash(
+                        sequence: entry.sequence,
+                        entryType: entry.entryType,
+                        subjectTable: entry.subjectTable,
+                        subjectID: entry.subjectID,
+                        previousHash: entry.previousHash,
+                        payloadHash: entry.payloadHash,
+                        metadataJSON: entry.metadataJSON
                     )
+                    if legacyHash == entry.entryHash {
+                        legacyEntryCount += 1
+                    } else {
+                        return LedgerVerificationResult(
+                            verified: false,
+                            checkedEntries: checkedEntries,
+                            firstBrokenEntryID: entry.entryID,
+                            message: "Ledger entry \(entry.entryID) hash does not match its stored hash material."
+                        )
+                    }
                 }
+                previousHash = entry.entryHash
             }
-            previousHash = entry.entryHash
+
+            if rows.count < pageSize { break }
         }
+
         let message: String
-        if entries.isEmpty {
+        if checkedEntries == 0 {
             message = "Ledger is empty."
         } else if legacyEntryCount > 0 {
             message = "Ledger chain verified; \(legacyEntryCount) legacy entr\(legacyEntryCount == 1 ? "y is" : "ies are") not timestamp-covered."
@@ -183,7 +203,7 @@ public actor LedgerStore {
         }
         return LedgerVerificationResult(
             verified: true,
-            checkedEntries: entries.count,
+            checkedEntries: checkedEntries,
             firstBrokenEntryID: nil,
             message: message
         )
@@ -266,9 +286,4 @@ public actor LedgerStore {
         String(format: "%.6f", timestamp)
     }
 
-    static func jsonString(_ dictionary: [String: String]) throws -> String? {
-        guard !dictionary.isEmpty else { return nil }
-        let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8)
-    }
 }

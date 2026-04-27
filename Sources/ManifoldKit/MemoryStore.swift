@@ -90,10 +90,10 @@ public actor MemoryStore {
             item.origin,
             item.title,
             item.body,
-            try Self.jsonString(item.contributingSourceIDs),
-            try Self.jsonString(item.contributingGrantIDs),
-            try Self.jsonString(item.contributingExposureIDs),
-            try Self.jsonString(item.contributingContentHashes),
+            try StoreJSON.encode(item.contributingSourceIDs),
+            try StoreJSON.encode(item.contributingGrantIDs),
+            try StoreJSON.encode(item.contributingExposureIDs),
+            try StoreJSON.encode(item.contributingContentHashes),
             item.createdSessionID,
             item.expiresAt.map { "\($0)" },
             "\(item.createdAt)",
@@ -162,31 +162,45 @@ public actor MemoryStore {
 
     public func recall(query: String? = nil, allowedSourceIDs: Set<String>? = nil, limit: Int = 10) throws -> [MemoryItem] {
         let normalizedLimit = max(1, min(limit, 100))
-        let rows: [[String: String]]
-        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let pattern = "%\(query)%"
-            rows = try db.queryAll("""
-                SELECT * FROM memory_items
-                WHERE status = ? AND (title LIKE ? OR body LIKE ?)
-                ORDER BY updated_at DESC
-                LIMIT ?
-            """, params: [MemoryStatus.active.rawValue, pattern, pattern, "\(normalizedLimit * 4)"])
-        } else {
-            rows = try db.queryAll("""
-                SELECT * FROM memory_items
-                WHERE status = ?
-                ORDER BY updated_at DESC
-                LIMIT ?
-            """, params: [MemoryStatus.active.rawValue, "\(normalizedLimit * 4)"])
-        }
-        return rows.compactMap(Self.item(from:))
-            .filter { item in
-                guard let allowedSourceIDs else { return true }
-                let lineageSources = Set(item.contributingSourceIDs)
-                return lineageSources.isEmpty || lineageSources.isSubset(of: allowedSourceIDs)
+        let trimmedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasQuery = !(trimmedQuery?.isEmpty ?? true)
+
+        // The lineage scope filter pushes the strict-subset check into SQL via
+        // `json_each`. A memory passes when its contributing_source_ids_json is
+        // empty (no lineage) OR every element in it is in allowedSourceIDs.
+        // When allowedSourceIDs is nil we emit no scope predicate at all.
+        var scopeClause = ""
+        var scopeParams: [String?] = []
+        if let allowedSourceIDs {
+            if allowedSourceIDs.isEmpty {
+                scopeClause = " AND contributing_source_ids_json = '[]'"
+            } else {
+                let placeholders = allowedSourceIDs.map { _ in "?" }.joined(separator: ", ")
+                scopeClause = """
+                 AND (contributing_source_ids_json = '[]' OR NOT EXISTS (
+                    SELECT 1 FROM json_each(contributing_source_ids_json)
+                    WHERE value NOT IN (\(placeholders))
+                ))
+                """
+                scopeParams = allowedSourceIDs.sorted().map { $0 as String? }
             }
-            .prefix(normalizedLimit)
-            .map { $0 }
+        }
+
+        let baseSelect = "SELECT * FROM memory_items WHERE status = ?"
+        let queryClause = hasQuery ? " AND (title LIKE ? OR body LIKE ?)" : ""
+        let suffix = " ORDER BY updated_at DESC LIMIT ?"
+
+        var params: [String?] = [MemoryStatus.active.rawValue]
+        if hasQuery, let trimmedQuery {
+            let pattern = "%\(trimmedQuery)%"
+            params.append(pattern)
+            params.append(pattern)
+        }
+        params.append(contentsOf: scopeParams)
+        params.append("\(normalizedLimit)")
+
+        let rows = try db.queryAll(baseSelect + queryClause + scopeClause + suffix, params: params)
+        return rows.compactMap(Self.item(from:))
     }
 
     public func list(limit: Int = 50, includeDeleted: Bool = false) throws -> [MemoryItem] {
@@ -299,10 +313,10 @@ public actor MemoryStore {
             origin: MemoryOrigin(rawValue: row["origin"] ?? "") ?? .agentDerived,
             title: title,
             body: body,
-            contributingSourceIDs: decodeArray(row["contributing_source_ids_json"]),
-            contributingGrantIDs: decodeArray(row["contributing_grant_ids_json"]),
-            contributingExposureIDs: decodeArray(row["contributing_exposure_ids_json"]),
-            contributingContentHashes: decodeArray(row["contributing_content_hashes_json"]),
+            contributingSourceIDs: StoreJSON.decodeArray(row["contributing_source_ids_json"]),
+            contributingGrantIDs: StoreJSON.decodeArray(row["contributing_grant_ids_json"]),
+            contributingExposureIDs: StoreJSON.decodeArray(row["contributing_exposure_ids_json"]),
+            contributingContentHashes: StoreJSON.decodeArray(row["contributing_content_hashes_json"]),
             createdSessionID: row["created_session_id"]?.nilIfEmpty,
             expiresAt: row["expires_at"].flatMap(Double.init),
             createdAt: createdAt,
@@ -310,20 +324,4 @@ public actor MemoryStore {
         )
     }
 
-    private static func jsonString(_ array: [String]) throws -> String {
-        let data = try JSONEncoder().encode(array)
-        return String(data: data, encoding: .utf8) ?? "[]"
-    }
-
-    private static func decodeArray(_ raw: String?) -> [String] {
-        guard let raw, let data = raw.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
-    }
-
-    private static func addColumnIfMissing(_ db: DatabaseConnection, table: String, column: String, sql: String) throws {
-        let columns = try db.queryAll("PRAGMA table_info(\(table))")
-        if !columns.contains(where: { $0["name"] == column }) {
-            try db.execute(sql)
-        }
-    }
 }

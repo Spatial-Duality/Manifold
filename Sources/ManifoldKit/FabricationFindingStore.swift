@@ -39,7 +39,7 @@ public actor FabricationFindingStore {
             sessionID: sessionID,
             claimText: claimText,
             status: status,
-            evidenceJSON: try Self.jsonString(evidence)
+            evidenceJSON: try StoreJSON.encode(evidence)
         )
         try db.execute("""
             INSERT INTO fabrication_findings (
@@ -84,8 +84,4 @@ public actor FabricationFindingStore {
         )
     }
 
-    private static func jsonString(_ dictionary: [String: String]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
 }

@@ -68,7 +68,7 @@ public actor KnowledgeGraphStore {
             node.nodeID,
             node.kind,
             node.label,
-            try Self.jsonString(node.lineage),
+            try StoreJSON.encode(node.lineage),
             "\(node.createdAt)",
             "\(node.updatedAt)",
         ])
@@ -87,7 +87,7 @@ public actor KnowledgeGraphStore {
             edge.fromNodeID,
             edge.toNodeID,
             edge.relation,
-            try Self.jsonString(edge.lineage),
+            try StoreJSON.encode(edge.lineage),
             "\(edge.createdAt)",
         ])
         return edge
@@ -136,21 +136,10 @@ public actor KnowledgeGraphStore {
             nodeID: nodeID,
             kind: kind,
             label: label,
-            lineage: decode([LineageRef].self, from: row["lineage_json"]) ?? [],
+            lineage: StoreJSON.decode([LineageRef].self, from: row["lineage_json"]) ?? [],
             createdAt: createdAt,
             updatedAt: updatedAt
         )
     }
 
-    private static func jsonString<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
-        return String(data: data, encoding: .utf8) ?? "null"
-    }
-
-    private static func decode<T: Decodable>(_ type: T.Type, from raw: String?) -> T? {
-        guard let raw, let data = raw.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
-    }
 }

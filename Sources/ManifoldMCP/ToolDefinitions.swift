@@ -169,7 +169,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "was_exposed_before",
-                description: "Check whether Manifold has previously exposed a content hash or governed path.",
+                description: "Check whether Manifold has previously exposed a content hash or governed path. Returns exposures from any agent that touched this content in the same scope, so use it to answer questions like \"has this file been read before?\" or \"what did the other agent see?\".",
                 inputSchema: objectSchema(properties: [
                     "content_hash": ["type": "string", "description": "SHA-256 content hash to look up"],
                     "path": ["type": "string", "description": "Governed resource path to look up"],
@@ -178,7 +178,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "reuse_prior_context",
-                description: "Return scoped prior memories and exposure summaries so the model can avoid rereading data.",
+                description: "Return scoped prior memories and exposure summaries from any agent that worked in the current source scope. Use this to answer \"what did Codex/Claude just do?\", surface another agent's recent reads, edits, and saved memory, and avoid rereading data the other agent already exposed.",
                 inputSchema: objectSchema(properties: [
                     "query": ["type": "string", "description": "Optional memory query"],
                     "path": ["type": "string", "description": "Optional governed path"],
@@ -194,7 +194,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "recall_memory",
-                description: "Recall user-owned memory whose lineage is allowed by the current session scope.",
+                description: "Recall user-owned memory whose lineage is allowed by the current session scope. Includes memory saved by any agent (you or another agent like Codex/Claude) that worked in the same source scope, so use it to surface what was decided, summarized, or noted across recent sessions.",
                 inputSchema: objectSchema(properties: [
                     "query": ["type": "string", "description": "Optional memory query"],
                     "limit": ["type": "integer", "description": "Maximum memory rows (default 10)"],
