@@ -376,7 +376,20 @@ private struct MailReviewTableArea: View {
                         // toggle wired to setMessageShared. Agent-tinted
                         // when on so users see WHICH agent the row is
                         // shared with at a glance.
-                        MailShareCheckbox(row: row, agent: mailReview.targetAgent)
+                        //
+                        // State + action are passed in explicitly: TableColumn
+                        // cells on macOS don't reliably propagate @Observable
+                        // environment values, so reading mailReview from inside
+                        // the cell crashes during layout.
+                        MailShareCheckbox(
+                            isShared: mailReview.sharedEmailIDs.contains(row.emailID),
+                            agent: mailReview.targetAgent,
+                            emailID: row.emailID,
+                            onToggle: {
+                                let isShared = mailReview.sharedEmailIDs.contains(row.emailID)
+                                Task { await mailReview.setMessageShared(row.emailID, isShared: !isShared) }
+                            }
+                        )
                     }
                     .width(min: 64, ideal: 72, max: 80)
 
@@ -769,22 +782,23 @@ enum MailDisplayFormatter {
 
 /// Tappable checkbox cell for the Share column. Same visual language
 /// as the redesigned files/folders matrix and the file inspector
-/// selector — SF Symbol checkbox glyphs, agent-tinted when on. One
-/// click toggles the row's shared state for the current target agent
-/// without affecting selection or inspector visibility.
+/// selector — SF Symbol checkbox glyphs, agent-tinted when on.
+///
+/// State + action are passed explicitly rather than read from
+/// @Environment. Tables on macOS don't reliably propagate @Observable
+/// environment values into TableColumn cells; reading the model from
+/// the cell crashes inside SwiftUI's EnvironmentBox.update during the
+/// next layout pass (EXC_BREAKPOINT in EnvironmentValues.subscript).
+/// Construct the closure where the environment is established (the
+/// MailReviewTableArea body) and capture what's needed.
 private struct MailShareCheckbox: View {
-    @Environment(MailReviewModel.self) private var mailReview
-    let row: MailReviewRow
+    let isShared: Bool
     let agent: TargetApp
-
-    private var isShared: Bool {
-        mailReview.sharedEmailIDs.contains(row.emailID)
-    }
+    let emailID: String
+    let onToggle: () -> Void
 
     var body: some View {
-        Button {
-            Task { await mailReview.setMessageShared(row.emailID, isShared: !isShared) }
-        } label: {
+        Button(action: onToggle) {
             Image(systemName: isShared ? "checkmark.square.fill" : "square")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(isShared ? AgentMeta.color(agent) : Color.secondary)
@@ -797,6 +811,6 @@ private struct MailShareCheckbox: View {
               : "Hidden from \(AgentMeta.label(agent)). Click to share.")
         .accessibilityLabel(isShared ? "Shared, click to hide" : "Hidden, click to share")
         .accessibilityAddTraits(.isToggle)
-        .accessibilityIdentifier("mail.share.\(row.emailID)")
+        .accessibilityIdentifier("mail.share.\(emailID)")
     }
 }
