@@ -14,8 +14,17 @@ import ManifoldKit
 struct MailReviewView: View {
     @Environment(MailAccountsModel.self) private var mailAccounts
     @Environment(MailReviewModel.self) private var mailReview
+    @Environment(ManifoldStore.self) private var store
     @FocusState private var isSearchFocused: Bool
     @State private var sortOrder = [KeyPathComparator(\MailReviewRow.receivedDate, order: .reverse)]
+
+    private var connectedAgents: [TargetApp] {
+        AgentMeta.connected(from: store.connectedAgents)
+    }
+
+    private var connectedAgentsKey: String {
+        connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
+    }
     /// Inspector hidden by default — opens automatically when the user
     /// clicks a message and can be dismissed via the close button or
     /// the toolbar toggle. Persisted so the user's last choice sticks
@@ -37,12 +46,18 @@ struct MailReviewView: View {
 
     private var reviewRows: [MailReviewRow] {
         mailReview.messages.map { message in
-            MailReviewRow(
+            // "Shared" here means at least one connected AI can see this
+            // message — that's enough for the per-row sort key. The
+            // table's chip stack column shows the per-agent breakdown.
+            let sharedAgents = mailReview.sharedAgents(for: message.emailID)
+            let visibility: VisibilityState = sharedAgents.isEmpty
+                ? VisibilityState(effective: .hidden, origin: .defaultScope)
+                : VisibilityState(effective: .allowed, origin: .explicit)
+            return MailReviewRow(
                 message: message,
                 threadKey: MailThreadRow.threadKey(for: message),
-                visibilityState: mailReview.sharedEmailIDs.contains(message.emailID)
-                    ? VisibilityState(effective: .allowed, origin: .explicit)
-                    : VisibilityState(effective: .hidden, origin: .defaultScope)
+                visibilityState: visibility,
+                sharedAgentCount: sharedAgents.count
             )
         }
         .sorted(using: sortOrder)
@@ -84,6 +99,7 @@ struct MailReviewView: View {
                     rows: reviewRows,
                     sortOrder: $sortOrder,
                     selection: selectedMessageBinding,
+                    connectedAgents: connectedAgents,
                     onOpenInspector: { isInspectorVisible = true }
                 )
             }
@@ -91,11 +107,17 @@ struct MailReviewView: View {
 
             if isInspectorVisible {
                 Divider()
-                ThreadInspector(onClose: { isInspectorVisible = false })
+                ThreadInspector(connectedAgents: connectedAgents, onClose: { isInspectorVisible = false })
                     .frame(width: 320)
                     .background(ManifoldPalette.surface2)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+        }
+        .task(id: connectedAgentsKey) {
+            // Push the live agent list into the model so its per-agent
+            // shared sets line up with the chips we render. Re-fires
+            // whenever the user activates or removes an AI.
+            await mailReview.setConnectedAgents(connectedAgents)
         }
         .animation(ManifoldMotion.micro, value: isInspectorVisible)
         .accessibilityElement(children: .contain)
@@ -271,19 +293,6 @@ private struct ThreadToolbar: View {
 
                 Spacer()
 
-                Picker("Agent", selection: Binding(
-                    get: { mailReview.targetAgent },
-                    set: { agent in Task { await mailReview.selectTargetAgent(agent) } }
-                )) {
-                    ForEach(TargetApp.allCases, id: \.self) { agent in
-                        Text(AgentMeta.label(agent)).tag(agent)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 150)
-                .accessibilityIdentifier("mail.targetAgent")
-
                 Button("Sync now") {
                     Task { await mailReview.syncSelectedAccount() }
                 }
@@ -315,8 +324,15 @@ private struct ThreadToolbar: View {
     private var summaryLine: String {
         let threadCount = mailReview.threadRows.count
         let messageCount = mailReview.messages.count
-        let sharedCount = mailReview.sharedEmailIDs.intersection(Set(mailReview.messages.map(\.emailID))).count
-        return "\(threadCount) conversations · \(messageCount) messages · \(sharedCount) shared with \(AgentMeta.label(mailReview.targetAgent))"
+        let sharedCount = mailReview.sharedAnyAgentCount
+        let agentCount = mailReview.connectedAgents.count
+        let suffix: String
+        switch agentCount {
+        case 0: suffix = "shared"
+        case 1: suffix = "shared with \(AgentMeta.label(mailReview.connectedAgents[0]))"
+        default: suffix = "shared with at least one AI"
+        }
+        return "\(threadCount) conversations · \(messageCount) messages · \(sharedCount) \(suffix)"
     }
 }
 
@@ -328,6 +344,7 @@ private struct MailReviewTableArea: View {
     let rows: [MailReviewRow]
     @Binding var sortOrder: [KeyPathComparator<MailReviewRow>]
     @Binding var selection: String?
+    let connectedAgents: [TargetApp]
     let onOpenInspector: () -> Void
 
     var body: some View {
@@ -371,27 +388,32 @@ private struct MailReviewTableArea: View {
                 }
 
                 Table(of: MailReviewRow.self, selection: $selection, sortOrder: $sortOrder) {
-                    TableColumn("Share", value: \.visibilitySortKey) { row in
-                        // Same checkbox visual as files/folders. Tappable
-                        // toggle wired to setMessageShared. Agent-tinted
-                        // when on so users see WHICH agent the row is
-                        // shared with at a glance.
-                        //
-                        // State + action are passed in explicitly: TableColumn
-                        // cells on macOS don't reliably propagate @Observable
-                        // environment values, so reading mailReview from inside
-                        // the cell crashes during layout.
-                        MailShareCheckbox(
-                            isShared: mailReview.sharedEmailIDs.contains(row.emailID),
-                            agent: mailReview.targetAgent,
-                            emailID: row.emailID,
-                            onToggle: {
-                                let isShared = mailReview.sharedEmailIDs.contains(row.emailID)
-                                Task { await mailReview.setMessageShared(row.emailID, isShared: !isShared) }
+                    TableColumn("Share", value: \.sharedAgentCount) { row in
+                        // Mirrors the Files surface: one chip per connected
+                        // AI, filled when shared and hollow when hidden.
+                        // State + action are captured here (where the
+                        // environment is real) and passed in explicitly —
+                        // TableColumn cells on macOS don't reliably
+                        // propagate @Observable env values, which crashes
+                        // layout if you read mailReview from inside the
+                        // cell.
+                        let visible = mailReview.sharedAgents(for: row.emailID)
+                        AccessChipStack(
+                            agents: connectedAgents,
+                            visibleAgents: visible,
+                            onToggle: { agent, wasVisible in
+                                Task {
+                                    await mailReview.setMessageShared(
+                                        row.emailID,
+                                        agent: agent,
+                                        isShared: !wasVisible
+                                    )
+                                }
                             }
                         )
+                        .accessibilityIdentifier("mail.share.\(row.emailID)")
                     }
-                    .width(min: 64, ideal: 72, max: 80)
+                    .width(min: 56, ideal: max(56, CGFloat(connectedAgents.count) * 18 + 12), max: 160)
 
                     TableColumn("Sender", value: \.senderSortKey) { row in
                         HStack(spacing: Spacing.s2) {
@@ -463,7 +485,7 @@ private struct MailReviewTableArea: View {
                                     onOpenInspector()
                                 }
                                 Divider()
-                                VisibilityActionMenu(row: row)
+                                VisibilityActionMenu(row: row, connectedAgents: connectedAgents)
                             }
                     }
                 }
@@ -521,15 +543,17 @@ private struct EmptyMailboxState: View {
 private struct ThreadInspector: View {
     @Environment(MailAccountsModel.self) private var mailAccounts
     @Environment(MailReviewModel.self) private var mailReview
+    let connectedAgents: [TargetApp]
     let onClose: () -> Void
 
     var body: some View {
         ScrollView {
             if let selectedThread = mailReview.selectedThread,
                let selectedMessage = mailReview.selectedMessage {
-                let visibilityState = mailReview.sharedEmailIDs.contains(selectedMessage.emailID)
-                    ? VisibilityState(effective: .allowed, origin: .explicit)
-                    : VisibilityState(effective: .hidden, origin: .defaultScope)
+                let sharedAgents = mailReview.sharedAgents(for: selectedMessage.emailID)
+                let visibilityState: VisibilityState = sharedAgents.isEmpty
+                    ? VisibilityState(effective: .hidden, origin: .defaultScope)
+                    : VisibilityState(effective: .allowed, origin: .explicit)
                 VStack(alignment: .leading, spacing: Spacing.s4) {
                     HStack(alignment: .top, spacing: Spacing.s2) {
                         SenderAvatar(label: MailThreadRow.shortSender(from: selectedMessage.sender), size: 28)
@@ -561,27 +585,30 @@ private struct ThreadInspector: View {
                     }
                     .accessibilityIdentifier("mail.message.inspector.visibility.\(selectedMessage.emailID)")
 
-                    HStack(spacing: Spacing.s2) {
-                        Button("Allow for \(AgentMeta.label(mailReview.targetAgent))") {
-                            Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: true) }
+                    // Per-agent share toggles — same control as the file
+                    // inspector. One row, every connected AI, no dropdown.
+                    AccessCheckboxStrip(
+                        agents: connectedAgents,
+                        visibleAgents: sharedAgents,
+                        accessibilityIDPrefix: "mail.message.share",
+                        onToggleAgent: { agent, wasVisible in
+                            Task {
+                                await mailReview.setMessageShared(
+                                    selectedMessage.emailID,
+                                    agent: agent,
+                                    isShared: !wasVisible
+                                )
+                            }
+                        },
+                        onSetAll: { newValue in
+                            Task {
+                                await mailReview.setMessageSharedForAllAgents(
+                                    selectedMessage.emailID,
+                                    isShared: newValue
+                                )
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(ManifoldPalette.selection)
-                        .accessibilityIdentifier("mail.message.allow")
-
-                        Button("Hide") {
-                            Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: false) }
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("mail.message.hide")
-
-                        Button("Reset") {
-                            Task { await mailReview.setMessageShared(selectedMessage.emailID, isShared: false) }
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(visibilityState.origin != .explicit)
-                        .accessibilityIdentifier("mail.message.reset")
-                    }
+                    )
 
                     VStack(alignment: .leading, spacing: Spacing.s2) {
                         inspectorRow("Received", MailDisplayFormatter.mailTimestamp(selectedMessage.receivedAt))
@@ -621,7 +648,7 @@ private struct ThreadInspector: View {
                         ForEach(selectedThread.messageRows) { row in
                             HStack(spacing: Spacing.s2) {
                                 Circle()
-                                    .fill(mailReview.sharedEmailIDs.contains(row.emailID) ? ManifoldPalette.selection : ManifoldPalette.border2)
+                                    .fill(mailReview.sharedAgents(for: row.emailID).isEmpty ? ManifoldPalette.border2 : ManifoldPalette.selection)
                                     .frame(width: 8, height: 8)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(MailThreadRow.shortSender(from: row.message.sender))
@@ -669,18 +696,32 @@ private struct ThreadInspector: View {
 private struct VisibilityActionMenu: View {
     @Environment(MailReviewModel.self) private var mailReview
     let row: MailReviewRow
+    let connectedAgents: [TargetApp]
 
     var body: some View {
-        Button("Allow for \(AgentMeta.label(mailReview.targetAgent))") {
-            Task { await mailReview.setMessageShared(row.emailID, isShared: true) }
+        if !connectedAgents.isEmpty {
+            Button("Share with all") {
+                Task { await mailReview.setMessageSharedForAllAgents(row.emailID, isShared: true) }
+            }
+            Button("Hide from all") {
+                Task { await mailReview.setMessageSharedForAllAgents(row.emailID, isShared: false) }
+            }
+            Divider()
+            ForEach(connectedAgents, id: \.self) { agent in
+                let isShared = mailReview.isShared(row.emailID, agent: agent)
+                Button(isShared
+                       ? "Hide from \(AgentMeta.label(agent))"
+                       : "Share with \(AgentMeta.label(agent))") {
+                    Task {
+                        await mailReview.setMessageShared(
+                            row.emailID,
+                            agent: agent,
+                            isShared: !isShared
+                        )
+                    }
+                }
+            }
         }
-        Button("Hide") {
-            Task { await mailReview.setMessageShared(row.emailID, isShared: false) }
-        }
-        Button("Reset to Default Hidden") {
-            Task { await mailReview.setMessageShared(row.emailID, isShared: false) }
-        }
-        .disabled(row.visibilityState.origin != .explicit)
     }
 }
 
@@ -688,6 +729,9 @@ private struct MailReviewRow: Identifiable, Hashable {
     let message: EmailMessageRecord
     let threadKey: String
     let visibilityState: VisibilityState
+    /// How many connected AIs currently see this message — drives the
+    /// Share column's sort order (more chips lit = "more shared").
+    let sharedAgentCount: Int
 
     var id: String { message.emailID }
     var emailID: String { message.emailID }
@@ -778,39 +822,3 @@ enum MailDisplayFormatter {
     }
 }
 
-// MARK: - Email share checkbox
-
-/// Tappable checkbox cell for the Share column. Same visual language
-/// as the redesigned files/folders matrix and the file inspector
-/// selector — SF Symbol checkbox glyphs, agent-tinted when on.
-///
-/// State + action are passed explicitly rather than read from
-/// @Environment. Tables on macOS don't reliably propagate @Observable
-/// environment values into TableColumn cells; reading the model from
-/// the cell crashes inside SwiftUI's EnvironmentBox.update during the
-/// next layout pass (EXC_BREAKPOINT in EnvironmentValues.subscript).
-/// Construct the closure where the environment is established (the
-/// MailReviewTableArea body) and capture what's needed.
-private struct MailShareCheckbox: View {
-    let isShared: Bool
-    let agent: TargetApp
-    let emailID: String
-    let onToggle: () -> Void
-
-    var body: some View {
-        Button(action: onToggle) {
-            Image(systemName: isShared ? "checkmark.square.fill" : "square")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(isShared ? AgentMeta.color(agent) : Color.secondary)
-                .frame(width: 28, height: 24)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(isShared
-              ? "Shared with \(AgentMeta.label(agent)). Click to hide."
-              : "Hidden from \(AgentMeta.label(agent)). Click to share.")
-        .accessibilityLabel(isShared ? "Shared, click to hide" : "Hidden, click to share")
-        .accessibilityAddTraits(.isToggle)
-        .accessibilityIdentifier("mail.share.\(emailID)")
-    }
-}

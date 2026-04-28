@@ -13,8 +13,12 @@ final class MailReviewModel {
     var activeQuickFilter: QuickFilter?
     var searchText: String = ""
     var messages: [EmailMessageRecord] = []
-    var sharedEmailIDs: Set<String> = []
-    var targetAgent: TargetApp = .cowork
+    /// Per-agent shared sets so the table can render an AccessChipStack
+    /// row showing every connected AI at once — same shape as Files.
+    var sharedEmailIDsByAgent: [TargetApp: Set<String>] = [:]
+    /// Activated AIs the user can share with. Pushed in by the view from
+    /// `ManifoldStore.connectedAgents`. Drives the chip stack columns.
+    var connectedAgents: [TargetApp] = []
     var expandedThreadKeys: Set<String> = []
     var selectedThreadKey: String?
     var selectedMessageID: String?
@@ -71,7 +75,7 @@ final class MailReviewModel {
             }
         }
 
-        sharedEmailIDs = await mailAccounts.sharedEmailIDs(agent: targetAgent)
+        await refreshSharedState()
         errorMessage = mailAccounts.lastQueryError
 
         guard selectedAccountID != nil else {
@@ -128,9 +132,11 @@ final class MailReviewModel {
         await reloadVisibleMessages()
     }
 
-    func selectTargetAgent(_ agent: TargetApp) async {
-        guard targetAgent != agent else { return }
-        targetAgent = agent
+    /// View pushes the live list of connected AIs in. Triggers a refresh
+    /// so the per-agent shared sets line up with the chips we'll render.
+    func setConnectedAgents(_ agents: [TargetApp]) async {
+        guard connectedAgents != agents else { return }
+        connectedAgents = agents
         await refreshSharedState()
     }
 
@@ -188,37 +194,70 @@ final class MailReviewModel {
         expandedThreadKeys = nextExpandedThreadKeys
     }
 
-    func setThreadShared(_ thread: MailThreadRow, isShared: Bool) async {
+    func setThreadShared(_ thread: MailThreadRow, agent: TargetApp, isShared: Bool) async {
         guard let mailAccounts else { return }
         let ids = thread.messages.map(\.emailID)
         if isShared {
-            await mailAccounts.shareEmails(emailIDs: ids, for: targetAgent)
+            await mailAccounts.shareEmails(emailIDs: ids, for: agent)
         } else {
-            await mailAccounts.unshareEmails(emailIDs: ids, for: targetAgent)
+            await mailAccounts.unshareEmails(emailIDs: ids, for: agent)
         }
         await refreshSharedState()
     }
 
-    func setMessageShared(_ emailID: String, isShared: Bool) async {
+    func setMessageShared(_ emailID: String, agent: TargetApp, isShared: Bool) async {
         guard let mailAccounts else { return }
         if isShared {
-            await mailAccounts.shareEmails(emailIDs: [emailID], for: targetAgent)
+            await mailAccounts.shareEmails(emailIDs: [emailID], for: agent)
         } else {
-            await mailAccounts.unshareEmails(emailIDs: [emailID], for: targetAgent)
+            await mailAccounts.unshareEmails(emailIDs: [emailID], for: agent)
         }
         await refreshSharedState()
+    }
+
+    /// Set sharing for one message across every connected AI in a single
+    /// gesture. Powers the "Share with all" / "Hide from all" buttons.
+    func setMessageSharedForAllAgents(_ emailID: String, isShared: Bool) async {
+        for agent in connectedAgents {
+            await setMessageShared(emailID, agent: agent, isShared: isShared)
+        }
+    }
+
+    func isShared(_ emailID: String, agent: TargetApp) -> Bool {
+        sharedEmailIDsByAgent[agent, default: []].contains(emailID)
+    }
+
+    /// AIs that currently see this email. Drives the AccessChipStack
+    /// "filled vs hollow" rendering per row.
+    func sharedAgents(for emailID: String) -> Set<TargetApp> {
+        var result: Set<TargetApp> = []
+        for agent in connectedAgents {
+            if isShared(emailID, agent: agent) { result.insert(agent) }
+        }
+        return result
+    }
+
+    /// Count of messages in `messages` shared with at least one connected
+    /// AI — used by the toolbar summary line.
+    var sharedAnyAgentCount: Int {
+        let known = Set(messages.map(\.emailID))
+        var union: Set<String> = []
+        for agent in connectedAgents {
+            union.formUnion(sharedEmailIDsByAgent[agent, default: []].intersection(known))
+        }
+        return union.count
     }
 
     func mailboxes(for accountID: String) -> [IMAPMailboxRecord] {
         (mailboxesByAccountID[accountID] ?? []).sorted(by: mailboxComparator)
     }
 
-    func shareState(for thread: MailThreadRow) -> MailThreadShareState {
-        thread.shareState(sharedEmailIDs: sharedEmailIDs)
+    func shareState(for thread: MailThreadRow, agent: TargetApp) -> MailThreadShareState {
+        thread.shareState(sharedEmailIDs: sharedEmailIDsByAgent[agent, default: []])
     }
 
-    func shareState(for emailID: String) -> MailThreadShareState {
-        sharedEmailIDs.contains(emailID) ? .on : .off
+    func shareState(for emailID: String, agent: TargetApp) -> MailThreadShareState {
+        isShared(emailID, agent: agent) ? .on : .off
     }
 
     private func reloadVisibleMessages() async {
@@ -317,7 +356,16 @@ final class MailReviewModel {
 
     private func refreshSharedState() async {
         guard let mailAccounts else { return }
-        sharedEmailIDs = await mailAccounts.sharedEmailIDs(agent: targetAgent)
+        // Query each connected AI independently so the UI can render the
+        // chip stack with one filled/hollow chip per agent. Falls back to
+        // .cowork when no AI has been wired up yet so existing data still
+        // surfaces in the table.
+        let agents = connectedAgents.isEmpty ? [TargetApp.cowork] : connectedAgents
+        var next: [TargetApp: Set<String>] = [:]
+        for agent in agents {
+            next[agent] = await mailAccounts.sharedEmailIDs(agent: agent)
+        }
+        sharedEmailIDsByAgent = next
         errorMessage = errorMessage ?? mailAccounts.lastQueryError
     }
 
@@ -384,7 +432,7 @@ final class MailReviewModel {
         activeQuickFilter = nil
         searchText = ""
         messages = []
-        sharedEmailIDs = []
+        sharedEmailIDsByAgent = [:]
         expandedThreadKeys = []
         selectedThreadKey = nil
         selectedMessageID = nil
