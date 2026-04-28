@@ -68,8 +68,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 5)
-        #expect(try migrator.currentVersion() == 31)
+        #expect(applied == 6)
+        #expect(try migrator.currentVersion() == 32)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
     }
@@ -81,14 +81,14 @@ struct DatabaseMigratorTests {
 
         let migrator = try DatabaseMigrator(db: db)
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        for version in 1...31 {
+        for version in 1...32 {
             try db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 params: ["\(version)", now]
             )
         }
 
-        #expect(try migrator.currentVersion() == 31)
+        #expect(try migrator.currentVersion() == 32)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
 
@@ -612,6 +612,49 @@ struct DatabaseMigratorTests {
                 .compactMap { $0["name"] }
         )
         #expect(columns.contains("target_app"))
+    }
+
+    @Test("Migration v32 creates filter mode tables")
+    func filterModePlumbing() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let settingsTable = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='filter_mode_settings'"
+        )
+        let overridesTable = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='filter_mode_overrides'"
+        )
+        #expect(!settingsTable.isEmpty)
+        #expect(!overridesTable.isEmpty)
+
+        let overrideIndexGrant = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_filter_mode_overrides_grant'"
+        )
+        let overrideIndexAgent = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_filter_mode_overrides_agent'"
+        )
+        #expect(!overrideIndexGrant.isEmpty)
+        #expect(!overrideIndexAgent.isEmpty)
+    }
+
+    @Test("Migration v32 is idempotent — re-running does not fail")
+    func filterModeIdempotent() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let firstMigrator = try DatabaseMigrator(db: db)
+        try firstMigrator.migrate()
+        let secondMigrator = try DatabaseMigrator(db: db)
+        try secondMigrator.migrate()
+
+        let settingsTable = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='filter_mode_settings'"
+        )
+        #expect(!settingsTable.isEmpty)
     }
 
     @Test("Migration v31 preserves legacy presets created without target_app")

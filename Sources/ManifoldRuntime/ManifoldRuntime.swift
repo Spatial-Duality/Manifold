@@ -36,6 +36,8 @@ public actor ManifoldRuntime {
     public nonisolated let fileVisibilityOverrideStore: FileVisibilityOverrideStore
     /// Saved access presets and per-agent named-session templates.
     public nonisolated let accessStore: AccessStore
+    /// Per-agent filter mode preferences and grant-scoped override approvals.
+    public nonisolated let filterModeStore: FilterModeStore
     /// Mail synchronization engine.
     public nonisolated let emailSyncEngine: EmailSyncEngine
     /// Approval queue for governed escalations.
@@ -93,6 +95,7 @@ public actor ManifoldRuntime {
         let workBlockStore = WorkBlockStore(db: db)
         let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
         let accessStore = AccessStore(db: db)
+        let filterModeStore = FilterModeStore(db: db)
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
@@ -139,6 +142,7 @@ public actor ManifoldRuntime {
         self.workBlockStore = workBlockStore
         self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
         self.accessStore = accessStore
+        self.filterModeStore = filterModeStore
         self.emailSyncEngine = emailSyncEngine
         self.approvalQueue = approvalQueue
         self.standingWriteApprovalStore = standingWriteApprovalStore

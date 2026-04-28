@@ -203,6 +203,50 @@ extension ManifoldXPCService {
         case "startSessionFromTemplate":
             return try await startSessionFromTemplateCommand(payload: payload)
 
+        case "getFilterMode":
+            // Effective per-agent mode (per-agent override > global > .off).
+            // If `agent` omitted, returns the global default.
+            if let agentRaw = payload["agent"] as? String,
+               let agent = TargetApp(rawValue: agentRaw) {
+                return ["mode": try await runtime.filterModeStore.mode(for: agent).rawValue]
+            }
+            return ["mode": try await runtime.filterModeStore.globalMode().rawValue]
+
+        case "setFilterMode":
+            guard let modeRaw = payload["mode"] as? String,
+                  let mode = FilterMode(rawValue: modeRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            // If agent provided, set per-agent. Otherwise set global default.
+            if let agentRaw = payload["agent"] as? String,
+               let agent = TargetApp(rawValue: agentRaw) {
+                try await runtime.filterModeStore.setMode(mode, for: agent)
+            } else {
+                try await runtime.filterModeStore.setGlobalMode(mode)
+            }
+            return ["ok": true]
+
+        case "clearAgentFilterMode":
+            // Clear a per-agent override so the agent falls back to the global default.
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.filterModeStore.setMode(nil, for: agent)
+            return ["ok": true]
+
+        case "addFilterModeOverrides":
+            // Bulk override-and-share approvals from the multi-select sheet.
+            let overrides = try decodePayload([FilterModeOverrideRecord].self, key: "overrides", from: payload, default: [])
+            try await runtime.filterModeStore.addOverrides(overrides)
+            return ["ok": true, "count": overrides.count]
+
+        case "listFilterModeOverrides":
+            guard let grantID = payload["grantID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["overrides": try XPCJSON.object(from: try await runtime.filterModeStore.overrides(grantID: grantID))]
+
         case "snapshotData":
             guard let hash = payload["hash"] as? String else {
                 throw ManifoldXPCError.invalidPayload

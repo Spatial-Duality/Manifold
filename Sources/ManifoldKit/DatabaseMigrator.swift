@@ -1422,5 +1422,46 @@ public struct DatabaseMigrator {
             )
             logger.info("Migration 31: named session templates (target_app on access_presets)")
         },
+
+        // v32: Filter mode plumbing. Adds a per-agent settings row plus a
+        // per-(grant, source, path) override table for "override and share"
+        // approvals. Default mode is 'off' so existing flows are unaffected
+        // until the UI surfaces a mode change.
+        //
+        // The runtime enforcement integration in ManifoldBridge.enforceFileReadRules
+        // is intentionally deferred — it depends on a findings provider that
+        // isn't yet wired in this lane. The data layer ships standalone so
+        // the UI can read/write user preferences and the enforcement can
+        // hook in as a separate compositing layer later.
+        Migration(version: 32, name: "filter_mode_plumbing") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS filter_mode_settings (
+                    -- 'agent' is either a TargetApp.rawValue ('cowork', 'codex') or
+                    -- the literal '_global' for the default that applies when an
+                    -- agent has no explicit override.
+                    agent TEXT PRIMARY KEY,
+                    mode TEXT NOT NULL DEFAULT 'off',
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS filter_mode_overrides (
+                    grant_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    approved_at TEXT NOT NULL,
+                    PRIMARY KEY(grant_id, agent, source_id, relative_path)
+                )
+            """)
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_filter_mode_overrides_grant ON filter_mode_overrides(grant_id)"
+            )
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_filter_mode_overrides_agent ON filter_mode_overrides(agent)"
+            )
+            logger.info("Migration 32: filter mode settings and override tables")
+        },
     ]
 }
