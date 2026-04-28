@@ -29,9 +29,10 @@ struct SplashView: View {
 }
 ```
 
-`TitleSequence.swift` lives here for reference. To use it in the Manifold target,
-move it to `ManifoldApp/ManifoldApp/Views/Brand/TitleSequence.swift` and add it to
-the Xcode project.
+The SwiftUI implementation is part of the Manifold app target at
+`ManifoldApp/ManifoldApp/Views/TitleSequence.swift`. This `brand/` folder
+is the design-system reference and source for web embeds, marks, and the
+iteration history; the in-app surface uses the file inside the app target.
 
 ## Files
 
@@ -47,9 +48,11 @@ the Xcode project.
 | `logo-compact.html` | Logo-only version (no halos/wordmark) for sidebar, footer, secondary contexts |
 | `mark-dark.svg` / `mark-light.svg` / `mark-mono.svg` | Static single-frame marks |
 | `wordmark-dark.svg` | Full logo lockup `{ \| } MANIFOLD` |
-| `TitleSequence.swift` | SwiftUI port of iter 5 |
 | `animation-research.md` | Pre-build research, references, technical decisions |
 | `iteration-log.md` | Pass-by-pass review of what worked, what fell short |
+
+> The SwiftUI port of iter-05 (`TitleSequence.swift`) now lives in the app target at
+> `ManifoldApp/ManifoldApp/Views/TitleSequence.swift`.
 
 ## Configuration (web)
 

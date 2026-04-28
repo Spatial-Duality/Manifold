@@ -126,6 +126,7 @@
 		UPDATER0M0DEL000BFIL0000 /* UpdaterModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = UPDATER0M0DEL000FREF0000 /* UpdaterModel.swift */; };
 		DIAGM0DTEST00001BFIL0000 /* DiagnosticsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DIAGM0DTEST00001FREF0000 /* DiagnosticsModelTests.swift */; };
 		UPDATERCLSTST001BFIL0000 /* UpdaterModelClassifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = UPDATERCLSTST001FREF0000 /* UpdaterModelClassifyTests.swift */; };
+		BRANDTITLESEQ001BFIL0000 /* TitleSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = BRANDTITLESEQ001FREF0000 /* TitleSequence.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -257,6 +258,7 @@
 		UPDATER0M0DEL000FREF0000 /* UpdaterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterModel.swift; sourceTree = "<group>"; };
 		DIAGM0DTEST00001FREF0000 /* DiagnosticsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModelTests.swift; sourceTree = "<group>"; };
 		UPDATERCLSTST001FREF0000 /* UpdaterModelClassifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterModelClassifyTests.swift; sourceTree = "<group>"; };
+		BRANDTITLESEQ001FREF0000 /* TitleSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleSequence.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -374,6 +376,7 @@
 		8318F9009B9A6F86C2A68433 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				BRANDTITLESEQ001FREF0000 /* TitleSequence.swift */,
 				11AF6365CF4386C43F2463FD /* CommandPaletteView.swift */,
 				D3D2A1D247044D00A8AB48FB /* Settings/SettingsView.swift */,
 				8E747635498B4D1F8BA21F48 /* Settings/GeneralSettingsPane.swift */,
@@ -815,6 +818,7 @@
 				A1B2C3D4E5F6012345678914 /* FileInspectorPane.swift in Sources */,
 				DIAGM0DEL0001000BFIL0000 /* DiagnosticsModel.swift in Sources */,
 				UPDATER0M0DEL000BFIL0000 /* UpdaterModel.swift in Sources */,
+				BRANDTITLESEQ001BFIL0000 /* TitleSequence.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

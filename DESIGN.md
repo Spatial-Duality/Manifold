@@ -94,7 +94,7 @@ slot is a real Manifold scope, so the animation demonstrates the product.
 
 | Surface | Implementation | File |
 |---------|----------------|------|
-| In-app splash | SwiftUI `ManifoldTitleSequence` (port of iter-05) | `brand/TitleSequence.swift` |
+| In-app splash | SwiftUI `ManifoldTitleSequence` (port of iter-05) | `ManifoldApp/ManifoldApp/Views/TitleSequence.swift` |
 | Web hero | Canvas + additive blending, 280 particles | `brand/iter-06-canvas.html` |
 | Iteration history | Pass-by-pass review with honest reference comparisons | `brand/iteration-log.md` |
 | Pre-build research | Direction decisions, technical references | `brand/animation-research.md` |
@@ -106,10 +106,28 @@ impression on web.
 `prefers-reduced-motion: reduce` automatically applies a static frame on web.
 The SwiftUI version respects scene activity (pauses when inactive).
 
-To use in the app target, move `brand/TitleSequence.swift` to
-`ManifoldApp/ManifoldApp/Views/Brand/TitleSequence.swift` and add it to the
-Xcode project. It's kept in `brand/` until adoption is wired so the brand work
-stays self-contained as reference.
+The SwiftUI implementation lives in the app target at
+`ManifoldApp/ManifoldApp/Views/TitleSequence.swift`. Use it like:
+
+```swift
+ManifoldTitleSequence(speed: 2.5)         // splash speed (~2.5s reveal)
+    .frame(width: 600, height: 400)
+```
+
+Or with custom configuration:
+
+```swift
+ManifoldTitleSequence(
+    speed: 1.0,
+    cycle: [.files, .bar, .emails, .bar, .history, .bar],
+    wordmark: "MANIFOLD",
+    tagline: "ACCESS, RECORDED."
+)
+```
+
+Currently available but not yet wired into any in-app surface. Natural homes:
+the About panel (replace `GradientAvatar`), the FirstRun welcome panel, or a
+dedicated splash on cold launch.
 
 ### Brand colors (NOT for UI)
 
