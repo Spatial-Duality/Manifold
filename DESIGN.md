@@ -129,6 +129,14 @@ Currently available but not yet wired into any in-app surface. Natural homes:
 the About panel (replace `GradientAvatar`), the FirstRun welcome panel, or a
 dedicated splash on cold launch.
 
+**Status: deferred for the post-launch brand-identity sprint.** The polish
+pass (cinematic Apple-style timing, color-theme refinement, custom SF Symbols,
+icon design) is intentionally bundled into one push rather than landing in
+fragments. The current SwiftUI port is the functional baseline that sprint
+will iterate on. The four open decisions from `brand/iteration-log.md`
+(slot inventory, web hero loop, in-app reactive vs cosmetic, sound design)
+will be resolved together at that point.
+
 ### Brand colors (NOT for UI)
 
 The mark and title sequence use specific brand colors. These do NOT appear in
@@ -326,3 +334,4 @@ Base-4 scale. Defined in `Components/Spacing.swift`. No ad-hoc values.
 | 2026-04-26 | Title sequence: SwiftUI iter-05 in-app, Canvas iter-06 web hero | Same identity, two render budgets. Both ship. |
 | 2026-04-26 | Brand colors are NOT UI colors | Brand uses specific hex (warm ink + #B86A1E halo); UI stays system semantic only. Regression if brand hex appears in SwiftUI UI. |
 | 2026-04-26 | Title-sequence morph slots match real Manifold scopes | `{ /files }` `{ /emails }` `{ /history }` — animation demonstrates the product, not decorates around it. |
+| 2026-04-28 | Title sequence final polish deferred to post-launch brand sprint | Pre-launch: SwiftUI port is in the app target as functional placeholder, not wired into any surface. Post-launch sprint bundles cinematic Apple-style title sequence, color theme refinement, custom SF Symbols, and icon design as one brand identity push. Resolves all 4 open decisions from `brand/iteration-log.md` (slot inventory, web hero loop behavior, in-app reactive vs cosmetic, sound design) by deferring them to this future sprint. |
