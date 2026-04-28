@@ -46,6 +46,29 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
+    postBuildScripts:
+      - name: Bundle Launch Agent
+        script: |
+          set -euo pipefail
+          cd "${SRCROOT}"
+          config_name="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')"
+          swift build --product ManifoldAgent -c "$config_name" 2>&1
+          launch_agents_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents"
+          launch_services_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices"
+          helper_path="$launch_services_dir/ManifoldAgent"
+          mkdir -p "$launch_agents_dir" "$launch_services_dir"
+          cp "${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist" "$launch_agents_dir/com.spatialduality.manifold.runtime.plist"
+          cp "${SRCROOT}/.build/$config_name/ManifoldAgent" "$helper_path"
+          chmod +x "$helper_path"
+          if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+            /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none --options runtime --generate-entitlement-der "$helper_path"
+          fi
+        inputFiles:
+          - $(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist
+          - $(SRCROOT)/Sources/ManifoldAgent/main.swift
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchServices/ManifoldAgent
 
   ManifoldAppTests:
     type: bundle.unit-test

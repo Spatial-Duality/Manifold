@@ -668,6 +668,7 @@
 				8263F2E00A2E489F2090951C /* Sources */,
 				CB43CC9BCDF2633E75D318C8 /* Resources */,
 				380E85CDE3445A5CAE94FE21 /* Frameworks */,
+				3C737C8CF544A60588263AE2 /* Bundle Launch Agent */,
 			);
 			buildRules = (
 			);
@@ -742,6 +743,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3C737C8CF544A60588263AE2 /* Bundle Launch Agent */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist",
+				"$(SRCROOT)/Sources/ManifoldAgent/main.swift",
+			);
+			name = "Bundle Launch Agent";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchServices/ManifoldAgent",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\ncd \"${SRCROOT}\"\nconfig_name=\"$(printf '%s' \"${CONFIGURATION:-Debug}\" | tr '[:upper:]' '[:lower:]')\"\nswift build --product ManifoldAgent -c \"$config_name\" 2>&1\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nhelper_path=\"$launch_services_dir/ManifoldAgent\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${SRCROOT}/.build/$config_name/ManifoldAgent\" \"$helper_path\"\nchmod +x \"$helper_path\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none --options runtime --generate-entitlement-der \"$helper_path\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		8263F2E00A2E489F2090951C /* Sources */ = {
