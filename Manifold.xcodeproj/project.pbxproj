@@ -124,6 +124,7 @@
 		E5E0C0630A050CEA7BED8AB8 /* StatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A51646FD4553B0768C3E88 /* StatusBar.swift */; };
 		E73ACFFE5B23740791F71E88 /* IntegrationHealthModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7981C30F5FF4898B4C65B0 /* IntegrationHealthModel.swift */; };
 		E76D4FA3F9FD8EF99F6F4C62 /* AccessChipStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCCF34DB1CE80E481C55382 /* AccessChipStack.swift */; };
+		E9E298E427A7AA2F6835D58A /* SessionsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */; };
 		EAD0522235878621DA2D71BD /* EvidenceInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9420041FA5B429CD7A5D4972 /* EvidenceInspector.swift */; };
 		EB3874B6B5D6745667AA989A /* MailSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8049B04016C58516B4B28E34 /* MailSettingsPane.swift */; };
 		EC290D5B1515B1B12F449FF9 /* EmailAccountSetupStub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5F1D598AA6E76EC14827F9 /* EmailAccountSetupStub.swift */; };
@@ -207,6 +208,7 @@
 		60C7BB3B39D5C42574132D78 /* RulesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesModel.swift; sourceTree = "<group>"; };
 		62382FE592DCD22D0AE9F7BE /* AccessHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessHistoryView.swift; sourceTree = "<group>"; };
 		63E586963394EC09E9DC6259 /* ManifoldAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManifoldAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsSettingsPane.swift; sourceTree = "<group>"; };
 		664794E534D54BE964BC7CFF /* GradientAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradientAvatar.swift; sourceTree = "<group>"; };
 		6887F8452E06D8FB1F5BF979 /* TitleSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleSequence.swift; sourceTree = "<group>"; };
 		6C03AE5934D7C2849FA454D8 /* ActivityWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityWindowView.swift; sourceTree = "<group>"; };
@@ -416,6 +418,7 @@
 				EC65884C8C989BEB07CAD993 /* GeneralSettingsPane.swift */,
 				8049B04016C58516B4B28E34 /* MailSettingsPane.swift */,
 				134F1EB5D50773A5809E0E27 /* PrivacySettingsPane.swift */,
+				65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */,
 				C68384EB81C759FFC811CBBD /* SettingsView.swift */,
 				009EA04550A7634D95791F57 /* StorageSettingsPane.swift */,
 			);
@@ -838,6 +841,7 @@
 				0260E84BE9451B7342295D1A /* SessionPrimitives.swift in Sources */,
 				5C2DC4EF4E4E360577226C2F /* SessionRail.swift in Sources */,
 				C71208F7926E63734BFD76C9 /* SessionStartSheet.swift in Sources */,
+				E9E298E427A7AA2F6835D58A /* SessionsSettingsPane.swift in Sources */,
 				8B276B4DB9AE3C9EA9F0FFCA /* SettingsView.swift in Sources */,
 				B68F43799D17150AE093B5CC /* SetupModel.swift in Sources */,
 				ED09CFB966DA76055A8DE450 /* SharingControl.swift in Sources */,

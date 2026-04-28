@@ -34,6 +34,10 @@ struct SettingsView: View {
                 PrivacySettingsPane()
                     .accessibilityIdentifier("settings.tab.privacy")
             }
+            Tab("Sessions", systemImage: "person.badge.clock") {
+                SessionsSettingsPane()
+                    .accessibilityIdentifier("settings.tab.sessions")
+            }
             Tab("Advanced", systemImage: "slider.horizontal.3") {
                 AdvancedSettingsPane()
                     .accessibilityIdentifier("settings.tab.advanced")

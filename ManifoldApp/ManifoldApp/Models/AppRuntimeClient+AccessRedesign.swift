@@ -5,6 +5,43 @@ import Foundation
 import ManifoldKit
 import ManifoldXPC
 
+/// Result of starting a tracked run from a saved access template. Carries
+/// the active grant alongside any stale references that were skipped, so
+/// the UI can render a "Started, skipped 2 missing folders" banner.
+public struct StartSessionFromTemplateResult: Sendable {
+    public let grant: GrantRecord
+    public let sources: [GrantSourceRecord]
+    public let templateID: String
+    public let templateName: String
+    public let skippedSources: [SkippedSource]
+    public let missingEmailIDs: [String]
+
+    public struct SkippedSource: Sendable {
+        public let sourceID: String
+        public let displayName: String
+        public init(sourceID: String, displayName: String) {
+            self.sourceID = sourceID
+            self.displayName = displayName
+        }
+    }
+
+    public init(
+        grant: GrantRecord,
+        sources: [GrantSourceRecord],
+        templateID: String,
+        templateName: String,
+        skippedSources: [SkippedSource],
+        missingEmailIDs: [String]
+    ) {
+        self.grant = grant
+        self.sources = sources
+        self.templateID = templateID
+        self.templateName = templateName
+        self.skippedSources = skippedSources
+        self.missingEmailIDs = missingEmailIDs
+    }
+}
+
 /// XPC client wrappers for the Access redesign data plumbing — bulk override
 /// writes, named session templates, filter mode preferences, and per-grant
 /// override-and-share approvals.
@@ -68,23 +105,6 @@ extension AppRuntimeClient {
             name: "deleteAccessTemplate",
             payload: ["presetID": presetID]
         )
-    }
-
-    /// Result of starting a session from a saved template. Carries the
-    /// active grant alongside any stale references that were skipped, so
-    /// the UI can render a "Started, skipped 2 missing folders" banner.
-    struct StartSessionFromTemplateResult: Sendable {
-        let grant: GrantRecord
-        let sources: [GrantSourceRecord]
-        let templateID: String
-        let templateName: String
-        let skippedSources: [SkippedSource]
-        let missingEmailIDs: [String]
-
-        struct SkippedSource: Sendable {
-            let sourceID: String
-            let displayName: String
-        }
     }
 
     func startSessionFromTemplate(

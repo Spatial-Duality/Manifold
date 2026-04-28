@@ -319,6 +319,30 @@ protocol RuntimeClientProtocol: Sendable {
         isDirectory: Bool
     ) async throws
 
+    // MARK: - Named session templates (Lane B-rest)
+
+    /// List saved templates visible to an agent (target_app match + unscoped).
+    func accessTemplates(for agent: TargetApp) async throws -> [AccessPresetRecord]
+    /// Create or update a saved template.
+    func saveAccessTemplate(
+        presetID: String?,
+        name: String,
+        targetApp: TargetApp?,
+        fileScopes: [FileSelectionScope],
+        emailIDs: [String]
+    ) async throws -> AccessPresetRecord
+    /// Remove a saved template.
+    func deleteAccessTemplate(presetID: String) async throws
+    /// Start a tracked run using a saved template's scope. Lenient on
+    /// stale references — see `StartSessionFromTemplateResult` for details.
+    func startSessionFromTemplate(
+        presetID: String,
+        targetApp: TargetApp?,
+        summaryFraming: String?,
+        noteCaptureMode: SessionNoteCaptureMode,
+        emailSensitivity: String?
+    ) async throws -> StartSessionFromTemplateResult
+
     // MARK: - Filter mode (Sensitive content detection — Lane C)
 
     /// Effective filter mode for an agent: per-agent override > global > .off.
@@ -357,10 +381,36 @@ protocol RuntimeClientProtocol: Sendable {
     func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview
 }
 
-// Default implementations for the Lane C filter mode methods so existing
-// stub / in-memory / preview implementations stay green. Concrete clients
-// (AppRuntimeClient) override these via their own implementations.
+// Default implementations for Lane B-rest (named session templates) and
+// Lane C (filter mode) methods so existing stub / in-memory / preview
+// implementations stay green. Concrete clients (AppRuntimeClient) override
+// these via their own implementations.
 extension RuntimeClientProtocol {
+    // Lane B-rest defaults
+    func accessTemplates(for agent: TargetApp) async throws -> [AccessPresetRecord] { [] }
+    func saveAccessTemplate(
+        presetID: String?,
+        name: String,
+        targetApp: TargetApp?,
+        fileScopes: [FileSelectionScope],
+        emailIDs: [String]
+    ) async throws -> AccessPresetRecord {
+        throw RuntimeClientStubError.unimplemented("saveAccessTemplate")
+    }
+    func deleteAccessTemplate(presetID: String) async throws {
+        throw RuntimeClientStubError.unimplemented("deleteAccessTemplate")
+    }
+    func startSessionFromTemplate(
+        presetID: String,
+        targetApp: TargetApp?,
+        summaryFraming: String?,
+        noteCaptureMode: SessionNoteCaptureMode,
+        emailSensitivity: String?
+    ) async throws -> StartSessionFromTemplateResult {
+        throw RuntimeClientStubError.unimplemented("startSessionFromTemplate")
+    }
+
+    // Lane C defaults
     func filterMode(for agent: TargetApp) async throws -> FilterMode { .off }
     func globalFilterMode() async throws -> FilterMode { .off }
     func setFilterMode(_ mode: FilterMode, for agent: TargetApp) async throws {
