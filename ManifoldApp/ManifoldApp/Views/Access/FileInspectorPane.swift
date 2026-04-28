@@ -169,9 +169,55 @@ struct FileInspectorPane: View {
                     ForEach(summaries, id: \.agent) { summary in
                         exposureRow(summary)
                     }
+                    auditTrailFooter
                 }
             }
         }
+    }
+
+    /// One-line trust footer beneath the per-agent rows: total audit
+    /// entries the runtime has recorded for this file, and the date of
+    /// the most recent one. The runtime is content-addressed and
+    /// hash-chained — when this row says "23 audit entries since Mar 12"
+    /// it means 23 cryptographically chained ledger records exist for
+    /// reads of this exact file.
+    @ViewBuilder
+    private var auditTrailFooter: some View {
+        let entryCount = exposures.count
+        guard entryCount > 0 else {
+            return AnyView(EmptyView())
+        }
+        let earliest = exposures.last?.timestamp
+        let dateText: String? = earliest.map { ts in
+            Self.relativeFormatter.localizedString(
+                for: Date(timeIntervalSince1970: ts), relativeTo: .now
+            )
+        }
+        return AnyView(
+            HStack(spacing: Spacing.s1) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(ManifoldPalette.active)
+                    .font(.system(size: 10))
+                    .accessibilityHidden(true)
+                Text(footerText(entryCount: entryCount, dateText: dateText))
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .padding(.top, 2)
+            .padding(.leading, 14)
+            .accessibilityLabel(
+                "\(entryCount) audit \(entryCount == 1 ? "entry" : "entries") logged for this file"
+            )
+        )
+    }
+
+    private func footerText(entryCount: Int, dateText: String?) -> String {
+        let entries = "\(entryCount) audit \(entryCount == 1 ? "entry" : "entries")"
+        if let dateText {
+            return "\(entries) · earliest \(dateText)"
+        }
+        return entries
     }
 
     @ViewBuilder
