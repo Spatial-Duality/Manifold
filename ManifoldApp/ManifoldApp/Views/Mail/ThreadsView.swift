@@ -16,6 +16,11 @@ struct MailReviewView: View {
     @Environment(MailReviewModel.self) private var mailReview
     @FocusState private var isSearchFocused: Bool
     @State private var sortOrder = [KeyPathComparator(\MailReviewRow.receivedDate, order: .reverse)]
+    /// Inspector hidden by default — opens automatically when the user
+    /// clicks a message and can be dismissed via the close button or
+    /// the toolbar toggle. Persisted so the user's last choice sticks
+    /// across launches.
+    @AppStorage("mail.inspector.visible") private var isInspectorVisible: Bool = false
 
     private var selectedAccount: EmailAccountRecord? {
         guard let accountID = mailReview.selectedAccountID else { return nil }
@@ -69,7 +74,8 @@ struct MailReviewView: View {
                 ThreadToolbar(
                     selectedAccount: selectedAccount,
                     selectedMailboxName: mailReview.selectedMailboxName,
-                    isSearchFocused: $isSearchFocused
+                    isSearchFocused: $isSearchFocused,
+                    isInspectorVisible: $isInspectorVisible
                 )
                 Divider()
                 MailReviewTableArea(
@@ -82,15 +88,31 @@ struct MailReviewView: View {
             }
             .frame(maxWidth: .infinity)
 
-            Divider()
-
-            ThreadInspector()
-                .frame(width: 320)
-                .background(ManifoldPalette.surface2)
+            if isInspectorVisible {
+                Divider()
+                ThreadInspector(onClose: { isInspectorVisible = false })
+                    .frame(width: 320)
+                    .background(ManifoldPalette.surface2)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .animation(ManifoldMotion.micro, value: isInspectorVisible)
         .accessibilityElement(children: .contain)
         .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
             isSearchFocused = true
+        }
+        .onChange(of: mailReview.selectedMessageID) { _, newValue in
+            // Auto-open the inspector when the user clicks a message. The
+            // close button + toolbar toggle let them hide it again; their
+            // choice persists via @AppStorage so the next launch respects it.
+            if newValue != nil { isInspectorVisible = true }
+        }
+        .background {
+            // ⌥⌘0 toggles the inspector — same chord as the Files inspector.
+            Button("Toggle Mail Inspector") { isInspectorVisible.toggle() }
+                .keyboardShortcut("0", modifiers: [.command, .option])
+                .opacity(0)
+                .accessibilityHidden(true)
         }
     }
 }
@@ -224,6 +246,7 @@ private struct ThreadToolbar: View {
     let selectedAccount: EmailAccountRecord?
     let selectedMailboxName: String?
     @FocusState.Binding var isSearchFocused: Bool
+    @Binding var isInspectorVisible: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s2) {
@@ -266,6 +289,18 @@ private struct ThreadToolbar: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(selectedAccount == nil)
+
+                Button {
+                    isInspectorVisible.toggle()
+                } label: {
+                    Image(systemName: isInspectorVisible
+                        ? "sidebar.right"
+                        : "sidebar.squares.right")
+                }
+                .buttonStyle(.borderless)
+                .help(isInspectorVisible ? "Hide message inspector" : "Show message inspector")
+                .keyboardShortcut("0", modifiers: [.command, .option])
+                .accessibilityIdentifier("mail.inspector.toggle")
             }
 
             Text(summaryLine)
@@ -449,6 +484,7 @@ private struct EmptyMailboxState: View {
 private struct ThreadInspector: View {
     @Environment(MailAccountsModel.self) private var mailAccounts
     @Environment(MailReviewModel.self) private var mailReview
+    let onClose: () -> Void
 
     var body: some View {
         ScrollView {
@@ -458,7 +494,7 @@ private struct ThreadInspector: View {
                     ? VisibilityState(effective: .allowed, origin: .explicit)
                     : VisibilityState(effective: .hidden, origin: .defaultScope)
                 VStack(alignment: .leading, spacing: Spacing.s4) {
-                    HStack(spacing: Spacing.s2) {
+                    HStack(alignment: .top, spacing: Spacing.s2) {
                         SenderAvatar(label: MailThreadRow.shortSender(from: selectedMessage.sender), size: 28)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(selectedMessage.subject.isEmpty ? "(No subject)" : selectedMessage.subject)
@@ -467,6 +503,17 @@ private struct ThreadInspector: View {
                                 .font(ManifoldType.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer(minLength: 0)
+                        Button(action: onClose) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Close message inspector")
+                        .keyboardShortcut(.cancelAction)
+                        .accessibilityLabel("Close inspector")
+                        .accessibilityIdentifier("mail.inspector.close")
                     }
 
                     HStack(spacing: Spacing.s2) {
