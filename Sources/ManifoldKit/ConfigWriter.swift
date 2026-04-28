@@ -29,11 +29,62 @@ public struct ConfigWriter {
         self.homeDir = homeDir
     }
 
-    /// Installs or updates Manifold config for Claude Desktop, Claude Code, and Codex.
+    /// Installs or updates Manifold config for Claude Desktop, Claude Code, and Codex,
+    /// and refreshes the per-tool agent rules files so AI tools prefer
+    /// `manifold.*` tools when working in approved sources.
     public func installAll() throws {
         try installClaudeDesktop()
         try installClaudeCode()
         try installCodex()
+        try installAgentRules()
+    }
+
+    /// Inserts or refreshes the Manifold-managed Markdown block in each
+    /// supported AI tool's rules file. Idempotent: re-running replaces only
+    /// the Manifold section and preserves user content above and below.
+    ///
+    /// Currently writes:
+    /// - `~/CLAUDE.md` (Claude Code's user-global rules file)
+    /// - `~/.codex/AGENTS.md` (Codex CLI's user-global agents instructions)
+    ///
+    /// Claude Desktop has no Markdown rules file (its system prompt is
+    /// configured per-Project inside the app), so it is intentionally
+    /// skipped here.
+    public func installAgentRules() throws {
+        try installClaudeCodeRules()
+        try installCodexRules()
+    }
+
+    /// Writes the Manifold rules block to `~/CLAUDE.md`. Creates the file if
+    /// absent; merges with existing user content otherwise.
+    public func installClaudeCodeRules() throws {
+        let rulesFile = homeDir.appendingPathComponent("CLAUDE.md")
+        try writeManifoldRules(to: rulesFile)
+    }
+
+    /// Writes the Manifold rules block to `~/.codex/AGENTS.md`. Creates the
+    /// directory and file if absent; merges with existing user content
+    /// otherwise.
+    public func installCodexRules() throws {
+        let rulesDir = homeDir.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: rulesDir, withIntermediateDirectories: true)
+        let rulesFile = rulesDir.appendingPathComponent("AGENTS.md")
+        try writeManifoldRules(to: rulesFile)
+    }
+
+    private func writeManifoldRules(to file: URL) throws {
+        let existing = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        let updated = AgentRulesTemplate.upsert(into: existing)
+        guard updated != existing else {
+            // Either no change needed (already up to date) or corrupted markers
+            // (AgentRulesTemplate.upsert logs a warning and returns existing).
+            // Either way, no write — preserves "no spurious file modifications"
+            // contract that re-running --install is safe to script.
+            logger.info("Manifold rules already up to date or file has corrupted markers: \(file.path, privacy: .public)")
+            return
+        }
+        try updated.write(to: file, atomically: true, encoding: .utf8)
+        logger.info("Wrote Manifold rules block: \(file.path, privacy: .public)")
     }
 
     /// Writes the Manifold MCP entry to Claude Desktop's JSON config.

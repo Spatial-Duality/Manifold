@@ -349,9 +349,110 @@ struct ConfigWriterTests {
         let claudeConfig = home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
         let claudeCodeConfig = home.appendingPathComponent(".claude/settings.json")
         let codexConfig = home.appendingPathComponent(".codex/config.toml")
+        let claudeRules = home.appendingPathComponent("CLAUDE.md")
+        let codexRules = home.appendingPathComponent(".codex/AGENTS.md")
 
         #expect(FileManager.default.fileExists(atPath: claudeConfig.path))
         #expect(FileManager.default.fileExists(atPath: claudeCodeConfig.path))
         #expect(FileManager.default.fileExists(atPath: codexConfig.path))
+        #expect(FileManager.default.fileExists(atPath: claudeRules.path),
+                "installAll must write the Claude Code rules file")
+        #expect(FileManager.default.fileExists(atPath: codexRules.path),
+                "installAll must write the Codex rules file")
+    }
+
+    // MARK: - Agent Rules Tests
+
+    @Test("Fresh install creates ~/CLAUDE.md with the manifold rules block")
+    func freshClaudeCodeRulesInstall() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let rulesFile = home.appendingPathComponent("CLAUDE.md")
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installClaudeCodeRules()
+
+        let content = try String(contentsOf: rulesFile, encoding: .utf8)
+        #expect(content.contains(AgentRulesTemplate.beginMarker))
+        #expect(content.contains(AgentRulesTemplate.endMarker))
+        #expect(content.contains("Manifold MCP tools (preferred when available)"))
+        #expect(content.contains("reuse_prior_context"),
+                "Rules must reference the cross-agent hero-shot tool")
+    }
+
+    @Test("Fresh install creates ~/.codex/AGENTS.md with the manifold rules block")
+    func freshCodexRulesInstall() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let rulesFile = home.appendingPathComponent(".codex/AGENTS.md")
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installCodexRules()
+
+        let content = try String(contentsOf: rulesFile, encoding: .utf8)
+        #expect(content.contains(AgentRulesTemplate.beginMarker))
+        #expect(content.contains("Manifold MCP tools (preferred when available)"))
+    }
+
+    /// CRITICAL regression test: a user with hand-edited CLAUDE.md must keep
+    /// every line of their content above and below the Manifold block, even
+    /// after multiple re-installs. Without this, `manifold-mcp --install`
+    /// would silently destroy user rules on every upgrade.
+    @Test("Re-install preserves user content above and below the manifold block in ~/CLAUDE.md")
+    func reinstallPreservesUserContent() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let rulesFile = home.appendingPathComponent("CLAUDE.md")
+        let userContent = """
+        # My personal Claude rules
+
+        - Be terse.
+        - Always run tests before committing.
+        - Use Swift Testing, not XCTest.
+
+        ## Project conventions
+        - Files live in src/, tests in test/.
+        """
+        try userContent.write(to: rulesFile, atomically: true, encoding: .utf8)
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        // Run install three times: pure idempotence + content preservation
+        try writer.installClaudeCodeRules()
+        try writer.installClaudeCodeRules()
+        try writer.installClaudeCodeRules()
+
+        let final = try String(contentsOf: rulesFile, encoding: .utf8)
+
+        // Every line of the user's content must survive
+        #expect(final.contains("# My personal Claude rules"))
+        #expect(final.contains("- Be terse."))
+        #expect(final.contains("- Always run tests before committing."))
+        #expect(final.contains("- Use Swift Testing, not XCTest."))
+        #expect(final.contains("## Project conventions"))
+        #expect(final.contains("- Files live in src/, tests in test/."))
+
+        // And the Manifold block appears exactly once
+        let beginCount = final.components(separatedBy: AgentRulesTemplate.beginMarker).count - 1
+        #expect(beginCount == 1, "Three re-installs should still leave exactly one manifold block")
+    }
+
+    @Test("Re-install on an unchanged file does not modify mtime")
+    func reinstallSkipsWriteWhenContentMatches() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let rulesFile = home.appendingPathComponent("CLAUDE.md")
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installClaudeCodeRules()
+
+        let mtime1 = try FileManager.default.attributesOfItem(atPath: rulesFile.path)[.modificationDate] as? Date
+        // Sleep briefly so we'd notice an mtime change
+        Thread.sleep(forTimeInterval: 0.05)
+        try writer.installClaudeCodeRules()
+        let mtime2 = try FileManager.default.attributesOfItem(atPath: rulesFile.path)[.modificationDate] as? Date
+
+        #expect(mtime1 == mtime2,
+                "Re-running install on an up-to-date file must not touch mtime — scripted re-install should be a no-op")
     }
 }
