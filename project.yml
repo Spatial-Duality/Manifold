@@ -8,6 +8,9 @@ options:
 packages:
   ManifoldKit:
     path: .
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
 
 targets:
   Manifold:
@@ -18,6 +21,12 @@ targets:
     dependencies:
       - package: ManifoldKit
         product: ManifoldKit
+      - package: ManifoldKit
+        product: ManifoldRuntime
+      - package: ManifoldKit
+        product: ManifoldXPC
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.spatialduality.manifold
@@ -37,3 +46,42 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
+
+  ManifoldAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ManifoldAppTests
+    dependencies:
+      - target: Manifold
+      - package: ManifoldKit
+        product: ManifoldKit
+      - package: ManifoldKit
+        product: ManifoldXPC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spatialduality.manifold.tests
+        PRODUCT_NAME: ManifoldAppTests
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Manifold.app/Contents/MacOS/Manifold"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+
+  ManifoldAppUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: ManifoldAppUITests
+    dependencies:
+      - target: Manifold
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spatialduality.manifold.uitests
+        PRODUCT_NAME: ManifoldAppUITests
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        TEST_TARGET_NAME: Manifold
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
