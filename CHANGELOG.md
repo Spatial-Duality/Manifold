@@ -4,21 +4,45 @@ All notable changes to Manifold are documented here.
 
 ## [Unreleased]
 
-### Added
+### Added — Access redesign (Cowork-First UI, 2026-04-28)
+- Per-AI sharing chip stack across the entire access surface. Folders Matrix, Files Flat, and Mail Threads each render one chip per connected AI (filled when shared, hollow when hidden, agent-tinted on tap) — the same `AccessChipStack` component everywhere. Replaces the old single-agent dropdown in Mail.
+- Drag-and-drop folders or files from Finder onto the Folders or Files surface. Folders add immediately; files raise a confirmation dialog asking whether to add the whole containing folder or only that file. "Add only this file" scopes the parent for every connected AI and writes per-file deny overrides for the existing top-level siblings via the bulk override endpoint.
+- Folders Matrix gains a labelled **Sharing** column that mirrors the row's checkboxes: `Not shared` / `Shared with Claude` / `Shared with Codex` / `Partly shared · N of M` / `Shared with all` (or `Shared with both` for a 2-AI setup). A small attention-coloured dot beside the pill flags sources that have explicit per-file overrides; the inspector still owns the per-file detail.
+- Source health pills (`Removed`, `Offline`) moved inline next to the folder name — they describe whether the folder exists on disk, not how it's shared.
+- Mail thread table prioritises Subject (the highest-information column) over Sender; widths rebalanced across Sender / Subject / Mailbox / Received / Attach so Subject takes the slack on narrow windows.
+- Mail message inspector now shows a real scrollable body (`bodyText` extracted from the .eml, fall back to `preview`), 220–360pt tall, selectable, line-spaced. A bordered **Open in Mail** button beside the Message header hands the original `.eml` to `NSWorkspace.shared.open` so the user lands in their default eml handler.
+- File inspector preview opens in the default app on double-click, matching Finder.
+- Inspector header in the folder tree pane tightens — chip strip moved below the title row, single-AI setups drop the redundant "Editing X overrides" caption, multi-AI picker is `.controlSize(.small)`.
+- New `AgentMeta.stableKey([TargetApp])` helper replaces three duplicated `connectedAgentsKey` views; new `ManifoldStore.fileVisibilityOverridesByAgent(_:)` loads overrides for a list of agents in parallel via TaskGroup; new `View.manifoldFileDropTarget(store:)` modifier consolidates the drop UX into a single component shared by Folders and Files.
+- `MailReviewModel` now tracks per-agent shared sets (`sharedEmailIDsByAgent`) and exposes `sharedAgents(for:)`, `setMessageShared(_:agent:isShared:)`, `setMessageSharedForAllAgents(_:isShared:)`. The view pushes the live `connectedAgents` list in via `setConnectedAgents` so chips track which AIs are activated, no greyed-out options.
+
+### Changed — Access redesign
+- `MailReviewRow` carries a precomputed `sharedAgents: Set<TargetApp>` so the Share TableColumn cell renders from the row instead of re-querying the model on every cell render. `sharedAnyAgentCount` is now a stored property recomputed inside `refreshSharedState` rather than allocating a fresh Set on every body pass.
+- `loadDriftCounts` and `loadOverrides` fan out per-agent XPC calls via `withTaskGroup` and only republish state when it actually changed, so `@Observable` doesn't fire on no-op refreshes.
+- `addSourceForSingleFile` writes deny overrides via `setManyFileVisibilityOverrides` (one XPC roundtrip) by downcasting `runtime` to `AppRuntimeClient`; falls back to per-record loop for fixture clients.
+- `mutateScope` in `ManifoldStore` reads-modifies-writes the whole `AgentAccessPolicy` struct so `@Observable` fires reliably on optional-value-type mutation. Previously the per-agent column failed to unselect after toggling.
+- The "Both" tri-state checkbox in the Folders matrix recomputes scope from live store state at click time, so a `.mixed` cell always moves toward "shared with all" rather than flipping off mid-cycle.
+
+### Fixed — Access redesign
+- `EXC_BREAKPOINT` crash on the Mail surface caused by reading an `@Observable` `MailReviewModel` from inside a SwiftUI Table cell — TableColumn cells on macOS don't reliably propagate environment values. State + actions are now passed into share cells explicitly.
+- Files Access column was using a labelled `AccessCheckboxStrip` with `.fixedSize(horizontal:)` that visually overflowed into the Name column on narrow windows. Switched to the chip-only `AccessChipStack`; per-row All/Allow/Deny/Reset still lives in the bulk bar and inspector.
+- Mail inspector defaulted to open and auto-opened on row select. Now starts hidden, opens only on double-click (or via the toolbar toggle / ⌥⌘0), with a close button on the inspector itself.
+
+### Added — Personal Data OS (earlier in cycle)
 - Personal Data OS stores for scoped memory, ledger entries, tool metrics, capability handles, knowledge graph nodes, saved skills, exec runs, and fabrication findings.
 - Runtime-backed memory settings: `amnesiacMode`, `derivedRetentionDays`, memory origins, and retention expiry via `expired_by_retention`.
 - XPC/app commands for reading and updating memory settings, with Access and Storage surfaces bound to runtime state instead of local UI-only preferences.
 - Strict claimed-action verification against scoped exposure records. Structured `content_hash` or `tool_name + resource_path` claims can be `supported`; weak text-only claims are `ambiguous`; missing scoped evidence is `unverified`.
 - Regression coverage for scoped memory deletion, scoped capability handles, memory retention, amnesiac mode, timestamp-covered ledger hashes, legacy ledger verification, and strict claim verification.
 
-### Changed
+### Changed — Personal Data OS
 - `forget_memory` now loads the memory item and checks source/grant lineage before tombstoning. Missing and out-of-scope memory IDs return the same generic denial.
 - `check_capability_flow` now scopes value handles before evaluating sinks or Rule-of-Two policy.
 - New ledger entries include stable timestamp material in their tamper-evident hash. Legacy no-timestamp rows still verify, with a warning that reports how many rows are not timestamp-covered.
 - Memory recall, prior-context reuse, graph queries, and app memory listing expire derived memory before returning results.
 - MCP tool documentation now describes structured claim proof semantics and scoped memory/capability behavior.
 
-### Fixed
+### Fixed — Personal Data OS
 - Privacy controls for memory are no longer cosmetic: amnesiac mode blocks derived-memory writes and retention tombstones expired derived memory.
 - Claim verification no longer marks loose global ledger/exposure text matches as proof.
 - Out-of-scope memory and capability IDs can no longer be mutated or queried merely because the caller has some active Manifold access.

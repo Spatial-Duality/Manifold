@@ -1,9 +1,56 @@
 # Access Redesign — Cowork-First Content Boundary UI
 
-**Status:** Approved direction · pending implementation
+**Status:** Phase 1 shipped on `main` (2026-04-28) · Phases 2–3 in flight
 **Date:** 2026-04-28
 **Branch:** `main`
 **Scope:** Manifold's Access surface (file/folder/email per-AI visibility), Mail tidy-up, supporting Settings + Sessions changes
+
+---
+
+## Shipped Today (2026-04-28)
+
+The **selector-control redesign** and the **Mail unification** were the high-priority pieces. Both shipped to `main`. What landed:
+
+### Bullet-proof per-AI selector
+- `AccessChipStack` (icon-only) renders one chip per connected AI in every table row across Folders, Files, and Mail. Filled = shared, hollow = hidden, agent-tinted on tap.
+- `AccessCheckboxStrip` (labelled, with All tri-state) renders in the file inspector and the folder-tree inspector — the wider surfaces where labels fit.
+- The "Both" tri-state checkbox in the Folders matrix recomputes scope from live store state at click time so a `.mixed` cell always moves toward "shared with all".
+- `mutateScope` in `ManifoldStore` reads-modifies-writes the whole `AgentAccessPolicy` struct so `@Observable` fires reliably on optional value-type mutation.
+
+### Goal #1 — Add folder/file with per-AI visibility
+- Drag-and-drop a Finder folder onto Folders or Files → `store.addSourceFromURL`.
+- Drag a file → confirmation dialog with **Add the whole folder** vs **Add only this file**. The latter scopes the parent for every connected AI and writes per-file deny overrides for the existing top-level siblings via the bulk `setManyFileVisibilityOverrides` endpoint.
+- Both are wired through the shared `View.manifoldFileDropTarget(store:)` modifier in `Components/Primitives/FileDropTarget.swift`.
+
+### Goal #3 — Toggle on/off for all or specific AIs
+- Per-row chip stack on every surface. Right-click context menu offers `Share with all`, `Hide from all`, plus a per-AI toggle line per connected AI.
+- Bulk-action bar appears on multi-select; inspector strip exposes the same controls with explicit labels.
+
+### Goal #4 — Adaptive UI based on connected AIs
+- `AgentMeta.connected(from:)` drives the agent column count. No greyed-out chips for AIs the user hasn't activated.
+- Single-AI setups drop redundant pickers and captions ("Editing X overrides" caption removed; multi-agent picker is `.controlSize(.small)`).
+
+### Goal #5 — Click file → details pane with version history
+- File inspector preview opens in the default app on double-click (matches Finder).
+- Mail inspector shows a real scrollable message body (220–360pt, selectable, line-spaced, extracted from `bodyText` or fallback to `preview`) plus a bordered **Open in Mail** button that hands the `.eml` to `NSWorkspace.shared.open`.
+
+### Mail (tidied)
+- `MailReviewModel` tracks per-agent shared sets (`sharedEmailIDsByAgent`) — single-target dropdown gone.
+- Mail thread table prioritises Subject over Sender (Sender capped at 200pt; Subject `min 240, ideal 420, no max`).
+- Inspector starts hidden, opens on double-click only, with a close button on the inspector itself plus the toolbar toggle and ⌥⌘0.
+- The Share column uses the same `AccessChipStack` as Files for full surface consistency.
+- Sharing column on the Folders matrix reads as plain English (`Not shared` / `Shared with X` / `Partly shared · N of M` / `Shared with all` / `Shared with both`); source health pills (`Removed`, `Offline`) moved inline beside the folder name. A small dot beside the Sharing pill flags sources with explicit per-file overrides.
+
+### Engineering
+- Per-agent loaders (`loadDriftCounts`, `loadOverrides`, `MailReviewModel.refreshSharedState`) fan out via `withTaskGroup` and only republish on actual change so `@Observable` doesn't fire on no-ops.
+- `MailReviewRow` precomputes `sharedAgents: Set<TargetApp>` so the Share TableColumn cell reads from the row instead of re-querying `mailReview` every render.
+- `sharedAnyAgentCount` cached as a stored property; new `AgentMeta.stableKey([TargetApp])` and `ManifoldStore.fileVisibilityOverridesByAgent(_:)` deduplicate logic across views.
+- Filter-mode plumbing (off/warn/block + per-agent override + grant-scoped overrides) and named-session templates landed in `ManifoldKit` / `ManifoldXPC`; the surface UI for them is the next phase.
+
+### Not yet shipped
+- Smart Views section in the Access sidebar is implemented in `FilesFlatView` only — Folders matrix and Mail still need parity.
+- Inspector audit timeline (cryptographic ledger verification, exposure mini-chart, tool sparkline, memory lineage) is partially wired into `FileInspectorPane`; full per-row audit panel is in flight.
+- Inline `+ Add ▾` toolbar menu, menu-bar quick-add (⌥-click), and Finder Share Extension are still `pending` from the spec — drag-and-drop covers the most common case for now.
 
 ---
 

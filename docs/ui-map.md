@@ -111,25 +111,32 @@ This is the main evidence ledger: sessions on the left, event rows in the center
 
 ```mermaid
 flowchart LR
-    A["AccessView"] --> B["Folders"]
-    A --> C["Files"]
+    A["AccessView"] --> B["Folders Matrix"]
+    A --> C["Files Flat"]
     A --> D["Session"]
     A --> E["History"]
+    B --> F["FileTreeInspector"]
+    C --> G["FileInspectorPane"]
 ```
 
-`Access` is the "who can see what" surface. It falls back to an empty state when the user has not shared any folders yet.
+`Access` is the "who can see what" surface. Each row carries an `AccessChipStack` with one chip per connected AI (filled when shared, hollow when hidden, agent-tinted on tap). The Folders matrix has a labelled **Sharing** column that reads `Not shared` / `Shared with X` / `Partly shared · N of M` / `Shared with all`; a small dot beside the pill flags sources with explicit per-file overrides. Source health (`Removed`, `Offline`) renders inline beside the folder name.
+
+Drag-and-drop is wired through the shared `View.manifoldFileDropTarget(store:)` modifier (see `Components/Primitives/FileDropTarget.swift`): folders dispatch to `store.addSourceFromURL` immediately; files raise a confirmation dialog with **Add the whole folder** or **Add only this file** (the latter writes per-file deny overrides for siblings via `setManyFileVisibilityOverrides`).
+
+The file inspector preview opens in the default app on double-click. The folder-tree inspector header stacks title above chips on the narrow inspector pane and drops the per-agent picker when only one AI is connected.
 
 ### Mail
 
 ```mermaid
 flowchart LR
-    A["MailView"] --> B["Mailboxes"]
-    A --> C["Threads"]
-    A --> D["Session"]
-    A --> E["History"]
+    A["MailReviewView"] --> B["MailScopeRail"]
+    A --> C["MailReviewTableArea"]
+    A --> D["ThreadInspector"]
 ```
 
-`Mail` is intentionally not a full mail client. It focuses on governed mailboxes, threads, and session evidence.
+`Mail` is intentionally not a full mail client — it's a Synology-Active-Backup-style read-only archive. The thread table prioritises Subject (the highest-information column) over Sender; the Share column renders the same `AccessChipStack` Files uses. The inspector is hidden by default, opens on double-click (or ⌥⌘0), and shows a real scrollable message body (extracted plaintext, fall back to preview) plus an **Open in Mail** button that hands the original `.eml` to `NSWorkspace.shared.open`.
+
+`MailReviewModel` tracks per-agent shared sets (`sharedEmailIDsByAgent`); the view pushes the live `connectedAgents` list in via `setConnectedAgents` so chips track which AIs are activated.
 
 ### Requests
 

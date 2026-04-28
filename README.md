@@ -11,7 +11,8 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
-  <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-macOS%20Swift-blue" alt="CI"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Swift-6-orange?logo=swift" alt="Swift 6">
 </p>
 
 ---
@@ -35,8 +36,10 @@ If that fits your setup, you can clone, build, and run the app locally today.
 
 ## What It Does
 
-- Lets you choose which files, folders, and emails Claude (Desktop, Cowork, and Claude Code) can see through Manifold
-- Lets you choose separately what Codex CLI can see through Manifold
+- Lets you choose, per AI, which files, folders, and emails Claude (Desktop, Cowork, Claude Code) and Codex CLI can see through Manifold. The Folders matrix and Files list show one chip per connected AI inline so you never have to switch a "target agent" dropdown.
+- Drag a folder from Finder to add it as a source; drag a file and Manifold asks whether to add the whole folder or just that file (siblings denied via per-file overrides).
+- Mail surface mirrors Files: per-message chip stack, scrollable message body in the inspector, and a one-click **Open in Mail** button that hands the original `.eml` to your default email client.
+- Sharing column on each folder reads as plain English — `Not shared`, `Shared with Claude`, `Partly shared · 1 of 2`, `Shared with all` — with a small dot when individual files inside have explicit allow/deny overrides.
 - Enforces a unified rule system across files, emails, and agent behavior, with seeded denies for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
