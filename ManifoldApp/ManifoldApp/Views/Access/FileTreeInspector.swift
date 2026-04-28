@@ -79,53 +79,53 @@ struct FileTreeInspector: View {
     }
 
     private func header(for source: SourceRecord) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.s2) {
-            HStack(spacing: Spacing.s2) {
+        // Title row carries the folder name + the per-agent share chips.
+        // Inspector is only ~320pt wide, so the chip strip dominates if
+        // we lay it inline with the name. Stack title above chips so
+        // both have full width and the header stays compact.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: Spacing.s2) {
                 FileTypeIcon(filename: source.displayName, isFolder: true, size: 14)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(source.displayName)
                         .font(ManifoldType.bodyMedium)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     Text(source.originalRootPath.shortenedPath)
                         .font(ManifoldType.mono)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer()
-                AccessCheckboxStrip(
-                    agents: connectedAgents,
-                    visibleAgents: agentsWithScope,
-                    accessibilityIDPrefix: "access.inspector.folder.\(source.sourceID.manifoldAccessIdentifierComponent)",
-                    onToggleAgent: { agent, wasVisible in
-                        Task {
-                            await store.setSourceScope(
-                                sourceID: source.sourceID,
-                                agent: agent,
-                                inScope: !wasVisible
-                            )
-                        }
-                    },
-                    onSetAll: { inScope in
-                        Task {
-                            await setSourceScope(agents: connectedAgents, inScope: inScope)
-                        }
-                    }
-                )
+                Spacer(minLength: 0)
             }
 
-            if connectedAgents.isEmpty {
-                Text("No agents connected.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-            } else if connectedAgents.count == 1 {
-                HStack(spacing: Spacing.s1) {
-                    GradientAvatar(agent: effectiveAgent, size: .tiny)
-                    Text("Editing \(AgentMeta.label(effectiveAgent)) overrides")
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+            AccessCheckboxStrip(
+                agents: connectedAgents,
+                visibleAgents: agentsWithScope,
+                accessibilityIDPrefix: "access.inspector.folder.\(source.sourceID.manifoldAccessIdentifierComponent)",
+                onToggleAgent: { agent, wasVisible in
+                    Task {
+                        await store.setSourceScope(
+                            sourceID: source.sourceID,
+                            agent: agent,
+                            inScope: !wasVisible
+                        )
+                    }
+                },
+                onSetAll: { inScope in
+                    Task {
+                        await setSourceScope(agents: connectedAgents, inScope: inScope)
+                    }
                 }
-            } else {
+            )
+
+            // Agent picker only when there's a real choice. Single-agent
+            // setups don't need a row to "select" the only AI — the
+            // chips already tell the whole story. The "No agents
+            // connected" hint also drops out: the chips render as
+            // disabled when no AI is wired up.
+            if connectedAgents.count > 1 {
                 Picker("Agent", selection: Binding(
                     get: { effectiveAgent },
                     set: { targetAgent = $0 }
@@ -135,10 +135,12 @@ struct FileTreeInspector: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .controlSize(.small)
                 .labelsHidden()
             }
         }
-        .padding(Spacing.s4)
+        .padding(.horizontal, Spacing.s3)
+        .padding(.vertical, Spacing.s2)
     }
 
     @ViewBuilder

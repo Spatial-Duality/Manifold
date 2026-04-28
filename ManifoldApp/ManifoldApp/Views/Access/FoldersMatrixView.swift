@@ -26,6 +26,11 @@ struct FoldersMatrixView: View {
     /// grant. Loaded lazily on appear and refreshed when the connected-
     /// agents set changes; absence means "no signal yet" not "zero drift".
     @State private var driftCountsByAgent: [TargetApp: [String: Int]] = [:]
+    /// Per-agent file-level overrides. Used by the Sharing column so a
+    /// folder that's *not* in any AI's source scope but still has
+    /// explicit allow overrides on individual files reads as "Some files
+    /// shared" instead of the misleading "Not shared".
+    @State private var overridesByAgent: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
     /// Files dropped onto the matrix queue here until the user picks
     /// "Add the whole folder" or "Add only this file" in a confirmation
     /// dialog. Folders are added immediately on drop without prompting.
@@ -84,7 +89,10 @@ struct FoldersMatrixView: View {
             }
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search folders")
-        .task(id: connectedAgentsKey) { await loadDriftCounts() }
+        .task(id: connectedAgentsKey) {
+            await loadDriftCounts()
+            await loadOverrides()
+        }
         .dropDestination(for: URL.self) { items, _ in
             handleDroppedURLs(items)
             return !items.isEmpty
@@ -195,6 +203,35 @@ struct FoldersMatrixView: View {
             }
         }
         driftCountsByAgent = fresh
+    }
+
+    /// Pulls per-agent file visibility overrides into local state. Used
+    /// to detect partial sharing on folders that aren't in any AI's
+    /// source-level scope but have allow overrides on individual files.
+    private func loadOverrides() async {
+        var fresh: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
+        for agent in connectedAgents {
+            fresh[agent] = await store.fileVisibilityOverrides(agent: agent)
+        }
+        overridesByAgent = fresh
+    }
+
+    /// Per-source breakdown of explicit overrides — agents that have at
+    /// least one allow / deny on a file inside this source. Empty sets
+    /// mean "no overrides for this source," which is the common case.
+    private func overrideAgentsByDecision(for source: SourceRecord) -> (allow: Set<TargetApp>, deny: Set<TargetApp>) {
+        var allow: Set<TargetApp> = []
+        var deny: Set<TargetApp> = []
+        for agent in connectedAgents {
+            guard let entries = overridesByAgent[agent] else { continue }
+            for record in entries where record.sourceID == source.sourceID {
+                switch record.decision {
+                case .allow: allow.insert(agent)
+                case .deny:  deny.insert(agent)
+                }
+            }
+        }
+        return (allow, deny)
     }
 
     private var toolbar: some View {
@@ -391,12 +428,20 @@ struct FoldersMatrixView: View {
         let help: String
     }
 
-    /// Compute the sharing pill for a source. Three states the user
-    /// asked for — all / part / none — each with a label that names
-    /// what's happening rather than relying on a colored dot.
+    /// Compute the sharing pill for a source. Considers two layers:
+    ///   1. Source-level scope — which AIs have this folder in their
+    ///      allowedSourceIDs.
+    ///   2. Per-file overrides — explicit allow/deny on individual
+    ///      files inside this source.
+    /// A folder that's not in any AI's source scope but still has
+    /// explicit allow overrides reads as "Some files shared", because
+    /// those overrides do let the AI see the named files. Without that
+    /// branch the column showed "Not shared" while the inspector was
+    /// listing a stack of ALLOWED files — visibly contradictory.
     private func sharingLabel(for source: SourceRecord) -> SharingLabel {
         let scoped = scopedAgents(for: source)
         let total = connectedAgents.count
+        let overrides = overrideAgentsByDecision(for: source)
 
         // No AIs activated yet — say so plainly. Sharing isn't possible
         // until the user wires up at least one AI.
@@ -409,6 +454,16 @@ struct FoldersMatrixView: View {
         }
 
         if scoped.isEmpty {
+            // No source-level scope — but the folder may still have
+            // explicit allow overrides that share specific files.
+            if !overrides.allow.isEmpty {
+                let agentNames = overrides.allow.sorted { $0.rawValue < $1.rawValue }.map(displayName(for:))
+                return SharingLabel(
+                    text: "Some files shared",
+                    variant: .scope,
+                    help: "Specific files inside this folder are shared with \(agentNames.joined(separator: " and ")). The folder itself isn't in any AI's default scope."
+                )
+            }
             return SharingLabel(
                 text: "Not shared",
                 variant: .neutral,
@@ -421,10 +476,19 @@ struct FoldersMatrixView: View {
                 ? "Shared"
                 : (total == 2 ? "Shared with both" : "Shared with all")
             let names = connectedAgents.map(displayName(for:)).joined(separator: " and ")
+            // Surface explicit deny overrides — the folder is fully
+            // shared but specific files are still hidden, which is
+            // worth calling out in the tooltip.
+            let suffix = overrides.deny.isEmpty
+                ? ""
+                : " · some files hidden"
+            let helpSuffix = overrides.deny.isEmpty
+                ? ""
+                : " A few files inside have explicit deny overrides."
             return SharingLabel(
-                text: text,
+                text: text + suffix,
                 variant: .defaultScope,
-                help: "Visible to \(names)."
+                help: "Visible to \(names).\(helpSuffix)"
             )
         }
 
