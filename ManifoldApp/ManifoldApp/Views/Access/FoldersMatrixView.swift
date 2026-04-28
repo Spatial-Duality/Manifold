@@ -258,16 +258,84 @@ struct FoldersMatrixView: View {
     }
 
     private var statusColumn: TableColumn<SourceRecord, Never, some View, Text> {
-        TableColumn("Status") { (source: SourceRecord) in
+        TableColumn("Sharing") { (source: SourceRecord) in
+            // Source health takes priority — a removed or offline folder
+            // can't actually share anything regardless of scope. For the
+            // common case (accessible folder) the pill describes the
+            // share state across every connected AI: all / part / none.
             if source.isRemoved {
-                Pill(text: "removed", variant: .attention)
+                Pill(text: "Removed", variant: .attention)
             } else if !source.isAccessible {
-                Pill(text: "offline", variant: .attention)
+                Pill(text: "Offline", variant: .attention)
             } else {
-                Pill(text: "active", variant: .defaultScope)
+                let label = sharingLabel(for: source)
+                Pill(text: label.text, variant: label.variant)
+                    .help(label.help)
             }
         }
-        .width(100)
+        .width(min: 110, ideal: 140, max: 180)
+    }
+
+    private struct SharingLabel {
+        let text: String
+        let variant: Pill.Variant
+        let help: String
+    }
+
+    /// Compute the sharing pill for a source. Three states the user
+    /// asked for — all / part / none — each with a label that names
+    /// what's happening rather than relying on a colored dot.
+    private func sharingLabel(for source: SourceRecord) -> SharingLabel {
+        let scoped = scopedAgents(for: source)
+        let total = connectedAgents.count
+
+        // No AIs activated yet — say so plainly. Sharing isn't possible
+        // until the user wires up at least one AI.
+        guard total > 0 else {
+            return SharingLabel(
+                text: "No AIs connected",
+                variant: .neutral,
+                help: "Activate Claude or Codex in Settings before sharing folders."
+            )
+        }
+
+        if scoped.isEmpty {
+            return SharingLabel(
+                text: "Not shared",
+                variant: .neutral,
+                help: "No AI can see this folder."
+            )
+        }
+
+        if scoped.count == total {
+            let text = total == 1
+                ? "Shared"
+                : (total == 2 ? "Shared with both" : "Shared with all")
+            let names = connectedAgents.map(displayName(for:)).joined(separator: " and ")
+            return SharingLabel(
+                text: text,
+                variant: .defaultScope,
+                help: "Visible to \(names)."
+            )
+        }
+
+        // Partial: name the AI when only one sees it; otherwise say
+        // "X of Y" and list the names in the tooltip.
+        let scopedNames = connectedAgents
+            .filter { scoped.contains($0) }
+            .map(displayName(for:))
+        if scoped.count == 1, let only = scopedNames.first {
+            return SharingLabel(
+                text: "Shared with \(only)",
+                variant: .scope,
+                help: "Only \(only) can see this folder."
+            )
+        }
+        return SharingLabel(
+            text: "Partly shared · \(scoped.count) of \(total)",
+            variant: .scope,
+            help: "Visible to \(scopedNames.joined(separator: " and "))."
+        )
     }
 
     // MARK: - Bulk bar
