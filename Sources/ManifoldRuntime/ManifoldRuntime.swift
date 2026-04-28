@@ -38,6 +38,10 @@ public actor ManifoldRuntime {
     public nonisolated let accessStore: AccessStore
     /// Per-agent filter mode preferences and grant-scoped override approvals.
     public nonisolated let filterModeStore: FilterModeStore
+    /// Pluggable findings provider used by ManifoldBridge.enforceFileReadRules
+    /// when filter mode is .warn or .block. Default is the regex-based
+    /// scanner for common high-confidence secret patterns.
+    public nonisolated let filterModeFindingsProvider: any FilterModeFindingsProvider
     /// Mail synchronization engine.
     public nonisolated let emailSyncEngine: EmailSyncEngine
     /// Approval queue for governed escalations.
@@ -96,6 +100,7 @@ public actor ManifoldRuntime {
         let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
         let accessStore = AccessStore(db: db)
         let filterModeStore = FilterModeStore(db: db)
+        let filterModeFindingsProvider: any FilterModeFindingsProvider = RegexFilterFindingsProvider()
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
@@ -143,6 +148,7 @@ public actor ManifoldRuntime {
         self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
         self.accessStore = accessStore
         self.filterModeStore = filterModeStore
+        self.filterModeFindingsProvider = filterModeFindingsProvider
         self.emailSyncEngine = emailSyncEngine
         self.approvalQueue = approvalQueue
         self.standingWriteApprovalStore = standingWriteApprovalStore
@@ -206,6 +212,8 @@ public actor ManifoldRuntime {
             fabricationFindingStore: fabricationFindingStore,
             ruleStore: ruleStore,
             privacyCoordinator: privacyCoordinator,
+            filterModeStore: filterModeStore,
+            filterModeFindingsProvider: filterModeFindingsProvider,
             targetApp: targetApp,
             serverName: "manifold",
             serverVersion: version,

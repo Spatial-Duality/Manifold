@@ -49,6 +49,8 @@ public actor ManifoldBridge {
     let fabricationFindingStore: FabricationFindingStore?
     let ruleStore: RuleStore?
     let privacyCoordinator: PrivacyPreflightCoordinator?
+    let filterModeStore: FilterModeStore?
+    let filterModeFindingsProvider: (any FilterModeFindingsProvider)?
     nonisolated let targetApp: TargetApp
     let profileID: String
     var runtimeContext: AgentRuntimeContext
@@ -78,6 +80,8 @@ public actor ManifoldBridge {
         fabricationFindingStore: FabricationFindingStore? = nil,
         ruleStore: RuleStore? = nil,
         privacyCoordinator: PrivacyPreflightCoordinator? = nil,
+        filterModeStore: FilterModeStore? = nil,
+        filterModeFindingsProvider: (any FilterModeFindingsProvider)? = nil,
         targetApp: TargetApp = .cowork,
         profileID: String = "default",
         serverName: String = "manifold",
@@ -107,6 +111,8 @@ public actor ManifoldBridge {
         self.fabricationFindingStore = fabricationFindingStore
         self.ruleStore = ruleStore
         self.privacyCoordinator = privacyCoordinator
+        self.filterModeStore = filterModeStore
+        self.filterModeFindingsProvider = filterModeFindingsProvider
         self.targetApp = targetApp
         self.profileID = profileID
         self.runtimeContext = AgentRuntimeContext(
@@ -1678,6 +1684,20 @@ public actor ManifoldBridge {
             fileURL: identity.fileURL,
             selection: artifact?.selection
         )
+
+        // Filter mode gate — Off / Warn / Block per the Settings ▸ Privacy
+        // ▸ Sensitive Content Detection user preference. Composes after
+        // rule eval and before privacy preflight so user choice can deny
+        // even when rules and overrides allow.
+        try await enforceFilterMode(
+            sourceID: artifact?.sourceID,
+            mountName: mountName,
+            relativePath: relativePath,
+            canonicalPath: canonicalPath,
+            content: read.text,
+            grantID: grantID
+        )
+
         let deliveredText = try await applyPrivacyPreflight(
             toolName: "read_file",
             resourcePath: canonicalPath,
@@ -1765,6 +1785,133 @@ public actor ManifoldBridge {
         case .allow:
             break
         }
+    }
+
+    /// Filter mode enforcement layer per the redesign plan's eng-review
+    /// Issue 1. Composes after rule eval and per-file visibility overrides
+    /// so user-preference enforcement can deny even when rules + overrides
+    /// allow. Disabled (no-op) when the agent's effective mode is .off,
+    /// which is the default until the user changes it in Settings.
+    ///
+    /// Layer order at file-read time:
+    ///   1. RuleEngine.evaluate() — already ran before bytes were read
+    ///   2. FileVisibilityOverrideStore — already evaluated upstream
+    ///   3. THIS — filter mode (off / warn / block) against findings
+    ///
+    /// Modes:
+    ///   off    — bypass entirely
+    ///   warn   — log a warning to the audit trail with finding counts
+    ///   block  — deny unless an explicit grant-level override exists in
+    ///            FilterModeStore for (grantID, agent, sourceID, path)
+    private func enforceFilterMode(
+        sourceID: String?,
+        mountName: String,
+        relativePath: String,
+        canonicalPath: String,
+        content: String,
+        grantID: String
+    ) async throws {
+        // Default-off when the plumbing isn't wired (e.g., test bridges
+        // built without the filter-mode dependency). Real bridges always
+        // pass these in via ManifoldRuntime.bridge(for:).
+        guard let filterModeStore, let filterModeFindingsProvider else { return }
+
+        let mode: FilterMode
+        do {
+            mode = try await filterModeStore.mode(for: targetApp)
+        } catch {
+            // Reading the preference shouldn't fail open OR closed for
+            // the wrong reason. Log + treat as .off so a misconfigured
+            // store doesn't block legitimate reads.
+            logger.error("Filter mode: failed to read preference — \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard mode != .off else { return }
+
+        let findings = await filterModeFindingsProvider.findings(
+            forFile: canonicalPath,
+            content: content
+        )
+        guard !findings.isEmpty else { return }
+
+        switch mode {
+        case .off:
+            return // already filtered above; defensive
+        case .warn:
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: agentName,
+                filePath: canonicalPath,
+                metadata: mergedMetadata([
+                    "grant_id": grantID,
+                    "filter_mode": "warn",
+                    "findings_total": "\(findings.totalCount)",
+                    "findings_secrets": "\(findings.secretCount)",
+                    "findings_pii": "\(findings.piiCount)",
+                ]),
+                grantID: grantID
+            )
+        case .block:
+            // Honor an existing override-and-share approval — the user
+            // explicitly clicked through the warning sheet for this file
+            // in this grant. The override is per-(grant, agent, source,
+            // path) so a re-grant requires a fresh approval.
+            if let sourceID {
+                let hasOverride = (try? await filterModeStore.hasOverride(
+                    grantID: grantID,
+                    agent: targetApp,
+                    sourceID: sourceID,
+                    relativePath: relativePath
+                )) ?? false
+                if hasOverride {
+                    try? await auditStore.log(
+                        action: .fileRead,
+                        agent: agentName,
+                        filePath: canonicalPath,
+                        metadata: mergedMetadata([
+                            "grant_id": grantID,
+                            "filter_mode": "block_overridden",
+                            "findings_total": "\(findings.totalCount)",
+                        ]),
+                        grantID: grantID
+                    )
+                    return
+                }
+            }
+            try? await auditStore.log(
+                action: .fileRead,
+                agent: agentName,
+                filePath: canonicalPath,
+                metadata: mergedMetadata([
+                    "grant_id": grantID,
+                    "filter_mode": "block",
+                    "filter_decision": "deny",
+                    "findings_total": "\(findings.totalCount)",
+                    "findings_secrets": "\(findings.secretCount)",
+                    "findings_pii": "\(findings.piiCount)",
+                ]),
+                grantID: grantID
+            )
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: "Sensitive content detection (Block mode)",
+                explanation: filterModeDenyExplanation(for: findings)
+            )
+        }
+    }
+
+    private func filterModeDenyExplanation(for findings: FilterFindingsSummary) -> String {
+        var parts: [String] = []
+        if findings.secretCount > 0 {
+            parts.append("\(findings.secretCount) secret\(findings.secretCount == 1 ? "" : "s")")
+        }
+        if findings.piiCount > 0 {
+            parts.append("\(findings.piiCount) PII match\(findings.piiCount == 1 ? "" : "es")")
+        }
+        if findings.financialCount > 0 {
+            parts.append("\(findings.financialCount) financial value\(findings.financialCount == 1 ? "" : "s")")
+        }
+        let summary = parts.joined(separator: ", ")
+        return "File contains \(summary). Block mode is enabled — open Settings ▸ Privacy ▸ Sensitive Content Detection to override per-file or change the mode."
     }
 
     /// Applies unified RuleStore email rules to governed email reads after
