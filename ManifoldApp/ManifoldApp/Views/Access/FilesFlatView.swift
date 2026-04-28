@@ -90,6 +90,32 @@ struct FilesFlatView: View {
         return set
     }
 
+    /// Agents whose state for this file is an explicit override (not just
+    /// inherited from the source default). The runtime returns this via
+    /// FileVisibilityEvaluationOrigin; the per-row dot strip uses it to
+    /// render a tinted underline beneath each override chip.
+    private func explicitOverrideAgents(for file: SourceFile) -> Set<TargetApp> {
+        var set: Set<TargetApp> = []
+        let defaults = defaultScopeByAgent
+        let resolvers = resolverByAgent
+        for agent in connectedAgents {
+            guard let resolver = resolvers[agent] else { continue }
+            let defaultVisible = defaults[agent]?.contains(file.sourceID) == true
+            let evaluation = resolver.evaluate(
+                sourceID: file.sourceID,
+                relativePath: file.relativePath,
+                defaultVisible: defaultVisible
+            )
+            switch evaluation.origin {
+            case .explicitAllow, .explicitDeny:
+                set.insert(agent)
+            case .inheritedAllow, .inheritedHidden:
+                break
+            }
+        }
+        return set
+    }
+
     private func hasOverride(_ decision: FileVisibilityOverrideDecision, for file: SourceFile) -> Bool {
         for overrides in fileOverridesByAgent.values {
             if overrides.contains(where: {
@@ -159,6 +185,7 @@ struct FilesFlatView: View {
                     activity: selectedHistory,
                     connectedAgents: connectedAgents,
                     visibleAgents: selectedFile.map(visibleAgents(for:)) ?? [],
+                    explicitAgents: selectedFile.map(explicitOverrideAgents(for:)) ?? [],
                     onToggleAgent: { agent, wasVisible in
                         guard let file = selectedFile else { return }
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
@@ -264,6 +291,7 @@ struct FilesFlatView: View {
                 AccessCheckboxStrip(
                     agents: connectedAgents,
                     visibleAgents: visibleAgents(for: file),
+                    explicitOverrideAgents: explicitOverrideAgents(for: file),
                     accessibilityIDPrefix: accessIdentifierPrefix(for: file),
                     onToggleAgent: { agent, wasVisible in
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }

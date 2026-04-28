@@ -19,6 +19,10 @@ struct FileInspectorPane: View {
     let activity: [SnapshotRecord]
     let connectedAgents: [TargetApp]
     let visibleAgents: Set<TargetApp>
+    /// Agents whose state for this file is an explicit override (not just
+    /// inherited from the source default). Used by the selector to render
+    /// the tinted underline beneath an override row.
+    var explicitAgents: Set<TargetApp> = []
     let onToggleAgent: (TargetApp, Bool) -> Void
     let onSetAllAgents: (Bool) -> Void
     let onReset: () -> Void
@@ -120,6 +124,7 @@ struct FileInspectorPane: View {
             InspectorSharingSelector(
                 connectedAgents: connectedAgents,
                 visibleAgents: visible,
+                explicitAgents: explicitAgents,
                 onToggleAgent: { agent, wasVisible in
                     onToggleAgent(agent, wasVisible)
                 },

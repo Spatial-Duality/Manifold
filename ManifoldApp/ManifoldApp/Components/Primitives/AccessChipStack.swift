@@ -67,6 +67,12 @@ struct AccessChipStack: View {
 struct AccessCheckboxStrip: View {
     let agents: [TargetApp]
     let visibleAgents: Set<TargetApp>
+    /// Agents whose state was set explicitly (.explicitAllow or
+    /// .explicitDeny in the runtime's FileVisibilityEvaluationOrigin).
+    /// Used to render a thin tinted underline beneath the chip so the
+    /// user can tell at a glance which decisions were inherited vs
+    /// manually overridden.
+    var explicitOverrideAgents: Set<TargetApp> = []
     var showsAllControl = true
     var accessibilityIDPrefix: String? = nil
     let onToggleAgent: (TargetApp, Bool) -> Void
@@ -106,20 +112,28 @@ struct AccessCheckboxStrip: View {
 
                 ForEach(agents, id: \.self) { agent in
                     let visible = visibleAgents.contains(agent)
+                    let isOverride = explicitOverrideAgents.contains(agent)
                     AccessCheckButton(
                         title: AgentMeta.label(agent),
                         systemImage: AgentMeta.systemImage(agent),
                         state: visible ? .on : .off,
                         tint: AgentMeta.color(agent),
+                        isExplicitOverride: isOverride,
                         accessibilityIdentifier: accessibilityIDPrefix.map { "\($0).agent.\(agent.rawValue)" }
                     ) {
                         onToggleAgent(agent, visible)
                     }
-                    .help(visible ? "Unshare from \(AgentMeta.label(agent))" : "Share with \(AgentMeta.label(agent))")
+                    .help(helpText(agent: agent, visible: visible, isOverride: isOverride))
                 }
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func helpText(agent: TargetApp, visible: Bool, isOverride: Bool) -> String {
+        let label = AgentMeta.label(agent)
+        let action = visible ? "Unshare from \(label)" : "Share with \(label)"
+        return isOverride ? "\(action) — explicit override" : action
     }
 }
 
@@ -134,30 +148,47 @@ private struct AccessCheckButton: View {
     let systemImage: String
     let state: State
     let tint: Color
+    var isExplicitOverride: Bool = false
     let accessibilityIdentifier: String?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                checkbox
-                Image(systemName: systemImage)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(ManifoldType.tiny.weight(.semibold))
-                    .lineLimit(1)
+            VStack(spacing: 1) {
+                HStack(spacing: 4) {
+                    checkbox
+                    Image(systemName: systemImage)
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(title)
+                        .font(ManifoldType.tiny.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(state == .off ? ManifoldPalette.text2 : tint)
+                .padding(.horizontal, 5)
+                .frame(height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.r2, style: .continuous)
+                        .fill(state == .off ? ManifoldPalette.surface.opacity(0.55) : tint.opacity(0.13))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Spacing.r2, style: .continuous)
+                        .strokeBorder(state == .off ? ManifoldPalette.border2 : tint.opacity(0.45), lineWidth: 0.8)
+                )
+
+                // Explicit-override underline. Renders only when the user
+                // set this agent's state directly (not inherited from a
+                // folder default). Picks up the agent's tint so it reads
+                // as "you set this for this AI".
+                if isExplicitOverride {
+                    Rectangle()
+                        .fill(tint)
+                        .frame(height: 1.5)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
+                } else {
+                    Color.clear.frame(height: 1.5)
+                }
             }
-            .foregroundStyle(state == .off ? ManifoldPalette.text2 : tint)
-            .padding(.horizontal, 5)
-            .frame(height: 22)
-            .background(
-                RoundedRectangle(cornerRadius: Spacing.r2, style: .continuous)
-                    .fill(state == .off ? ManifoldPalette.surface.opacity(0.55) : tint.opacity(0.13))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Spacing.r2, style: .continuous)
-                    .strokeBorder(state == .off ? ManifoldPalette.border2 : tint.opacity(0.45), lineWidth: 0.8)
-            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -192,13 +223,14 @@ private struct AccessCheckButton: View {
     }
 
     private var accessibilityLabel: String {
+        let suffix = isExplicitOverride ? " — explicit override" : ""
         switch state {
         case .on:
-            return "\(title), shared"
+            return "\(title), shared\(suffix)"
         case .mixed:
-            return "\(title), partially shared"
+            return "\(title), partially shared\(suffix)"
         case .off:
-            return "\(title), not shared"
+            return "\(title), not shared\(suffix)"
         }
     }
 
