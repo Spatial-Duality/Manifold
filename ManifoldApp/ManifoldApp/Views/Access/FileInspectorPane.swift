@@ -72,10 +72,15 @@ struct FileInspectorPane: View {
             HStack(alignment: .top, spacing: Spacing.s2) {
                 FileTypeIcon(filename: file.name, size: 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(file.name)
-                        .font(ManifoldType.heading)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
+                    HStack(spacing: Spacing.s1) {
+                        Text(file.name)
+                            .font(ManifoldType.heading)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                        if let touched = aiTouchedSummary {
+                            sparkleBadge(touched)
+                        }
+                    }
                     Text(file.relativePath)
                         .font(ManifoldType.mono)
                         .foregroundStyle(.secondary)
@@ -138,6 +143,53 @@ struct FileInspectorPane: View {
                 .buttonStyle(.borderless)
                 .font(ManifoldType.caption)
         }
+    }
+
+    // MARK: - AI-touched indicator (Goal 6 from the redesign brief)
+
+    /// Summary of AI authorship for the current file. Computed from the
+    /// existing snapshot timeline — non-baseline, non-restore snapshots
+    /// with source "agent" mean an AI wrote bytes. Returns nil when no
+    /// AI authorship is present (so the badge stays out of the way).
+    private var aiTouchedSummary: AITouchSummary? {
+        let agentSnapshots = activity.filter { snap in
+            !snap.isBaseline
+                && !snap.isDelete
+                && snap.source.lowercased().contains("agent")
+        }
+        guard let mostRecent = agentSnapshots.max(by: { $0.timestamp < $1.timestamp }) else {
+            return nil
+        }
+        return AITouchSummary(
+            count: agentSnapshots.count,
+            mostRecentTimestamp: mostRecent.timestamp
+        )
+    }
+
+    private struct AITouchSummary {
+        let count: Int
+        let mostRecentTimestamp: String
+    }
+
+    /// Sparkle inline next to the filename. Tinted in the accent color
+    /// (we don't yet know which specific agent wrote the bytes — runID
+    /// → grant → targetApp join is a future refinement). Tooltip names
+    /// the count + relative recency of the latest AI write.
+    @ViewBuilder
+    private func sparkleBadge(_ summary: AITouchSummary) -> some View {
+        Image(systemName: "sparkle")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.tint)
+            .help(sparkleHelpText(summary))
+            .accessibilityLabel(sparkleHelpText(summary))
+    }
+
+    private func sparkleHelpText(_ summary: AITouchSummary) -> String {
+        let plural = summary.count == 1 ? "" : "s"
+        let date = ISO8601DateFormatter().date(from: summary.mostRecentTimestamp)
+            ?? Date(timeIntervalSinceReferenceDate: 0)
+        let relative = Self.relativeFormatter.localizedString(for: date, relativeTo: .now)
+        return "AI-touched · \(summary.count) write\(plural), most recent \(relative)"
     }
 
     /// Per-agent exposure counts for the current file. Honest: when an
