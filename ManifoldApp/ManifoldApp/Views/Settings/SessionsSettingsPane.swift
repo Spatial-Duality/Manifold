@@ -19,6 +19,7 @@ struct SessionsSettingsPane: View {
     @State private var error: String?
     @State private var startingTemplateID: String?
     @State private var statusMessage: String?
+    @State private var showCaptureSheet = false
 
     var body: some View {
         Form {
@@ -46,7 +47,76 @@ struct SessionsSettingsPane: View {
         .formStyle(.grouped)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.sessions.pane")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showCaptureSheet = true
+                } label: {
+                    Label("Capture current scope", systemImage: "plus")
+                }
+                .help("Save what an assistant can currently see as a named template")
+            }
+        }
+        .sheet(isPresented: $showCaptureSheet) {
+            CaptureScopeSheet(
+                connectedAgents: connectedAgents,
+                onSave: { name, agent in
+                    Task { await captureScope(name: name, agent: agent) }
+                    showCaptureSheet = false
+                },
+                onCancel: { showCaptureSheet = false }
+            )
+        }
         .task { await loadIfNeeded() }
+    }
+
+    private var connectedAgents: [TargetApp] {
+        let raw = store.connectedAgents.compactMap { TargetApp(rawValue: $0) }
+        return raw.isEmpty ? [.cowork, .codex] : raw
+    }
+
+    /// Snapshot the named agent's current allowed sources as a session
+    /// template. Per-file overrides (from FileVisibilityOverrideStore) live
+    /// outside the template — they're persistent agent state that applies
+    /// to any session, so re-running this template later picks up whatever
+    /// overrides exist at that time. The template captures intent — "the
+    /// scope I had on this date" — not a frozen snapshot of every file.
+    private func captureScope(name: String, agent: TargetApp) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Read the agent's current policy from the governance state the app
+        // already keeps in sync via DashboardState. This avoids a fresh XPC
+        // roundtrip and matches what every other UI surface uses.
+        let allowedSourceIDs: Set<String> = store.governance.policy(for: agent)?.allowedSourceIDs ?? []
+        guard !allowedSourceIDs.isEmpty else {
+            error = "\(displayName(for: agent)) currently has no sources in scope. Add a source first or share existing folders before capturing."
+            return
+        }
+        // One directory-scope per source covers the whole tree. Future
+        // callers (StartSessionFromTemplate) interpret this as "agent can
+        // see everything under each of these sources, modulo overrides".
+        // Per-file overrides live in FileVisibilityOverrideStore — they're
+        // persistent agent state that applies to any session, so this
+        // template captures intent ("the sources Claude could see on this
+        // date") not a frozen file-by-file snapshot.
+        let scopes = allowedSourceIDs.sorted().map { sourceID in
+            FileSelectionScope(sourceID: sourceID, relativePath: "", isDirectory: true)
+        }
+        do {
+            _ = try await store.runtime.saveAccessTemplate(
+                presetID: nil,
+                name: trimmed,
+                targetApp: agent,
+                fileScopes: scopes,
+                emailIDs: []
+            )
+            statusMessage = "Saved '\(trimmed)' for \(displayName(for: agent)) — \(scopes.count) source\(scopes.count == 1 ? "" : "s")."
+            error = nil
+            loaded = false
+            await loadIfNeeded()
+        } catch {
+            self.error = "Couldn't save scope: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Sections
@@ -82,7 +152,7 @@ struct SessionsSettingsPane: View {
             VStack(alignment: .leading, spacing: Spacing.section) {
                 Text("No saved sessions yet")
                     .font(ManifoldType.bodyMedium)
-                Text("When the unified Access surface ships its create-template flow, you'll be able to save the current scope as a named session here. For now, this pane lists templates created programmatically.")
+                Text("Click Capture current scope in the toolbar to save the sources Claude or Codex can currently see as a named template you can re-run later.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -249,4 +319,87 @@ private struct TemplateGroup: Identifiable {
     let agent: TargetApp
     let templates: [AccessPresetRecord]
     var id: String { agent.rawValue }
+}
+
+// MARK: - Capture scope sheet
+
+/// "Capture current scope" sheet. Lets the user name a template and pick
+/// which agent's scope to capture. Shows a one-line explanation of what
+/// gets saved (sources only, not per-file overrides) so users aren't
+/// surprised when they re-run later and find overrides have changed.
+private struct CaptureScopeSheet: View {
+    let connectedAgents: [TargetApp]
+    let onSave: (String, TargetApp) -> Void
+    let onCancel: () -> Void
+
+    @State private var draftName: String = ""
+    @State private var selectedAgent: TargetApp
+
+    init(
+        connectedAgents: [TargetApp],
+        onSave: @escaping (String, TargetApp) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.connectedAgents = connectedAgents
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _selectedAgent = State(initialValue: connectedAgents.first ?? .cowork)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s4) {
+            Text("Capture current scope as a template")
+                .font(ManifoldType.heading)
+
+            Text("Saves the sources \(displayName(for: selectedAgent)) can currently see as a named template you can re-run later. Per-file overrides aren't captured — they're persistent across sessions.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                Text("Name")
+                    .font(ManifoldType.captionMedium)
+                    .foregroundStyle(.secondary)
+                TextField("e.g. Q4 Reporting", text: $draftName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(saveIfValid)
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                Text("Capture from")
+                    .font(ManifoldType.captionMedium)
+                    .foregroundStyle(.secondary)
+                Picker("Capture from", selection: $selectedAgent) {
+                    ForEach(connectedAgents, id: \.rawValue) { agent in
+                        Text(displayName(for: agent)).tag(agent)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                Button("Save", action: saveIfValid)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(Spacing.s4)
+        .frame(width: 420)
+    }
+
+    private func saveIfValid() {
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onSave(trimmed, selectedAgent)
+    }
+
+    private func displayName(for agent: TargetApp) -> String {
+        switch agent {
+        case .cowork: return "Claude"
+        case .codex:  return "Codex"
+        }
+    }
 }
