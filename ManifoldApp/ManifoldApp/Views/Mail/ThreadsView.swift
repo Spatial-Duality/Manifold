@@ -83,7 +83,8 @@ struct MailReviewView: View {
                     selectedSyncState: selectedSyncState,
                     rows: reviewRows,
                     sortOrder: $sortOrder,
-                    selection: selectedMessageBinding
+                    selection: selectedMessageBinding,
+                    onOpenInspector: { isInspectorVisible = true }
                 )
             }
             .frame(maxWidth: .infinity)
@@ -101,12 +102,11 @@ struct MailReviewView: View {
         .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
             isSearchFocused = true
         }
-        .onChange(of: mailReview.selectedMessageID) { _, newValue in
-            // Auto-open the inspector when the user clicks a message. The
-            // close button + toolbar toggle let them hide it again; their
-            // choice persists via @AppStorage so the next launch respects it.
-            if newValue != nil { isInspectorVisible = true }
-        }
+        // Single click selects the row (highlights it) but does NOT open
+        // the inspector — that matches the macOS Finder convention. Double
+        // click on a row opens the inspector (see openInspectorForRow in
+        // MailReviewTableArea). User can also press the toolbar toggle or
+        // ⌥⌘0 at any time, regardless of selection.
         .background {
             // ⌥⌘0 toggles the inspector — same chord as the Files inspector.
             Button("Toggle Mail Inspector") { isInspectorVisible.toggle() }
@@ -328,6 +328,7 @@ private struct MailReviewTableArea: View {
     let rows: [MailReviewRow]
     @Binding var sortOrder: [KeyPathComparator<MailReviewRow>]
     @Binding var selection: String?
+    let onOpenInspector: () -> Void
 
     var body: some View {
         if mailReview.isLoading && mailReview.messages.isEmpty {
@@ -370,10 +371,14 @@ private struct MailReviewTableArea: View {
                 }
 
                 Table(of: MailReviewRow.self, selection: $selection, sortOrder: $sortOrder) {
-                    TableColumn("Visibility", value: \.visibilitySortKey) { row in
-                        VisibilityChip(state: row.visibilityState)
+                    TableColumn("Share", value: \.visibilitySortKey) { row in
+                        // Same checkbox visual as files/folders. Tappable
+                        // toggle wired to setMessageShared. Agent-tinted
+                        // when on so users see WHICH agent the row is
+                        // shared with at a glance.
+                        MailShareCheckbox(row: row, agent: mailReview.targetAgent)
                     }
-                    .width(min: 110, ideal: 124, max: 138)
+                    .width(min: 64, ideal: 72, max: 80)
 
                     TableColumn("Sender", value: \.senderSortKey) { row in
                         HStack(spacing: Spacing.s2) {
@@ -382,6 +387,13 @@ private struct MailReviewTableArea: View {
                                 .font(ManifoldType.body)
                                 .lineLimit(1)
                         }
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            TapGesture(count: 2).onEnded {
+                                selection = row.emailID
+                                onOpenInspector()
+                            }
+                        )
                     }
                     .width(min: 160, ideal: 190)
 
@@ -395,6 +407,13 @@ private struct MailReviewTableArea: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            TapGesture(count: 2).onEnded {
+                                selection = row.emailID
+                                onOpenInspector()
+                            }
+                        )
                     }
 
                     TableColumn("Mailbox", value: \.mailboxSortKey) { row in
@@ -426,6 +445,11 @@ private struct MailReviewTableArea: View {
                     ForEach(rows) { row in
                         TableRow(row)
                             .contextMenu {
+                                Button("Open inspector") {
+                                    selection = row.emailID
+                                    onOpenInspector()
+                                }
+                                Divider()
                                 VisibilityActionMenu(row: row)
                             }
                     }
@@ -738,5 +762,41 @@ enum MailDisplayFormatter {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - Email share checkbox
+
+/// Tappable checkbox cell for the Share column. Same visual language
+/// as the redesigned files/folders matrix and the file inspector
+/// selector — SF Symbol checkbox glyphs, agent-tinted when on. One
+/// click toggles the row's shared state for the current target agent
+/// without affecting selection or inspector visibility.
+private struct MailShareCheckbox: View {
+    @Environment(MailReviewModel.self) private var mailReview
+    let row: MailReviewRow
+    let agent: TargetApp
+
+    private var isShared: Bool {
+        mailReview.sharedEmailIDs.contains(row.emailID)
+    }
+
+    var body: some View {
+        Button {
+            Task { await mailReview.setMessageShared(row.emailID, isShared: !isShared) }
+        } label: {
+            Image(systemName: isShared ? "checkmark.square.fill" : "square")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(isShared ? AgentMeta.color(agent) : Color.secondary)
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isShared
+              ? "Shared with \(AgentMeta.label(agent)). Click to hide."
+              : "Hidden from \(AgentMeta.label(agent)). Click to share.")
+        .accessibilityLabel(isShared ? "Shared, click to hide" : "Hidden, click to share")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityIdentifier("mail.share.\(row.emailID)")
     }
 }
