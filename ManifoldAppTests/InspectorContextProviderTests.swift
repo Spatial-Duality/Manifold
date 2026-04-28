@@ -21,6 +21,24 @@ final class InspectorContextProviderTests: XCTestCase {
         }
     }
 
+    /// Sendable mutable Date holder for tests that step a fake clock
+    /// forward through a synchronous `@Sendable () -> Date` closure.
+    /// `clock` on `InspectorContextProvider` is sync, so we can't use
+    /// an actor here — protect the Date with NSLock instead.
+    private final class FakeClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Date
+        init(_ initial: Date) { self.value = initial }
+        func now() -> Date {
+            lock.lock(); defer { lock.unlock() }
+            return value
+        }
+        func advance(by interval: TimeInterval) {
+            lock.lock(); defer { lock.unlock() }
+            value = value.addingTimeInterval(interval)
+        }
+    }
+
     func testCacheMissTriggersFetch() async throws {
         let recorder = RecordingFetcher()
         let provider = InspectorContextProvider { fileID in
@@ -52,10 +70,10 @@ final class InspectorContextProviderTests: XCTestCase {
 
     func testCacheExpiryTriggersRefetch() async throws {
         let recorder = RecordingFetcher()
-        var fakeNow = Date(timeIntervalSince1970: 1000)
+        let clock = FakeClock(Date(timeIntervalSince1970: 1000))
         let provider = InspectorContextProvider(
             configuration: .init(ttl: .seconds(60), capacity: 10),
-            clock: { fakeNow }
+            clock: { clock.now() }
         ) { fileID in
             await recorder.record(fileID)
             return InspectorContext(fileID: fileID)
@@ -65,7 +83,7 @@ final class InspectorContextProviderTests: XCTestCase {
         _ = try await provider.context(for: id)
 
         // Advance past TTL.
-        fakeNow = fakeNow.addingTimeInterval(120)
+        clock.advance(by: 120)
         _ = try await provider.context(for: id)
 
         let calls = await recorder.calls

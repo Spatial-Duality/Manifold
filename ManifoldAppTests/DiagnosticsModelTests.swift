@@ -12,8 +12,12 @@ final class DiagnosticsModelTests: XCTestCase {
     private var tempDir: URL!
     private var recorder: DiagnosticsRecorder!
 
-    override func setUp() {
-        super.setUp()
+    // Async variants run on the @MainActor-inherited isolation of this
+    // class, so mutating @MainActor-isolated stored properties is safe.
+    // The sync overrides land on a nonisolated XCTest queue and trip
+    // Swift 6 strict-concurrency warnings.
+    override func setUp() async throws {
+        try await super.setUp()
         let suiteName = "com.spatialduality.manifold.diagnostics-test.\(UUID().uuidString)"
         tempDefaults = UserDefaults(suiteName: suiteName)!
         tempDir = FileManager.default.temporaryDirectory
@@ -22,14 +26,12 @@ final class DiagnosticsModelTests: XCTestCase {
         recorder = DiagnosticsRecorder(process: .app, directory: tempDir, launchUUID: "test-launch")
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: tempDir)
-        if let suite = tempDefaults.dictionaryRepresentation().keys.first.map({ _ in tempDefaults }) {
-            for key in suite!.dictionaryRepresentation().keys {
-                tempDefaults.removeObject(forKey: key)
-            }
+        for key in tempDefaults.dictionaryRepresentation().keys {
+            tempDefaults.removeObject(forKey: key)
         }
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func makeModel(endpoint: URL? = nil) -> DiagnosticsModel {

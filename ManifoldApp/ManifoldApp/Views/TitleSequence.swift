@@ -373,7 +373,7 @@ private struct ParticleSlot: View {
                 system.draw(into: context, size: size)
             }
         }
-        .onChange(of: slotState) { newState in
+        .onChange(of: slotState) { _, newState in
             morph(to: newState)
         }
         .onAppear {

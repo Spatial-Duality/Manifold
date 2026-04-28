@@ -147,17 +147,22 @@ final class ManifoldStoreTests: XCTestCase {
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
 
         await store.mailReview.prepare(force: true)
+        // The redesigned mail surface tracks per-agent share state.
+        // Push the AI we're asserting on (cowork) into the model so its
+        // shared set populates, then drive every assertion through the
+        // agent-aware API.
+        await store.mailReview.setConnectedAgents([.cowork])
 
         let boardThread = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-frontier-sync@anthropic.test" }))
-        XCTAssertEqual(store.mailReview.shareState(for: boardThread), .mixed)
+        XCTAssertEqual(store.mailReview.shareState(for: boardThread, agent: .cowork), .mixed)
 
-        await store.mailReview.setMessageShared("email-2", isShared: true)
+        await store.mailReview.setMessageShared("email-2", agent: .cowork, isShared: true)
         let afterSecondShare = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-frontier-sync@anthropic.test" }))
-        XCTAssertEqual(store.mailReview.shareState(for: afterSecondShare), .mixed)
+        XCTAssertEqual(store.mailReview.shareState(for: afterSecondShare, agent: .cowork), .mixed)
 
-        await store.mailReview.setMessageShared("email-3", isShared: true)
+        await store.mailReview.setMessageShared("email-3", agent: .cowork, isShared: true)
         let fullyShared = try XCTUnwrap(store.mailReview.threadRows.first(where: { $0.threadKey == "thread-frontier-sync@anthropic.test" }))
-        XCTAssertEqual(store.mailReview.shareState(for: fullyShared), .on)
+        XCTAssertEqual(store.mailReview.shareState(for: fullyShared, agent: .cowork), .on)
     }
 
     func testPrivacyFixtureLoadsDiscoveryStateAndPrivacyApproval() async throws {

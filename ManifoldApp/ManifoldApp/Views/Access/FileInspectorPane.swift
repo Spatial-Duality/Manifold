@@ -247,16 +247,13 @@ struct FileInspectorPane: View {
     @ViewBuilder
     private var auditTrailFooter: some View {
         let entryCount = exposures.count
-        guard entryCount > 0 else {
-            return AnyView(EmptyView())
-        }
-        let earliest = exposures.last?.timestamp
-        let dateText: String? = earliest.map { ts in
-            Self.relativeFormatter.localizedString(
-                for: Date(timeIntervalSince1970: ts), relativeTo: .now
-            )
-        }
-        return AnyView(
+        if entryCount > 0 {
+            let earliest = exposures.last?.timestamp
+            let dateText: String? = earliest.map { ts in
+                Self.relativeFormatter.localizedString(
+                    for: Date(timeIntervalSince1970: ts), relativeTo: .now
+                )
+            }
             HStack(spacing: Spacing.s1) {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundStyle(ManifoldPalette.active)
@@ -272,7 +269,7 @@ struct FileInspectorPane: View {
             .accessibilityLabel(
                 "\(entryCount) audit \(entryCount == 1 ? "entry" : "entries") logged for this file"
             )
-        )
+        }
     }
 
     private func footerText(entryCount: Int, dateText: String?) -> String {
