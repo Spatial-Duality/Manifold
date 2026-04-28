@@ -22,8 +22,8 @@ If that fits your setup, you can clone, build, and run the app locally today.
 
 ## What It Does
 
-- Lets you choose which files, folders, and emails Claude can see through Manifold
-- Lets you choose separately what Codex can see through Manifold
+- Lets you choose which files, folders, and emails Claude (Desktop, Cowork, and Claude Code) can see through Manifold
+- Lets you choose separately what Codex CLI can see through Manifold
 - Enforces a unified rule system across files, emails, and agent behavior, with seeded denies for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
@@ -101,6 +101,39 @@ See [docs/architecture.md](docs/architecture.md) for the outsider-friendly syste
 ## Current Status
 
 Early development, but already usable for local builds. The runtime, app tests, and fixture-mode UI tests are in place, and the main product model is now in the codebase.
+
+## What Manifold governs (and what it doesn't)
+
+Manifold governs the path that goes through `manifold-mcp`. AI tools
+that connect via MCP and call `manifold.*` tools get per-agent policy,
+exposure recording, cross-agent memory, and reviewable writes via
+tracked workspaces.
+
+Supported MCP clients today (configured automatically by
+`manifold-mcp --install`):
+
+- **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Claude Cowork** — same registration as Claude Desktop
+- **Claude Code (CLI)** — `~/.claude/settings.json`
+- **Codex CLI** — `~/.codex/config.toml`
+
+The same install also writes `~/CLAUDE.md` and `~/.codex/AGENTS.md`
+with a Manifold-managed Markdown block that nudges these tools toward
+`manifold.*` tools (managed section, idempotent across re-installs,
+preserves your existing rules).
+
+What Manifold **does not** govern (intentionally surfaced):
+
+- System shell, network requests, and direct filesystem reads outside
+  approved Manifold sources. AI tools with native shell or file tools
+  can bypass Manifold by using those tools instead. The rules file
+  nudges them away from this; nothing enforces it.
+- Computer use / vision capabilities (e.g., Claude controlling the
+  mouse). Outside Manifold's process boundary entirely.
+- Vendor-hosted connectors and remote-tool calls that happen on the
+  vendor's infrastructure rather than your machine.
+- AI tools that don't support MCP (e.g., older Aider versions, raw API
+  scripts). No installation point, no governance.
 
 ## Known Limitations
 
