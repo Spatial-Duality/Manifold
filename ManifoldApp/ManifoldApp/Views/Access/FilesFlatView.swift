@@ -24,12 +24,15 @@ struct FilesFlatView: View {
     @State private var searchText = ""
     @State private var quickLookURL: URL?
     @State private var aiTouchedPaths: Set<String> = []
+    @AppStorage("access.smartViews") private var smartViewsJSON: String = "[]"
+    @State private var showSmartViewSheet = false
+    @State private var smartViewDraftName: String = ""
     @State private var sortOrder: [KeyPathComparator<SourceFile>] = [
         KeyPathComparator(\SourceFile.sourceName),
         KeyPathComparator(\SourceFile.relativePath),
     ]
 
-    enum ScopeFilter: Hashable {
+    enum ScopeFilter: Hashable, Codable {
         case all
         case shared
         case unshared
@@ -37,6 +40,28 @@ struct FilesFlatView: View {
         case overriddenAllow
         case overriddenHide
         case changed
+    }
+
+    /// User-saved combination of (scopeFilter, searchText). Persisted via
+    /// @AppStorage as JSON — Smart Views are app-level preferences, not
+    /// runtime state, so they don't belong in the AccessStore database.
+    struct SmartView: Codable, Identifiable, Hashable {
+        let id: UUID
+        var name: String
+        var scopeFilter: ScopeFilter
+        var searchText: String
+
+        init(
+            id: UUID = UUID(),
+            name: String,
+            scopeFilter: ScopeFilter,
+            searchText: String
+        ) {
+            self.id = id
+            self.name = name
+            self.scopeFilter = scopeFilter
+            self.searchText = searchText
+        }
     }
 
     // MARK: - Derived
@@ -240,6 +265,53 @@ struct FilesFlatView: View {
         }
     }
 
+    // MARK: - Smart Views
+
+    /// Decoded list of saved Smart Views. Read-only — write through
+    /// `saveSmartViews(_:)` so the @AppStorage JSON stays in sync.
+    private var smartViews: [SmartView] {
+        guard let data = smartViewsJSON.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([SmartView].self, from: data)) ?? []
+    }
+
+    private func saveSmartViews(_ views: [SmartView]) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(views),
+              let json = String(data: data, encoding: .utf8) else { return }
+        smartViewsJSON = json
+    }
+
+    /// True when the user has tweaked the filter/search away from defaults.
+    /// Drives the "Save current view" button enable state — saving an
+    /// empty filter produces a useless preset.
+    private var hasNonDefaultFilter: Bool {
+        scopeFilter != .all || !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func applySmartView(_ view: SmartView) {
+        scopeFilter = view.scopeFilter
+        searchText = view.searchText
+    }
+
+    private func deleteSmartView(_ view: SmartView) {
+        var updated = smartViews
+        updated.removeAll { $0.id == view.id }
+        saveSmartViews(updated)
+    }
+
+    private func saveCurrentAsSmartView(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var updated = smartViews
+        updated.append(SmartView(
+            name: trimmed,
+            scopeFilter: scopeFilter,
+            searchText: searchText
+        ))
+        saveSmartViews(updated)
+    }
+
     private var connectedAgentsKey: String {
         connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
     }
@@ -270,6 +342,8 @@ struct FilesFlatView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
 
+            smartViewsMenu
+
             Spacer()
 
             Text("\(visibleFiles.count) of \(files.count)")
@@ -292,6 +366,64 @@ struct FilesFlatView: View {
         case .overriddenHide:        return "Hidden overrides"
         case .changed:               return "Changed"
         }
+    }
+
+    /// Smart Views menu — saved (filter, search) combinations the user
+    /// can recall in one click. Mirrors the Mail.app Smart Mailbox
+    /// pattern. Save action is disabled when the current filter is the
+    /// default since there's nothing meaningful to save.
+    @ViewBuilder
+    private var smartViewsMenu: some View {
+        Menu {
+            if smartViews.isEmpty {
+                Text("No saved views")
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(smartViews) { view in
+                    Button(view.name) { applySmartView(view) }
+                }
+                Divider()
+                Menu("Delete") {
+                    ForEach(smartViews) { view in
+                        Button(view.name, role: .destructive) {
+                            deleteSmartView(view)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Save current view…") {
+                smartViewDraftName = ""
+                showSmartViewSheet = true
+            }
+            .disabled(!hasNonDefaultFilter)
+        } label: {
+            Label("Smart Views", systemImage: "star")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .sheet(isPresented: $showSmartViewSheet) {
+            SmartViewSheet(
+                draftName: $smartViewDraftName,
+                currentDescription: currentFilterDescription,
+                onSave: {
+                    saveCurrentAsSmartView(name: smartViewDraftName)
+                    showSmartViewSheet = false
+                },
+                onCancel: { showSmartViewSheet = false }
+            )
+        }
+    }
+
+    /// Plain-English description of the current filter shown in the
+    /// save sheet so the user sees what's being captured.
+    private var currentFilterDescription: String {
+        var parts: [String] = [scopeFilterLabel]
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            parts.append("matching \"\(trimmed)\"")
+        }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: - Table
@@ -662,4 +794,39 @@ struct FilesFlatView: View {
     }
 
     static let relativeFormatter = RelativeDateTimeFormatter()
+}
+
+// MARK: - Smart View save sheet
+
+private struct SmartViewSheet: View {
+    @Binding var draftName: String
+    let currentDescription: String
+    let onSave: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s4) {
+            Text("Save Smart View")
+                .font(ManifoldType.heading)
+            Text(currentDescription)
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("Name", text: $draftName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(onSave)
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                Button("Save", action: onSave)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(Spacing.s4)
+        .frame(width: 360)
+    }
 }
