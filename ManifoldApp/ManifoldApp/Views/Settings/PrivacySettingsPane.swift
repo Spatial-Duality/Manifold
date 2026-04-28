@@ -26,6 +26,7 @@ struct PrivacySettingsPane: View {
         Form {
             modelSection
             presetsSection
+            FilterModeSection()
             identitySection
             allowlistSection
             indexStatusSection

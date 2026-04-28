@@ -319,6 +319,19 @@ protocol RuntimeClientProtocol: Sendable {
         isDirectory: Bool
     ) async throws
 
+    // MARK: - Filter mode (Sensitive content detection — Lane C)
+
+    /// Effective filter mode for an agent: per-agent override > global > .off.
+    func filterMode(for agent: TargetApp) async throws -> FilterMode
+    /// Global default filter mode (applied when an agent has no per-agent override).
+    func globalFilterMode() async throws -> FilterMode
+    /// Set per-agent filter mode override.
+    func setFilterMode(_ mode: FilterMode, for agent: TargetApp) async throws
+    /// Set global default filter mode.
+    func setGlobalFilterMode(_ mode: FilterMode) async throws
+    /// Drop a per-agent override so the agent falls back to the global default.
+    func clearAgentFilterMode(_ agent: TargetApp) async throws
+
     // MARK: - Approval queue (Phase-5 wiring)
 
     /// Pending approval requests from the runtime's ApprovalQueue.
@@ -342,6 +355,23 @@ protocol RuntimeClientProtocol: Sendable {
     func resetSeededRules() async throws
     /// Live preview — "how many files/emails would match this rule right now?"
     func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview
+}
+
+// Default implementations for the Lane C filter mode methods so existing
+// stub / in-memory / preview implementations stay green. Concrete clients
+// (AppRuntimeClient) override these via their own implementations.
+extension RuntimeClientProtocol {
+    func filterMode(for agent: TargetApp) async throws -> FilterMode { .off }
+    func globalFilterMode() async throws -> FilterMode { .off }
+    func setFilterMode(_ mode: FilterMode, for agent: TargetApp) async throws {
+        throw RuntimeClientStubError.unimplemented("setFilterMode")
+    }
+    func setGlobalFilterMode(_ mode: FilterMode) async throws {
+        throw RuntimeClientStubError.unimplemented("setGlobalFilterMode")
+    }
+    func clearAgentFilterMode(_ agent: TargetApp) async throws {
+        throw RuntimeClientStubError.unimplemented("clearAgentFilterMode")
+    }
 }
 
 /// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.

@@ -106,6 +106,7 @@
 		CABA5434A78C177BBD7D722E /* NavSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 169EB55B5856F9B3D2DA0778 /* NavSidebar.swift */; };
 		CC1C03869B96079BF5581EB1 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5FF27F89470525B8EB5C11D3 /* Sparkle */; };
 		CC21D9FF87A4036B5A9BEC18 /* FileTypeIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB6201733D6CF2A55D93970 /* FileTypeIcon.swift */; };
+		CC344FCCF506B5ED7C10554D /* FilterModeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082C6CC15B5FEB657FFA34A /* FilterModeSection.swift */; };
 		CD8AAC075D816C85DDCA6E58 /* PrivacySeverityBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D88BA89EB19AFFFFD84CDF1 /* PrivacySeverityBar.swift */; };
 		D0F2BBBDD05111A46F81CBCA /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E50FA851604BE30695DFD21 /* QuickLookPreview.swift */; };
 		D10DDBE51F4AA051C0B52A98 /* FilesFlatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C954B211BE478AB70CCDC861 /* FilesFlatView.swift */; };
@@ -242,6 +243,7 @@
 		ACE7ED146F47690C064E79D0 /* ManifoldAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldAppUITests.swift; sourceTree = "<group>"; };
 		AD21F463E8A0DD4E7E5B25C8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		ADFE22B107DA01C6DC2C67C7 /* Spacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spacing.swift; sourceTree = "<group>"; };
+		B082C6CC15B5FEB657FFA34A /* FilterModeSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterModeSection.swift; sourceTree = "<group>"; };
 		B10B54AE03CE3C69CAF56E27 /* LedgerWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerWindowView.swift; sourceTree = "<group>"; };
 		B120B9699C60029951F5A48A /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		B18AB9C065F0670DC385345A /* RootWindowContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootWindowContent.swift; sourceTree = "<group>"; };
@@ -410,6 +412,7 @@
 			children = (
 				80E07891B5469129BFFFBFDD /* AdvancedSettingsPane.swift */,
 				1A6C12C18EB52D7A9D63436A /* AIAppsSettingsPane.swift */,
+				B082C6CC15B5FEB657FFA34A /* FilterModeSection.swift */,
 				EC65884C8C989BEB07CAD993 /* GeneralSettingsPane.swift */,
 				8049B04016C58516B4B28E34 /* MailSettingsPane.swift */,
 				134F1EB5D50773A5809E0E27 /* PrivacySettingsPane.swift */,
@@ -779,6 +782,7 @@
 				8F750A171F9E05D8834FD7BB /* FileTreeInspector.swift in Sources */,
 				CC21D9FF87A4036B5A9BEC18 /* FileTypeIcon.swift in Sources */,
 				D10DDBE51F4AA051C0B52A98 /* FilesFlatView.swift in Sources */,
+				CC344FCCF506B5ED7C10554D /* FilterModeSection.swift in Sources */,
 				DFDCA6688406932807587BCC /* FirstRunFlow.swift in Sources */,
 				BB08EB9B2BE1ED8745795EBA /* FirstRunPanels.swift in Sources */,
 				0FBBB43C0AB9648016121C75 /* FoldersMatrixView.swift in Sources */,
