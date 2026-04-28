@@ -225,6 +225,25 @@ extension AppRuntimeClient {
         return Set(paths)
     }
 
+    /// Per-source drift counts since the named agent's most recently
+    /// ended grant. Only sources with > 0 changes are present in the
+    /// returned dictionary.
+    func sourceDriftCounts(agent: TargetApp) async throws -> [String: Int] {
+        let response = try await xpc.command(
+            name: "sourceDriftCounts",
+            payload: ["agent": agent.rawValue]
+        )
+        // XPC marshals number values as NSNumber across the boundary;
+        // accept both Int and number-backed casts.
+        if let direct = response["counts"] as? [String: Int] {
+            return direct
+        }
+        if let nsBacked = response["counts"] as? [String: NSNumber] {
+            return nsBacked.mapValues { $0.intValue }
+        }
+        return [:]
+    }
+
     func filterModeOverrides(grantID: String) async throws -> [FilterModeOverrideRecord] {
         let response = try await xpc.command(
             name: "listFilterModeOverrides",

@@ -208,6 +208,30 @@ public actor SnapshotStore {
         return Set(rows.compactMap { $0["file_path"] })
     }
 
+    /// Count of distinct files under `rootPath` with non-baseline snapshots
+    /// recorded after `sinceTimestamp`. Used by the per-source drift
+    /// indicator on FoldersMatrixView — "12 files modified since Claude's
+    /// last session ended."
+    ///
+    /// `rootPath` is matched as a prefix; passing the source's
+    /// originalRootPath catches every file under it. `sinceTimestamp` is
+    /// an ISO 8601 string (the snapshots table stores timestamps as text
+    /// and ISO 8601 sorts correctly as text). Pass an empty string to get
+    /// total non-baseline write count for the source.
+    public func driftCount(rootPath: String, sinceTimestamp: String) throws -> Int {
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        let result = try db.queryScalar(
+            """
+            SELECT COUNT(DISTINCT file_path) FROM snapshots
+            WHERE is_baseline = 0
+              AND file_path LIKE ?
+              AND timestamp > ?
+            """,
+            params: [prefix + "%", sinceTimestamp]
+        )
+        return Int(result ?? "0") ?? 0
+    }
+
     /// Count snapshots for a file path.
     public func snapshotCount(filePath: String) throws -> Int {
         let result = try db.queryScalar(

@@ -354,6 +354,13 @@ protocol RuntimeClientProtocol: Sendable {
     /// authored entry. Drives the per-row sparkle in the Files table.
     func aiTouchedFilePaths() async throws -> Set<String>
 
+    /// Per-source counts of files that have changed since the named
+    /// agent's most recently ended grant. Drives the drift badge on
+    /// FoldersMatrixView source rows. Returns sourceID → drift count
+    /// (only sources with > 0 changes are present in the dictionary).
+    /// Empty map means no prior grant exists yet for this agent.
+    func sourceDriftCounts(agent: TargetApp) async throws -> [String: Int]
+
     // MARK: - Filter mode (Sensitive content detection — Lane C)
 
     /// Effective filter mode for an agent: per-agent override > global > .off.
@@ -437,6 +444,7 @@ extension RuntimeClientProtocol {
     // Inspector gem defaults
     func fileExposures(resourcePath: String, limit: Int) async throws -> [ExposureRecord] { [] }
     func aiTouchedFilePaths() async throws -> Set<String> { [] }
+    func sourceDriftCounts(agent: TargetApp) async throws -> [String: Int] { [:] }
 }
 
 /// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.

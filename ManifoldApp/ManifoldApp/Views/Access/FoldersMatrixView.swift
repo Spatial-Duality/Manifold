@@ -21,6 +21,11 @@ struct FoldersMatrixView: View {
     @State private var sortOrder: [KeyPathComparator<SourceRecord>] = [
         KeyPathComparator(\SourceRecord.displayName)
     ]
+    /// Per-agent drift counts keyed by sourceID. "Drift" = files with
+    /// non-baseline snapshots after that agent's most recently ended
+    /// grant. Loaded lazily on appear and refreshed when the connected-
+    /// agents set changes; absence means "no signal yet" not "zero drift".
+    @State private var driftCountsByAgent: [TargetApp: [String: Int]] = [:]
 
     // MARK: - Derived
 
@@ -74,6 +79,27 @@ struct FoldersMatrixView: View {
             }
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search folders")
+        .task(id: connectedAgentsKey) { await loadDriftCounts() }
+    }
+
+    private var connectedAgentsKey: String {
+        connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
+    }
+
+    /// Loads drift counts for every connected agent in parallel, then
+    /// publishes them to the table. One XPC per agent (typically 1-2
+    /// roundtrips). Failure is silent — drift badges just don't render
+    /// rather than the matrix erroring out.
+    private func loadDriftCounts() async {
+        var fresh: [TargetApp: [String: Int]] = [:]
+        for agent in connectedAgents {
+            do {
+                fresh[agent] = try await store.runtime.sourceDriftCounts(agent: agent)
+            } catch {
+                fresh[agent] = [:]
+            }
+        }
+        driftCountsByAgent = fresh
     }
 
     private var toolbar: some View {
@@ -126,8 +152,54 @@ struct FoldersMatrixView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    if let drift = driftSummary(for: source) {
+                        driftBadge(drift)
+                    }
                 }
             }
+        }
+    }
+
+    /// Drift summary for a source — agent + count. Picks the agent with
+    /// the highest drift count; null when no agent has drift > 0. Render
+    /// as a thin caption under the source path so the matrix stays tight
+    /// while the signal is still visible.
+    private struct DriftSummary {
+        let agent: TargetApp
+        let count: Int
+    }
+
+    private func driftSummary(for source: SourceRecord) -> DriftSummary? {
+        var best: DriftSummary?
+        for agent in connectedAgents {
+            let count = driftCountsByAgent[agent]?[source.sourceID] ?? 0
+            if count > 0, count > (best?.count ?? 0) {
+                best = DriftSummary(agent: agent, count: count)
+            }
+        }
+        return best
+    }
+
+    @ViewBuilder
+    private func driftBadge(_ summary: DriftSummary) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(ManifoldPalette.attention)
+                .accessibilityHidden(true)
+            Text("\(summary.count) since \(displayName(for: summary.agent))'s last session")
+                .font(ManifoldType.caption)
+                .foregroundStyle(ManifoldPalette.attention)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .help("\(summary.count) files have changed in this source since \(displayName(for: summary.agent))'s last session ended")
+    }
+
+    private func displayName(for agent: TargetApp) -> String {
+        switch agent {
+        case .cowork: return "Claude"
+        case .codex:  return "Codex"
         }
     }
 

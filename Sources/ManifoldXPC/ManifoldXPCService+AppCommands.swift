@@ -253,6 +253,18 @@ extension ManifoldXPCService {
             // indicator in the Files table.
             return ["paths": Array(try await runtime.snapshotStore.aiTouchedFilePaths())]
 
+        case "sourceDriftCounts":
+            // Per-source counts of files that have changed (non-baseline
+            // snapshots) since the named agent's most recently ended grant.
+            // Returns [sourceID: Int]. Sources with no drift get a 0;
+            // sources with no prior grant ALSO get 0 (no baseline =
+            // no drift signal yet).
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["counts": try await sourceDriftCounts(agent: agent)]
+
         case "fileExposures":
             // Per-file exposure timeline used by the inspector to show
             // "Claude read 5× · Codex 0×". The runtime returns the recent
@@ -949,6 +961,44 @@ extension ManifoldXPCService {
     /// runtime accepts grants for any agent and the UI gates connection at
     /// session-start time. (TODO when AppRuntimeClient surfaces connection
     /// status to the bridge layer.)
+    /// Per-source drift counts for a given agent. For each currently
+    /// active source, computes how many files have non-baseline snapshots
+    /// recorded after the agent's most recently ended grant. Returns a
+    /// JSON-friendly [sourceID: count] map (Int values for XPC).
+    ///
+    /// "Most recently ended grant" gives a single cutoff per agent; this
+    /// is a useful approximation rather than per-(source, agent) precision.
+    /// In the common case — a user runs Claude sessions, ends them, then
+    /// returns later — this answers "since I last worked with Claude,
+    /// what has changed in each of the sources I share with Claude?"
+    /// Sources that weren't in the most-recent grant still get a count
+    /// (signal: there has been activity in them); the UI can interpret
+    /// the count as a drift cue regardless of grant overlap.
+    private func sourceDriftCounts(agent: TargetApp) async throws -> [String: Int] {
+        let recentGrants = try await runtime.grantStore.allGrants(limit: 50)
+        let mostRecentEnded = recentGrants.first { record in
+            record.targetApp == agent.rawValue && record.endedAt != nil
+        }
+        guard let cutoff = mostRecentEnded?.endedAt, !cutoff.isEmpty else {
+            // No prior session ended for this agent — no baseline to drift
+            // from. Returning an empty map signals "no drift signal yet"
+            // to the UI, which renders the source rows without badges.
+            return [:]
+        }
+        let activeSources = try await runtime.grantStore.activeSources()
+        var counts: [String: Int] = [:]
+        for source in activeSources {
+            let count = try await runtime.snapshotStore.driftCount(
+                rootPath: source.originalRootPath,
+                sinceTimestamp: cutoff
+            )
+            if count > 0 {
+                counts[source.sourceID] = count
+            }
+        }
+        return counts
+    }
+
     private func startSessionFromTemplateCommand(payload: [String: Any]) async throws -> [String: Any] {
         guard let presetID = payload["presetID"] as? String else {
             throw ManifoldXPCError.invalidPayload
