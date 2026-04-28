@@ -188,6 +188,26 @@ public actor SnapshotStore {
         return rows.compactMap { $0["file_path"] }
     }
 
+    /// File paths that have at least one non-baseline snapshot whose
+    /// `source` indicates an AI agent wrote the bytes. Used by the
+    /// Files table to render the sparkle (✦) at a glance across the
+    /// whole listing — Goal 6 from the redesign brief.
+    ///
+    /// "agent"-flavored sources are detected by case-insensitive substring
+    /// match. The schema's source field is free-form ("agent",
+    /// "manifold-restore", "user", "baseline", etc.); the substring check
+    /// catches existing variants without depending on a future enum.
+    public func aiTouchedFilePaths() throws -> Set<String> {
+        let rows = try db.queryAll(
+            """
+            SELECT DISTINCT file_path FROM snapshots
+            WHERE is_baseline = 0
+              AND LOWER(source) LIKE '%agent%'
+            """
+        )
+        return Set(rows.compactMap { $0["file_path"] })
+    }
+
     /// Count snapshots for a file path.
     public func snapshotCount(filePath: String) throws -> Int {
         let result = try db.queryScalar(

@@ -217,6 +217,14 @@ extension AppRuntimeClient {
         return try XPCJSON.decode([ExposureRecord].self, from: object)
     }
 
+    /// File paths whose snapshot timeline contains at least one agent-
+    /// authored entry. Used by the Files table for the per-row sparkle.
+    func aiTouchedFilePaths() async throws -> Set<String> {
+        let response = try await xpc.command(name: "aiTouchedFilePaths", payload: [:])
+        let paths = response["paths"] as? [String] ?? []
+        return Set(paths)
+    }
+
     func filterModeOverrides(grantID: String) async throws -> [FilterModeOverrideRecord] {
         let response = try await xpc.command(
             name: "listFilterModeOverrides",

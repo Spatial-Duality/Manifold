@@ -350,6 +350,10 @@ protocol RuntimeClientProtocol: Sendable {
     /// Aggregation lives in the app — the runtime returns the raw timeline.
     func fileExposures(resourcePath: String, limit: Int) async throws -> [ExposureRecord]
 
+    /// File paths whose snapshot timeline contains at least one agent-
+    /// authored entry. Drives the per-row sparkle in the Files table.
+    func aiTouchedFilePaths() async throws -> Set<String>
+
     // MARK: - Filter mode (Sensitive content detection — Lane C)
 
     /// Effective filter mode for an agent: per-agent override > global > .off.
@@ -432,6 +436,7 @@ extension RuntimeClientProtocol {
 
     // Inspector gem defaults
     func fileExposures(resourcePath: String, limit: Int) async throws -> [ExposureRecord] { [] }
+    func aiTouchedFilePaths() async throws -> Set<String> { [] }
 }
 
 /// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.

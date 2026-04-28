@@ -247,6 +247,12 @@ extension ManifoldXPCService {
             }
             return ["overrides": try XPCJSON.object(from: try await runtime.filterModeStore.overrides(grantID: grantID))]
 
+        case "aiTouchedFilePaths":
+            // File paths whose snapshot timeline contains at least one
+            // non-baseline agent-authored entry. Drives the sparkle
+            // indicator in the Files table.
+            return ["paths": Array(try await runtime.snapshotStore.aiTouchedFilePaths())]
+
         case "fileExposures":
             // Per-file exposure timeline used by the inspector to show
             // "Claude read 5× · Codex 0×". The runtime returns the recent

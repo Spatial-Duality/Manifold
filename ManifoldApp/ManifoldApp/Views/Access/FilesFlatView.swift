@@ -23,6 +23,7 @@ struct FilesFlatView: View {
     @State private var scopeFilter: ScopeFilter = .all
     @State private var searchText = ""
     @State private var quickLookURL: URL?
+    @State private var aiTouchedPaths: Set<String> = []
     @State private var sortOrder: [KeyPathComparator<SourceFile>] = [
         KeyPathComparator(\SourceFile.sourceName),
         KeyPathComparator(\SourceFile.relativePath),
@@ -216,6 +217,7 @@ struct FilesFlatView: View {
         }
         .task(id: sourceReloadKey) {
             await loadFilesProgressively()
+            await loadAITouched()
         }
         .task(id: connectedAgentsKey) {
             await loadOverrides()
@@ -226,6 +228,15 @@ struct FilesFlatView: View {
                 return
             }
             selectedHistory = await store.fileHistory(filePath: path)
+        }
+    }
+
+    private func loadAITouched() async {
+        do {
+            aiTouchedPaths = try await store.runtime.aiTouchedFilePaths()
+        } catch {
+            // Honest no-op: sparkle stays absent if the runtime call fails.
+            aiTouchedPaths = []
         }
     }
 
@@ -316,6 +327,13 @@ struct FilesFlatView: View {
                         .font(ManifoldType.body)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    if aiTouchedPaths.contains(file.path) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.tint)
+                            .help("AI has written to this file")
+                            .accessibilityLabel("AI-touched")
+                    }
                 }
             }
             .width(min: 160, ideal: 220)
