@@ -415,12 +415,16 @@ private struct MailReviewTableArea: View {
                     }
                     .width(min: 56, ideal: max(56, CGFloat(connectedAgents.count) * 18 + 12), max: 160)
 
+                    // Sender is identifying but secondary — cap it so
+                    // Subject (the column that actually tells you what
+                    // the message is about) gets the widest slot.
                     TableColumn("Sender", value: \.senderSortKey) { row in
                         HStack(spacing: Spacing.s2) {
                             SenderAvatar(label: row.senderSortKey, size: 18)
                             Text(row.senderSortKey)
                                 .font(ManifoldType.body)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                         }
                         .contentShape(Rectangle())
                         .simultaneousGesture(
@@ -430,18 +434,24 @@ private struct MailReviewTableArea: View {
                             }
                         )
                     }
-                    .width(min: 160, ideal: 190)
+                    .width(min: 110, ideal: 150, max: 200)
 
+                    // Subject is the highest-information column — give it
+                    // a generous min so it can breathe and no max so it
+                    // takes any flex room left over from neighbors.
                     TableColumn("Subject", value: \.subjectSortKey) { row in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.subjectSortKey)
                                 .font(ManifoldType.bodyMedium)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                             Text(row.previewText)
                                 .font(ManifoldType.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                         .simultaneousGesture(
                             TapGesture(count: 2).onEnded {
@@ -450,20 +460,24 @@ private struct MailReviewTableArea: View {
                             }
                         )
                     }
+                    .width(min: 240, ideal: 420)
 
                     TableColumn("Mailbox", value: \.mailboxSortKey) { row in
                         Text(row.mailboxSortKey)
                             .font(ManifoldType.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-                    .width(min: 120, ideal: 140, max: 180)
+                    .width(min: 90, ideal: 110, max: 150)
 
                     TableColumn("Received", value: \.receivedDate) { row in
                         Text(MailDisplayFormatter.mailTimestamp(row.receivedAt))
                             .font(ManifoldType.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    .width(min: 100, ideal: 120, max: 140)
+                    .width(min: 92, ideal: 110, max: 130)
 
                     TableColumn("Attach", value: \.attachmentCount) { row in
                         if row.attachmentCount > 0 {
@@ -475,7 +489,7 @@ private struct MailReviewTableArea: View {
                                 .foregroundStyle(.tertiary)
                         }
                     }
-                    .width(min: 70, ideal: 80, max: 90)
+                    .width(min: 56, ideal: 64, max: 76)
                 } rows: {
                     ForEach(rows) { row in
                         TableRow(row)
@@ -545,6 +559,16 @@ private struct ThreadInspector: View {
     @Environment(MailReviewModel.self) private var mailReview
     let connectedAgents: [TargetApp]
     let onClose: () -> Void
+
+    /// Default-mail-client open handler. Hands the on-disk .eml URL to
+    /// NSWorkspace so the user lands in Apple Mail (or whatever they've
+    /// set as their default eml handler). Returns false silently when
+    /// the message has no .eml on disk yet — button shows disabled.
+    private func openInDefaultMailClient(_ message: EmailMessageRecord) {
+        guard let path = message.emlPath, !path.isEmpty else { return }
+        let url = URL(fileURLWithPath: path)
+        NSWorkspace.shared.open(url)
+    }
 
     var body: some View {
         ScrollView {
@@ -618,25 +642,59 @@ private struct ThreadInspector: View {
                         inspectorRow("Attachments", "\(selectedMessage.attachmentCount)")
                     }
 
+                    // Message body — full text, scrollable, selectable.
+                    // Replaces the previous one-line italic preview.
+                    // bodyText is the plaintext extracted from the .eml
+                    // for FTS5 indexing, so it's already free of HTML.
+                    // Falls back to the indexed preview if bodyText is
+                    // empty (older rows or messages still being parsed).
                     VStack(alignment: .leading, spacing: Spacing.s2) {
-                        Text("Safe excerpt")
-                            .font(ManifoldType.tiny.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .tracking(0.4)
+                        HStack {
+                            Text("Message")
+                                .font(ManifoldType.tiny.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .tracking(0.4)
+                            Spacer()
+                            // Prominent "Open in Mail" — the user asked
+                            // for a clearly placed button to bounce
+                            // into their default eml handler.
+                            Button {
+                                openInDefaultMailClient(selectedMessage)
+                            } label: {
+                                Label("Open in Mail", systemImage: "envelope.open")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled((selectedMessage.emlPath ?? "").isEmpty)
+                            .help("Open the original .eml in your default email client")
+                            .accessibilityIdentifier("mail.message.openExternal")
+                        }
 
-                        Text(MailDisplayFormatter.compactPreview(selectedMessage.preview ?? selectedMessage.bodyText ?? "No preview available"))
-                            .font(ManifoldType.body)
-                            .italic()
-                            .padding(Spacing.s3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(ManifoldPalette.surface)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.6)
-                            )
+                        let messageBody = (selectedMessage.bodyText?.isEmpty == false
+                            ? selectedMessage.bodyText
+                            : selectedMessage.preview)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                        ScrollView {
+                            Text(messageBody?.isEmpty == false
+                                 ? messageBody!
+                                 : "No message body extracted yet. Open in Mail to see the original.")
+                                .font(ManifoldType.body)
+                                .foregroundStyle(messageBody?.isEmpty == false ? .primary : .secondary)
+                                .textSelection(.enabled)
+                                .lineSpacing(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(Spacing.s3)
+                        }
+                        .frame(minHeight: 220, maxHeight: 360)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(ManifoldPalette.surface)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(ManifoldPalette.border, lineWidth: 0.6)
+                        )
+                        .accessibilityIdentifier("mail.message.body.\(selectedMessage.emailID)")
                     }
 
                     VStack(alignment: .leading, spacing: Spacing.s2) {

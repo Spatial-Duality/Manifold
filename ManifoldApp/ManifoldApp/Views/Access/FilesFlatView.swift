@@ -536,27 +536,23 @@ struct FilesFlatView: View {
 
     private var table: some View {
         Table(of: SourceFile.self, selection: $selectedFilePaths, sortOrder: $sortOrder) {
+            // Compact chip-stack in the row, same component the Mail
+            // Share column uses. Labels were forcing the labeled strip
+            // wider than the column slot and visually overflowing into
+            // the Name column. The All / per-agent "Allow / Deny / Reset"
+            // controls remain available in the bulk bar (when rows are
+            // selected) and the file inspector.
             TableColumn("Access") { file in
-                AccessCheckboxStrip(
+                AccessChipStack(
                     agents: connectedAgents,
                     visibleAgents: visibleAgents(for: file),
-                    explicitOverrideAgents: explicitOverrideAgents(for: file),
-                    accessibilityIDPrefix: accessIdentifierPrefix(for: file),
-                    onToggleAgent: { agent, wasVisible in
+                    onToggle: { agent, wasVisible in
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
-                    },
-                    onSetAll: { inScope in
-                        Task {
-                            await bulkSetVisibility(
-                                agents: connectedAgents,
-                                decision: inScope ? .allow : .deny,
-                                files: [file]
-                            )
-                        }
                     }
                 )
+                .accessibilityIdentifier(accessIdentifierPrefix(for: file))
             }
-            .width(min: 170, ideal: 190, max: 230)
+            .width(min: 56, ideal: max(56, CGFloat(connectedAgents.count) * 18 + 12), max: 140)
 
             TableColumn("Name", value: \.name) { file in
                 HStack(spacing: Spacing.s2) {
