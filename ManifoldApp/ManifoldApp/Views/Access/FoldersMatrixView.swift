@@ -26,6 +26,11 @@ struct FoldersMatrixView: View {
     /// grant. Loaded lazily on appear and refreshed when the connected-
     /// agents set changes; absence means "no signal yet" not "zero drift".
     @State private var driftCountsByAgent: [TargetApp: [String: Int]] = [:]
+    /// Files dropped onto the matrix queue here until the user picks
+    /// "Add the whole folder" or "Add only this file" in a confirmation
+    /// dialog. Folders are added immediately on drop without prompting.
+    @State private var pendingFileDrops: [URL] = []
+    @State private var isDropTargeted = false
 
     // MARK: - Derived
 
@@ -80,6 +85,96 @@ struct FoldersMatrixView: View {
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search folders")
         .task(id: connectedAgentsKey) { await loadDriftCounts() }
+        .dropDestination(for: URL.self) { items, _ in
+            handleDroppedURLs(items)
+            return !items.isEmpty
+        } isTargeted: { targeted in
+            isDropTargeted = targeted
+        }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(ManifoldPalette.selection, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .padding(2)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .confirmationDialog(
+            fileDropTitle,
+            isPresented: Binding(
+                get: { !pendingFileDrops.isEmpty },
+                set: { if !$0 { pendingFileDrops = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Add the whole folder") {
+                let drops = pendingFileDrops
+                pendingFileDrops = []
+                Task {
+                    for url in drops {
+                        await store.addSourceFromURL(url)
+                    }
+                }
+            }
+            Button("Add only \(pendingFileDrops.count == 1 ? "this file" : "these files")") {
+                let drops = pendingFileDrops
+                pendingFileDrops = []
+                Task {
+                    for url in drops {
+                        await store.addSourceForSingleFile(url)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingFileDrops = []
+            }
+        } message: {
+            Text(fileDropMessage)
+        }
+    }
+
+    private var fileDropTitle: String {
+        pendingFileDrops.count == 1
+            ? "Add \(pendingFileDrops[0].lastPathComponent)?"
+            : "Add \(pendingFileDrops.count) files?"
+    }
+
+    private var fileDropMessage: String {
+        // Honest about the model: Manifold tracks at folder granularity,
+        // so either choice ends up adding the parent folder. "Add only
+        // this file" hides the existing siblings via per-file deny
+        // overrides so only the dropped file is shared with the AIs.
+        // Files added to the folder later are visible by default.
+        if pendingFileDrops.count == 1 {
+            return "Manifold tracks at folder granularity. Add the whole folder so every file in it is visible, or add only this file and Manifold will hide its current siblings."
+        }
+        return "Manifold tracks at folder granularity. Add the whole containing folder of each file, or add only the dropped files and hide existing siblings."
+    }
+
+    private func handleDroppedURLs(_ urls: [URL]) {
+        let resolved = urls.map { $0.standardizedFileURL }
+        var folders: [URL] = []
+        var files: [URL] = []
+        for url in resolved {
+            if store.dropTargetIsFile(url) {
+                files.append(url)
+            } else {
+                folders.append(url)
+            }
+        }
+        if !folders.isEmpty {
+            Task {
+                for url in folders {
+                    await store.addSourceFromURL(url)
+                }
+            }
+        }
+        if !files.isEmpty {
+            // Append rather than replace so the user can drop again
+            // before answering the previous prompt — the dialog batches.
+            pendingFileDrops.append(contentsOf: files)
+        }
     }
 
     private var connectedAgentsKey: String {
@@ -212,8 +307,22 @@ struct FoldersMatrixView: View {
                 tint: ManifoldPalette.selection,
                 accessibilityIdentifier: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent).all"
             ) {
+                // Read live scope at click time. Two reasons:
+                // 1. .mixed should always go ON (toward all-shared), never OFF —
+                //    `!allScoped` would flip it OFF first, which is surprising.
+                // 2. If the cell rendered with a stale snapshot of governance
+                //    (TableColumn cells on macOS occasionally lag the
+                //    @Observable store), recomputing here avoids a no-op
+                //    click that looked like the toggle was broken.
                 Task {
-                    await setSourceScope(sourceID: source.sourceID, agents: connectedAgents, inScope: !allScoped)
+                    let liveScoped = scopedAgents(for: source)
+                    let liveAll = !connectedAgents.isEmpty
+                        && connectedAgents.allSatisfy { liveScoped.contains($0) }
+                    await setSourceScope(
+                        sourceID: source.sourceID,
+                        agents: connectedAgents,
+                        inScope: !liveAll
+                    )
                 }
             }
         }

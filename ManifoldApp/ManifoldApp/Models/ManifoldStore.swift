@@ -391,6 +391,106 @@ final class ManifoldStore {
         for path in paths { removeSource(path: path) }
     }
 
+    /// Drop-in entry: take a Finder URL and add it as a source. Folder
+    /// URLs add the folder itself; file URLs add the parent folder so
+    /// the file is reachable. Returns the added/existing SourceRecord
+    /// so callers can chain follow-up overrides.
+    @discardableResult
+    func addSourceFromURL(_ url: URL) async -> SourceRecord? {
+        let resolved = resolvedFolderURL(for: url)
+        let path = resolved.path
+        if let existing = sources.first(where: { $0.originalRootPath == path }) {
+            return existing
+        }
+        guard isRuntimeConnected else {
+            lastError = "Cannot add \"\(resolved.lastPathComponent)\" — runtime is not connected. Check that ManifoldAgent is running."
+            return nil
+        }
+        do {
+            let record = try await runtime.addSource(path: path, displayName: resolved.lastPathComponent)
+            await loadSources()
+            return record
+        } catch {
+            logger.error("Failed to add source \(resolved.lastPathComponent): \(error.localizedDescription)")
+            lastError = "Failed to add \"\(resolved.lastPathComponent)\": \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// "Add only this file" drop mode. Adds the parent folder as a source
+    /// (Manifold's granularity is a folder), brings the source into scope
+    /// for every connected AI, then writes per-file deny overrides for
+    /// every existing top-level sibling so only the dropped file is
+    /// visible to any AI. Subdirectories are left alone — denying a
+    /// directory at the top level would also hide nested files inside it,
+    /// which is too aggressive for V1.
+    ///
+    /// Limitation worth surfacing: any new file dropped into the parent
+    /// folder *after* this call is allowed by default, since we can't
+    /// pre-deny things that don't yet exist. The user can extend the
+    /// deny list later from the Files surface.
+    func addSourceForSingleFile(_ fileURL: URL) async {
+        let parent = fileURL.deletingLastPathComponent()
+        guard let source = await addSourceFromURL(parent) else { return }
+
+        let activeAgents = AgentMeta.connected(from: connectedAgents)
+        for agent in activeAgents {
+            await setSourceScope(sourceID: source.sourceID, agent: agent, inScope: true)
+        }
+        guard !activeAgents.isEmpty else { return }
+
+        let siblings = (try? FileManager.default.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let targetPath = fileURL.standardizedFileURL.path
+        let denyTargets: [URL] = siblings.compactMap { sibling in
+            let isFile = (try? sibling.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            guard isFile else { return nil }
+            guard sibling.standardizedFileURL.path != targetPath else { return nil }
+            return sibling
+        }
+        guard !denyTargets.isEmpty else { return }
+
+        // Loop the per-record protocol API. The bulk endpoint lives on
+        // the concrete AppRuntimeClient (not the protocol used here), so
+        // we accept N round-trips for the typically-small sibling list.
+        for agent in activeAgents {
+            for sibling in denyTargets {
+                do {
+                    try await runtime.setFileVisibilityOverride(
+                        agent: agent,
+                        sourceID: source.sourceID,
+                        relativePath: sibling.lastPathComponent,
+                        isDirectory: false,
+                        decision: .deny
+                    )
+                } catch {
+                    logger.error("Single-file drop deny failed for \(sibling.lastPathComponent): \(error.localizedDescription)")
+                    lastError = "Added folder but couldn't restrict siblings: \(error.localizedDescription)"
+                    return
+                }
+            }
+        }
+    }
+
+    /// True when the URL points at a file or symlink (not a directory).
+    /// Drop handlers use this to decide whether to ask the user how
+    /// they want a file added.
+    func dropTargetIsFile(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        return exists && !isDir.boolValue
+    }
+
+    private func resolvedFolderURL(for url: URL) -> URL {
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        if exists, isDir.boolValue { return url }
+        return url.deletingLastPathComponent()
+    }
+
     func loadSources() async {
         do {
             sources = try await runtime.listSources()
