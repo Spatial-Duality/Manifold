@@ -864,13 +864,27 @@ final class ManifoldStore {
     }
 
     private func mutateScope(agent: TargetApp, sourceID: String, inScope: Bool) {
+        // Read-modify-write the WHOLE policy struct rather than mutating
+        // allowedSourceIDs through optional chaining. @Observable doesn't
+        // reliably fire on deep mutations through `?.` on a value-type
+        // property — the setter only sees the inner Set change, not the
+        // outer claudePolicy / codexPolicy property write that the
+        // observation framework wraps. Without the explicit assign-back,
+        // FoldersMatrixView's scopeByAgent computed var keeps the stale
+        // value and the user sees the checkbox refuse to unselect.
         switch agent {
         case .cowork:
-            if inScope { governance.claudePolicy?.allowedSourceIDs.insert(sourceID) }
-            else       { governance.claudePolicy?.allowedSourceIDs.remove(sourceID) }
+            if var policy = governance.claudePolicy {
+                if inScope { policy.allowedSourceIDs.insert(sourceID) }
+                else       { policy.allowedSourceIDs.remove(sourceID) }
+                governance.claudePolicy = policy
+            }
         case .codex:
-            if inScope { governance.codexPolicy?.allowedSourceIDs.insert(sourceID) }
-            else       { governance.codexPolicy?.allowedSourceIDs.remove(sourceID) }
+            if var policy = governance.codexPolicy {
+                if inScope { policy.allowedSourceIDs.insert(sourceID) }
+                else       { policy.allowedSourceIDs.remove(sourceID) }
+                governance.codexPolicy = policy
+            }
         }
     }
 
