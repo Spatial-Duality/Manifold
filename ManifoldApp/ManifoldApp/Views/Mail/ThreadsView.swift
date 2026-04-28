@@ -23,7 +23,7 @@ struct MailReviewView: View {
     }
 
     private var connectedAgentsKey: String {
-        connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
+        AgentMeta.stableKey(connectedAgents)
     }
     /// Inspector hidden by default — opens automatically when the user
     /// clicks a message and can be dismissed via the close button or
@@ -46,9 +46,6 @@ struct MailReviewView: View {
 
     private var reviewRows: [MailReviewRow] {
         mailReview.messages.map { message in
-            // "Shared" here means at least one connected AI can see this
-            // message — that's enough for the per-row sort key. The
-            // table's chip stack column shows the per-agent breakdown.
             let sharedAgents = mailReview.sharedAgents(for: message.emailID)
             let visibility: VisibilityState = sharedAgents.isEmpty
                 ? VisibilityState(effective: .hidden, origin: .defaultScope)
@@ -57,7 +54,7 @@ struct MailReviewView: View {
                 message: message,
                 threadKey: MailThreadRow.threadKey(for: message),
                 visibilityState: visibility,
-                sharedAgentCount: sharedAgents.count
+                sharedAgents: sharedAgents
             )
         }
         .sorted(using: sortOrder)
@@ -114,9 +111,6 @@ struct MailReviewView: View {
             }
         }
         .task(id: connectedAgentsKey) {
-            // Push the live agent list into the model so its per-agent
-            // shared sets line up with the chips we render. Re-fires
-            // whenever the user activates or removes an AI.
             await mailReview.setConnectedAgents(connectedAgents)
         }
         .animation(ManifoldMotion.micro, value: isInspectorVisible)
@@ -124,13 +118,8 @@ struct MailReviewView: View {
         .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
             isSearchFocused = true
         }
-        // Single click selects the row (highlights it) but does NOT open
-        // the inspector — that matches the macOS Finder convention. Double
-        // click on a row opens the inspector (see openInspectorForRow in
-        // MailReviewTableArea). User can also press the toolbar toggle or
-        // ⌥⌘0 at any time, regardless of selection.
         .background {
-            // ⌥⌘0 toggles the inspector — same chord as the Files inspector.
+            // ⌥⌘0 toggles the inspector — matches the Files inspector chord.
             Button("Toggle Mail Inspector") { isInspectorVisible.toggle() }
                 .keyboardShortcut("0", modifiers: [.command, .option])
                 .opacity(0)
@@ -389,18 +378,13 @@ private struct MailReviewTableArea: View {
 
                 Table(of: MailReviewRow.self, selection: $selection, sortOrder: $sortOrder) {
                     TableColumn("Share", value: \.sharedAgentCount) { row in
-                        // Mirrors the Files surface: one chip per connected
-                        // AI, filled when shared and hollow when hidden.
-                        // State + action are captured here (where the
-                        // environment is real) and passed in explicitly —
-                        // TableColumn cells on macOS don't reliably
-                        // propagate @Observable env values, which crashes
-                        // layout if you read mailReview from inside the
-                        // cell.
-                        let visible = mailReview.sharedAgents(for: row.emailID)
+                        // sharedAgents is captured on the row at build time;
+                        // reading mailReview from inside a TableColumn cell
+                        // crashes layout (@Observable env doesn't propagate
+                        // reliably into Table cells on macOS).
                         AccessChipStack(
                             agents: connectedAgents,
-                            visibleAgents: visible,
+                            visibleAgents: row.sharedAgents,
                             onToggle: { agent, wasVisible in
                                 Task {
                                     await mailReview.setMessageShared(
@@ -415,9 +399,6 @@ private struct MailReviewTableArea: View {
                     }
                     .width(min: 56, ideal: max(56, CGFloat(connectedAgents.count) * 18 + 12), max: 160)
 
-                    // Sender is identifying but secondary — cap it so
-                    // Subject (the column that actually tells you what
-                    // the message is about) gets the widest slot.
                     TableColumn("Sender", value: \.senderSortKey) { row in
                         HStack(spacing: Spacing.s2) {
                             SenderAvatar(label: row.senderSortKey, size: 18)
@@ -436,9 +417,7 @@ private struct MailReviewTableArea: View {
                     }
                     .width(min: 110, ideal: 150, max: 200)
 
-                    // Subject is the highest-information column — give it
-                    // a generous min so it can breathe and no max so it
-                    // takes any flex room left over from neighbors.
+                    // No max width — Subject takes any flex left over.
                     TableColumn("Subject", value: \.subjectSortKey) { row in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.subjectSortKey)
@@ -560,14 +539,9 @@ private struct ThreadInspector: View {
     let connectedAgents: [TargetApp]
     let onClose: () -> Void
 
-    /// Default-mail-client open handler. Hands the on-disk .eml URL to
-    /// NSWorkspace so the user lands in Apple Mail (or whatever they've
-    /// set as their default eml handler). Returns false silently when
-    /// the message has no .eml on disk yet — button shows disabled.
     private func openInDefaultMailClient(_ message: EmailMessageRecord) {
         guard let path = message.emlPath, !path.isEmpty else { return }
-        let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
     var body: some View {
@@ -609,8 +583,6 @@ private struct ThreadInspector: View {
                     }
                     .accessibilityIdentifier("mail.message.inspector.visibility.\(selectedMessage.emailID)")
 
-                    // Per-agent share toggles — same control as the file
-                    // inspector. One row, every connected AI, no dropdown.
                     AccessCheckboxStrip(
                         agents: connectedAgents,
                         visibleAgents: sharedAgents,
@@ -642,12 +614,8 @@ private struct ThreadInspector: View {
                         inspectorRow("Attachments", "\(selectedMessage.attachmentCount)")
                     }
 
-                    // Message body — full text, scrollable, selectable.
-                    // Replaces the previous one-line italic preview.
-                    // bodyText is the plaintext extracted from the .eml
-                    // for FTS5 indexing, so it's already free of HTML.
-                    // Falls back to the indexed preview if bodyText is
-                    // empty (older rows or messages still being parsed).
+                    // bodyText is FTS5-indexed plaintext from the .eml;
+                    // preview is the fallback for rows still being parsed.
                     VStack(alignment: .leading, spacing: Spacing.s2) {
                         HStack {
                             Text("Message")
@@ -655,9 +623,6 @@ private struct ThreadInspector: View {
                                 .foregroundStyle(.secondary)
                                 .tracking(0.4)
                             Spacer()
-                            // Prominent "Open in Mail" — the user asked
-                            // for a clearly placed button to bounce
-                            // into their default eml handler.
                             Button {
                                 openInDefaultMailClient(selectedMessage)
                             } label: {
@@ -787,10 +752,12 @@ private struct MailReviewRow: Identifiable, Hashable {
     let message: EmailMessageRecord
     let threadKey: String
     let visibilityState: VisibilityState
-    /// How many connected AIs currently see this message — drives the
-    /// Share column's sort order (more chips lit = "more shared").
-    let sharedAgentCount: Int
+    /// AIs that can see this message, captured once when the row is
+    /// built. Cells render directly from this set instead of re-asking
+    /// the model — avoids N×M lookups per table render.
+    let sharedAgents: Set<TargetApp>
 
+    var sharedAgentCount: Int { sharedAgents.count }
     var id: String { message.emailID }
     var emailID: String { message.emailID }
     var senderSortKey: String { MailThreadRow.shortSender(from: message.sender) }

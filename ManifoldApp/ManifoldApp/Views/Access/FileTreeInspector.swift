@@ -79,10 +79,8 @@ struct FileTreeInspector: View {
     }
 
     private func header(for source: SourceRecord) -> some View {
-        // Title row carries the folder name + the per-agent share chips.
-        // Inspector is only ~320pt wide, so the chip strip dominates if
-        // we lay it inline with the name. Stack title above chips so
-        // both have full width and the header stays compact.
+        // Stack title above chips — inline they'd squeeze each other in
+        // the ~320pt inspector.
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: Spacing.s2) {
                 FileTypeIcon(filename: source.displayName, isFolder: true, size: 14)
@@ -120,11 +118,6 @@ struct FileTreeInspector: View {
                 }
             )
 
-            // Agent picker only when there's a real choice. Single-agent
-            // setups don't need a row to "select" the only AI — the
-            // chips already tell the whole story. The "No agents
-            // connected" hint also drops out: the chips render as
-            // disabled when no AI is wired up.
             if connectedAgents.count > 1 {
                 Picker("Agent", selection: Binding(
                     get: { effectiveAgent },

@@ -138,6 +138,12 @@ enum AgentMeta {
         }
     }
 
+    /// Stable key for a list of agents. Drives `.task(id:)` so views
+    /// reload data when the connected-agent set changes.
+    static func stableKey(_ agents: [TargetApp]) -> String {
+        agents.map(\.rawValue).sorted().joined(separator: ",")
+    }
+
     private static func order(_ agent: TargetApp) -> Int {
         switch agent {
         case .cowork: return 0

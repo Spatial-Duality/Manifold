@@ -42,6 +42,7 @@
 		516D5E047E71B26F39DE8C1A /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = C2910946E949A8F592980971 /* ManifoldXPC */; };
 		518EF078E6F82F743E959890 /* StorageSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 009EA04550A7634D95791F57 /* StorageSettingsPane.swift */; };
 		527808D9447CEA98E82AEB55 /* IntegrationHealthModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FF9F7B8DBA9337056A84D8 /* IntegrationHealthModelTests.swift */; };
+		54607D222485209827037042 /* FileDropTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4E1FB8E42726300FDD5A00 /* FileDropTarget.swift */; };
 		5495F70C6106A15C8B479B6C /* MailboxesMatrixView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6435C62B07AFF77C18B982B /* MailboxesMatrixView.swift */; };
 		57B8BBA1ED763E7479DD595F /* AdvancedSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80E07891B5469129BFFFBFDD /* AdvancedSettingsPane.swift */; };
 		58DA505771335E7D8FA3C52B /* PathLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8504BD8549930002957BEF /* PathLabel.swift */; };
@@ -264,6 +265,7 @@
 		C68384EB81C759FFC811CBBD /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C7BFC0D540BFCD85B2F8D3CE /* RuleInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleInspector.swift; sourceTree = "<group>"; };
 		C954B211BE478AB70CCDC861 /* FilesFlatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesFlatView.swift; sourceTree = "<group>"; };
+		CC4E1FB8E42726300FDD5A00 /* FileDropTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDropTarget.swift; sourceTree = "<group>"; };
 		CE38CC872AE015C1D6A971C7 /* DiagnosticsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModelTests.swift; sourceTree = "<group>"; };
 		CE8504BD8549930002957BEF /* PathLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathLabel.swift; sourceTree = "<group>"; };
 		D050CA6EEFB11452C92977C1 /* DiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffView.swift; sourceTree = "<group>"; };
@@ -437,6 +439,7 @@
 				B1B3C61AB4243F58346D1B8E /* CategoryChip.swift */,
 				2503627A27A75894E6EF02BF /* CommitLadder.swift */,
 				4331F73A42EB2B126226A9EB /* EmptyStateIllustration.swift */,
+				CC4E1FB8E42726300FDD5A00 /* FileDropTarget.swift */,
 				2EB6201733D6CF2A55D93970 /* FileTypeIcon.swift */,
 				664794E534D54BE964BC7CFF /* GradientAvatar.swift */,
 				6F762E94653BA267336BB76A /* KbdLabel.swift */,
@@ -809,6 +812,7 @@
 				1E8D80EBDAD1320A3DBA030D /* EmptyStateIllustration.swift in Sources */,
 				2F6BC1249F27E1DB1B64D7DD /* EventTable.swift in Sources */,
 				EAD0522235878621DA2D71BD /* EvidenceInspector.swift in Sources */,
+				54607D222485209827037042 /* FileDropTarget.swift in Sources */,
 				A7FC5B97EF5D8D320241880B /* FileInspectorPane.swift in Sources */,
 				DD0E814909A12F268657D2BA /* FileNode.swift in Sources */,
 				8F750A171F9E05D8834FD7BB /* FileTreeInspector.swift in Sources */,

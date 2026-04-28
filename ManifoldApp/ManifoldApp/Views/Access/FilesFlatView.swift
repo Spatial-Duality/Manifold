@@ -31,11 +31,6 @@ struct FilesFlatView: View {
         KeyPathComparator(\SourceFile.sourceName),
         KeyPathComparator(\SourceFile.relativePath),
     ]
-    /// Files dropped onto the surface queue here until the user picks
-    /// "Add the whole folder" or "Add only this file" in a dialog.
-    /// Folders are added immediately so every file under them appears.
-    @State private var pendingFileDrops: [URL] = []
-    @State private var isDropTargeted = false
 
     enum ScopeFilter: Hashable, Codable {
         case all
@@ -251,53 +246,7 @@ struct FilesFlatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
             // searchable handles focus natively; kept for forward-compat.
         }
-        .dropDestination(for: URL.self) { items, _ in
-            handleDroppedURLs(items)
-            return !items.isEmpty
-        } isTargeted: { targeted in
-            isDropTargeted = targeted
-        }
-        .overlay {
-            if isDropTargeted {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(ManifoldPalette.selection, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .padding(2)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
-        .confirmationDialog(
-            fileDropTitle,
-            isPresented: Binding(
-                get: { !pendingFileDrops.isEmpty },
-                set: { if !$0 { pendingFileDrops = [] } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Add the whole folder") {
-                let drops = pendingFileDrops
-                pendingFileDrops = []
-                Task {
-                    for url in drops {
-                        await store.addSourceFromURL(url)
-                    }
-                }
-            }
-            Button("Add only \(pendingFileDrops.count == 1 ? "this file" : "these files")") {
-                let drops = pendingFileDrops
-                pendingFileDrops = []
-                Task {
-                    for url in drops {
-                        await store.addSourceForSingleFile(url)
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingFileDrops = []
-            }
-        } message: {
-            Text(fileDropMessage)
-        }
+        .manifoldFileDropTarget(store: store)
         .task(id: sourceReloadKey) {
             await loadFilesProgressively()
             await loadAITouched()
@@ -320,47 +269,6 @@ struct FilesFlatView: View {
         } catch {
             // Honest no-op: sparkle stays absent if the runtime call fails.
             aiTouchedPaths = []
-        }
-    }
-
-    // MARK: - Finder drop
-
-    private var fileDropTitle: String {
-        pendingFileDrops.count == 1
-            ? "Add \(pendingFileDrops[0].lastPathComponent)?"
-            : "Add \(pendingFileDrops.count) files?"
-    }
-
-    private var fileDropMessage: String {
-        if pendingFileDrops.count == 1 {
-            return "Manifold tracks at folder granularity. Add the whole folder so every file in it is visible, or add only this file and Manifold will hide its current siblings."
-        }
-        return "Manifold tracks at folder granularity. Add the whole containing folder of each file, or add only the dropped files and hide existing siblings."
-    }
-
-    private func handleDroppedURLs(_ urls: [URL]) {
-        let resolved = urls.map { $0.standardizedFileURL }
-        var folders: [URL] = []
-        var files: [URL] = []
-        for url in resolved {
-            if store.dropTargetIsFile(url) {
-                files.append(url)
-            } else {
-                folders.append(url)
-            }
-        }
-        if !folders.isEmpty {
-            // Folders dropped onto the Files surface get added straight
-            // through — the runtime indexes them and every file appears
-            // in this list automatically. No prompt.
-            Task {
-                for url in folders {
-                    await store.addSourceFromURL(url)
-                }
-            }
-        }
-        if !files.isEmpty {
-            pendingFileDrops.append(contentsOf: files)
         }
     }
 
@@ -412,7 +320,7 @@ struct FilesFlatView: View {
     }
 
     private var connectedAgentsKey: String {
-        connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
+        AgentMeta.stableKey(connectedAgents)
     }
 
     // MARK: - Toolbar
@@ -862,16 +770,8 @@ struct FilesFlatView: View {
     }
 
     private func loadOverrides() async {
-        await withTaskGroup(of: (TargetApp, [FileVisibilityOverrideRecord]).self) { group in
-            for agent in connectedAgents {
-                group.addTask { (agent, await store.fileVisibilityOverrides(agent: agent)) }
-            }
-            var result: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
-            for await (agent, records) in group {
-                result[agent] = records
-            }
-            fileOverridesByAgent = result
-        }
+        let fresh = await store.fileVisibilityOverridesByAgent(connectedAgents)
+        if fresh != fileOverridesByAgent { fileOverridesByAgent = fresh }
     }
 
     private func reloadOverrides(agent: TargetApp) async {

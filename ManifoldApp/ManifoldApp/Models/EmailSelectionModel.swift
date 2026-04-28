@@ -13,11 +13,7 @@ final class MailReviewModel {
     var activeQuickFilter: QuickFilter?
     var searchText: String = ""
     var messages: [EmailMessageRecord] = []
-    /// Per-agent shared sets so the table can render an AccessChipStack
-    /// row showing every connected AI at once — same shape as Files.
     var sharedEmailIDsByAgent: [TargetApp: Set<String>] = [:]
-    /// Activated AIs the user can share with. Pushed in by the view from
-    /// `ManifoldStore.connectedAgents`. Drives the chip stack columns.
     var connectedAgents: [TargetApp] = []
     var expandedThreadKeys: Set<String> = []
     var selectedThreadKey: String?
@@ -132,8 +128,8 @@ final class MailReviewModel {
         await reloadVisibleMessages()
     }
 
-    /// View pushes the live list of connected AIs in. Triggers a refresh
-    /// so the per-agent shared sets line up with the chips we'll render.
+    /// Pushed in by the view when the activated-AI list changes; refreshes
+    /// the per-agent shared sets so chips line up.
     func setConnectedAgents(_ agents: [TargetApp]) async {
         guard connectedAgents != agents else { return }
         connectedAgents = agents
@@ -215,8 +211,6 @@ final class MailReviewModel {
         await refreshSharedState()
     }
 
-    /// Set sharing for one message across every connected AI in a single
-    /// gesture. Powers the "Share with all" / "Hide from all" buttons.
     func setMessageSharedForAllAgents(_ emailID: String, isShared: Bool) async {
         for agent in connectedAgents {
             await setMessageShared(emailID, agent: agent, isShared: isShared)
@@ -227,8 +221,6 @@ final class MailReviewModel {
         sharedEmailIDsByAgent[agent, default: []].contains(emailID)
     }
 
-    /// AIs that currently see this email. Drives the AccessChipStack
-    /// "filled vs hollow" rendering per row.
     func sharedAgents(for emailID: String) -> Set<TargetApp> {
         var result: Set<TargetApp> = []
         for agent in connectedAgents {
@@ -238,14 +230,19 @@ final class MailReviewModel {
     }
 
     /// Count of messages in `messages` shared with at least one connected
-    /// AI — used by the toolbar summary line.
-    var sharedAnyAgentCount: Int {
+    /// AI. Cached because the toolbar summary line reads it on every body
+    /// pass — recomputing the Set each time was N-message + N-agent work
+    /// per render.
+    private(set) var sharedAnyAgentCount: Int = 0
+
+    private func recomputeSharedAnyAgentCount() {
         let known = Set(messages.map(\.emailID))
         var union: Set<String> = []
         for agent in connectedAgents {
             union.formUnion(sharedEmailIDsByAgent[agent, default: []].intersection(known))
         }
-        return union.count
+        let next = union.count
+        if next != sharedAnyAgentCount { sharedAnyAgentCount = next }
     }
 
     func mailboxes(for accountID: String) -> [IMAPMailboxRecord] {
@@ -356,16 +353,16 @@ final class MailReviewModel {
 
     private func refreshSharedState() async {
         guard let mailAccounts else { return }
-        // Query each connected AI independently so the UI can render the
-        // chip stack with one filled/hollow chip per agent. Falls back to
-        // .cowork when no AI has been wired up yet so existing data still
-        // surfaces in the table.
-        let agents = connectedAgents.isEmpty ? [TargetApp.cowork] : connectedAgents
+        // mailAccounts is @MainActor, so a TaskGroup wouldn't actually
+        // parallelize — every await would hop back to the main actor and
+        // serialize. Keep the loop and just add a same-value short-circuit
+        // so @Observable doesn't fire when the result hasn't changed.
         var next: [TargetApp: Set<String>] = [:]
-        for agent in agents {
+        for agent in connectedAgents {
             next[agent] = await mailAccounts.sharedEmailIDs(agent: agent)
         }
-        sharedEmailIDsByAgent = next
+        if next != sharedEmailIDsByAgent { sharedEmailIDsByAgent = next }
+        recomputeSharedAnyAgentCount()
         errorMessage = errorMessage ?? mailAccounts.lastQueryError
     }
 

@@ -63,9 +63,6 @@ struct FileInspectorPane: View {
         let visible = visibleAgents
 
         VStack(alignment: .leading, spacing: Spacing.s4) {
-            // Double-click opens the file in its default app — same
-            // affordance Finder offers on a preview thumbnail. Single
-            // clicks fall through to QuickLook's own interaction.
             QuickLookPreview(url: url)
                 .frame(height: 220)
                 .frame(maxWidth: .infinity)

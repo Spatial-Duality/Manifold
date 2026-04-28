@@ -31,11 +31,6 @@ struct FoldersMatrixView: View {
     /// explicit allow overrides on individual files reads as "Some files
     /// shared" instead of the misleading "Not shared".
     @State private var overridesByAgent: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
-    /// Files dropped onto the matrix queue here until the user picks
-    /// "Add the whole folder" or "Add only this file" in a confirmation
-    /// dialog. Folders are added immediately on drop without prompting.
-    @State private var pendingFileDrops: [URL] = []
-    @State private var isDropTargeted = false
 
     // MARK: - Derived
 
@@ -93,127 +88,35 @@ struct FoldersMatrixView: View {
             await loadDriftCounts()
             await loadOverrides()
         }
-        .dropDestination(for: URL.self) { items, _ in
-            handleDroppedURLs(items)
-            return !items.isEmpty
-        } isTargeted: { targeted in
-            isDropTargeted = targeted
-        }
-        .overlay {
-            if isDropTargeted {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(ManifoldPalette.selection, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .padding(2)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
-        .confirmationDialog(
-            fileDropTitle,
-            isPresented: Binding(
-                get: { !pendingFileDrops.isEmpty },
-                set: { if !$0 { pendingFileDrops = [] } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Add the whole folder") {
-                let drops = pendingFileDrops
-                pendingFileDrops = []
-                Task {
-                    for url in drops {
-                        await store.addSourceFromURL(url)
-                    }
-                }
-            }
-            Button("Add only \(pendingFileDrops.count == 1 ? "this file" : "these files")") {
-                let drops = pendingFileDrops
-                pendingFileDrops = []
-                Task {
-                    for url in drops {
-                        await store.addSourceForSingleFile(url)
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingFileDrops = []
-            }
-        } message: {
-            Text(fileDropMessage)
-        }
-    }
-
-    private var fileDropTitle: String {
-        pendingFileDrops.count == 1
-            ? "Add \(pendingFileDrops[0].lastPathComponent)?"
-            : "Add \(pendingFileDrops.count) files?"
-    }
-
-    private var fileDropMessage: String {
-        // Honest about the model: Manifold tracks at folder granularity,
-        // so either choice ends up adding the parent folder. "Add only
-        // this file" hides the existing siblings via per-file deny
-        // overrides so only the dropped file is shared with the AIs.
-        // Files added to the folder later are visible by default.
-        if pendingFileDrops.count == 1 {
-            return "Manifold tracks at folder granularity. Add the whole folder so every file in it is visible, or add only this file and Manifold will hide its current siblings."
-        }
-        return "Manifold tracks at folder granularity. Add the whole containing folder of each file, or add only the dropped files and hide existing siblings."
-    }
-
-    private func handleDroppedURLs(_ urls: [URL]) {
-        let resolved = urls.map { $0.standardizedFileURL }
-        var folders: [URL] = []
-        var files: [URL] = []
-        for url in resolved {
-            if store.dropTargetIsFile(url) {
-                files.append(url)
-            } else {
-                folders.append(url)
-            }
-        }
-        if !folders.isEmpty {
-            Task {
-                for url in folders {
-                    await store.addSourceFromURL(url)
-                }
-            }
-        }
-        if !files.isEmpty {
-            // Append rather than replace so the user can drop again
-            // before answering the previous prompt — the dialog batches.
-            pendingFileDrops.append(contentsOf: files)
-        }
+        .manifoldFileDropTarget(store: store)
     }
 
     private var connectedAgentsKey: String {
-        connectedAgents.map(\.rawValue).sorted().joined(separator: ",")
+        AgentMeta.stableKey(connectedAgents)
     }
 
-    /// Loads drift counts for every connected agent in parallel, then
-    /// publishes them to the table. One XPC per agent (typically 1-2
-    /// roundtrips). Failure is silent — drift badges just don't render
-    /// rather than the matrix erroring out.
+    /// Pulls drift counts for every connected agent in parallel. Failures
+    /// land as empty maps so the matrix renders without drift badges
+    /// instead of erroring out.
     private func loadDriftCounts() async {
-        var fresh: [TargetApp: [String: Int]] = [:]
-        for agent in connectedAgents {
-            do {
-                fresh[agent] = try await store.runtime.sourceDriftCounts(agent: agent)
-            } catch {
-                fresh[agent] = [:]
+        let agents = connectedAgents
+        let fresh = await withTaskGroup(of: (TargetApp, [String: Int]).self) { group in
+            for agent in agents {
+                group.addTask {
+                    let counts = (try? await store.runtime.sourceDriftCounts(agent: agent)) ?? [:]
+                    return (agent, counts)
+                }
             }
+            var result: [TargetApp: [String: Int]] = [:]
+            for await (agent, counts) in group { result[agent] = counts }
+            return result
         }
-        driftCountsByAgent = fresh
+        if fresh != driftCountsByAgent { driftCountsByAgent = fresh }
     }
 
-    /// Pulls per-agent file visibility overrides into local state. Used
-    /// to detect partial sharing on folders that aren't in any AI's
-    /// source-level scope but have allow overrides on individual files.
     private func loadOverrides() async {
-        var fresh: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
-        for agent in connectedAgents {
-            fresh[agent] = await store.fileVisibilityOverrides(agent: agent)
-        }
-        overridesByAgent = fresh
+        let fresh = await store.fileVisibilityOverridesByAgent(connectedAgents)
+        if fresh != overridesByAgent { overridesByAgent = fresh }
     }
 
     /// Per-source breakdown of explicit overrides — agents that have at
@@ -282,10 +185,6 @@ struct FoldersMatrixView: View {
                             .font(ManifoldType.body)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        // Health pill rides with the folder name now —
-                        // Removed/Offline are about whether the folder
-                        // exists on disk, not about sharing, so they
-                        // belong here, not in the Sharing column.
                         if source.isRemoved {
                             Pill(text: "Removed", variant: .attention)
                         } else if !source.isAccessible {
@@ -332,20 +231,13 @@ struct FoldersMatrixView: View {
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(ManifoldPalette.attention)
                 .accessibilityHidden(true)
-            Text("\(summary.count) since \(displayName(for: summary.agent))'s last session")
+            Text("\(summary.count) since \(AgentMeta.label(summary.agent))'s last session")
                 .font(ManifoldType.caption)
                 .foregroundStyle(ManifoldPalette.attention)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .help("\(summary.count) files have changed in this source since \(displayName(for: summary.agent))'s last session ended")
-    }
-
-    private func displayName(for agent: TargetApp) -> String {
-        switch agent {
-        case .cowork: return "Claude"
-        case .codex:  return "Codex"
-        }
+        .help("\(summary.count) files have changed in this source since \(AgentMeta.label(summary.agent))'s last session ended")
     }
 
     private var allAgentsColumn: TableColumn<SourceRecord, Never, some View, Text> {
@@ -418,12 +310,6 @@ struct FoldersMatrixView: View {
 
     private var statusColumn: TableColumn<SourceRecord, Never, some View, Text> {
         TableColumn("Sharing") { (source: SourceRecord) in
-            // Pure sharing read-out. Source health (Removed/Offline)
-            // moved to the Folder column inline with the name, since
-            // those are conditions of the source on disk, not sharing.
-            // Per-file overrides surface as a small dot next to the
-            // pill — keeps the headline label clean while signalling
-            // there's extra detail in the inspector.
             HStack(spacing: 4) {
                 let label = sharingLabel(for: source)
                 Pill(text: label.text, variant: label.variant)
@@ -475,7 +361,7 @@ struct FoldersMatrixView: View {
             let text = total == 1
                 ? "Shared"
                 : (total == 2 ? "Shared with both" : "Shared with all")
-            let names = connectedAgents.map(displayName(for:)).joined(separator: " and ")
+            let names = connectedAgents.map(AgentMeta.label(_:)).joined(separator: " and ")
             return SharingLabel(
                 text: text,
                 variant: .defaultScope,
@@ -485,7 +371,7 @@ struct FoldersMatrixView: View {
 
         let scopedNames = connectedAgents
             .filter { scoped.contains($0) }
-            .map(displayName(for:))
+            .map(AgentMeta.label(_:))
         if scoped.count == 1, let only = scopedNames.first {
             return SharingLabel(
                 text: "Shared with \(only)",

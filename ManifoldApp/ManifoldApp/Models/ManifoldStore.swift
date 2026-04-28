@@ -391,10 +391,8 @@ final class ManifoldStore {
         for path in paths { removeSource(path: path) }
     }
 
-    /// Drop-in entry: take a Finder URL and add it as a source. Folder
-    /// URLs add the folder itself; file URLs add the parent folder so
-    /// the file is reachable. Returns the added/existing SourceRecord
-    /// so callers can chain follow-up overrides.
+    /// File URLs resolve to the containing folder; existing sources are
+    /// returned without re-adding so callers can chain follow-up overrides.
     @discardableResult
     func addSourceFromURL(_ url: URL) async -> SourceRecord? {
         let resolved = resolvedFolderURL(for: url)
@@ -417,18 +415,12 @@ final class ManifoldStore {
         }
     }
 
-    /// "Add only this file" drop mode. Adds the parent folder as a source
-    /// (Manifold's granularity is a folder), brings the source into scope
-    /// for every connected AI, then writes per-file deny overrides for
-    /// every existing top-level sibling so only the dropped file is
-    /// visible to any AI. Subdirectories are left alone — denying a
-    /// directory at the top level would also hide nested files inside it,
-    /// which is too aggressive for V1.
-    ///
-    /// Limitation worth surfacing: any new file dropped into the parent
-    /// folder *after* this call is allowed by default, since we can't
-    /// pre-deny things that don't yet exist. The user can extend the
-    /// deny list later from the Files surface.
+    /// Adds the parent folder, scopes it for every connected AI, then
+    /// denies existing top-level file siblings so only the dropped file
+    /// is visible. Subdirectories are left alone (denying a directory
+    /// would also hide its contents). New siblings appearing after this
+    /// call default to allowed — the runtime has no notion of a future-
+    /// proof default-deny per source yet.
     func addSourceForSingleFile(_ fileURL: URL) async {
         let parent = fileURL.deletingLastPathComponent()
         guard let source = await addSourceFromURL(parent) else { return }
@@ -453,31 +445,47 @@ final class ManifoldStore {
         }
         guard !denyTargets.isEmpty else { return }
 
-        // Loop the per-record protocol API. The bulk endpoint lives on
-        // the concrete AppRuntimeClient (not the protocol used here), so
-        // we accept N round-trips for the typically-small sibling list.
-        for agent in activeAgents {
-            for sibling in denyTargets {
-                do {
-                    try await runtime.setFileVisibilityOverride(
-                        agent: agent,
-                        sourceID: source.sourceID,
-                        relativePath: sibling.lastPathComponent,
-                        isDirectory: false,
-                        decision: .deny
-                    )
-                } catch {
-                    logger.error("Single-file drop deny failed for \(sibling.lastPathComponent): \(error.localizedDescription)")
-                    lastError = "Added folder but couldn't restrict siblings: \(error.localizedDescription)"
-                    return
-                }
+        let batch = activeAgents.flatMap { agent in
+            denyTargets.map { sibling in
+                FileVisibilityOverrideRecord(
+                    agent: agent,
+                    sourceID: source.sourceID,
+                    relativePath: sibling.lastPathComponent,
+                    isDirectory: false,
+                    decision: .deny
+                )
+            }
+        }
+
+        // Bulk endpoint is on the concrete AppRuntimeClient only; loop
+        // through the per-record protocol API for fixture clients.
+        if let client = runtime as? AppRuntimeClient {
+            do {
+                try await client.setManyFileVisibilityOverrides(batch)
+            } catch {
+                logger.error("Single-file drop bulk deny failed: \(error.localizedDescription)")
+                lastError = "Added folder but couldn't restrict siblings: \(error.localizedDescription)"
+            }
+            return
+        }
+        for record in batch {
+            do {
+                try await runtime.setFileVisibilityOverride(
+                    agent: record.agent,
+                    sourceID: record.sourceID,
+                    relativePath: record.relativePath,
+                    isDirectory: record.isDirectory,
+                    decision: record.decision
+                )
+            } catch {
+                logger.error("Single-file drop deny failed for \(record.relativePath): \(error.localizedDescription)")
+                lastError = "Added folder but couldn't restrict siblings: \(error.localizedDescription)"
+                return
             }
         }
     }
 
-    /// True when the URL points at a file or symlink (not a directory).
-    /// Drop handlers use this to decide whether to ask the user how
-    /// they want a file added.
+    /// True for files and symlinks; false for directories or non-existent paths.
     func dropTargetIsFile(_ url: URL) -> Bool {
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
@@ -894,6 +902,22 @@ final class ManifoldStore {
         } catch {
             logger.error("Failed to load file visibility overrides: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    /// Pulls overrides for every requested agent in parallel — one XPC
+    /// per agent. Failures land as empty arrays so the caller doesn't
+    /// have to special-case partial loads.
+    func fileVisibilityOverridesByAgent(_ agents: [TargetApp]) async -> [TargetApp: [FileVisibilityOverrideRecord]] {
+        await withTaskGroup(of: (TargetApp, [FileVisibilityOverrideRecord]).self) { group in
+            for agent in agents {
+                group.addTask { (agent, await self.fileVisibilityOverrides(agent: agent)) }
+            }
+            var result: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
+            for await (agent, overrides) in group {
+                result[agent] = overrides
+            }
+            return result
         }
     }
 
