@@ -34,6 +34,8 @@ Manifold is the user-owned control plane that sits beside Claude and Codex, reco
 - [DESIGN-STANDARDS.md](DESIGN-STANDARDS.md) — shared UI language, copy, and QA rules
 - [APPLE-DESIGN-EXCELLENCE-GUIDE.md](APPLE-DESIGN-EXCELLENCE-GUIDE.md) — platform-level design constraints
 - [APP-QUALITY-ROADMAP.md](APP-QUALITY-ROADMAP.md) — quality priorities from the current baseline
+- [../DESIGN.md](../DESIGN.md) — UI design system (typography, color, spacing, Liquid Glass) plus brand mark and title sequence
+- [../brand/](../brand/) — brand mark `{ \| }`, wordmark, static SVGs, animated title sequence (5 iterations + Canvas variant), SwiftUI port
 
 ## Historical Material
 

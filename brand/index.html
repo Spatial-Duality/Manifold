@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manifold — Title Sequence Iterations</title>
+<style>
+  :root {
+    --bg: #050507;
+    --ink: #F1ECE0;
+    --ink-mute: #6A665E;
+    --accent: #FFE0B2;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink);
+    font-family: 'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  body { display: grid; grid-template-rows: 56px 1fr; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px;
+    border-bottom: 1px solid rgba(241, 236, 224, 0.06);
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(12px);
+  }
+  .brand {
+    font-size: 13px; letter-spacing: 0.4em; font-weight: 300;
+    color: var(--ink); text-indent: 0.4em;
+  }
+  .brand .punc { color: var(--accent); }
+  .iters {
+    display: flex; gap: 4px; align-items: center;
+  }
+  .iter-btn {
+    appearance: none; background: transparent; border: 1px solid rgba(241, 236, 224, 0.12);
+    color: var(--ink-mute); padding: 7px 14px; font-size: 11px; font-weight: 400;
+    letter-spacing: 0.18em; cursor: pointer; border-radius: 4px;
+    transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    font-family: inherit;
+  }
+  .iter-btn:hover { color: var(--ink); border-color: rgba(241, 236, 224, 0.3); }
+  .iter-btn.active {
+    color: var(--bg); background: var(--ink); border-color: var(--ink);
+  }
+  .label-name {
+    font-size: 10px; color: var(--ink-mute); letter-spacing: 0.16em;
+  }
+  iframe {
+    width: 100%; height: 100%; border: 0; display: block;
+  }
+  .stage-frame {
+    position: relative;
+    overflow: hidden;
+  }
+  .info-strip {
+    position: absolute;
+    bottom: 14px; left: 22px; right: 22px;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px;
+    background: rgba(5, 5, 7, 0.7);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(241, 236, 224, 0.06);
+    border-radius: 6px;
+    font-size: 11px; letter-spacing: 0.12em; font-weight: 300;
+    color: var(--ink-mute);
+    pointer-events: none;
+    opacity: 0; animation: fade-in 800ms 600ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .info-strip strong { color: var(--ink); font-weight: 400; }
+  @keyframes fade-in { to { opacity: 0.85; } }
+  .replay-hint {
+    position: absolute;
+    top: 14px; right: 22px;
+    font-size: 10px; letter-spacing: 0.16em;
+    color: var(--ink-mute);
+    opacity: 0.7;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="punc">{</span> <span class="punc">|</span> <span class="punc">}</span>  MANIFOLD</div>
+  <div class="iters">
+    <span class="label-name">ITERATION</span>
+    <button class="iter-btn" data-src="iter-01-refined.html"  data-name="Refined">01</button>
+    <button class="iter-btn" data-src="iter-02-morph.html"    data-name="Morph">02</button>
+    <button class="iter-btn" data-src="iter-03-cinematic.html" data-name="Cinematic">03</button>
+    <button class="iter-btn" data-src="iter-04-keynote.html"  data-name="Keynote">04</button>
+    <button class="iter-btn active" data-src="iter-05-final.html" data-name="Final">05</button>
+    <button class="iter-btn" data-src="iter-06-canvas.html"   data-name="Canvas">06</button>
+    <button class="iter-btn" data-src="logo-compact.html"     data-name="Compact">LOGO</button>
+  </div>
+</header>
+
+<div class="stage-frame">
+  <iframe id="frame" src="iter-05-final.html" title="Iteration"></iframe>
+  <div class="info-strip">
+    <span><strong id="info-name">FINAL</strong> &nbsp; — &nbsp; <span id="info-desc">Synthesis. Splash variant + light theme + a11y. Production.</span></span>
+    <span>Click iteration in stage to replay</span>
+  </div>
+</div>
+
+<script>
+  const descriptions = {
+    'Refined':  'Iris reveal from cusp · layered halos · atmospheric grain · no morph yet.',
+    'Morph':    'Particle morph slot · /files /emails /history · bezier curves with stagger.',
+    'Cinematic':'Trails · halo flash · warm transit tint · scatter reveal · Brownian shimmer.',
+    'Keynote':  'Custom brace paths · letter stagger · chromatic aberration · multi-layer bloom.',
+    'Final':    'Synthesis. Seed-line restored · longer holds · auto-drift · splash + a11y. Ship.',
+    'Canvas':   'Bonus experiment. Canvas + additive blending · 280 atoms · frame-accumulation trails.',
+    'Compact':  'Logo-only — no halos / wordmark / tagline. For sidebar, footer, secondary contexts.'
+  };
+
+  const frame = document.getElementById('frame');
+  const infoName = document.getElementById('info-name');
+  const infoDesc = document.getElementById('info-desc');
+
+  document.querySelectorAll('.iter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.iter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      frame.src = btn.dataset.src;
+      const name = btn.dataset.name;
+      infoName.textContent = name.toUpperCase();
+      infoDesc.textContent = descriptions[name];
+    });
+  });
+
+  // Keyboard shortcuts: 1-7 to switch (1-5 iterations, 6 canvas, 7 logo)
+  document.addEventListener('keydown', (e) => {
+    if (e.key >= '1' && e.key <= '7') {
+      const idx = parseInt(e.key) - 1;
+      const btns = document.querySelectorAll('.iter-btn');
+      btns[idx]?.click();
+    }
+  });
+</script>
+</body>
+</html>

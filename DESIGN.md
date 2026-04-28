@@ -67,6 +67,70 @@ Agent identity is communicated through content, not decoration:
 | `disabled` | 0.5 | Disabled element overlay |
 | `scrim` | 0.3 | Command palette overlay background |
 
+## Brand Mark
+
+`{ | }` — the brand mark embodies the product thesis as a glyph. The vertical
+bar is content authority (what flows through Manifold). The curly braces are
+the trust boundary that scopes it. The bar between braces IS the product.
+
+Live in `brand/` (sibling to `design/`). The folder is the canonical source;
+DESIGN.md references it.
+
+### Static variants
+
+| Variant | File | Use |
+|---------|------|-----|
+| Dark | `brand/mark-dark.svg` | Dark backgrounds; primary identity |
+| Light | `brand/mark-light.svg` | Light backgrounds (warm ink palette) |
+| Mono | `brand/mark-mono.svg` | Single-color contexts (favicon, embeds, social previews) |
+| Wordmark | `brand/wordmark-dark.svg` | Full lockup `{ \| } MANIFOLD` |
+| Compact logo (no halos) | `brand/logo-compact.html` | Sidebar, footer, secondary contexts |
+
+### Title sequence
+
+Animated reveal: particle morph between slot states (`{ \| }` ↔ `{ /files }` ↔
+`{ /emails }` ↔ `{ /history }`). The morph is structural, not decorative — each
+slot is a real Manifold scope, so the animation demonstrates the product.
+
+| Surface | Implementation | File |
+|---------|----------------|------|
+| In-app splash | SwiftUI `ManifoldTitleSequence` (port of iter-05) | `brand/TitleSequence.swift` |
+| Web hero | Canvas + additive blending, 280 particles | `brand/iter-06-canvas.html` |
+| Iteration history | Pass-by-pass review with honest reference comparisons | `brand/iteration-log.md` |
+| Pre-build research | Direction decisions, technical references | `brand/animation-research.md` |
+
+Both production variants ship. Each fits its render budget: SwiftUI is clean
+and inspectable for in-app; Canvas is more cinematic in motion for the first
+impression on web.
+
+`prefers-reduced-motion: reduce` automatically applies a static frame on web.
+The SwiftUI version respects scene activity (pauses when inactive).
+
+To use in the app target, move `brand/TitleSequence.swift` to
+`ManifoldApp/ManifoldApp/Views/Brand/TitleSequence.swift` and add it to the
+Xcode project. It's kept in `brand/` until adoption is wired so the brand work
+stays self-contained as reference.
+
+### Brand colors (NOT for UI)
+
+The mark and title sequence use specific brand colors. These do NOT appear in
+app UI. The macOS app uses Liquid Glass + system semantic colors exclusively
+(see "Colour" above). Brand uses these specific hex values.
+
+| Token | Hex | Use |
+|-------|-----|-----|
+| Brand ink (deep) | `#0A0907` | Brace gradient bottom |
+| Brand ink (mid) | `#15140F` | Brace gradient mid; bar fill |
+| Brand ink (top) | `#2C2A24` | Brace gradient top |
+| Brand warm halo | `#B86A1E` @ 0.18 | Halo behind mark; transit tint during morph |
+| Brand cold accent | cool cyan | 1% of particles in title sequence (atom mix) |
+
+Atom color mix ratio in the title sequence: **92% ink / 7% warm / 1% cold**.
+
+If brand hex values appear in SwiftUI UI code, that's a regression. Brand
+identity lives in the mark, the wordmark, and the title sequence — never in
+buttons, surfaces, or row tints.
+
 ## Liquid Glass
 
 ### Core Principle
@@ -240,3 +304,7 @@ Base-4 scale. Defined in `Components/Spacing.swift`. No ad-hoc values.
 | 2026-04-11 | Domain category sidebar with counts | Mail.app smart mailbox pattern for domain filtering |
 | 2026-04-11 | FilesView converted to SwiftUI Table | Sortable columns, native keyboard nav, click-to-sort |
 | 2026-04-11 | Typography weight by email volume | 100+ = body, 10-99 = callout, <10 = caption |
+| 2026-04-26 | Brand mark `{ \| }` is structural, not decorative | The bar between braces IS the product. Mark = product thesis as glyph. |
+| 2026-04-26 | Title sequence: SwiftUI iter-05 in-app, Canvas iter-06 web hero | Same identity, two render budgets. Both ship. |
+| 2026-04-26 | Brand colors are NOT UI colors | Brand uses specific hex (warm ink + #B86A1E halo); UI stays system semantic only. Regression if brand hex appears in SwiftUI UI. |
+| 2026-04-26 | Title-sequence morph slots match real Manifold scopes | `{ /files }` `{ /emails }` `{ /history }` — animation demonstrates the product, not decorates around it. |

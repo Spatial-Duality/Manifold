@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manifold — Iter 02 (Particle Morph)</title>
+<style>
+  /* ITERATION 2 — Particle Morph Slot
+     Goal: replace static `|` with a particle field that morphs into text glyphs.
+     Sequence: { | } → { /files } → { /emails } → { /history } → { | } → loop
+     Approach:
+       - 140 atoms (SVG circles) form a vertical line at rest
+       - On transition, atoms are reassigned to target positions sampled from
+         a rasterized glyph shape (offscreen canvas → pixel sampling)
+       - Each atom moves with a quadratic-bezier path (perpendicular curve),
+         staggered by index, eased with cubic-bezier
+       - Brief brightening pulse at t=0.45 of every transition */
+
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&display=swap');
+
+  :root {
+    --bg-deep: #050507;
+    --bg-lift: #0F0F12;
+    --ink: #F1ECE0;
+    --ink-soft: #D6D0C2;
+    --ink-mute: #6A665E;
+    --gate: #FFE0B2;
+    --pulse: #FFFFFF;
+
+    --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-confident: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-material: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  *,*::before,*::after { margin:0; padding:0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-deep);
+    font-family: 'SF Pro Display', 'Inter', -apple-system, system-ui, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    color: var(--ink);
+  }
+
+  .stage {
+    position: relative; width: 100%; height: 100vh;
+    display: grid; place-items: center;
+    background: radial-gradient(ellipse 65% 50% at 50% 47%, var(--bg-lift) 0%, var(--bg-deep) 70%);
+    cursor: pointer;
+  }
+
+  .stage::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; mix-blend-mode: overlay;
+    background:
+      radial-gradient(ellipse 50% 40% at 50% 50%, transparent 0%, rgba(0,0,0,0.4) 100%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.92  0 0 0 0 0.90  0 0 0 0 0.84  0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-blend-mode: multiply;
+  }
+
+  .composition {
+    position: relative;
+    width: min(820px, 92vw);
+    aspect-ratio: 16 / 11;
+    display: grid;
+    grid-template-rows: 1fr auto auto;
+    align-items: center;
+    justify-items: center;
+  }
+
+  .mark {
+    position: relative;
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Halos — same as iter 01 */
+  .halo, .halo-far {
+    position: absolute; border-radius: 50%; pointer-events: none; opacity: 0;
+  }
+  .halo {
+    width: 280px; height: 360px;
+    background: radial-gradient(ellipse 50% 60% at 50% 50%,
+      color-mix(in srgb, var(--gate) 38%, transparent) 0%, transparent 65%);
+    filter: blur(18px);
+    animation: halo-rise 1100ms var(--ease-confident) 2400ms forwards,
+               halo-breathe 7s ease-in-out 4500ms infinite;
+  }
+  .halo-far {
+    width: 520px; height: 480px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--gate) 14%, transparent) 0%, transparent 60%);
+    filter: blur(46px);
+    animation: halo-far-rise 1500ms var(--ease-confident) 2200ms forwards,
+               halo-breathe-slow 11s ease-in-out 5000ms infinite;
+  }
+
+  /* Slot SVG — hosts the particle field. Positioned where the bar used to be. */
+  .slot-svg {
+    position: absolute;
+    width: 360px;
+    height: 280px;
+    overflow: visible;
+    /* gentle bloom on the field as a whole */
+    filter: drop-shadow(0 0 12px color-mix(in srgb, var(--gate) 25%, transparent));
+  }
+
+  .slot-svg circle {
+    fill: var(--ink);
+  }
+
+  /* Braces */
+  .brace {
+    font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    font-weight: 200;
+    font-size: clamp(200px, 30vw, 300px);
+    line-height: 1;
+    color: var(--ink);
+    display: inline-block;
+    opacity: 0;
+    text-shadow: 0 0 28px color-mix(in srgb, var(--ink) 6%, transparent);
+  }
+  .brace.left {
+    margin-right: 110px;
+    clip-path: circle(0% at 0% 50%);
+    animation: iris-left 1500ms var(--ease-cinematic) 1000ms forwards;
+  }
+  .brace.right {
+    margin-left: 110px;
+    clip-path: circle(0% at 100% 50%);
+    animation: iris-right 1500ms var(--ease-cinematic) 1300ms forwards;
+  }
+
+  .wordmark {
+    margin-top: 56px;
+    font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    font-weight: 300;
+    font-size: clamp(20px, 2.4vw, 30px);
+    letter-spacing: 0.66em;
+    text-indent: 0.66em;
+    color: var(--ink-soft);
+    opacity: 0;
+    transform: translateY(8px);
+    animation: word-rise 1100ms var(--ease-cinematic) 5000ms forwards;
+  }
+  .tagline {
+    margin-top: 22px;
+    font-size: clamp(10px, 1.05vw, 12px);
+    letter-spacing: 0.34em;
+    text-indent: 0.34em;
+    color: var(--ink-mute);
+    opacity: 0;
+    animation: tag-rise 900ms ease-out 5800ms forwards;
+  }
+
+  @keyframes iris-left {
+    0% { clip-path: circle(0% at 0% 50%); opacity: 0; }
+    20% { opacity: 1; }
+    100% { clip-path: circle(140% at 0% 50%); opacity: 1; }
+  }
+  @keyframes iris-right {
+    0% { clip-path: circle(0% at 100% 50%); opacity: 0; }
+    20% { opacity: 1; }
+    100% { clip-path: circle(140% at 100% 50%); opacity: 1; }
+  }
+  @keyframes halo-rise { to { opacity: 0.55; transform: scale(1); } }
+  @keyframes halo-far-rise { to { opacity: 0.6; transform: scale(1); } }
+  @keyframes halo-breathe { 0%,100% { opacity: 0.45; } 50% { opacity: 0.7; } }
+  @keyframes halo-breathe-slow { 0%,100% { opacity: 0.5; } 50% { opacity: 0.7; } }
+  @keyframes word-rise { to { opacity: 1; transform: translateY(0); } }
+  @keyframes tag-rise { to { opacity: 0.85; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <div class="composition">
+    <div class="mark">
+      <div class="halo-far" aria-hidden="true"></div>
+      <div class="halo" aria-hidden="true"></div>
+      <span class="brace left" aria-hidden="true">{</span>
+      <svg class="slot-svg" id="slot" viewBox="-180 -140 360 280" aria-hidden="true"></svg>
+      <span class="brace right" aria-hidden="true">}</span>
+    </div>
+    <div class="wordmark">MANIFOLD</div>
+    <div class="tagline">ACCESS, RECORDED.</div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   PARTICLE MORPH SYSTEM
+   ============================================================ */
+
+const ATOM_COUNT = 140;
+const SLOT = document.getElementById('slot');
+
+// === Atom factory ===
+function createAtoms() {
+  const atoms = [];
+  for (let i = 0; i < ATOM_COUNT; i++) {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('r', 1.4);
+    c.setAttribute('cx', 0);
+    c.setAttribute('cy', 0);
+    c.style.opacity = 0;
+    SLOT.appendChild(c);
+    atoms.push({
+      el: c,
+      x: 0, y: 0,            // current position
+      sx: 0, sy: 0,           // start of current transition
+      tx: 0, ty: 0,           // target of current transition
+      cpx: 0, cpy: 0,         // bezier control point
+      delay: 0,               // ms
+      duration: 0,            // ms
+      tStart: 0,              // performance.now() at transition start
+      visible: true,
+      targetVisible: true,
+    });
+  }
+  return atoms;
+}
+
+// === Sample target points for a given state ===
+// Returns array of {x,y} relative to slot center.
+function sampleBar() {
+  const points = [];
+  // Bar: vertical line from y=-100 to y=+100, x=0
+  for (let i = 0; i < ATOM_COUNT; i++) {
+    const t = i / (ATOM_COUNT - 1);
+    points.push({ x: 0, y: (t - 0.5) * 200 });
+  }
+  return points;
+}
+
+function sampleText(text, fontSize = 88) {
+  // Render text to offscreen canvas, sample non-empty pixels
+  const W = 360, H = 200;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.font = `300 ${fontSize}px 'SF Pro Display', 'Inter', system-ui, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, W/2, H/2);
+
+  const data = ctx.getImageData(0, 0, W, H).data;
+  const samples = [];
+  // step every 2 pixels for density
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const i = (y * W + x) * 4;
+      if (data[i+3] > 100) samples.push({ x: x - W/2, y: y - H/2 });
+    }
+  }
+  // Pick ATOM_COUNT samples evenly
+  const out = [];
+  if (samples.length === 0) return sampleBar();
+  for (let i = 0; i < ATOM_COUNT; i++) {
+    out.push(samples[Math.floor((i / ATOM_COUNT) * samples.length)]);
+  }
+  // Shuffle so atoms don't move in obvious left-to-right order
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// === Greedy nearest-neighbor assignment ===
+// Reduces total travel distance — atoms find their nearest target.
+function assignTargets(atoms, targets) {
+  // O(N^2) but N=140 so fine
+  const used = new Array(targets.length).fill(false);
+  const order = atoms.map((_, i) => i);
+  // Sort atoms by current y so closest pairs fire first
+  order.sort((a, b) => atoms[a].y - atoms[b].y);
+  for (const ai of order) {
+    const a = atoms[ai];
+    let best = -1, bestD = Infinity;
+    for (let ti = 0; ti < targets.length; ti++) {
+      if (used[ti]) continue;
+      const dx = a.x - targets[ti].x;
+      const dy = a.y - targets[ti].y;
+      const d = dx*dx + dy*dy;
+      if (d < bestD) { bestD = d; best = ti; }
+    }
+    if (best >= 0) {
+      a.tx = targets[best].x;
+      a.ty = targets[best].y;
+      used[best] = true;
+    }
+  }
+}
+
+// === Easing ===
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+}
+
+// === Begin transition for all atoms ===
+let currentState = 'bar';
+let isTransitioning = false;
+
+function transitionTo(state, duration = 900) {
+  let targets;
+  if (state === 'bar') targets = sampleBar();
+  else if (state === 'files') targets = sampleText('/files', 84);
+  else if (state === 'emails') targets = sampleText('/emails', 84);
+  else if (state === 'history') targets = sampleText('/history', 76);
+  else if (state === 'tasks') targets = sampleText('/tasks', 84);
+  else return;
+
+  assignTargets(atoms, targets);
+
+  const now = performance.now();
+  atoms.forEach((a, i) => {
+    a.sx = a.x;
+    a.sy = a.y;
+    // Perpendicular control point for bezier curve — atoms don't travel straight
+    const midx = (a.sx + a.tx) / 2;
+    const midy = (a.sy + a.ty) / 2;
+    const dx = a.tx - a.sx, dy = a.ty - a.sy;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    // Perpendicular vector
+    const px = -dy / (len || 1);
+    const py = dx / (len || 1);
+    // Curve magnitude: scaled by distance, randomized
+    const curve = (Math.random() - 0.5) * Math.min(40, len * 0.25);
+    a.cpx = midx + px * curve;
+    a.cpy = midy + py * curve;
+    a.delay = (i / ATOM_COUNT) * 220 + Math.random() * 80;  // stagger 0-300ms
+    a.duration = duration;
+    a.tStart = now + a.delay;
+    a.targetVisible = true;
+  });
+
+  currentState = state;
+  isTransitioning = true;
+}
+
+// === Render loop ===
+const atoms = createAtoms();
+
+function render(now) {
+  let allDone = true;
+  for (const a of atoms) {
+    const elapsed = now - a.tStart;
+    if (elapsed < 0) {
+      // pre-stagger: stay at start
+      allDone = false;
+      requestAnimationFrame(render);
+      continue;
+    }
+    const t = Math.min(1, elapsed / a.duration);
+    if (t < 1) allDone = false;
+
+    const e = easeInOutCubic(t);
+    const u = 1 - e;
+    // Quadratic bezier
+    a.x = u*u*a.sx + 2*u*e*a.cpx + e*e*a.tx;
+    a.y = u*u*a.sy + 2*u*e*a.cpy + e*e*a.ty;
+
+    // Brightening peak at t=0.5
+    const bright = 1 - Math.abs(t - 0.5) * 2; // 0 → 1 → 0
+    const opacity = 0.65 + 0.35 * bright;
+    const r = 1.2 + 0.6 * bright;
+
+    a.el.setAttribute('cx', a.x.toFixed(2));
+    a.el.setAttribute('cy', a.y.toFixed(2));
+    a.el.style.opacity = opacity;
+    a.el.setAttribute('r', r.toFixed(2));
+  }
+  if (!allDone) requestAnimationFrame(render);
+  else isTransitioning = false;
+}
+
+// === Initial reveal ===
+function revealAtoms() {
+  // Start atoms hidden at center, then fade in to bar position
+  atoms.forEach((a, i) => {
+    a.x = 0; a.y = 0;
+    a.el.setAttribute('cx', 0);
+    a.el.setAttribute('cy', 0);
+    a.el.style.opacity = 0;
+  });
+  // After a delay, fade in atoms one by one to form the bar
+  const startDelay = 2500;
+  atoms.forEach((a, i) => {
+    const delay = startDelay + (i / ATOM_COUNT) * 800;
+    setTimeout(() => {
+      const targetY = ((i / (ATOM_COUNT - 1)) - 0.5) * 200;
+      a.x = 0; a.y = targetY;
+      a.el.setAttribute('cy', targetY);
+      a.el.style.transition = 'opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
+      a.el.style.opacity = 0.85;
+    }, delay);
+  });
+}
+
+// === Sequence loop ===
+function runSequence() {
+  revealAtoms();
+  // After reveal complete, begin morph cycle
+  setTimeout(() => beginCycle(), 4500);
+}
+
+const cycle = ['files', 'bar', 'emails', 'bar', 'history', 'bar'];
+let cycleIdx = 0;
+function beginCycle() {
+  const state = cycle[cycleIdx % cycle.length];
+  transitionTo(state, 900);
+  requestAnimationFrame(render);
+  // Hold time after transition
+  const holdMs = state === 'bar' ? 1500 : 2400;
+  cycleIdx++;
+  setTimeout(beginCycle, 900 + 320 + holdMs);  // duration + max stagger + hold
+}
+
+window.addEventListener('load', runSequence);
+document.getElementById('stage').addEventListener('click', () => location.reload());
+</script>
+</body>
+</html>

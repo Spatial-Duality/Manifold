@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manifold — Title Sequence</title>
+<meta name="description" content="The user-owned boundary for AI work.">
+<style>
+  /* ============================================================
+     MANIFOLD — TITLE SEQUENCE (PRODUCTION)
+     ============================================================
+     Synthesis of iters 01-04. Final ship version.
+
+     Embed:
+       <iframe src="title-sequence.html" style="border:0;width:100%;height:100vh"></iframe>
+     Or copy <body> innerHTML + <style> into a hero section.
+
+     Variants (add class to .stage):
+       .splash   → ~2.5s compressed for app launch
+       .light    → light theme
+       .static   → final frame only (no motion, accessibility fallback)
+
+     Configurable via JS:
+       window.ManifoldTitle.setCycle(['bar','files','emails','history']);
+       window.ManifoldTitle.setSpeed(1.2);
+       window.ManifoldTitle.replay();
+
+     Performance:
+       - 120 atoms (down from 150) at 60fps target
+       - 3-position trails per atom
+       - Pauses on document.hidden
+       - Respects prefers-reduced-motion
+     ============================================================ */
+
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&display=swap');
+
+  :root {
+    --bg-deep: #050507;
+    --bg-lift: #101013;
+    --ink: #F1ECE0;
+    --ink-warm: #FFD9A0;
+    --ink-cold: #B8C8E0;
+    --ink-soft: #D6D0C2;
+    --ink-mute: #6A665E;
+    --gate: #FFE0B2;
+    --pulse: #FFFFFF;
+
+    --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-confident: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-material: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  *,*::before,*::after { margin:0; padding:0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%; background: var(--bg-deep);
+    font-family: 'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    overflow: hidden; -webkit-font-smoothing: antialiased; color: var(--ink);
+  }
+
+  .stage {
+    position: relative; width: 100%; height: 100vh;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(ellipse 30% 20% at 50% 47%, color-mix(in srgb, var(--ink-warm) 5%, transparent) 0%, transparent 70%),
+      radial-gradient(ellipse 70% 55% at 50% 47%, var(--bg-lift) 0%, var(--bg-deep) 75%);
+    cursor: pointer;
+  }
+
+  /* Light theme override */
+  .stage.light {
+    --bg-deep: #F4F0E6; --bg-lift: #FFFFFF; --ink: #15140F;
+    --ink-warm: #B86A1E; --ink-soft: #2C2A24; --ink-mute: #807C72;
+    --gate: #B86A1E; --pulse: #FFFFFF;
+  }
+
+  /* Film grain — denser at periphery */
+  .stage::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; mix-blend-mode: overlay;
+    background:
+      radial-gradient(ellipse 50% 40% at 50% 50%, transparent 0%, rgba(0,0,0,0.45) 100%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.92  0 0 0 0 0.90  0 0 0 0 0.84  0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-blend-mode: multiply;
+  }
+
+  .composition {
+    position: relative;
+    width: min(820px, 92vw);
+    aspect-ratio: 16 / 11;
+    display: grid;
+    grid-template-rows: 1fr auto auto;
+    align-items: center;
+    justify-items: center;
+    perspective: 1400px;
+  }
+
+  .mark {
+    position: relative; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    transform-style: preserve-3d;
+    /* Slow auto-drift on the entire composition — makes the composition feel breathing */
+    animation: drift 14s ease-in-out infinite;
+  }
+
+  /* Halos */
+  .halo, .halo-far, .halo-cold {
+    position: absolute; border-radius: 50%; pointer-events: none; opacity: 0;
+    transition: opacity 280ms var(--ease-material);
+  }
+  .halo {
+    width: 280px; height: 360px;
+    background: radial-gradient(ellipse 50% 60% at 50% 50%,
+      color-mix(in srgb, var(--gate) 42%, transparent) 0%, transparent 65%);
+    filter: blur(18px);
+    animation: halo-rise 1100ms var(--ease-confident) 2400ms forwards;
+    transform: translateZ(-20px);
+  }
+  .halo-far {
+    width: 540px; height: 480px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--gate) 14%, transparent) 0%, transparent 60%);
+    filter: blur(46px);
+    animation: halo-far-rise 1500ms var(--ease-confident) 2200ms forwards;
+    transform: translateZ(-60px);
+  }
+  .halo-cold {
+    width: 380px; height: 420px;
+    background: radial-gradient(ellipse 50% 55% at 50% 50%,
+      color-mix(in srgb, var(--ink-cold) 10%, transparent) 0%, transparent 70%);
+    filter: blur(32px);
+    animation: halo-cold-rise 1700ms var(--ease-confident) 2300ms forwards;
+    transform: translateZ(-40px);
+  }
+  .halo.flash { opacity: 0.9 !important; }
+
+  /* Seed line — the prelude. Appears before everything else. */
+  .seed {
+    position: absolute;
+    width: 220px; height: 1px;
+    background: linear-gradient(90deg, transparent 0%,
+      color-mix(in srgb, var(--ink) 60%, transparent) 50%, transparent 100%);
+    transform: scaleX(0);
+    opacity: 0;
+    animation:
+      seed-in 1000ms var(--ease-cinematic) 600ms forwards,
+      seed-out 700ms ease-in 2300ms forwards;
+  }
+
+  /* Custom-drawn braces with gradient stroke for depth */
+  .brace-svg {
+    height: clamp(220px, 32vw, 320px);
+    width: auto; overflow: visible; opacity: 0;
+  }
+  .brace-svg.left {
+    margin-right: 92px;
+    clip-path: circle(0% at 0% 50%);
+    animation: iris-left 1500ms var(--ease-cinematic) 1200ms forwards,
+               brace-breathe 9s ease-in-out 4000ms infinite;
+    transform: translateZ(20px);
+  }
+  .brace-svg.right {
+    margin-left: 92px;
+    clip-path: circle(0% at 100% 50%);
+    animation: iris-right 1500ms var(--ease-cinematic) 1500ms forwards,
+               brace-breathe 9s ease-in-out 4300ms infinite;
+    transform: translateZ(20px);
+  }
+
+  /* Slot multi-layer composite */
+  .slot-wrap { position: absolute; width: 360px; height: 280px; pointer-events: none; }
+  .slot-svg { position: absolute; inset: 0; overflow: visible; }
+  .slot-svg.bloom {
+    filter: blur(6px) saturate(1.3);
+    mix-blend-mode: screen;
+    opacity: 0.5;
+  }
+  .slot-svg.front circle { fill: var(--ink); }
+  .slot-svg.bloom circle { fill: var(--ink-warm); }
+  .slot-svg .trail circle { fill: var(--ink-warm); }
+
+  .slot-wrap.aberrating .slot-svg.front {
+    filter: drop-shadow(1px 0 0 rgba(255, 120, 120, 0.5))
+            drop-shadow(-1px 0 0 rgba(120, 160, 255, 0.5));
+  }
+  .slot-wrap.punch .slot-svg.front {
+    filter: brightness(1.35) drop-shadow(0 0 6px var(--pulse));
+  }
+  .slot-wrap.aberrating, .slot-wrap.punch {
+    transition: filter 180ms var(--ease-material);
+  }
+
+  /* Wordmark with letter stagger */
+  .wordmark {
+    margin-top: 56px;
+    font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    font-weight: 300;
+    font-size: clamp(20px, 2.4vw, 30px);
+    color: var(--ink-soft);
+    display: flex;
+    gap: 0.55em;
+  }
+  .wordmark .ltr {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(10px);
+    animation: ltr-rise 700ms var(--ease-cinematic) forwards;
+  }
+  .tagline {
+    margin-top: 22px;
+    font-size: clamp(10px, 1.05vw, 12px);
+    letter-spacing: 0.34em;
+    text-indent: 0.34em;
+    color: var(--ink-mute);
+    opacity: 0;
+    animation: tag-rise 900ms ease-out 6400ms forwards;
+  }
+
+  /* === KEYFRAMES === */
+  @keyframes seed-in { 0% { transform: scaleX(0); opacity: 0; } 100% { transform: scaleX(1); opacity: 0.9; } }
+  @keyframes seed-out { to { opacity: 0; } }
+  @keyframes iris-left { 0%{clip-path:circle(0% at 0% 50%);opacity:0;} 18%{opacity:1;} 100%{clip-path:circle(140% at 0% 50%);opacity:1;} }
+  @keyframes iris-right { 0%{clip-path:circle(0% at 100% 50%);opacity:0;} 18%{opacity:1;} 100%{clip-path:circle(140% at 100% 50%);opacity:1;} }
+  @keyframes halo-rise { to { opacity: 0.55; } }
+  @keyframes halo-far-rise { to { opacity: 0.6; } }
+  @keyframes halo-cold-rise { to { opacity: 0.65; } }
+  @keyframes brace-breathe {
+    0%, 100% { transform: translateZ(20px) scale(1); }
+    50%      { transform: translateZ(20px) scale(1.006); }
+  }
+  @keyframes ltr-rise { to { opacity: 1; transform: translateY(0); } }
+  @keyframes tag-rise { to { opacity: 0.8; } }
+  @keyframes drift {
+    0%,100% { transform: translate3d(0,0,0); }
+    25%     { transform: translate3d(-3px,1px,0); }
+    50%     { transform: translate3d(2px,-2px,0); }
+    75%     { transform: translate3d(-1px,2px,0); }
+  }
+
+  /* Splash variant — compressed for app launch */
+  .stage.splash .seed { animation-delay: 100ms, 1300ms; animation-duration: 600ms, 400ms; }
+  .stage.splash .brace-svg.left { animation-delay: 600ms, 0ms; animation-duration: 900ms, 0ms; }
+  .stage.splash .brace-svg.right { animation-delay: 750ms, 0ms; animation-duration: 900ms, 0ms; }
+  .stage.splash .halo { animation-delay: 1500ms; animation-duration: 800ms; }
+  .stage.splash .wordmark .ltr {
+    animation-duration: 500ms;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .seed { display: none; }
+    .brace-svg, .halo, .halo-far, .halo-cold {
+      opacity: 1 !important; clip-path: none !important;
+      transform: translateZ(20px) !important;
+    }
+    .wordmark .ltr { opacity: 1 !important; transform: none !important; }
+    .tagline { opacity: 0.8 !important; }
+  }
+  .stage.static { animation: none; }
+  .stage.static *, .stage.static *::before, .stage.static *::after {
+    animation: none !important; transition: none !important;
+  }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <div class="composition">
+    <div class="mark" id="mark">
+      <div class="halo-cold" aria-hidden="true"></div>
+      <div class="halo-far" aria-hidden="true"></div>
+      <div class="halo" id="halo" aria-hidden="true"></div>
+      <div class="seed" aria-hidden="true"></div>
+
+      <!-- Left brace -->
+      <svg class="brace-svg left" viewBox="0 0 80 240" aria-hidden="true">
+        <defs>
+          <linearGradient id="braceGradL" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#FFFCF2"/>
+            <stop offset="50%"  stop-color="#F1ECE0"/>
+            <stop offset="100%" stop-color="#B8B0A0"/>
+          </linearGradient>
+          <filter id="braceGlowL" x="-30%" y="-10%" width="160%" height="120%">
+            <feGaussianBlur stdDeviation="1.0"/>
+          </filter>
+        </defs>
+        <path d="M 64 8 C 36 8, 26 18, 26 40 L 26 100
+                 C 26 110, 18 116, 6 120
+                 C 18 124, 26 130, 26 140 L 26 200
+                 C 26 222, 36 232, 64 232"
+              fill="none" stroke="url(#braceGradL)" stroke-width="3.5"
+              stroke-linecap="round" stroke-linejoin="round"
+              filter="url(#braceGlowL)"/>
+        <path d="M 64 8 C 36 8, 26 18, 26 40 L 26 100
+                 C 26 110, 18 116, 6 120
+                 C 18 124, 26 130, 26 140 L 26 200
+                 C 26 222, 36 232, 64 232"
+              fill="none" stroke="rgba(255,255,255,0.20)" stroke-width="0.8"
+              stroke-linecap="round" transform="translate(0,-0.5)"/>
+      </svg>
+
+      <!-- Slot -->
+      <div class="slot-wrap" id="slotWrap">
+        <svg class="slot-svg bloom" viewBox="-180 -140 360 280" aria-hidden="true">
+          <g id="atomsBloom"></g>
+        </svg>
+        <svg class="slot-svg front" viewBox="-180 -140 360 280" aria-hidden="true">
+          <g id="trails"></g>
+          <g id="atoms"></g>
+        </svg>
+      </div>
+
+      <!-- Right brace -->
+      <svg class="brace-svg right" viewBox="0 0 80 240" aria-hidden="true">
+        <defs>
+          <linearGradient id="braceGradR" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#FFFCF2"/>
+            <stop offset="50%"  stop-color="#F1ECE0"/>
+            <stop offset="100%" stop-color="#B8B0A0"/>
+          </linearGradient>
+          <filter id="braceGlowR" x="-30%" y="-10%" width="160%" height="120%">
+            <feGaussianBlur stdDeviation="1.0"/>
+          </filter>
+        </defs>
+        <path d="M 16 8 C 44 8, 54 18, 54 40 L 54 100
+                 C 54 110, 62 116, 74 120
+                 C 62 124, 54 130, 54 140 L 54 200
+                 C 54 222, 44 232, 16 232"
+              fill="none" stroke="url(#braceGradR)" stroke-width="3.5"
+              stroke-linecap="round" stroke-linejoin="round"
+              filter="url(#braceGlowR)"/>
+        <path d="M 16 8 C 44 8, 54 18, 54 40 L 54 100
+                 C 54 110, 62 116, 74 120
+                 C 62 124, 54 130, 54 140 L 54 200
+                 C 54 222, 44 232, 16 232"
+              fill="none" stroke="rgba(255,255,255,0.20)" stroke-width="0.8"
+              stroke-linecap="round" transform="translate(0,-0.5)"/>
+      </svg>
+    </div>
+
+    <div class="wordmark" id="wordmark" aria-label="MANIFOLD"></div>
+    <div class="tagline">ACCESS, RECORDED.</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* === Wordmark letter stagger === */
+  const wmText = 'MANIFOLD';
+  const wm = document.getElementById('wordmark');
+  wmText.split('').forEach((ch, i) => {
+    const span = document.createElement('span');
+    span.className = 'ltr';
+    span.textContent = ch;
+    span.style.animationDelay = `${5200 + i * 80}ms`;
+    span.setAttribute('aria-hidden', 'true');
+    wm.appendChild(span);
+  });
+
+  /* === Particle morph === */
+  const ATOM_COUNT = 120;
+  const TRAIL_LENGTH = 3;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const FRONT  = document.getElementById('atoms');
+  const BLOOM  = document.getElementById('atomsBloom');
+  const TRAILS = document.getElementById('trails');
+  const HALO   = document.getElementById('halo');
+  const SLOT_WRAP = document.getElementById('slotWrap');
+
+  const COLORS = ['var(--ink)', 'var(--ink-warm)', 'var(--ink-cold)'];
+  const COLOR_WEIGHTS = [0.92, 0.99, 1.0];
+
+  function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+  function pickColor() {
+    const r = Math.random();
+    for (let i = 0; i < COLOR_WEIGHTS.length; i++) {
+      if (r < COLOR_WEIGHTS[i]) return COLORS[i];
+    }
+    return COLORS[0];
+  }
+
+  class Atom {
+    constructor(idx) {
+      this.idx = idx;
+
+      this.el = document.createElementNS(SVG_NS, 'circle');
+      this.el.setAttribute('r', 1.4);
+      this.el.style.opacity = 0;
+      this.el.style.fill = pickColor();
+      FRONT.appendChild(this.el);
+
+      this.bloom = document.createElementNS(SVG_NS, 'circle');
+      this.bloom.setAttribute('r', 2.4);
+      this.bloom.style.opacity = 0;
+      BLOOM.appendChild(this.bloom);
+
+      this.trail = [];
+      for (let i = 0; i < TRAIL_LENGTH; i++) {
+        const t = document.createElementNS(SVG_NS, 'circle');
+        t.setAttribute('r', 1.0);
+        t.style.opacity = 0;
+        t.style.fill = 'var(--ink-warm)';
+        TRAILS.appendChild(t);
+        this.trail.push({ el: t, x: 0, y: 0 });
+      }
+
+      // Off-frame start position
+      this.x = (Math.random() - 0.5) * 700;
+      this.y = (Math.random() - 0.5) * 500;
+      this.sx = this.x; this.sy = this.y;
+      this.tx = 0; this.ty = 0;
+      this.cpx = 0; this.cpy = 0;
+      this.delay = 0; this.duration = 900; this.tStart = 0;
+      this.size = 1.5;
+      this.shimmerPhase = Math.random() * Math.PI * 2;
+      this.inFlight = false;
+    }
+
+    setRestSize(idx, total) {
+      const t = (idx / (total - 1) - 0.5) * 2;
+      this.size = 1.55 - Math.abs(t) * 0.4;
+    }
+
+    begin(target, dur, delay) {
+      this.sx = this.x; this.sy = this.y;
+      this.tx = target.x; this.ty = target.y;
+      const dx = this.tx - this.sx, dy = this.ty - this.sy;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const px = -dy/(len||1), py = dx/(len||1);
+      const curve = (Math.random() - 0.5) * Math.min(60, len * 0.35);
+      this.cpx = (this.sx + this.tx)/2 + px*curve;
+      this.cpy = (this.sy + this.ty)/2 + py*curve;
+      this.delay = delay;
+      this.duration = dur;
+      this.tStart = performance.now() + delay;
+      this.inFlight = true;
+      for (const t of this.trail) { t.x = this.sx; t.y = this.sy; t.el.style.opacity = 0; }
+    }
+
+    update(now) {
+      const elapsed = now - this.tStart;
+      if (elapsed < 0) return;
+      if (!this.inFlight) {
+        const phase = now * 0.001 + this.shimmerPhase;
+        const sx = Math.sin(phase * 1.7) * 0.35;
+        const sy = Math.cos(phase * 2.1) * 0.35;
+        this.el.setAttribute('cx', (this.x + sx).toFixed(2));
+        this.el.setAttribute('cy', (this.y + sy).toFixed(2));
+        this.bloom.setAttribute('cx', (this.x + sx).toFixed(2));
+        this.bloom.setAttribute('cy', (this.y + sy).toFixed(2));
+        return;
+      }
+      let t = Math.min(1, elapsed / this.duration);
+      if (t >= 1) {
+        this.inFlight = false;
+        this.x = this.tx; this.y = this.ty;
+      }
+      const e = easeInOutCubic(t);
+      const u = 1 - e;
+      this.x = u*u*this.sx + 2*u*e*this.cpx + e*e*this.tx;
+      this.y = u*u*this.sy + 2*u*e*this.cpy + e*e*this.ty;
+      const bright = 1 - Math.abs(t - 0.5) * 2;
+      const op = 0.55 + 0.45 * (this.inFlight ? bright : 1);
+      const r = this.size + 0.7 * bright;
+      this.el.setAttribute('cx', this.x.toFixed(2));
+      this.el.setAttribute('cy', this.y.toFixed(2));
+      this.el.style.opacity = op;
+      this.el.setAttribute('r', r.toFixed(2));
+      this.bloom.setAttribute('cx', this.x.toFixed(2));
+      this.bloom.setAttribute('cy', this.y.toFixed(2));
+      this.bloom.style.opacity = op * 0.45;
+      this.bloom.setAttribute('r', (r * 1.8).toFixed(2));
+
+      for (let i = this.trail.length - 1; i > 0; i--) {
+        this.trail[i].x = this.trail[i-1].x;
+        this.trail[i].y = this.trail[i-1].y;
+      }
+      this.trail[0].x = this.x; this.trail[0].y = this.y;
+      for (let i = 0; i < this.trail.length; i++) {
+        const tr = this.trail[i];
+        tr.el.setAttribute('cx', tr.x.toFixed(2));
+        tr.el.setAttribute('cy', tr.y.toFixed(2));
+        tr.el.style.opacity = (this.inFlight ? (1 - i/this.trail.length) * 0.45 * bright : 0);
+        tr.el.setAttribute('r', (this.size * 0.7 - i * 0.1).toFixed(2));
+      }
+    }
+  }
+
+  function sampleBar() {
+    const points = [];
+    for (let i = 0; i < ATOM_COUNT; i++) {
+      points.push({ x: 0, y: ((i / (ATOM_COUNT - 1)) - 0.5) * 200 });
+    }
+    return points;
+  }
+
+  function sampleText(text, fontSize = 88) {
+    const W = 360, H = 200;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.font = `300 ${fontSize}px 'SF Pro Display', 'Inter', system-ui, sans-serif`;
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    ctx.fillText(text, W/2, H/2);
+    const data = ctx.getImageData(0, 0, W, H).data;
+    const samples = [];
+    for (let y = 0; y < H; y += 2)
+      for (let x = 0; x < W; x += 2)
+        if (data[(y*W + x)*4 + 3] > 100) samples.push({ x: x - W/2, y: y - H/2 });
+    if (samples.length === 0) return sampleBar();
+    const out = [];
+    for (let i = 0; i < ATOM_COUNT; i++)
+      out.push(samples[Math.floor((i/ATOM_COUNT) * samples.length)]);
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  }
+
+  function assignTargets(atoms, targets) {
+    const used = new Array(targets.length).fill(false);
+    const order = atoms.map((_, i) => i).sort((a,b) => atoms[a].y - atoms[b].y);
+    for (const ai of order) {
+      const a = atoms[ai];
+      let best = -1, bestD = Infinity;
+      for (let ti = 0; ti < targets.length; ti++) {
+        if (used[ti]) continue;
+        const dx = a.x - targets[ti].x, dy = a.y - targets[ti].y;
+        const d = dx*dx + dy*dy;
+        if (d < bestD) { bestD = d; best = ti; }
+      }
+      if (best >= 0) { atoms[ai].nextTarget = targets[best]; used[best] = true; }
+    }
+  }
+
+  const atoms = [];
+  for (let i = 0; i < ATOM_COUNT; i++) { const a = new Atom(i); a.setRestSize(i, ATOM_COUNT); atoms.push(a); }
+
+  let rafId = null;
+  function loop() {
+    const now = performance.now();
+    for (const a of atoms) a.update(now);
+    rafId = requestAnimationFrame(loop);
+  }
+  rafId = requestAnimationFrame(loop);
+
+  // Pause when tab hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (rafId) cancelAnimationFrame(rafId); rafId = null; }
+    else if (!rafId) rafId = requestAnimationFrame(loop);
+  });
+
+  function flashHalo(ms) { HALO.classList.add('flash'); setTimeout(()=>HALO.classList.remove('flash'), ms); }
+  function aberrate(on) { SLOT_WRAP.classList.toggle('aberrating', on); }
+  function punch() {
+    SLOT_WRAP.classList.add('punch');
+    setTimeout(()=>SLOT_WRAP.classList.remove('punch'), 140);
+  }
+
+  function transitionTo(state, dur = 1000) {
+    let targets;
+    if (state === 'bar')      targets = sampleBar();
+    else if (state === 'files')   targets = sampleText('/files', 84);
+    else if (state === 'emails')  targets = sampleText('/emails', 84);
+    else if (state === 'history') targets = sampleText('/history', 76);
+    else if (state === 'tasks')   targets = sampleText('/tasks', 84);
+    else return;
+    assignTargets(atoms, targets);
+    atoms.forEach((a, i) => a.begin(a.nextTarget, dur, (i/ATOM_COUNT)*260 + Math.random()*80));
+    flashHalo(dur);
+    aberrate(true);
+    setTimeout(()=>aberrate(false), dur * 0.75);
+    setTimeout(punch, dur + 280);
+  }
+
+  function initialReveal() {
+    const targets = sampleBar();
+    assignTargets(atoms, targets);
+    atoms.forEach((a, i) => a.begin(a.nextTarget, 1500, (i/ATOM_COUNT)*700 + Math.random()*200));
+    flashHalo(900);
+    setTimeout(punch, 2000);
+  }
+
+  // === Public API ===
+  let cycle = ['files', 'bar', 'emails', 'bar', 'history', 'bar'];
+  let cycleIdx = 0;
+  let cycleTimer = null;
+  let speed = 1;
+
+  function nextCycle() {
+    const state = cycle[cycleIdx % cycle.length];
+    const dur = (state === 'bar' ? 850 : 1100) / speed;
+    transitionTo(state, dur);
+    const holdMs = (state === 'bar' ? 1600 : 2800) / speed;
+    cycleIdx++;
+    cycleTimer = setTimeout(nextCycle, dur + 380 + holdMs);
+  }
+
+  function startSequence() {
+    setTimeout(initialReveal, 2400 / speed);
+    setTimeout(nextCycle, 5400 / speed);
+  }
+
+  window.ManifoldTitle = {
+    setCycle(arr) { cycle = arr.slice(); cycleIdx = 0; },
+    setSpeed(s)   { speed = Math.max(0.3, Math.min(3, s)); },
+    replay()      { location.reload(); },
+    pause()       { if (cycleTimer) clearTimeout(cycleTimer); if (rafId) cancelAnimationFrame(rafId); rafId = null; },
+    resume()      { if (!rafId) rafId = requestAnimationFrame(loop); nextCycle(); }
+  };
+
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.getElementById('stage').classList.add('static');
+  } else {
+    window.addEventListener('load', startSequence);
+  }
+  document.getElementById('stage').addEventListener('click', () => location.reload());
+})();
+</script>
+</body>
+</html>

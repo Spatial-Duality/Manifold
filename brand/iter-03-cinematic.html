@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manifold — Iter 03 (Cinematic)</title>
+<style>
+  /* ITERATION 3 — Cinematic Polish
+     Changes from iter 02:
+       - Motion trails: each atom leaves 5 ghost positions with opacity decay
+       - Halo flashes brighter at the START of each transition
+       - Atoms warm-tint during motion, return to bone-white at rest
+       - Variable atom size by distance from center spine (richness)
+       - Variable transition duration scales with target complexity
+       - Atoms scatter in from off-frame for initial reveal (no awkward snap)
+       - Ambient Brownian shimmer on held states (atoms breathe ±0.5px)
+       - Halo is layered: near (warm), far (cold-blue accent), creating depth */
+
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&display=swap');
+
+  :root {
+    --bg-deep: #050507;
+    --bg-lift: #101013;
+    --ink: #F1ECE0;
+    --ink-warm: #FFE0B2;
+    --ink-soft: #D6D0C2;
+    --ink-mute: #6A665E;
+    --gate: #FFE0B2;
+    --cold: #B8C8E0;
+    --pulse: #FFFFFF;
+
+    --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-confident: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-material: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  *,*::before,*::after { margin:0; padding:0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-deep);
+    font-family: 'SF Pro Display', 'Inter', -apple-system, system-ui, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    color: var(--ink);
+  }
+
+  .stage {
+    position: relative; width: 100%; height: 100vh;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(ellipse 30% 20% at 50% 47%, color-mix(in srgb, var(--ink-warm) 4%, transparent) 0%, transparent 70%),
+      radial-gradient(ellipse 70% 55% at 50% 47%, var(--bg-lift) 0%, var(--bg-deep) 75%);
+    cursor: pointer;
+  }
+
+  .stage::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.55; mix-blend-mode: overlay;
+    background:
+      radial-gradient(ellipse 50% 40% at 50% 50%, transparent 0%, rgba(0,0,0,0.45) 100%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.92  0 0 0 0 0.90  0 0 0 0 0.84  0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-blend-mode: multiply;
+  }
+
+  .composition {
+    position: relative;
+    width: min(820px, 92vw);
+    aspect-ratio: 16 / 11;
+    display: grid;
+    grid-template-rows: 1fr auto auto;
+    align-items: center;
+    justify-items: center;
+  }
+
+  .mark {
+    position: relative; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .halo, .halo-far, .halo-cold {
+    position: absolute; border-radius: 50%; pointer-events: none; opacity: 0;
+    transition: opacity 280ms var(--ease-material);
+  }
+  .halo {
+    width: 280px; height: 360px;
+    background: radial-gradient(ellipse 50% 60% at 50% 50%,
+      color-mix(in srgb, var(--gate) 42%, transparent) 0%, transparent 65%);
+    filter: blur(18px);
+    animation: halo-rise 1100ms var(--ease-confident) 2400ms forwards;
+  }
+  .halo-far {
+    width: 540px; height: 480px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--gate) 14%, transparent) 0%, transparent 60%);
+    filter: blur(46px);
+    animation: halo-far-rise 1500ms var(--ease-confident) 2200ms forwards;
+  }
+  .halo-cold {
+    width: 380px; height: 420px;
+    background: radial-gradient(ellipse 50% 55% at 50% 50%,
+      color-mix(in srgb, var(--cold) 8%, transparent) 0%, transparent 70%);
+    filter: blur(32px);
+    animation: halo-cold-rise 1700ms var(--ease-confident) 2300ms forwards;
+  }
+
+  /* Halo flash class — toggled briefly on transitions */
+  .halo.flash { opacity: 0.9 !important; }
+
+  .slot-svg {
+    position: absolute;
+    width: 360px; height: 280px;
+    overflow: visible;
+  }
+  .slot-svg circle { fill: var(--ink); }
+  .slot-svg .trail circle { fill: var(--ink-warm); }
+
+  .brace {
+    font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    font-weight: 200;
+    font-size: clamp(200px, 30vw, 300px);
+    line-height: 1;
+    color: var(--ink);
+    display: inline-block;
+    opacity: 0;
+    text-shadow:
+      0 0 32px color-mix(in srgb, var(--ink) 8%, transparent),
+      0 0 1px color-mix(in srgb, var(--ink) 30%, transparent);
+  }
+  .brace.left {
+    margin-right: 110px;
+    clip-path: circle(0% at 0% 50%);
+    animation: iris-left 1500ms var(--ease-cinematic) 1000ms forwards;
+  }
+  .brace.right {
+    margin-left: 110px;
+    clip-path: circle(0% at 100% 50%);
+    animation: iris-right 1500ms var(--ease-cinematic) 1300ms forwards;
+  }
+
+  .wordmark {
+    margin-top: 56px;
+    font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    font-weight: 300;
+    font-size: clamp(20px, 2.4vw, 30px);
+    letter-spacing: 0.66em;
+    text-indent: 0.66em;
+    color: var(--ink-soft);
+    opacity: 0;
+    transform: translateY(8px);
+    animation: word-rise 1100ms var(--ease-cinematic) 5000ms forwards;
+  }
+  .tagline {
+    margin-top: 22px;
+    font-size: clamp(10px, 1.05vw, 12px);
+    letter-spacing: 0.34em;
+    text-indent: 0.34em;
+    color: var(--ink-mute);
+    opacity: 0;
+    animation: tag-rise 900ms ease-out 5800ms forwards;
+  }
+
+  @keyframes iris-left { 0%{clip-path:circle(0% at 0% 50%);opacity:0;} 20%{opacity:1;} 100%{clip-path:circle(140% at 0% 50%);opacity:1;} }
+  @keyframes iris-right { 0%{clip-path:circle(0% at 100% 50%);opacity:0;} 20%{opacity:1;} 100%{clip-path:circle(140% at 100% 50%);opacity:1;} }
+  @keyframes halo-rise { to { opacity: 0.55; } }
+  @keyframes halo-far-rise { to { opacity: 0.6; } }
+  @keyframes halo-cold-rise { to { opacity: 0.7; } }
+  @keyframes word-rise { to { opacity: 1; transform: translateY(0); } }
+  @keyframes tag-rise { to { opacity: 0.85; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,*::before,*::after { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <div class="composition">
+    <div class="mark">
+      <div class="halo-cold" aria-hidden="true"></div>
+      <div class="halo-far" aria-hidden="true"></div>
+      <div class="halo" id="halo" aria-hidden="true"></div>
+      <span class="brace left" aria-hidden="true">{</span>
+      <svg class="slot-svg" id="slot" viewBox="-180 -140 360 280" aria-hidden="true">
+        <g id="trails"></g>
+        <g id="atoms"></g>
+      </svg>
+      <span class="brace right" aria-hidden="true">}</span>
+    </div>
+    <div class="wordmark">MANIFOLD</div>
+    <div class="tagline">ACCESS, RECORDED.</div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   ITER 03 — Cinematic Particle Morph
+   Adds: trails, halo flash, warm-tint transit, variable atom size,
+   scatter-from-off-frame initial reveal, Brownian shimmer on hold.
+   ============================================================ */
+
+const ATOM_COUNT = 150;
+const TRAIL_LENGTH = 5;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SLOT = document.getElementById('atoms');
+const TRAILS = document.getElementById('trails');
+const HALO = document.getElementById('halo');
+
+class Atom {
+  constructor() {
+    this.el = document.createElementNS(SVG_NS, 'circle');
+    this.el.setAttribute('r', 1.4);
+    this.el.setAttribute('cx', (Math.random() - 0.5) * 800);
+    this.el.setAttribute('cy', (Math.random() - 0.5) * 600);
+    this.el.style.opacity = 0;
+    this.el.style.fill = 'var(--ink)';
+    SLOT.appendChild(this.el);
+
+    // Trail circles — older positions
+    this.trail = [];
+    for (let i = 0; i < TRAIL_LENGTH; i++) {
+      const t = document.createElementNS(SVG_NS, 'circle');
+      t.setAttribute('r', 1.0);
+      t.style.opacity = 0;
+      t.style.fill = 'var(--ink-warm)';
+      TRAILS.appendChild(t);
+      this.trail.push({ el: t, x: 0, y: 0, age: 0 });
+    }
+
+    // Read out from a random off-frame position
+    this.x = (Math.random() - 0.5) * 800;
+    this.y = (Math.random() - 0.5) * 600;
+    this.sx = this.x; this.sy = this.y;
+    this.tx = 0; this.ty = 0;
+    this.cpx = 0; this.cpy = 0;
+    this.delay = 0;
+    this.duration = 900;
+    this.tStart = 0;
+    this.size = 1.4;
+    this.shimmerPhase = Math.random() * Math.PI * 2;
+    this.inFlight = false;
+  }
+
+  beginTransition(target, dur, delay) {
+    this.sx = this.x; this.sy = this.y;
+    this.tx = target.x; this.ty = target.y;
+    const dx = this.tx - this.sx, dy = this.ty - this.sy;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const px = -dy / (len || 1), py = dx / (len || 1);
+    const curve = (Math.random() - 0.5) * Math.min(50, len * 0.3);
+    this.cpx = (this.sx + this.tx) / 2 + px * curve;
+    this.cpy = (this.sy + this.ty) / 2 + py * curve;
+    this.delay = delay;
+    this.duration = dur;
+    this.tStart = performance.now() + delay;
+    this.inFlight = true;
+    // Reset trail positions to current
+    for (const t of this.trail) { t.x = this.sx; t.y = this.sy; t.age = 0; t.el.style.opacity = 0; }
+  }
+
+  update(now) {
+    const elapsed = now - this.tStart;
+    if (elapsed < 0 || !this.inFlight) {
+      // Hold state — Brownian shimmer
+      if (!this.inFlight) {
+        const phase = now * 0.001 + this.shimmerPhase;
+        const sx = Math.sin(phase * 1.7) * 0.4;
+        const sy = Math.cos(phase * 2.1) * 0.4;
+        this.el.setAttribute('cx', (this.x + sx).toFixed(2));
+        this.el.setAttribute('cy', (this.y + sy).toFixed(2));
+      }
+      return;
+    }
+    let t = Math.min(1, elapsed / this.duration);
+    if (t >= 1) {
+      this.inFlight = false;
+      this.x = this.tx; this.y = this.ty;
+    }
+    const e = easeInOutCubic(t);
+    const u = 1 - e;
+    this.x = u*u*this.sx + 2*u*e*this.cpx + e*e*this.tx;
+    this.y = u*u*this.sy + 2*u*e*this.cpy + e*e*this.ty;
+
+    // Brightening peak at t=0.5
+    const bright = 1 - Math.abs(t - 0.5) * 2;
+    const opacity = 0.55 + 0.45 * (this.inFlight ? bright : 1);
+    const r = this.size + 0.6 * bright;
+
+    this.el.setAttribute('cx', this.x.toFixed(2));
+    this.el.setAttribute('cy', this.y.toFixed(2));
+    this.el.style.opacity = opacity;
+    this.el.setAttribute('r', r.toFixed(2));
+
+    // Update trails — shift positions
+    for (let i = this.trail.length - 1; i > 0; i--) {
+      this.trail[i].x = this.trail[i-1].x;
+      this.trail[i].y = this.trail[i-1].y;
+    }
+    this.trail[0].x = this.x;
+    this.trail[0].y = this.y;
+    for (let i = 0; i < this.trail.length; i++) {
+      const tr = this.trail[i];
+      tr.el.setAttribute('cx', tr.x.toFixed(2));
+      tr.el.setAttribute('cy', tr.y.toFixed(2));
+      tr.el.style.opacity = (this.inFlight ? (1 - i / this.trail.length) * 0.45 * bright : 0);
+      tr.el.setAttribute('r', (this.size * 0.7 - i * 0.08).toFixed(2));
+    }
+  }
+
+  setRestSize(idx, total) {
+    // Vary size by position relative to spine center for richness
+    const t = (idx / (total - 1) - 0.5) * 2; // -1..1
+    this.size = 1.5 - Math.abs(t) * 0.4; // larger in middle
+  }
+}
+
+function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+// === Sample target points ===
+function sampleBar() {
+  const points = [];
+  for (let i = 0; i < ATOM_COUNT; i++) {
+    const t = i / (ATOM_COUNT - 1);
+    points.push({ x: 0, y: (t - 0.5) * 200 });
+  }
+  return points;
+}
+function sampleText(text, fontSize = 88) {
+  const W = 360, H = 200;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.font = `300 ${fontSize}px 'SF Pro Display', 'Inter', system-ui, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, W/2, H/2);
+  const data = ctx.getImageData(0, 0, W, H).data;
+  const samples = [];
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const i = (y * W + x) * 4;
+      if (data[i+3] > 100) samples.push({ x: x - W/2, y: y - H/2 });
+    }
+  }
+  if (samples.length === 0) return sampleBar();
+  const out = [];
+  for (let i = 0; i < ATOM_COUNT; i++) {
+    out.push(samples[Math.floor((i / ATOM_COUNT) * samples.length)]);
+  }
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function assignTargets(atoms, targets) {
+  const used = new Array(targets.length).fill(false);
+  const order = atoms.map((_, i) => i).sort((a,b) => atoms[a].y - atoms[b].y);
+  for (const ai of order) {
+    const a = atoms[ai];
+    let best = -1, bestD = Infinity;
+    for (let ti = 0; ti < targets.length; ti++) {
+      if (used[ti]) continue;
+      const dx = a.x - targets[ti].x, dy = a.y - targets[ti].y;
+      const d = dx*dx + dy*dy;
+      if (d < bestD) { bestD = d; best = ti; }
+    }
+    if (best >= 0) {
+      atoms[ai].nextTarget = targets[best];
+      used[best] = true;
+    }
+  }
+}
+
+// === Build atom field ===
+const atoms = [];
+for (let i = 0; i < ATOM_COUNT; i++) {
+  const a = new Atom();
+  a.setRestSize(i, ATOM_COUNT);
+  atoms.push(a);
+}
+
+let renderActive = false;
+function render() {
+  const now = performance.now();
+  for (const a of atoms) a.update(now);
+  renderActive = true;
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// === Initial reveal: scatter-from-off-frame to bar ===
+function initialReveal() {
+  const targets = sampleBar();
+  assignTargets(atoms, targets);
+  // fade in atoms as they approach
+  atoms.forEach((a, i) => {
+    a.beginTransition(a.nextTarget, 1400, (i / ATOM_COUNT) * 600 + Math.random() * 200);
+  });
+  // halo flash
+  flashHalo(800);
+}
+
+// === Halo flash ===
+function flashHalo(ms = 600) {
+  HALO.classList.add('flash');
+  setTimeout(() => HALO.classList.remove('flash'), ms);
+}
+
+// === Transition to named state ===
+function transitionTo(state, duration = 900) {
+  let targets;
+  if (state === 'bar') targets = sampleBar();
+  else if (state === 'files') targets = sampleText('/files', 84);
+  else if (state === 'emails') targets = sampleText('/emails', 84);
+  else if (state === 'history') targets = sampleText('/history', 76);
+  else return;
+  assignTargets(atoms, targets);
+  atoms.forEach((a, i) => {
+    a.beginTransition(a.nextTarget, duration, (i / ATOM_COUNT) * 250 + Math.random() * 80);
+  });
+  flashHalo(duration);
+}
+
+// === Sequence ===
+const cycle = ['files', 'bar', 'emails', 'bar', 'history', 'bar'];
+let cycleIdx = 0;
+function nextCycle() {
+  const state = cycle[cycleIdx % cycle.length];
+  // Variable duration based on text complexity
+  const dur = state === 'bar' ? 800 : 1100;
+  transitionTo(state, dur);
+  const holdMs = state === 'bar' ? 1300 : 2400;
+  cycleIdx++;
+  setTimeout(nextCycle, dur + 350 + holdMs);
+}
+
+window.addEventListener('load', () => {
+  setTimeout(initialReveal, 2400);
+  setTimeout(nextCycle, 5200);
+});
+document.getElementById('stage').addEventListener('click', () => location.reload());
+</script>
+</body>
+</html>
