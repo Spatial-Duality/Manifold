@@ -171,23 +171,33 @@ struct FileInspectorPane: View {
 
     @ViewBuilder
     private func exposureRow(_ summary: AgentExposureSummary) -> some View {
-        HStack(spacing: Spacing.s2) {
-            Circle()
-                .fill(agentColor(summary.agent))
-                .frame(width: 8, height: 8)
-                .accessibilityHidden(true)
-            Text(displayName(for: summary.agent))
-                .font(ManifoldType.caption)
-                .foregroundStyle(.primary)
-            Spacer()
-            if summary.totalCount == 0 {
-                Text("never")
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Spacing.s2) {
+                Circle()
+                    .fill(agentColor(summary.agent))
+                    .frame(width: 8, height: 8)
+                    .accessibilityHidden(true)
+                Text(displayName(for: summary.agent))
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if summary.totalCount == 0 {
+                    Text("never")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(summary.summaryText)
+                        .font(ManifoldType.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !summary.toolBreakdown.isEmpty {
+                Text(summary.toolBreakdown)
                     .font(ManifoldType.caption)
                     .foregroundStyle(.tertiary)
-            } else {
-                Text(summary.summaryText)
-                    .font(ManifoldType.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .padding(.leading, 14)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
     }
@@ -198,6 +208,7 @@ struct FileInspectorPane: View {
         let writeCount: Int
         let totalBytes: Int
         let lastTimestamp: Double?
+        let topTools: [(name: String, count: Int)]
         var totalCount: Int { readCount + writeCount }
         var summaryText: String {
             var parts: [String] = []
@@ -216,17 +227,34 @@ struct FileInspectorPane: View {
             }
             return joined
         }
+        /// "via read_file (3), grep (2)" — caption line beneath the count
+        /// row that tells the user which tools the agent used. Empty when
+        /// the agent has no exposures.
+        var toolBreakdown: String {
+            guard !topTools.isEmpty else { return "" }
+            let formatted = topTools.prefix(3).map { entry in
+                entry.count > 1 ? "\(entry.name) (\(entry.count))" : entry.name
+            }
+            return "via " + formatted.joined(separator: ", ")
+        }
     }
 
     /// Aggregates the in-memory exposure timeline by agent. Filtering on
     /// connected agents only — disconnected agents have no audit row.
     private func exposureSummaries(for file: SourceFile) -> [AgentExposureSummary] {
         let connectedRaw = Set(connectedAgents.map(\.rawValue))
-        var counts: [TargetApp: (read: Int, write: Int, bytes: Int, latest: Double?)] = [:]
+        struct Bucket {
+            var read = 0
+            var write = 0
+            var bytes = 0
+            var latest: Double?
+            var toolCounts: [String: Int] = [:]
+        }
+        var counts: [TargetApp: Bucket] = [:]
         for record in exposures {
             guard connectedRaw.contains(record.agent),
                   let agent = TargetApp(rawValue: record.agent) else { continue }
-            var entry = counts[agent] ?? (read: 0, write: 0, bytes: 0, latest: nil)
+            var entry = counts[agent] ?? Bucket()
             entry.bytes += record.byteCount
             if record.exposureType.contains("write") {
                 entry.write += 1
@@ -238,16 +266,26 @@ struct FileInspectorPane: View {
             } else {
                 entry.latest = record.timestamp
             }
+            if !record.toolName.isEmpty {
+                entry.toolCounts[record.toolName, default: 0] += 1
+            }
             counts[agent] = entry
         }
         return connectedAgents.map { agent in
-            let entry = counts[agent] ?? (read: 0, write: 0, bytes: 0, latest: nil)
+            let entry = counts[agent] ?? Bucket()
+            let topTools = entry.toolCounts
+                .sorted { lhs, rhs in
+                    if lhs.value != rhs.value { return lhs.value > rhs.value }
+                    return lhs.key < rhs.key
+                }
+                .map { (name: $0.key, count: $0.value) }
             return AgentExposureSummary(
                 agent: agent,
                 readCount: entry.read,
                 writeCount: entry.write,
                 totalBytes: entry.bytes,
-                lastTimestamp: entry.latest
+                lastTimestamp: entry.latest,
+                topTools: topTools
             )
         }
     }
