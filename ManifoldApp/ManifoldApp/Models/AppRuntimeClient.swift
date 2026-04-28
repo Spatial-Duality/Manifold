@@ -343,6 +343,13 @@ protocol RuntimeClientProtocol: Sendable {
         emailSensitivity: String?
     ) async throws -> StartSessionFromTemplateResult
 
+    // MARK: - Inspector gem fetchers
+
+    /// Recent exposure records for one file path. Used by the inspector to
+    /// surface per-agent read/write counts ("Claude read 5×, Codex 0×").
+    /// Aggregation lives in the app — the runtime returns the raw timeline.
+    func fileExposures(resourcePath: String, limit: Int) async throws -> [ExposureRecord]
+
     // MARK: - Filter mode (Sensitive content detection — Lane C)
 
     /// Effective filter mode for an agent: per-agent override > global > .off.
@@ -422,6 +429,9 @@ extension RuntimeClientProtocol {
     func clearAgentFilterMode(_ agent: TargetApp) async throws {
         throw RuntimeClientStubError.unimplemented("clearAgentFilterMode")
     }
+
+    // Inspector gem defaults
+    func fileExposures(resourcePath: String, limit: Int) async throws -> [ExposureRecord] { [] }
 }
 
 /// Plain Sendable record mirroring ApprovalQueue.PendingRequest across XPC.

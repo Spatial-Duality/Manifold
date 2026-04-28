@@ -23,6 +23,9 @@ struct FileInspectorPane: View {
     let onSetAllAgents: (Bool) -> Void
     let onReset: () -> Void
 
+    @State private var exposures: [ExposureRecord] = []
+    @State private var exposuresFilePath: String?
+
     var body: some View {
         ScrollView {
             if selectionCount > 1 {
@@ -31,9 +34,20 @@ struct FileInspectorPane: View {
             } else if let file {
                 singleFileContent(file)
                     .padding(Spacing.s4)
+                    .task(id: file.path) { await loadExposures(for: file) }
             } else {
                 empty
             }
+        }
+    }
+
+    private func loadExposures(for file: SourceFile) async {
+        guard exposuresFilePath != file.path else { return }
+        exposuresFilePath = file.path
+        do {
+            exposures = try await store.runtime.fileExposures(resourcePath: file.path, limit: 200)
+        } catch {
+            exposures = []
         }
     }
 
@@ -68,6 +82,8 @@ struct FileInspectorPane: View {
             }
 
             accessSection(file: file, visible: visible)
+
+            auditSection(file: file)
 
             HStack(spacing: Spacing.s2) {
                 Button {
@@ -116,6 +132,137 @@ struct FileInspectorPane: View {
             Button("Reset to inherited", action: onReset)
                 .buttonStyle(.borderless)
                 .font(ManifoldType.caption)
+        }
+    }
+
+    /// Per-agent exposure counts for the current file. Honest: when an
+    /// agent has 0 reads we say "Codex 0×" rather than hiding the row,
+    /// because absence-of-evidence is real audit information.
+    @ViewBuilder
+    private func auditSection(file: SourceFile) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            Text("Audit")
+                .font(ManifoldType.captionMedium)
+                .foregroundStyle(.secondary)
+
+            if connectedAgents.isEmpty {
+                Text("Connect an AI to start recording exposures.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                let summaries = exposureSummaries(for: file)
+                if exposuresFilePath == nil {
+                    HStack(spacing: Spacing.s1) {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 12, height: 12)
+                        Text("Loading exposure history…")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(summaries, id: \.agent) { summary in
+                        exposureRow(summary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func exposureRow(_ summary: AgentExposureSummary) -> some View {
+        HStack(spacing: Spacing.s2) {
+            Circle()
+                .fill(agentColor(summary.agent))
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            Text(displayName(for: summary.agent))
+                .font(ManifoldType.caption)
+                .foregroundStyle(.primary)
+            Spacer()
+            if summary.totalCount == 0 {
+                Text("never")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text(summary.summaryText)
+                    .font(ManifoldType.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private struct AgentExposureSummary {
+        let agent: TargetApp
+        let readCount: Int
+        let writeCount: Int
+        let totalBytes: Int
+        let lastTimestamp: Double?
+        var totalCount: Int { readCount + writeCount }
+        var summaryText: String {
+            var parts: [String] = []
+            if readCount > 0 {
+                parts.append("read \(readCount)×")
+            }
+            if writeCount > 0 {
+                parts.append("wrote \(writeCount)×")
+            }
+            let joined = parts.joined(separator: ", ")
+            if totalBytes > 0 {
+                let bytes = ByteCountFormatter.string(
+                    fromByteCount: Int64(totalBytes), countStyle: .memory
+                )
+                return "\(joined) (\(bytes))"
+            }
+            return joined
+        }
+    }
+
+    /// Aggregates the in-memory exposure timeline by agent. Filtering on
+    /// connected agents only — disconnected agents have no audit row.
+    private func exposureSummaries(for file: SourceFile) -> [AgentExposureSummary] {
+        let connectedRaw = Set(connectedAgents.map(\.rawValue))
+        var counts: [TargetApp: (read: Int, write: Int, bytes: Int, latest: Double?)] = [:]
+        for record in exposures {
+            guard connectedRaw.contains(record.agent),
+                  let agent = TargetApp(rawValue: record.agent) else { continue }
+            var entry = counts[agent] ?? (read: 0, write: 0, bytes: 0, latest: nil)
+            entry.bytes += record.byteCount
+            if record.exposureType.contains("write") {
+                entry.write += 1
+            } else {
+                entry.read += 1
+            }
+            if let current = entry.latest {
+                entry.latest = max(current, record.timestamp)
+            } else {
+                entry.latest = record.timestamp
+            }
+            counts[agent] = entry
+        }
+        return connectedAgents.map { agent in
+            let entry = counts[agent] ?? (read: 0, write: 0, bytes: 0, latest: nil)
+            return AgentExposureSummary(
+                agent: agent,
+                readCount: entry.read,
+                writeCount: entry.write,
+                totalBytes: entry.bytes,
+                lastTimestamp: entry.latest
+            )
+        }
+    }
+
+    private func displayName(for agent: TargetApp) -> String {
+        switch agent {
+        case .cowork: return "Claude"
+        case .codex:  return "Codex"
+        }
+    }
+
+    private func agentColor(_ agent: TargetApp) -> Color {
+        switch agent {
+        case .cowork: return .blue
+        case .codex:  return .purple
         }
     }
 

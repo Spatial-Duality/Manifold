@@ -247,6 +247,17 @@ extension ManifoldXPCService {
             }
             return ["overrides": try XPCJSON.object(from: try await runtime.filterModeStore.overrides(grantID: grantID))]
 
+        case "fileExposures":
+            // Per-file exposure timeline used by the inspector to show
+            // "Claude read 5× · Codex 0×". The runtime returns the recent
+            // ExposureRecord rows; the app aggregates per agent.
+            guard let resourcePath = payload["resourcePath"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let limit = payload["limit"] as? Int ?? 100
+            let records = try await runtime.exposureStore.exposures(resourcePath: resourcePath, limit: limit)
+            return ["exposures": try XPCJSON.object(from: records)]
+
         case "snapshotData":
             guard let hash = payload["hash"] as? String else {
                 throw ManifoldXPCError.invalidPayload

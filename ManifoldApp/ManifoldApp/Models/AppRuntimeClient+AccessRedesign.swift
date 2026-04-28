@@ -202,6 +202,21 @@ extension AppRuntimeClient {
         )
     }
 
+    // MARK: - Inspector gem fetchers
+
+    /// Per-file exposure timeline. Used by the file inspector to render the
+    /// per-agent read/write counts beneath the Sharing selector.
+    func fileExposures(resourcePath: String, limit: Int = 100) async throws -> [ExposureRecord] {
+        let response = try await xpc.command(
+            name: "fileExposures",
+            payload: ["resourcePath": resourcePath, "limit": limit]
+        )
+        guard let object = response["exposures"], !(object is NSNull) else {
+            return []
+        }
+        return try XPCJSON.decode([ExposureRecord].self, from: object)
+    }
+
     func filterModeOverrides(grantID: String) async throws -> [FilterModeOverrideRecord] {
         let response = try await xpc.command(
             name: "listFilterModeOverrides",
