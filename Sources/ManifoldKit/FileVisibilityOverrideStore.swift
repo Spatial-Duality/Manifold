@@ -204,6 +204,41 @@ public actor FileVisibilityOverrideStore {
         )
     }
 
+    /// Apply a batch of overrides in a single transaction. Required by the
+    /// bulk-action bar in the unified Access surface — looping per-file would
+    /// run N round-trips and N statement prepares per click.
+    ///
+    /// Empty input is a no-op. Mixed allow/deny in one batch is supported.
+    /// Atomicity: if any row fails, the whole batch rolls back.
+    public func setManyOverrides(_ overrides: [FileVisibilityOverrideRecord]) throws {
+        guard !overrides.isEmpty else { return }
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.transaction {
+            for override in overrides {
+                let normalizedPath = FileSelectionScope(
+                    sourceID: override.sourceID,
+                    relativePath: override.relativePath,
+                    isDirectory: override.isDirectory
+                ).normalizedRelativePath
+                try db.execute(
+                    """
+                    INSERT OR REPLACE INTO file_visibility_overrides (
+                        agent, source_id, relative_path, is_directory, decision, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    params: [
+                        override.agent.rawValue,
+                        override.sourceID,
+                        normalizedPath,
+                        override.isDirectory ? "1" : "0",
+                        override.decision.rawValue,
+                        now,
+                    ]
+                )
+            }
+        }
+    }
+
     public func clearOverride(
         agent: TargetApp,
         sourceID: String,

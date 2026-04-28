@@ -160,6 +160,49 @@ extension ManifoldXPCService {
             )
             return ["ok": true]
 
+        case "setManyFileVisibilityOverrides":
+            // Bulk-action batch write for the unified Access surface multi-select
+            // bar. Decoded as an array of FileVisibilityOverrideRecord so the UI
+            // can express mixed allow/deny in a single round-trip.
+            let overrides = try decodePayload([FileVisibilityOverrideRecord].self, key: "overrides", from: payload, default: [])
+            try await runtime.fileVisibilityOverrideStore.setManyOverrides(overrides)
+            return ["ok": true, "count": overrides.count]
+
+        case "listAccessTemplatesForAgent":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["templates": try XPCJSON.object(from: try await runtime.accessStore.templatesForAgent(agent))]
+
+        case "saveAccessTemplate":
+            guard let name = payload["name"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let presetID = payload["presetID"] as? String
+            let targetAppRaw = payload["targetApp"] as? String
+            let targetApp = targetAppRaw.flatMap(TargetApp.init(rawValue:))
+            let scopes = try decodePayload([FileSelectionScope].self, key: "fileScopes", from: payload, default: [])
+            let emailIDs = payload["emailIDs"] as? [String] ?? []
+            let saved = try await runtime.accessStore.savePreset(
+                id: presetID,
+                name: name,
+                targetApp: targetApp,
+                fileScopes: scopes,
+                emailIDs: emailIDs
+            )
+            return ["template": try XPCJSON.object(from: saved)]
+
+        case "deleteAccessTemplate":
+            guard let presetID = payload["presetID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.accessStore.deletePreset(id: presetID)
+            return ["ok": true]
+
+        case "startSessionFromTemplate":
+            return try await startSessionFromTemplateCommand(payload: payload)
+
         case "snapshotData":
             guard let hash = payload["hash"] as? String else {
                 throw ManifoldXPCError.invalidPayload
@@ -829,6 +872,91 @@ extension ManifoldXPCService {
         return [
             "activeGrant": try XPCJSON.object(from: state.grant),
             "activeGrantSources": try XPCJSON.object(from: state.sources),
+        ]
+    }
+
+    /// Start a tracked run from a saved access template.
+    ///
+    /// Lenient on stale references (per eng-review Issue 2): sources that
+    /// have been deleted, removed, or paused are silently dropped from the
+    /// scope, and their displayName + sourceID are returned in
+    /// `skippedSources` so the UI can surface a banner. The session still
+    /// starts with the surviving scope (or with no scope, falling back to
+    /// the agent's default policy if the template was empty).
+    ///
+    /// Disconnected target agent currently does NOT pre-fail here — the
+    /// runtime accepts grants for any agent and the UI gates connection at
+    /// session-start time. (TODO when AppRuntimeClient surfaces connection
+    /// status to the bridge layer.)
+    private func startSessionFromTemplateCommand(payload: [String: Any]) async throws -> [String: Any] {
+        guard let presetID = payload["presetID"] as? String else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        guard let snapshot = try await runtime.accessStore.loadPreset(id: presetID) else {
+            throw ManifoldXPCError.invalidPayload
+        }
+
+        // Target agent: explicit override > template's targetApp > cowork.
+        let explicitTargetApp = (payload["targetApp"] as? String).flatMap(TargetApp.init(rawValue:))
+        let targetApp: TargetApp = explicitTargetApp ?? snapshot.preset.targetApp ?? .cowork
+
+        // Filter stale source references. activeSources() already drops
+        // status='removed' rows; we additionally drop paused sources for
+        // template-driven runs (paused = "temporarily off" — the template
+        // shouldn't silently re-enable them).
+        let activeSources = try await runtime.grantStore.activeSources()
+        let activeIDs = Set(activeSources.map(\.sourceID))
+        let allSources = try await runtime.grantStore.allSources()
+        let knownDisplayNamesByID = Dictionary(uniqueKeysWithValues: allSources.map { ($0.sourceID, $0.displayName) })
+
+        var skippedSources: [[String: String]] = []
+        var seenSkipped = Set<String>()
+        let templateScopes = snapshot.fileScopes
+        let survivingScopes: [FileSelectionScope] = templateScopes.compactMap { scope in
+            if activeIDs.contains(scope.sourceID) {
+                return scope
+            }
+            if seenSkipped.insert(scope.sourceID).inserted {
+                skippedSources.append([
+                    "sourceID": scope.sourceID,
+                    "displayName": knownDisplayNamesByID[scope.sourceID] ?? scope.sourceID,
+                ])
+            }
+            return nil
+        }
+
+        // Email IDs: keep only ones the email store still knows about.
+        let templateEmailIDs = snapshot.emailIDs
+        var missingEmailIDs: [String] = []
+        let survivingEmailIDs: Set<String>
+        if templateEmailIDs.isEmpty {
+            survivingEmailIDs = []
+        } else {
+            let known = Set(try runtime.emailStore.emailMessages(ids: templateEmailIDs).map(\.emailID))
+            survivingEmailIDs = Set(templateEmailIDs.filter { known.contains($0) })
+            missingEmailIDs = templateEmailIDs.filter { !known.contains($0) }
+        }
+
+        let summaryFraming = payload["summaryFraming"] as? String
+        let noteCaptureMode = (payload["noteCaptureMode"] as? String).flatMap(SessionNoteCaptureMode.init(rawValue:)) ?? .off
+        let sensitivity = (payload["emailSensitivity"] as? String).flatMap(EmailSensitivityFilter.Level.init(rawValue:))
+
+        let state = try await startTrackedRun(
+            targetApp: targetApp,
+            fileScopes: survivingScopes,
+            selectedEmailIDs: survivingEmailIDs,
+            summaryFraming: summaryFraming,
+            noteCaptureMode: noteCaptureMode,
+            sensitivityOverride: sensitivity
+        )
+
+        return [
+            "activeGrant": try XPCJSON.object(from: state.grant),
+            "activeGrantSources": try XPCJSON.object(from: state.sources),
+            "templateID": presetID,
+            "templateName": snapshot.preset.name,
+            "skippedSources": skippedSources,
+            "missingEmailIDs": missingEmailIDs,
         ]
     }
 

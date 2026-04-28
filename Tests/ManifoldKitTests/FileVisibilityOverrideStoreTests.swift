@@ -107,4 +107,115 @@ struct FileVisibilityOverrideStoreTests {
         #expect(!inheritedDeny.isVisible)
         #expect(inheritedDeny.origin == .explicitDeny)
     }
+
+    @Test("setManyOverrides empty input is a no-op")
+    func setManyEmpty() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.setManyOverrides([])
+        let overrides = try await store.overrides(agent: .cowork)
+        #expect(overrides.isEmpty)
+    }
+
+    @Test("setManyOverrides applies all rows in a single transaction")
+    func setManyApplies() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let batch: [FileVisibilityOverrideRecord] = (0..<10).map { i in
+            FileVisibilityOverrideRecord(
+                agent: .cowork,
+                sourceID: "src-1",
+                relativePath: "file-\(i).txt",
+                isDirectory: false,
+                decision: .deny
+            )
+        }
+        try await store.setManyOverrides(batch)
+
+        let overrides = try await store.overrides(agent: .cowork)
+        #expect(overrides.count == 10)
+        #expect(overrides.allSatisfy { $0.decision == .deny })
+    }
+
+    @Test("setManyOverrides supports mixed allow/deny in one batch")
+    func setManyMixedDecisions() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.setManyOverrides([
+            FileVisibilityOverrideRecord(
+                agent: .cowork,
+                sourceID: "src-1",
+                relativePath: "allowed.md",
+                isDirectory: false,
+                decision: .allow
+            ),
+            FileVisibilityOverrideRecord(
+                agent: .cowork,
+                sourceID: "src-1",
+                relativePath: "denied.md",
+                isDirectory: false,
+                decision: .deny
+            ),
+        ])
+
+        let overrides = try await store.overrides(agent: .cowork)
+        #expect(overrides.count == 2)
+        let decisions = Set(overrides.map(\.decision))
+        #expect(decisions == [.allow, .deny])
+    }
+
+    @Test("setManyOverrides INSERT OR REPLACE semantics on existing rows")
+    func setManyReplacesExisting() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.setOverride(
+            agent: .cowork,
+            sourceID: "src-1",
+            relativePath: "file.md",
+            isDirectory: false,
+            decision: .allow
+        )
+        // Replace via batch.
+        try await store.setManyOverrides([
+            FileVisibilityOverrideRecord(
+                agent: .cowork,
+                sourceID: "src-1",
+                relativePath: "file.md",
+                isDirectory: false,
+                decision: .deny
+            )
+        ])
+        let overrides = try await store.overrides(agent: .cowork)
+        #expect(overrides.count == 1)
+        #expect(overrides.first?.decision == .deny)
+    }
+
+    @Test("setManyOverrides supports per-agent scoping in one batch")
+    func setManyMultipleAgents() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.setManyOverrides([
+            FileVisibilityOverrideRecord(
+                agent: .cowork,
+                sourceID: "src-1",
+                relativePath: "claude-only.md",
+                isDirectory: false,
+                decision: .allow
+            ),
+            FileVisibilityOverrideRecord(
+                agent: .codex,
+                sourceID: "src-1",
+                relativePath: "codex-only.md",
+                isDirectory: false,
+                decision: .allow
+            ),
+        ])
+        #expect(try await store.overrides(agent: .cowork).count == 1)
+        #expect(try await store.overrides(agent: .codex).count == 1)
+    }
 }
