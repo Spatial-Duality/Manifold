@@ -377,6 +377,21 @@ struct FoldersMatrixView: View {
 
 // MARK: - CoverageDotButton
 
+/// Native checkbox glyph for the per-agent matrix cells. Replaces the
+/// previous filled-circle indicator that users mistook for a non-
+/// interactive status dot. SF Symbol checkbox glyphs match Apple's
+/// Privacy & Security ▸ Files and Folders pane and the redesigned file
+/// inspector's parent-child selector — same visual language across the
+/// access surface, no ambiguity about clickability.
+///
+/// State map:
+///   off    → hollow square        (`square`)
+///   on     → tinted checked       (`checkmark.square.fill`, agent color)
+///   mixed  → tinted minus         (`minus.square.fill`, agent color)
+///
+/// Hit region is a 28×24 rectangle around the 16pt glyph so clicks
+/// inside the matrix cell reliably reach the button rather than the
+/// underlying Table row's selection target.
 private struct CoverageDotButton: View {
     enum State {
         case off
@@ -391,39 +406,41 @@ private struct CoverageDotButton: View {
 
     var body: some View {
         Button(action: action) {
-            Circle()
-                .fill(state == .off ? ManifoldPalette.surface3 : tint)
-                .overlay(Circle().strokeBorder(state == .off ? ManifoldPalette.border : tint.opacity(0.4), lineWidth: 0.8))
-                .overlay {
-                    if state == .mixed {
-                        Circle()
-                            .fill(ManifoldPalette.surface)
-                            .frame(width: 6, height: 6)
-                    }
-                }
-                .frame(width: 14, height: 14)
+            glyph
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(state == .off ? Color.secondary : tint)
                 .frame(width: 28, height: 24)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
         .help(helpText)
         .accessibilityLabel(helpText)
         .accessibilityValue(accessibilityValue)
+        .accessibilityAddTraits(.isToggle)
         .accessibilityIdentifier(accessibilityIdentifier ?? "")
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        switch state {
+        case .on:    Image(systemName: "checkmark.square.fill")
+        case .off:   Image(systemName: "square")
+        case .mixed: Image(systemName: "minus.square.fill")
+        }
     }
 
     private var helpText: String {
         switch state {
-        case .on: return "Shared. Click to unshare."
-        case .off: return "Not shared. Click to share."
+        case .on:    return "Shared. Click to unshare."
+        case .off:   return "Not shared. Click to share."
         case .mixed: return "Partially shared. Click to share with both."
         }
     }
 
     private var accessibilityValue: String {
         switch state {
-        case .on: return "shared"
-        case .off: return "not shared"
+        case .on:    return "shared"
+        case .off:   return "not shared"
         case .mixed: return "partially shared"
         }
     }
