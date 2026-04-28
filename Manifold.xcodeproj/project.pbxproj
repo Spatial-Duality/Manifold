@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		004EF9A5AA1121DDB0CCE1DF /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = 4D2FD3A168147341D2B2B3D4 /* ManifoldXPC */; };
+		016A645B83DCA9156959A87D /* InspectorSharingSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */; };
 		0260E84BE9451B7342295D1A /* SessionPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2C3550A7F5EE69EDB1285F /* SessionPrimitives.swift */; };
 		045A18D0B9D5EC53F16E88C0 /* AgentCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB438FF3647437EBED8BF70D /* AgentCard.swift */; };
 		05AB12F30653C35B8EF3EF21 /* RequestsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E79E643E551805B5D3D00EB /* RequestsWindowView.swift */; };
@@ -196,6 +197,7 @@
 		4D54697975287E64B2E0BE35 /* ManifoldStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStoreTests.swift; sourceTree = "<group>"; };
 		4E50FA851604BE30695DFD21 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
 		4FE9AE4B50EB41439D440FED /* ManifoldIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldIntents.swift; sourceTree = "<group>"; };
+		51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorSharingSelector.swift; sourceTree = "<group>"; };
 		51DD2323547D39C216A931AF /* PendingQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingQueueView.swift; sourceTree = "<group>"; };
 		549CBBBB207F1B4B91F9BE55 /* FileTreeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeInspector.swift; sourceTree = "<group>"; };
 		564B55046AEBA3B1643FE2FE /* Manifold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manifold.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -392,6 +394,7 @@
 				C954B211BE478AB70CCDC861 /* FilesFlatView.swift */,
 				549CBBBB207F1B4B91F9BE55 /* FileTreeInspector.swift */,
 				0095F0998503E87F97508D06 /* FoldersMatrixView.swift */,
+				51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */,
 				5D518E521BF7064410F259E4 /* SessionDiffView.swift */,
 				DA8CE67FA56A5963A5AE6FB2 /* SharingControl.swift */,
 			);
@@ -794,6 +797,7 @@
 				152085B000FDA2B89960DC53 /* HistoryModel.swift in Sources */,
 				6B632DF1154B821ECFB35927 /* InspectorContext.swift in Sources */,
 				7EA82BC996CD720116AF780C /* InspectorContextProvider.swift in Sources */,
+				016A645B83DCA9156959A87D /* InspectorSharingSelector.swift in Sources */,
 				85E8CF294C5A22AEABFF1A37 /* IntegratedToolbar.swift in Sources */,
 				E73ACFFE5B23740791F71E88 /* IntegrationHealthModel.swift in Sources */,
 				2763FEB342221B07FBB4C18E /* KbdLabel.swift in Sources */,

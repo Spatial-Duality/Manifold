@@ -96,26 +96,22 @@ struct FileInspectorPane: View {
 
     @ViewBuilder
     private func accessSection(file: SourceFile, visible: Set<TargetApp>) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.s2) {
-            Text("Access")
+        VStack(alignment: .leading, spacing: Spacing.s3) {
+            Text("Sharing")
                 .font(ManifoldType.captionMedium)
                 .foregroundStyle(.secondary)
 
-            if connectedAgents.isEmpty {
-                Text("No agents connected. Connect Claude or Codex to share files.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                AccessCheckboxStrip(
-                    agents: connectedAgents,
-                    visibleAgents: visible,
-                    accessibilityIDPrefix: "access.inspector.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent)",
-                    onToggleAgent: { agent, wasVisible in
-                        onToggleAgent(agent, wasVisible)
-                    },
-                    onSetAll: onSetAllAgents
-                )
-            }
+            InspectorSharingSelector(
+                connectedAgents: connectedAgents,
+                visibleAgents: visible,
+                onToggleAgent: { agent, wasVisible in
+                    onToggleAgent(agent, wasVisible)
+                },
+                onSetAllAgents: onSetAllAgents
+            )
+            .accessibilityIdentifier(
+                "access.inspector.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent).selector"
+            )
 
             Button("Reset to inherited", action: onReset)
                 .buttonStyle(.borderless)
