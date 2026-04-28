@@ -40,6 +40,10 @@ struct FilesFlatView: View {
         case overriddenAllow
         case overriddenHide
         case changed
+        /// Files an AI has written bytes to. Drives the same sparkle-tagged
+        /// rows that already render the `✦` indicator in the Name column,
+        /// scoped to just those rows when this filter is active.
+        case aiTouched
     }
 
     /// User-saved combination of (scopeFilter, searchText). Persisted via
@@ -176,6 +180,8 @@ struct FilesFlatView: View {
                 matches = hasOverride(.deny, for: file)
             case .changed:
                 matches = file.versionCount > 0
+            case .aiTouched:
+                matches = aiTouchedPaths.contains(file.path)
             }
             guard matches else { return false }
 
@@ -336,6 +342,12 @@ struct FilesFlatView: View {
                 Button("Allowed overrides") { scopeFilter = .overriddenAllow }
                 Button("Hidden overrides")  { scopeFilter = .overriddenHide }
                 Button("Changed")           { scopeFilter = .changed }
+                Divider()
+                Button {
+                    scopeFilter = .aiTouched
+                } label: {
+                    Label("AI-touched", systemImage: "sparkle")
+                }
             } label: {
                 Label(scopeFilterLabel, systemImage: "line.3.horizontal.decrease.circle")
             }
@@ -365,6 +377,7 @@ struct FilesFlatView: View {
         case .overriddenAllow:       return "Allowed overrides"
         case .overriddenHide:        return "Hidden overrides"
         case .changed:               return "Changed"
+        case .aiTouched:             return "AI-touched"
         }
     }
 
