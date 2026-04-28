@@ -1,13 +1,26 @@
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://img.shields.io/badge/CI-macOS%20Swift-blue)](.github/workflows/ci.yml)
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/mark-dark.svg">
+    <img src="brand/mark-light.svg" alt="Manifold mark" width="160">
+  </picture>
+</p>
 
-# Manifold
+<h1 align="center">Manifold</h1>
 
-Give AI agents a copy of your project, not your whole Mac.
+<p align="center"><strong>Give AI agents a copy of your project, not your whole Mac.</strong></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-macOS%20Swift-blue" alt="CI"></a>
+</p>
+
+---
 
 Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac when their work goes through Manifold.
 
 It is a local macOS app and runtime for giving AI tools controlled access to the files and email you choose through Manifold, with reviewable workspaces, durable history, and a clear audit trail of what was exposed.
+
+The mark `{ | }` is the product thesis as a glyph. Curly braces are the trust boundary; the bar between them is the content authority that flows through. See [DESIGN.md](DESIGN.md#brand-mark) and [`brand/`](brand/) for the brand work.
 
 ## Can I Use It?
 
