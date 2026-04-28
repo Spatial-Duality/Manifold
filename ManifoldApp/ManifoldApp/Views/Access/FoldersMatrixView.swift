@@ -277,8 +277,21 @@ struct FoldersMatrixView: View {
             HStack(spacing: Spacing.s2) {
                 FileTypeIcon(filename: source.displayName, isFolder: true, size: 13)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(source.displayName)
-                        .font(ManifoldType.body)
+                    HStack(spacing: Spacing.s1) {
+                        Text(source.displayName)
+                            .font(ManifoldType.body)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        // Health pill rides with the folder name now —
+                        // Removed/Offline are about whether the folder
+                        // exists on disk, not about sharing, so they
+                        // belong here, not in the Sharing column.
+                        if source.isRemoved {
+                            Pill(text: "Removed", variant: .attention)
+                        } else if !source.isAccessible {
+                            Pill(text: "Offline", variant: .attention)
+                        }
+                    }
                     Text(source.originalRootPath.shortenedPath)
                         .font(ManifoldType.mono)
                         .foregroundStyle(.secondary)
@@ -405,18 +418,23 @@ struct FoldersMatrixView: View {
 
     private var statusColumn: TableColumn<SourceRecord, Never, some View, Text> {
         TableColumn("Sharing") { (source: SourceRecord) in
-            // Source health takes priority — a removed or offline folder
-            // can't actually share anything regardless of scope. For the
-            // common case (accessible folder) the pill describes the
-            // share state across every connected AI: all / part / none.
-            if source.isRemoved {
-                Pill(text: "Removed", variant: .attention)
-            } else if !source.isAccessible {
-                Pill(text: "Offline", variant: .attention)
-            } else {
+            // Pure sharing read-out. Source health (Removed/Offline)
+            // moved to the Folder column inline with the name, since
+            // those are conditions of the source on disk, not sharing.
+            // Per-file overrides surface as a small dot next to the
+            // pill — keeps the headline label clean while signalling
+            // there's extra detail in the inspector.
+            HStack(spacing: 4) {
                 let label = sharingLabel(for: source)
                 Pill(text: label.text, variant: label.variant)
                     .help(label.help)
+                if hasFileOverrides(for: source) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 5))
+                        .foregroundStyle(ManifoldPalette.attention)
+                        .help("Some files inside have explicit allow or deny overrides — open the inspector to see them.")
+                        .accessibilityLabel("Has per-file overrides")
+                }
             }
         }
         .width(min: 110, ideal: 140, max: 180)
@@ -428,23 +446,15 @@ struct FoldersMatrixView: View {
         let help: String
     }
 
-    /// Compute the sharing pill for a source. Considers two layers:
-    ///   1. Source-level scope — which AIs have this folder in their
-    ///      allowedSourceIDs.
-    ///   2. Per-file overrides — explicit allow/deny on individual
-    ///      files inside this source.
-    /// A folder that's not in any AI's source scope but still has
-    /// explicit allow overrides reads as "Some files shared", because
-    /// those overrides do let the AI see the named files. Without that
-    /// branch the column showed "Not shared" while the inspector was
-    /// listing a stack of ALLOWED files — visibly contradictory.
+    /// Compute the sharing pill for a source. Reads the source-level
+    /// scope only — i.e., the same checkboxes the user can tick on
+    /// this row. Per-file overrides have their own surface in the
+    /// inspector, so we don't conflate them here. Health states
+    /// (removed / offline) live in the Folder column inline.
     private func sharingLabel(for source: SourceRecord) -> SharingLabel {
         let scoped = scopedAgents(for: source)
         let total = connectedAgents.count
-        let overrides = overrideAgentsByDecision(for: source)
 
-        // No AIs activated yet — say so plainly. Sharing isn't possible
-        // until the user wires up at least one AI.
         guard total > 0 else {
             return SharingLabel(
                 text: "No AIs connected",
@@ -454,16 +464,6 @@ struct FoldersMatrixView: View {
         }
 
         if scoped.isEmpty {
-            // No source-level scope — but the folder may still have
-            // explicit allow overrides that share specific files.
-            if !overrides.allow.isEmpty {
-                let agentNames = overrides.allow.sorted { $0.rawValue < $1.rawValue }.map(displayName(for:))
-                return SharingLabel(
-                    text: "Some files shared",
-                    variant: .scope,
-                    help: "Specific files inside this folder are shared with \(agentNames.joined(separator: " and ")). The folder itself isn't in any AI's default scope."
-                )
-            }
             return SharingLabel(
                 text: "Not shared",
                 variant: .neutral,
@@ -476,24 +476,13 @@ struct FoldersMatrixView: View {
                 ? "Shared"
                 : (total == 2 ? "Shared with both" : "Shared with all")
             let names = connectedAgents.map(displayName(for:)).joined(separator: " and ")
-            // Surface explicit deny overrides — the folder is fully
-            // shared but specific files are still hidden, which is
-            // worth calling out in the tooltip.
-            let suffix = overrides.deny.isEmpty
-                ? ""
-                : " · some files hidden"
-            let helpSuffix = overrides.deny.isEmpty
-                ? ""
-                : " A few files inside have explicit deny overrides."
             return SharingLabel(
-                text: text + suffix,
+                text: text,
                 variant: .defaultScope,
-                help: "Visible to \(names).\(helpSuffix)"
+                help: "Visible to \(names)."
             )
         }
 
-        // Partial: name the AI when only one sees it; otherwise say
-        // "X of Y" and list the names in the tooltip.
         let scopedNames = connectedAgents
             .filter { scoped.contains($0) }
             .map(displayName(for:))
@@ -509,6 +498,16 @@ struct FoldersMatrixView: View {
             variant: .scope,
             help: "Visible to \(scopedNames.joined(separator: " and "))."
         )
+    }
+
+    /// Returns true when this source has any per-file allow or deny
+    /// override across any connected AI. Used to render a small
+    /// indicator next to the Sharing pill so the user knows there's
+    /// extra detail in the inspector without cluttering the main
+    /// label.
+    private func hasFileOverrides(for source: SourceRecord) -> Bool {
+        let breakdown = overrideAgentsByDecision(for: source)
+        return !breakdown.allow.isEmpty || !breakdown.deny.isEmpty
     }
 
     // MARK: - Bulk bar
