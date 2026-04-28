@@ -68,8 +68,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 4)
-        #expect(try migrator.currentVersion() == 30)
+        #expect(applied == 5)
+        #expect(try migrator.currentVersion() == 31)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
     }
@@ -81,14 +81,14 @@ struct DatabaseMigratorTests {
 
         let migrator = try DatabaseMigrator(db: db)
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        for version in 1...30 {
+        for version in 1...31 {
             try db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 params: ["\(version)", now]
             )
         }
 
-        #expect(try migrator.currentVersion() == 30)
+        #expect(try migrator.currentVersion() == 31)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
 
@@ -575,5 +575,73 @@ struct DatabaseMigratorTests {
         #expect(!settingsTable.isEmpty)
         #expect(memoryColumns.contains("origin"))
         #expect(memoryColumns.contains("expires_at"))
+    }
+
+    @Test("Migration v31 adds target_app column to access_presets")
+    func sessionTemplatesTargetAppColumn() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        let columns = Set(
+            try db.queryAll("PRAGMA table_info(access_presets)")
+                .compactMap { $0["name"] }
+        )
+        #expect(columns.contains("target_app"))
+
+        let indexes = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_presets_target_app'"
+        )
+        #expect(!indexes.isEmpty)
+    }
+
+    @Test("Migration v31 is idempotent — re-running does not fail")
+    func sessionTemplatesIdempotent() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let firstMigrator = try DatabaseMigrator(db: db)
+        try firstMigrator.migrate()
+        let secondMigrator = try DatabaseMigrator(db: db)
+        try secondMigrator.migrate()
+
+        let columns = Set(
+            try db.queryAll("PRAGMA table_info(access_presets)")
+                .compactMap { $0["name"] }
+        )
+        #expect(columns.contains("target_app"))
+    }
+
+    @Test("Migration v31 preserves legacy presets created without target_app")
+    func sessionTemplatesPreservesLegacyPresets() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        try migrator.migrate()
+
+        // Insert a preset by directly avoiding target_app — simulates a row
+        // created by code running on a pre-v31 schema and persisted across
+        // the migration boundary.
+        let now = ISO8601DateFormatter().string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO access_presets (preset_id, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            params: ["legacy-1", "Legacy preset", now, now]
+        )
+
+        let rows = try db.queryAll(
+            "SELECT preset_id, name, target_app FROM access_presets WHERE preset_id = ?",
+            params: ["legacy-1"]
+        )
+        #expect(rows.count == 1)
+        // SQLite returns NULL columns as nil/missing in our query interface; this
+        // legacy row should have target_app absent or empty, never crashing readers.
+        let targetApp = rows.first?["target_app"]?.trimmingCharacters(in: .whitespaces) ?? ""
+        #expect(targetApp.isEmpty)
     }
 }

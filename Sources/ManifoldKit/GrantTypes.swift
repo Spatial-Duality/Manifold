@@ -298,8 +298,26 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
     public var id: String { presetID }
     public let presetID: String
     public let name: String
+    /// Agent this preset is scoped to when used as a named-session template.
+    /// `nil` means the preset is unscoped (legacy presets, or templates that
+    /// apply to any agent).
+    public let targetApp: TargetApp?
     public let createdAt: String
     public let updatedAt: String
+
+    public init(
+        presetID: String,
+        name: String,
+        targetApp: TargetApp? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.presetID = presetID
+        self.name = name
+        self.targetApp = targetApp
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 
     public init?(row: [String: String]) {
         guard let presetID = row["preset_id"],
@@ -308,8 +326,16 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
               let updatedAt = row["updated_at"] else {
             return nil
         }
+        let targetAppRaw = row["target_app"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetApp: TargetApp?
+        if let raw = targetAppRaw, !raw.isEmpty {
+            targetApp = TargetApp(rawValue: raw)
+        } else {
+            targetApp = nil
+        }
         self.presetID = presetID
         self.name = name
+        self.targetApp = targetApp
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

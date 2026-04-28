@@ -99,4 +99,128 @@ struct AccessStoreTests {
         #expect(try await store.allPresets().isEmpty)
         #expect(try await store.loadPreset(id: created.presetID) == nil)
     }
+
+    @Test("savePreset persists targetApp and loadPreset reads it back")
+    func savePresetWithTargetApp() async throws {
+        let (store, db, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            params: ["src-1", "Project", "/tmp/project", "idle", now, now]
+        )
+
+        let saved = try await store.savePreset(
+            name: "Q4 Reporting",
+            targetApp: .cowork,
+            fileScopes: [
+                FileSelectionScope(sourceID: "src-1", relativePath: "Q4", isDirectory: true)
+            ],
+            emailIDs: []
+        )
+        #expect(saved.targetApp == .cowork)
+
+        let loaded = try await store.loadPreset(id: saved.presetID)
+        #expect(loaded?.preset.targetApp == .cowork)
+        #expect(loaded?.preset.name == "Q4 Reporting")
+    }
+
+    @Test("savePreset with nil targetApp produces unscoped preset")
+    func savePresetUnscoped() async throws {
+        let (store, db, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            params: ["src-1", "Project", "/tmp/project", "idle", now, now]
+        )
+
+        let saved = try await store.savePreset(
+            name: "Default",
+            targetApp: nil,
+            fileScopes: [],
+            emailIDs: []
+        )
+        #expect(saved.targetApp == nil)
+    }
+
+    @Test("templatesForAgent returns scoped templates plus unscoped legacy presets")
+    func templatesForAgentFilter() async throws {
+        let (store, db, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            params: ["src-1", "Project", "/tmp/project", "idle", now, now]
+        )
+
+        // Templates scoped to Claude (cowork).
+        _ = try await store.savePreset(
+            name: "Q4 (Claude)", targetApp: .cowork, fileScopes: [], emailIDs: []
+        )
+        _ = try await store.savePreset(
+            name: "Code review (Claude)", targetApp: .cowork, fileScopes: [], emailIDs: []
+        )
+        // Template scoped to Codex.
+        _ = try await store.savePreset(
+            name: "Tax filing (Codex)", targetApp: .codex, fileScopes: [], emailIDs: []
+        )
+        // Unscoped (legacy / default) preset.
+        _ = try await store.savePreset(
+            name: "Default", targetApp: nil, fileScopes: [], emailIDs: []
+        )
+
+        let claudeTemplates = try await store.templatesForAgent(.cowork)
+        let claudeNames = Set(claudeTemplates.map(\.name))
+        #expect(claudeNames.contains("Q4 (Claude)"))
+        #expect(claudeNames.contains("Code review (Claude)"))
+        #expect(claudeNames.contains("Default"))            // unscoped is visible to any agent
+        #expect(!claudeNames.contains("Tax filing (Codex)")) // codex-scoped is hidden from claude
+
+        let codexTemplates = try await store.templatesForAgent(.codex)
+        let codexNames = Set(codexTemplates.map(\.name))
+        #expect(codexNames.contains("Tax filing (Codex)"))
+        #expect(codexNames.contains("Default"))
+        #expect(!codexNames.contains("Q4 (Claude)"))
+    }
+
+    @Test("templatesForAgent returns empty array when no templates exist")
+    func templatesForAgentEmpty() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+        let templates = try await store.templatesForAgent(.cowork)
+        #expect(templates.isEmpty)
+    }
+
+    @Test("templatesForAgent surfaces legacy presets persisted with NULL target_app")
+    func templatesForAgentLegacyNullCompat() async throws {
+        let (store, db, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        // Direct insert without target_app — simulates a row created by pre-v31 code.
+        try db.execute(
+            """
+            INSERT INTO access_presets (preset_id, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            params: ["legacy-1", "Legacy preset", now, now]
+        )
+
+        let templates = try await store.templatesForAgent(.cowork)
+        #expect(templates.contains(where: { $0.presetID == "legacy-1" }))
+        #expect(templates.first(where: { $0.presetID == "legacy-1" })?.targetApp == nil)
+    }
 }

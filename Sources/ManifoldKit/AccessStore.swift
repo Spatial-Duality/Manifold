@@ -33,6 +33,21 @@ public actor AccessStore {
         return rows.compactMap { AccessPresetRecord(row: $0) }
     }
 
+    /// Presets visible to a specific agent — either scoped to that agent or
+    /// unscoped (legacy presets with NULL `target_app`). Used to populate
+    /// the SESSIONS sidebar section per agent.
+    public func templatesForAgent(_ agent: TargetApp) throws -> [AccessPresetRecord] {
+        let rows = try db.queryAll(
+            """
+            SELECT * FROM access_presets
+            WHERE target_app = ? OR target_app IS NULL OR target_app = ''
+            ORDER BY updated_at DESC, name ASC
+            """,
+            params: [agent.rawValue]
+        )
+        return rows.compactMap { AccessPresetRecord(row: $0) }
+    }
+
     public func loadPreset(id: String) throws -> AccessPresetSnapshot? {
         let rows = try db.queryAll(
             "SELECT * FROM access_presets WHERE preset_id = ? LIMIT 1",
@@ -80,27 +95,29 @@ public actor AccessStore {
     public func savePreset(
         id: String? = nil,
         name: String,
+        targetApp: TargetApp? = nil,
         fileScopes: [FileSelectionScope],
         emailIDs: [String]
     ) throws -> AccessPresetRecord {
         let presetID = id ?? "preset-\(UUID().uuidString.prefix(8).lowercased())"
         let now = ISO8601DateFormatter.shared.string(from: Date())
+        let targetAppValue = targetApp?.rawValue ?? ""
         try db.transaction {
             if id == nil {
                 try db.execute(
                     """
-                    INSERT INTO access_presets (preset_id, name, created_at, updated_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO access_presets (preset_id, name, target_app, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    params: [presetID, name, now, now]
+                    params: [presetID, name, targetAppValue, now, now]
                 )
             } else {
                 try db.execute(
                     """
-                    UPDATE access_presets SET name = ?, updated_at = ?
+                    UPDATE access_presets SET name = ?, target_app = ?, updated_at = ?
                     WHERE preset_id = ?
                     """,
-                    params: [name, now, presetID]
+                    params: [name, targetAppValue, now, presetID]
                 )
                 try db.execute(
                     "DELETE FROM access_preset_file_scopes WHERE preset_id = ?",

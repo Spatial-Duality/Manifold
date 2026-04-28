@@ -1392,5 +1392,35 @@ public struct DatabaseMigrator {
             try MemoryStore.ensureSchema(db)
             logger.info("Migration 30: memory settings and derived-memory retention")
         },
+
+        // v31: Named session templates. Adds optional target_app column to
+        // access_presets so saved presets can be scoped to one agent and
+        // reused as named-session starting points. NULL target_app means
+        // the preset applies to any agent (legacy behavior preserved).
+        //
+        // Defensive against broken upgrade paths: if access_presets is
+        // missing entirely (e.g., a database where v12's CREATE TABLE was
+        // skipped), this migration is a no-op. A future repair migration
+        // is responsible for rebuilding the table; this one only adapts
+        // an already-present table.
+        Migration(version: 31, name: "session_templates_target_app") { db in
+            let tableExists = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='access_presets'"
+            )
+            guard !tableExists.isEmpty else {
+                logger.info("Migration 31: access_presets table missing, skipping (no-op)")
+                return
+            }
+
+            let columns = try db.queryAll("PRAGMA table_info(access_presets)")
+            let columnNames = Set(columns.compactMap { $0["name"] })
+            if !columnNames.contains("target_app") {
+                try db.execute("ALTER TABLE access_presets ADD COLUMN target_app TEXT")
+            }
+            try db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_presets_target_app ON access_presets(target_app)"
+            )
+            logger.info("Migration 31: named session templates (target_app on access_presets)")
+        },
     ]
 }
