@@ -723,7 +723,7 @@ struct GrantBoundaryBridgeTests {
         try emlContent.write(to: emlFile, atomically: true, encoding: .utf8)
 
         // Create the email account first (FK constraint)
-        let emailAccount = try await harness.emailStore.addEmailAccount(
+        let emailAccount = try harness.emailStore.addEmailAccount(
             displayName: "Test Account",
             providerType: "other",
             server: "imap.example.com",
@@ -732,7 +732,7 @@ struct GrantBoundaryBridgeTests {
             authType: "password"
         )
 
-        try await harness.emailStore.upsertEmailMessage(
+        try harness.emailStore.upsertEmailMessage(
             emailID: "email-1",
             accountID: emailAccount.accountID,
             mailbox: "Inbox",
@@ -770,7 +770,7 @@ struct GrantBoundaryBridgeTests {
         let harness = try makeHarness()
         defer { cleanup(harness.tempDir) }
 
-        let emailAccount = try await harness.emailStore.addEmailAccount(
+        let emailAccount = try harness.emailStore.addEmailAccount(
             displayName: "Test Account",
             providerType: "other",
             server: "imap.example.com",
@@ -779,7 +779,7 @@ struct GrantBoundaryBridgeTests {
             authType: "password"
         )
 
-        try await harness.emailStore.upsertEmailMessage(
+        try harness.emailStore.upsertEmailMessage(
             emailID: "email-needle",
             accountID: emailAccount.accountID,
             mailbox: "Inbox",

@@ -73,7 +73,7 @@ private struct RequestsStatusHeader: View {
     }
 
     private var statusTitle: String {
-        store.pendingRequests.isEmpty ? "No requests need an answer" : "Requests waiting for your decision"
+        store.pendingRequests.isEmpty ? "No decisions waiting" : "Decide what the agent may see"
     }
 
     private var statusSubtitle: String {
@@ -83,7 +83,7 @@ private struct RequestsStatusHeader: View {
         if let exposure = store.dataControlSummary?.lastExposure {
             return "Last exposure: \(exposureSummary(exposure))."
         }
-        return "Manifold defaults to not sharing more data until you choose a narrower or broader grant."
+        return "Use Requests to block, redact, share once, or turn repeated decisions into durable rules."
     }
 
     private func exposureSummary(_ exposure: DataControlSummary.Exposure) -> String {
@@ -99,12 +99,16 @@ private struct RequestsInsightRail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.s4) {
-                RequestsRailSection(title: "Decision ladder", systemImage: "arrow.up.arrow.down") {
-                    ShortcutsCard()
+                RequestsRailSection(title: "Privacy playbook", systemImage: "shield.lefthalf.filled") {
+                    RequestsPrivacyPlaybookCard()
                 }
 
                 RequestsRailSection(title: "Privacy filter", systemImage: "sparkles.rectangle.stack") {
                     PrivacyFilterRequestCard(status: store.governance.privacyRuntimeStatus)
+                }
+
+                RequestsRailSection(title: "Decision ladder", systemImage: "arrow.up.arrow.down") {
+                    ShortcutsCard()
                 }
 
                 RequestsRailSection(title: "Recent answers", systemImage: "clock.arrow.circlepath") {
@@ -133,6 +137,44 @@ private struct RequestsRailSection<Content: View>: View {
                 .tracking(0.5)
             content
         }
+    }
+}
+
+private struct RequestsPrivacyPlaybookCard: View {
+    private let rows: [(String, String, String, Pill.Variant)] = [
+        ("hand.raised.fill", "Always block", "Secrets, tokens, account numbers", .attention),
+        ("text.badge.checkmark", "Redact", "My Identity and private people", .defaultScope),
+        ("checkmark.shield", "Keep", "Public company data on the allowlist", .session),
+        ("exclamationmark.triangle", "Warn", "Ambiguous or high-severity context", .preview),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            ForEach(rows, id: \.1) { row in
+                HStack(alignment: .top, spacing: Spacing.s2) {
+                    Image(systemName: row.0)
+                        .foregroundStyle(row.3.color)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.1)
+                            .font(ManifoldType.captionMedium)
+                        Text(row.2)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(Spacing.s3)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .fill(ManifoldPalette.surface.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+        )
     }
 }
 
@@ -165,8 +207,9 @@ private struct PrivacyFilterRequestCard: View {
 
     private var title: String {
         guard let status else { return "Privacy status loading" }
-        if status.effectiveBackend == .officialCLI {
-            return status.modelLoaded ? "OpenAI privacy filter ready" : "OpenAI privacy filter paused"
+        if status.effectiveBackend == .mlx {
+            let name = status.runtimeDisplayName ?? "Fast Local Scanner"
+            return status.modelLoaded ? "\(name) ready" : "\(name) paused"
         }
         return status.modelLoaded ? "\(status.effectiveBackend.displayName) ready" : "\(status.effectiveBackend.displayName) paused"
     }
@@ -176,9 +219,9 @@ private struct PrivacyFilterRequestCard: View {
             return "Sensitive-content decisions use the configured privacy backend before a request reaches Claude or Codex."
         }
         if status.modelLoaded {
-            return "Requests with secrets, identity matches, or high severity findings can be denied, redacted, shared once, or saved as Rules."
+            return "Privacy requests can be denied, shared redacted, approved once, or remembered as allow/block/redact/warn rules."
         }
-        return "Install or enable the privacy model before relying on category and severity decisions."
+        return "Install or enable the privacy model before relying on category and severity decisions; secrets still use built-in pattern rules."
     }
 }
 

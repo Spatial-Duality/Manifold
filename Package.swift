@@ -18,7 +18,9 @@ let package = Package(
         .executable(name: "manifold-mcp", targets: ["ManifoldMCP"]),
         .executable(name: "ManifoldAgent", targets: ["ManifoldAgent"]),
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.3"),
+    ],
     targets: [
         .target(
             name: "ManifoldKit",
@@ -27,7 +29,11 @@ let package = Package(
         ),
         .target(
             name: "ManifoldRuntime",
-            dependencies: ["ManifoldKit"],
+            dependencies: [
+                "ManifoldKit",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
             path: "Sources/ManifoldRuntime"
         ),
         .target(

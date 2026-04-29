@@ -356,13 +356,10 @@ final class ManifoldStore {
         let filePaths = chooseFilePathsFromPicker()
         guard !filePaths.isEmpty else { return false }
 
-        let existingPaths = Set(sources.map(\.originalRootPath))
-        let parentPaths = Set(
-            filePaths.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
-        )
-
-        for path in parentPaths where !existingPaths.contains(path) {
-            addSource(path: path)
+        Task {
+            for path in filePaths {
+                await addSourceForSingleFile(URL(fileURLWithPath: path))
+            }
         }
         return true
     }

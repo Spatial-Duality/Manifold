@@ -20,11 +20,14 @@ import ManifoldKit
 extension ManifoldBridge {
     public func fileHistoryContext(filePath: String, limit: Int = 20) async throws -> FileHistoryContext {
         await logToolCall(tool: "get_file_history_context", arguments: ["file_path": filePath, "limit": limit])
-        let (_, decisionID) = try await resolveAccessForTool(
+        let (accessContext, decisionID) = try await resolveAccessForTool(
             toolName: "get_file_history_context",
             action: "read",
             resourcePath: filePath
         )
+        guard isResourcePath(filePath, inScopeOf: accessContext) else {
+            throw ManifoldMCPError.fileNotFound(filePath)
+        }
         let snapshots = (try await snapshotStore.fileHistory(filePath: filePath)).prefix(limit).map { $0 }
         let activity = (try await auditStore.recentEntries(limit: max(limit * 10, 100)))
             .filter { $0.filePath == filePath }
@@ -218,10 +221,17 @@ extension ManifoldBridge {
     public func whatChangedSince(path: String? = nil, limit: Int = 20) async throws -> String {
         let (context, decisionID) = try await resolveAccessForTool(toolName: "what_changed_since", action: "history", resourcePath: path)
         let activeGrantID = grantID(in: context)
+        if let path, !path.isEmpty, !isResourcePath(path, inScopeOf: context) {
+            throw ManifoldMCPError.fileNotFound(path)
+        }
         let entries = try await auditStore.recentEntries(limit: max(limit * 4, 50))
             .filter { entry in
                 if let activeGrantID, entry.grantID != activeGrantID {
                     return false
+                }
+                if activeGrantID == nil {
+                    guard let entryPath = entry.filePath else { return false }
+                    guard isResourcePath(entryPath, inScopeOf: context) else { return false }
                 }
                 guard let path, !path.isEmpty else { return true }
                 return entry.filePath == path

@@ -1496,5 +1496,148 @@ public struct DatabaseMigrator {
             )
             logger.info("Migration 32: filter mode settings and override tables")
         },
+
+        Migration(version: 33, name: "managed_privacy_runtime") { db in
+            let settingsTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='privacy_preflight_settings'"
+            )
+            if !settingsTables.isEmpty {
+                try db.execute("""
+                    UPDATE privacy_preflight_settings
+                    SET selected_backend = 'mlx',
+                        install_state = CASE
+                            WHEN selected_backend IN ('official_cli', 'mlx') THEN 'download_required'
+                            ELSE install_state
+                        END,
+                        model_version = CASE
+                            WHEN selected_backend IN ('official_cli', 'mlx') THEN NULL
+                            ELSE model_version
+                        END,
+                        installed_at = CASE
+                            WHEN selected_backend IN ('official_cli', 'mlx') THEN NULL
+                            ELSE installed_at
+                        END
+                    WHERE selected_backend IN ('official_cli', 'mlx')
+                """)
+            }
+
+            let cacheTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='privacy_scan_cache'"
+            )
+            if !cacheTables.isEmpty {
+                try db.execute("DELETE FROM privacy_scan_cache WHERE backend IN ('official_cli', 'mlx')")
+            }
+
+            logger.info("Migration 33: migrated legacy privacy backends to managed privacy scanner")
+        },
+
+        Migration(version: 34, name: "mlx_mxfp8_privacy_runtime") { db in
+            let settingsTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='privacy_preflight_settings'"
+            )
+            if !settingsTables.isEmpty {
+                try db.execute("""
+                    UPDATE privacy_preflight_settings
+                    SET selected_backend = 'mlx',
+                        install_state = 'download_required',
+                        model_version = NULL,
+                        installed_at = NULL
+                    WHERE selected_backend IN ('core_ml', 'official_cli')
+                """)
+            }
+
+            let cacheTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='privacy_scan_cache'"
+            )
+            if !cacheTables.isEmpty {
+                try db.execute("DELETE FROM privacy_scan_cache WHERE backend IN ('core_ml', 'official_cli', 'mlx')")
+            }
+
+            let eventTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='privacy_scan_events'"
+            )
+            if !eventTables.isEmpty {
+                try db.execute("UPDATE privacy_scan_events SET backend = 'mlx' WHERE backend IN ('core_ml', 'official_cli')")
+            }
+
+            logger.info("Migration 34: migrated managed privacy scanner to MLX MXFP8")
+        },
+
+        // v35: Scrub orphan access records left behind by older builds where
+        // `removeSource` only flipped status to 'removed' without cascading
+        // into file_visibility_overrides or agent_access_policies. The
+        // runtime's resolveAccess re-filters via activeSources() so orphans
+        // were never an enforcement leak, but they polluted the matrix dot
+        // indicator (which lights up for any source with overrides) and
+        // would fire if a code path ever read policies without the status
+        // filter.
+        Migration(version: 35, name: "scrub_orphan_access_records") { db in
+            // The migration requires both `sources` (created in v3) and
+            // either `file_visibility_overrides` or `agent_access_policies`
+            // to do anything useful. If the underlying tables are absent —
+            // typically because an older migrator test seeded the
+            // schema_migrations row without running the real migration —
+            // there's nothing to scrub. Bail before issuing any DELETE.
+            let sourceTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='sources'"
+            )
+            guard !sourceTables.isEmpty else {
+                logger.info("Migration 35: no sources table, skipping access scrub")
+                return
+            }
+
+            // 1. Drop file visibility overrides that reference a source
+            //    that's missing from `sources` or marked removed.
+            let overridesTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'"
+            )
+            if !overridesTables.isEmpty {
+                try db.execute("""
+                    DELETE FROM file_visibility_overrides
+                    WHERE source_id NOT IN (
+                        SELECT source_id FROM sources WHERE status IN ('idle', 'active', 'paused')
+                    )
+                """)
+            }
+
+            // 2. Walk every agent_access_policies row and prune its
+            //    allowed_source_ids JSON of any entry that points at a
+            //    missing or removed source.
+            let policyTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_access_policies'"
+            )
+            guard !policyTables.isEmpty else {
+                logger.info("Migration 35: no agent_access_policies table, skipping policy scrub")
+                return
+            }
+            let liveSourceRows = try db.queryAll(
+                "SELECT source_id FROM sources WHERE status IN ('idle', 'active', 'paused')"
+            )
+            let liveSourceIDs = Set(liveSourceRows.compactMap { $0["source_id"] })
+            let policyRows = try db.queryAll(
+                "SELECT policy_id, allowed_source_ids FROM agent_access_policies"
+            )
+            let now = ISO8601DateFormatter.shared.string(from: Date())
+            var scrubbedRows = 0
+            for row in policyRows {
+                guard let policyID = row["policy_id"],
+                      let allowedJSON = row["allowed_source_ids"],
+                      let data = allowedJSON.data(using: .utf8),
+                      let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+                    continue
+                }
+                let kept = decoded.filter { liveSourceIDs.contains($0) }
+                guard kept.count != decoded.count else { continue }
+                let encoded = (try? JSONEncoder().encode(kept.sorted())).flatMap {
+                    String(data: $0, encoding: .utf8)
+                } ?? "[]"
+                try db.execute(
+                    "UPDATE agent_access_policies SET allowed_source_ids = ?, updated_at = ? WHERE policy_id = ?",
+                    params: [encoded, now, policyID]
+                )
+                scrubbedRows += 1
+            }
+            logger.info("Migration 35: scrubbed orphan access records (\(scrubbedRows) policy rows updated)")
+        },
     ]
 }

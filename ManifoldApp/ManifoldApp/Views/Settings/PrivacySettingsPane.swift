@@ -4,7 +4,7 @@
 // PrivacySettingsPane — the Privacy tab in the Settings window.
 //
 // Five sections, top to bottom:
-//   1. Model & Backend  — install/uninstall, effective backend, cache
+//   1. Scanner Model    — install/uninstall, effective scanner, cache
 //   2. Auto-Settings     — Off / Balanced / Strict / Custom preset tiles
 //   3. My Identity       — suggestion triage + accepted identity table
 //   4. Org Allowlist     — domains/addresses that suppress model findings
@@ -48,7 +48,7 @@ struct PrivacySettingsPane: View {
         }
     }
 
-    // MARK: - 1. Model & Backend
+    // MARK: - 1. Scanner Model
 
     @ViewBuilder
     private var modelSection: some View {
@@ -57,11 +57,11 @@ struct PrivacySettingsPane: View {
                let status = store.governance.privacyRuntimeStatus {
                 PrivacyModelCard(settings: settings, status: status)
             } else {
-                ProgressView("Loading privacy runtime…")
+                ProgressView("Loading scanner model…")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } header: {
-            Text("Model & Backend").font(ManifoldType.title)
+            Text("Fast Local Scanner").font(ManifoldType.title)
         }
     }
 
@@ -217,7 +217,7 @@ private struct PrivacyModelCard: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: Spacing.s2) {
-                        Text("Privacy Preflight")
+                        Text("Fast Local Scanner")
                             .font(ManifoldType.bodyMedium)
                         Pill(
                             text: status.installState.displayName,
@@ -234,45 +234,44 @@ private struct PrivacyModelCard: View {
                 Toggle("", isOn: enabledBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .accessibilityIdentifier("settings.privacy.model.enabled")
+                .accessibilityIdentifier("settings.privacy.model.enabled")
+                .disabled(status.installState == .unavailable)
             }
 
-            Picker("Backend", selection: backendBinding) {
-                ForEach(PrivacyBackendKind.allCases, id: \.self) { backend in
-                    Text(backend.displayName).tag(backend)
-                }
+            runtimeSummary
+            if let progress = status.downloadProgress,
+               status.installState == .downloading || status.installState == .verifying {
+                ProgressView(value: progress)
+                    .accessibilityLabel("Privacy scanner download progress")
             }
-            .pickerStyle(.segmented)
-            .disabled(!settings.isEnabled)
-            .accessibilityIdentifier("settings.privacy.model.backend")
 
             HStack(spacing: Spacing.s2) {
                 Button {
                     Task {
                         isBusy = true
                         defer { isBusy = false }
-                        await store.governance.installPrivacyModel()
+                        await store.governance.installPrivacyRuntime()
                     }
                 } label: {
-                    Label(settings.installState == .installed ? "Reinstall" : "Install",
+                    Label(installButtonTitle,
                           systemImage: "arrow.down.circle")
                 }
                 .controlSize(.small)
-                .disabled(isBusy)
-                .accessibilityIdentifier("settings.privacy.model.install")
+                .disabled(isBusy || status.installState == .unavailable || status.installState == .downloading || status.installState == .verifying)
+                .accessibilityIdentifier("settings.privacy.runtime.install")
 
                 Button {
                     Task {
                         isBusy = true
                         defer { isBusy = false }
-                        await store.governance.uninstallPrivacyModel()
+                        await store.governance.uninstallPrivacyRuntime()
                     }
                 } label: {
-                    Label("Uninstall", systemImage: "trash")
+                    Label(cancelOrRemoveTitle, systemImage: status.installState == .downloading ? "xmark.circle" : "trash")
                 }
                 .controlSize(.small)
-                .disabled(settings.installState == .notInstalled || isBusy)
-                .accessibilityIdentifier("settings.privacy.model.uninstall")
+                .disabled(status.installState == .notInstalled || status.installState == .downloadRequired || status.installState == .unavailable || isBusy)
+                .accessibilityIdentifier("settings.privacy.runtime.uninstall")
 
                 Button {
                     Task {
@@ -302,11 +301,37 @@ private struct PrivacyModelCard: View {
                     .foregroundStyle(ManifoldPalette.attention)
             }
         }
+        .task(id: status.installState) {
+            guard status.installState == .downloading || status.installState == .verifying else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                await store.governance.loadPolicies()
+            }
+        }
+    }
+
+    private var runtimeSummary: some View {
+        HStack(spacing: Spacing.s2) {
+            Image(systemName: status.verificationState == .checksumVerified ? "checkmark.seal" : "shippingbox")
+                .foregroundStyle(status.verificationState == .failed ? ManifoldPalette.danger : ManifoldPalette.text2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.runtimeDisplayName ?? "Fast Local Scanner")
+                    .font(ManifoldType.captionMedium)
+                Text(runtimeDetail)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, Spacing.s1)
     }
 
     private var accentColor: Color {
         switch status.installState {
         case .installed:        return ManifoldPalette.active
+        case .downloading:      return ManifoldPalette.selection
+        case .verifying:        return ManifoldPalette.selection
         case .downloadRequired: return ManifoldPalette.attention
         case .unavailable:      return ManifoldPalette.danger
         case .notInstalled:     return ManifoldPalette.text3
@@ -316,6 +341,8 @@ private struct PrivacyModelCard: View {
     private var installPillVariant: Pill.Variant {
         switch status.installState {
         case .installed:        return .session
+        case .downloading:      return .defaultScope
+        case .verifying:        return .defaultScope
         case .downloadRequired: return .attention
         case .unavailable:      return .attention
         case .notInstalled:     return .neutral
@@ -325,6 +352,8 @@ private struct PrivacyModelCard: View {
     private var installPillIcon: String {
         switch status.installState {
         case .installed:        return "checkmark.seal.fill"
+        case .downloading:      return "arrow.down.circle.fill"
+        case .verifying:        return "checkmark.shield"
         case .downloadRequired: return "arrow.down.circle"
         case .unavailable:      return "exclamationmark.triangle"
         case .notInstalled:     return "circle.dashed"
@@ -332,10 +361,43 @@ private struct PrivacyModelCard: View {
     }
 
     private var subtitle: String {
+        if status.installState == .unavailable {
+            return "Privacy Preflight requires Apple Silicon."
+        }
         if settings.isEnabled {
-            return "Effective backend: \(status.effectiveBackend.displayName) · \(status.modelLoaded ? "Model loaded" : "Model unloaded")"
+            return "Active scanner: \(status.effectiveBackend.displayName) · \(status.modelLoaded ? "Model loaded" : "Model unloaded")"
         }
         return "Privacy preflight is off. Agents see raw content."
+    }
+
+    private var runtimeDetail: String {
+        if status.installState == .unavailable {
+            return "MLX MXFP8 scanning is unavailable on this Mac."
+        }
+        if status.installState == .downloading || status.installState == .verifying {
+            let progress = (status.downloadProgress ?? 0) * 100
+            return "MLX MXFP8 · 1.47 GB · \(String(format: "%.0f", progress))% \(status.installState.displayName.lowercased())."
+        }
+        if let installed = status.installedVersion {
+            let verification = status.verificationState?.displayName ?? "Verification unknown"
+            return "MLX MXFP8 · Installed \(installed) · \(verification) · works offline."
+        }
+        return "MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs."
+    }
+
+    private var installButtonTitle: String {
+        switch status.installState {
+        case .installed:
+            return "Update"
+        case .downloadRequired where (status.downloadedBytes ?? 0) > 0:
+            return "Resume"
+        default:
+            return "Download"
+        }
+    }
+
+    private var cancelOrRemoveTitle: String {
+        status.installState == .downloading || status.installState == .verifying ? "Cancel" : "Remove"
     }
 
     private var enabledBinding: Binding<Bool> {
@@ -348,17 +410,6 @@ private struct PrivacyModelCard: View {
                     updated.installState = .installed
                     updated.modelVersion = updated.modelVersion ?? "rules-only-v1"
                 }
-                Task { await store.governance.updatePrivacySettings(updated) }
-            }
-        )
-    }
-
-    private var backendBinding: Binding<PrivacyBackendKind> {
-        Binding(
-            get: { store.governance.privacySettings?.selectedBackend ?? settings.selectedBackend },
-            set: { newValue in
-                guard var updated = store.governance.privacySettings else { return }
-                updated.selectedBackend = newValue
                 Task { await store.governance.updatePrivacySettings(updated) }
             }
         )

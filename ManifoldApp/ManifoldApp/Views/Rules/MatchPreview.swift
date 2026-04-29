@@ -9,7 +9,6 @@
 
 import SwiftUI
 import ManifoldKit
-import ManifoldXPC
 
 struct MatchPreview: View {
     @Bindable var model: RulesModel

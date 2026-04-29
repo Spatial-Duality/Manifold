@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		004EF9A5AA1121DDB0CCE1DF /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = 4D2FD3A168147341D2B2B3D4 /* ManifoldXPC */; };
 		016A645B83DCA9156959A87D /* InspectorSharingSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */; };
 		0260E84BE9451B7342295D1A /* SessionPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2C3550A7F5EE69EDB1285F /* SessionPrimitives.swift */; };
 		045A18D0B9D5EC53F16E88C0 /* AgentCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB438FF3647437EBED8BF70D /* AgentCard.swift */; };
@@ -99,7 +98,6 @@
 		BA90100002414E7F10873EA2 /* MatchPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = E065C3AD01FCDCAE769F0759 /* MatchPreview.swift */; };
 		BAD8C5E020409EBE19EA8D79 /* ConnectCodexSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79022746F9505B00E5F5CA94 /* ConnectCodexSheet.swift */; };
 		BB08EB9B2BE1ED8745795EBA /* FirstRunPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2490787A48C47E6B5387C30 /* FirstRunPanels.swift */; };
-		BB70DF23A078376BF1F76429 /* ManifoldRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 6D7CF24710B719023A4E7C10 /* ManifoldRuntime */; };
 		C003D4F566EDA57C6C54F484 /* SparklineBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE0A56225C445AF1538A55E /* SparklineBar.swift */; };
 		C07539145FD00F66E2A60B46 /* CommitLadder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2503627A27A75894E6EF02BF /* CommitLadder.swift */; };
 		C408814DC73E7C017B61C33E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AD21F463E8A0DD4E7E5B25C8 /* Assets.xcassets */; };
@@ -298,7 +296,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */,
-				BB70DF23A078376BF1F76429 /* ManifoldRuntime in Frameworks */,
 				516D5E047E71B26F39DE8C1A /* ManifoldXPC in Frameworks */,
 				CC1C03869B96079BF5581EB1 /* Sparkle in Frameworks */,
 			);
@@ -309,7 +306,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				8000319D6B87B95A8D489AF2 /* ManifoldKit in Frameworks */,
-				004EF9A5AA1121DDB0CCE1DF /* ManifoldXPC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -658,7 +654,6 @@
 			name = ManifoldAppTests;
 			packageProductDependencies = (
 				C71CE419C7372C8FDF30CD21 /* ManifoldKit */,
-				4D2FD3A168147341D2B2B3D4 /* ManifoldXPC */,
 			);
 			productName = ManifoldAppTests;
 			productReference = F0A975D2F645FEB19DF74F76 /* ManifoldAppTests.xctest */;
@@ -680,7 +675,6 @@
 			name = Manifold;
 			packageProductDependencies = (
 				59CA05998C5293BB2C2FB2E7 /* ManifoldKit */,
-				6D7CF24710B719023A4E7C10 /* ManifoldRuntime */,
 				C2910946E949A8F592980971 /* ManifoldXPC */,
 				5FF27F89470525B8EB5C11D3 /* Sparkle */,
 			);
@@ -1249,10 +1243,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		4D2FD3A168147341D2B2B3D4 /* ManifoldXPC */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ManifoldXPC;
-		};
 		59CA05998C5293BB2C2FB2E7 /* ManifoldKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ManifoldKit;
@@ -1261,10 +1251,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4B2E137E2DA5D0F33C08AC25 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
-		};
-		6D7CF24710B719023A4E7C10 /* ManifoldRuntime */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ManifoldRuntime;
 		};
 		C2910946E949A8F592980971 /* ManifoldXPC */ = {
 			isa = XCSwiftPackageProductDependency;

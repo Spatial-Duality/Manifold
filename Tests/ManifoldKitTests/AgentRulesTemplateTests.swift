@@ -18,7 +18,7 @@ struct AgentRulesTemplateTests {
     }
 
     @Test("Existing content without markers gets the block appended")
-    func appendToExistingFile() {
+    func appendToExistingFile() throws {
         let existing = """
         # My Rules
 
@@ -34,12 +34,10 @@ struct AgentRulesTemplateTests {
         #expect(result.contains(AgentRulesTemplate.endMarker))
 
         // Block appears AFTER user content
-        let userContentRange = try? #require(result.range(of: "Use Swift Testing, not XCTest."))
-        let manifoldRange = try? #require(result.range(of: AgentRulesTemplate.beginMarker))
-        if let userContentRange, let manifoldRange {
-            #expect(userContentRange.upperBound < manifoldRange.lowerBound,
-                    "Manifold block must come after user content")
-        }
+        let userContentRange = try #require(result.range(of: "Use Swift Testing, not XCTest."))
+        let manifoldRange = try #require(result.range(of: AgentRulesTemplate.beginMarker))
+        #expect(userContentRange.upperBound < manifoldRange.lowerBound,
+                "Manifold block must come after user content")
     }
 
     @Test("Re-install replaces the existing manifold block in place")

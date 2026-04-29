@@ -861,7 +861,7 @@ public actor ManifoldBridge {
                let block = try await wbStore.activeBlock(for: targetApp) {
                 // Work block active — route through grant/materialization
                 if let grant = try await grantStore.grant(id: block.grantID) {
-                    let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+                    let grantSources = try await scopedGrantSources(grant: grant, policy: policy)
                     try await grantStore.touchGrant(grantID: grant.grantID)
                     return .workBlock(grant: grant, grantSources: grantSources, block: block)
                 }
@@ -878,7 +878,7 @@ public actor ManifoldBridge {
             }
 
             // Resolve allowed source records
-            let allSources = try await grantStore.allSources()
+            let allSources = try await grantStore.activeSources()
             let allowedSources = allSources.filter {
                 policy.allowedSourceIDs.contains($0.sourceID)
                     || resolver.sourceIDsWithAllowOverrides.contains($0.sourceID)
@@ -888,6 +888,31 @@ public actor ManifoldBridge {
 
         // Path 2: Legacy grant-only (PolicyStore not injected)
         return try await legacyRequireGrant()
+    }
+
+    private func scopedGrantSources(grant: GrantRecord, policy: AgentAccessPolicy?) async throws -> [GrantSourceRecord] {
+        var grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+        let activeSourceIDs = Set((try await grantStore.activeSources()).map(\.sourceID))
+        grantSources = grantSources.filter { activeSourceIDs.contains($0.sourceID) }
+
+        guard let policy else { return grantSources }
+        guard policy.agent.rawValue == grant.targetApp, !policy.isPaused else { return [] }
+
+        if grant.explicitSelection {
+            let explicitSourceIDs = Set((try await grantStore.grantFileScopes(grantID: grant.grantID)).map(\.sourceID))
+            guard !explicitSourceIDs.isEmpty else { return [] }
+            return grantSources.filter { explicitSourceIDs.contains($0.sourceID) }
+        }
+
+        let resolver = try await standingFileVisibilityResolver(for: policy)
+        let allowedSourceIDs = policy.allowedSourceIDs.union(resolver.sourceIDsWithAllowOverrides)
+        return grantSources.filter { allowedSourceIDs.contains($0.sourceID) }
+    }
+
+    private func explicitGrantEmailIDs(for grant: GrantRecord, limit: Int) throws -> Set<String>? {
+        guard grant.explicitSelection else { return nil }
+        let ids = Set(try emailStore.grantEmails(grantID: grant.grantID, limit: limit).map(\.emailID))
+        return ids.isEmpty ? nil : ids
     }
 
     private func hasStandingEmailAccess(policy: AgentAccessPolicy) async throws -> Bool {
@@ -911,7 +936,7 @@ public actor ManifoldBridge {
             return true
         }
 
-        return (try emailStore.sharedEmailCount()) > 0
+        return (try emailStore.sharedEmailCount(agent: policy.agent)) > 0
     }
 
     /// Legacy grant resolution — kept for backward compatibility during transition.
@@ -1143,9 +1168,7 @@ public actor ManifoldBridge {
         let context = try await emailPolicyContext(
             policy: policy,
             sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
-            explicitGrantEmailIDs: grant.explicitSelection
-                ? Set(try emailStore.grantEmails(grantID: grant.grantID, limit: limit).map(\.emailID))
-                : nil
+            explicitGrantEmailIDs: explicitGrantEmailIDs(for: grant, limit: limit)
         )
         let allEmails = try emailStore.allEmailMessages(limit: limit)
         return allEmails.filter { email in
@@ -1171,9 +1194,7 @@ public actor ManifoldBridge {
         let context = try await emailPolicyContext(
             policy: policy,
             sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
-            explicitGrantEmailIDs: grant.explicitSelection
-                ? Set(try emailStore.grantEmails(grantID: grant.grantID, limit: 1_000).map(\.emailID))
-                : nil
+            explicitGrantEmailIDs: explicitGrantEmailIDs(for: grant, limit: 1_000)
         )
         return EmailPolicyEngine.decision(for: email, context: context).allowed
     }
@@ -1188,9 +1209,7 @@ public actor ManifoldBridge {
         let context = try await emailPolicyContext(
             policy: policy,
             sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
-            explicitGrantEmailIDs: grant.explicitSelection
-                ? Set(try emailStore.grantEmails(grantID: grant.grantID, limit: 1_000).map(\.emailID))
-                : nil
+            explicitGrantEmailIDs: explicitGrantEmailIDs(for: grant, limit: 1_000)
         )
         return EmailPolicyEngine.decision(for: email, context: context)
     }
@@ -1453,11 +1472,10 @@ public actor ManifoldBridge {
                 noteGuidance: nil
             )
         } catch ManifoldMCPError.noAccessConfigured {
-            let sources = (try? await grantStore.allSources()) ?? []
             return StatusResult(
                 active: false, grantID: nil,
-                sources: sources.filter(\.isAccessible).map(\.displayName),
-                pausedSources: sources.filter(\.isPaused).map(\.displayName),
+                sources: [],
+                pausedSources: [],
                 fileCount: 0, emailCount: 0,
                 message: "No access configured. Use Review & Update Access in Manifold to grant file or email access.",
                 noteCaptureMode: SessionNoteCaptureMode.off.rawValue,
@@ -1465,13 +1483,12 @@ public actor ManifoldBridge {
             )
         } catch ManifoldMCPError.noActiveSession {
             let sources = (try? await grantStore.allSources()) ?? []
-            let paused = sources.filter(\.isPaused)
             let active = sources.filter(\.isAccessible)
             return StatusResult(
                 active: false,
                 grantID: nil,
-                sources: active.map(\.displayName),
-                pausedSources: paused.map(\.displayName),
+                sources: [],
+                pausedSources: [],
                 fileCount: 0,
                 emailCount: 0,
                 message: "No active session. \(active.count) source(s) configured. Start a session in Manifold to grant access.",
@@ -2375,7 +2392,7 @@ public actor ManifoldBridge {
         var results: [(path: String, source: String, matches: [String])] = []
 
         for mount in mounts {
-            let rootURL = URL(fileURLWithPath: mount.mountPath)
+            let rootURL = URL(fileURLWithPath: mount.mountPath).standardizedFileURL
             guard let enumerator = fm.enumerator(
                 at: rootURL,
                 includingPropertiesForKeys: [.isRegularFileKey],
@@ -2384,8 +2401,9 @@ public actor ManifoldBridge {
 
             let basePath = rootURL.path + "/"
             while let fileURL = enumerator.nextObject() as? URL {
-                guard fileURL.path.hasPrefix(basePath) else { continue }
-                let relativePath = String(fileURL.path.dropFirst(basePath.count))
+                let filePath = fileURL.standardizedFileURL.path
+                guard filePath.hasPrefix(basePath) else { continue }
+                let relativePath = String(filePath.dropFirst(basePath.count))
 
                 let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
                 let skip = [".git", "node_modules", ".build", "Build", "DerivedData",
@@ -2455,11 +2473,13 @@ public actor ManifoldBridge {
             mountPath = mount.mountPath
             mountName = mount.mountName
             resolvedPath = relPath
+            try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
         } else {
             let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
             mountPath = mount.mountPath
             mountName = mount.mountName
             resolvedPath = relPath
+            try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
         }
 
         let fileURL = try validatePath(resolvedPath, rootPath: mountPath)
@@ -2737,6 +2757,17 @@ public actor ManifoldBridge {
         }
         let grantID = access.grantID ?? "standing"
 
+        if access.isStanding {
+            let payload = try await standingStructuredSearchPayload(
+                query: query,
+                limit: limit,
+                access: access,
+                intent: validatedIntent
+            )
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            return String(data: data, encoding: .utf8) ?? "[]"
+        }
+
         let hits = try await artifactIndex.search(
             grantID: grantID,
             query: query,
@@ -2792,15 +2823,144 @@ public actor ManifoldBridge {
         return json
     }
 
+    private func standingStructuredSearchPayload(
+        query: String,
+        limit: Int,
+        access: ResolvedMounts,
+        intent: AccessIntent?
+    ) async throws -> [[String: Any]] {
+        let normalizedLimit = max(1, min(limit, 50))
+        var payload: [[String: Any]] = []
+
+        let fileResults = try searchFilesInOriginals(
+            query: query,
+            mounts: access.mounts,
+            policy: access.standingPolicy,
+            resolver: access.standingResolver
+        )
+        for result in fileResults where payload.count < normalizedLimit {
+            var deliveredPreview: [String] = []
+            for snippet in result.matches {
+                do {
+                    let deliveredSnippet = try await applyPrivacyPreflight(
+                        toolName: "search_structured",
+                        resourcePath: result.path,
+                        text: snippet,
+                        decisionID: access.decisionID,
+                        grantID: access.grantID,
+                        contentKind: .structuredResult
+                    )
+                    deliveredPreview.append(deliveredSnippet)
+                    await recordExposure(
+                        toolName: "search_structured",
+                        resourcePath: result.path,
+                        text: deliveredSnippet,
+                        exposureType: "snippet",
+                        decisionID: access.decisionID,
+                        intent: intent
+                    )
+                } catch {
+                    continue
+                }
+            }
+            guard !deliveredPreview.isEmpty else { continue }
+            payload.append([
+                "kind": ArtifactKind.file.rawValue,
+                "path": result.path,
+                "source": result.source,
+                "score": 0,
+                "preview": deliveredPreview,
+                "selection": selectionJSON(nil),
+                "retrieval": [
+                    "mode": "standing_file_search",
+                    "chunk_id": NSNull(),
+                    "content_hash": NSNull(),
+                    "context": NSNull(),
+                ],
+            ])
+        }
+
+        if payload.count < normalizedLimit, let policy = access.standingPolicy {
+            let emailResults = try emailStore.searchEmailMessages(freeText: query, limit: normalizedLimit)
+            for email in emailResults where payload.count < normalizedLimit {
+                guard try await isEmailAccessible(email: email, policy: policy) else { continue }
+                let preview = [email.sender, email.subject, email.preview ?? ""]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n")
+                do {
+                    let deliveredPreview = try await applyPrivacyPreflight(
+                        toolName: "search_structured",
+                        resourcePath: email.emailID,
+                        text: preview,
+                        decisionID: access.decisionID,
+                        grantID: access.grantID,
+                        contentKind: .email
+                    )
+                    payload.append([
+                        "kind": ArtifactKind.email.rawValue,
+                        "path": email.emailID,
+                        "source": email.senderDomain ?? "email",
+                        "score": 0,
+                        "preview": [deliveredPreview],
+                        "selection": selectionJSON(nil),
+                        "retrieval": [
+                            "mode": "standing_email_search",
+                            "chunk_id": NSNull(),
+                            "content_hash": NSNull(),
+                            "context": NSNull(),
+                        ],
+                    ])
+                    await recordExposure(
+                        toolName: "search_structured",
+                        resourcePath: email.emailID,
+                        text: deliveredPreview,
+                        exposureType: "email_preview",
+                        decisionID: access.decisionID,
+                        intent: intent
+                    )
+                } catch {
+                    continue
+                }
+            }
+        }
+
+        return payload
+    }
+
     // MARK: - Changes
 
     public func listChanges() async throws -> [ChangeInfo] {
         await logToolCall(tool: "list_changes")
         let access = try await resolveAccessMounts(toolName: "list_changes", action: "list")
         let grantID = access.grantID
+        let scopedContext: AccessContext?
+        if let grant = access.grant {
+            let grantSources = access.mounts.map {
+                GrantSourceRecord(grantID: grant.grantID, sourceID: $0.sourceID, mountName: $0.mountName)
+            }
+            scopedContext = .legacyGrant(grant: grant, grantSources: grantSources)
+        } else if access.isStanding {
+            var sources: [SourceRecord] = []
+            for mount in access.mounts {
+                if let source = try await grantStore.source(id: mount.sourceID) {
+                    sources.append(source)
+                }
+            }
+            scopedContext = .standing(policy: access.standingPolicy ?? AgentAccessPolicy(agent: targetApp), sources: sources)
+        } else {
+            scopedContext = nil
+        }
         let entries = try await auditStore.recentEntries(limit: 50)
         let changes = entries
-            .filter { grantID == nil || $0.grantID == grantID }
+            .filter { entry in
+                if let grantID {
+                    return entry.grantID == grantID
+                }
+                guard let scopedContext, let path = entry.filePath else {
+                    return false
+                }
+                return isResourcePath(path, inScopeOf: scopedContext)
+            }
             .map { entry in
                 ChangeInfo(
                     action: entry.action,
@@ -3335,10 +3495,14 @@ public actor ManifoldBridge {
     }
 
     func isResourcePath(_ path: String, inScopeOf context: AccessContext) -> Bool {
-        let lower = path.lowercased()
+        let lower = cleanPath(path)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
         return scopeLabels(in: context).contains { label in
-            let scoped = label.lowercased()
-            return lower == scoped || lower.hasPrefix(scoped + "/") || lower.contains(scoped)
+            let scoped = cleanPath(label)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .lowercased()
+            return !scoped.isEmpty && (lower == scoped || lower.hasPrefix(scoped + "/"))
         }
     }
 
@@ -3380,7 +3544,13 @@ public actor ManifoldBridge {
     func scopeLabels(in context: AccessContext) -> [String] {
         switch context {
         case .standing(_, let sources):
-            return sources.flatMap { [$0.sourceID, $0.displayName] }
+            return sources.flatMap {
+                [
+                    $0.sourceID,
+                    $0.displayName,
+                    URL(fileURLWithPath: $0.originalRootPath).lastPathComponent.lowercased(),
+                ]
+            }
         case .workBlock(_, let grantSources, _), .legacyGrant(_, let grantSources):
             return grantSources.flatMap { [$0.sourceID, $0.mountName] }
         }

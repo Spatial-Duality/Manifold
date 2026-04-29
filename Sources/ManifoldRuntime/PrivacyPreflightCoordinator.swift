@@ -23,34 +23,31 @@ public actor PrivacyPreflightCoordinator {
     private let store: PrivacyStore
     private let defaultStorageURL: URL
     private let rulesOnlyBackend: RulesOnlyPrivacyBackend
-    private let officialCLIBackend: OfficialCLIPrivacyBackend
-    private let mlxBackend = PlaceholderPrivacyBackend(
-        kind: .mlx,
-        note: "MLX backend is reserved for a later native runtime implementation."
-    )
-    private let coreMLBackend = PlaceholderPrivacyBackend(
-        kind: .coreML,
-        note: "Core ML backend is reserved for a later production experiment."
-    )
+    private let runtimeManager: PrivacyRuntimeManager
+    private let mlxBackend: MLXPrivacyBackend
     private var lastError: String?
 
     init(
         store: PrivacyStore,
         defaultStorageURL: URL,
         rulesOnlyBackend: RulesOnlyPrivacyBackend = RulesOnlyPrivacyBackend(),
-        officialCLIBackend: OfficialCLIPrivacyBackend? = nil
+        runtimeManager: PrivacyRuntimeManager? = nil,
+        mlxBackend: MLXPrivacyBackend? = nil
     ) {
         self.store = store
         self.defaultStorageURL = defaultStorageURL
         self.rulesOnlyBackend = rulesOnlyBackend
-        self.officialCLIBackend = officialCLIBackend ?? OfficialCLIPrivacyBackend(storageURL: defaultStorageURL)
+        let manager = runtimeManager ?? PrivacyRuntimeManager(storageURL: defaultStorageURL)
+        self.runtimeManager = manager
+        self.mlxBackend = mlxBackend ?? MLXPrivacyBackend(runtimeManager: manager)
     }
 
     public func settingsBundle() async throws -> PrivacySettingsBundle {
         try PrivacySettingsBundle(
             settings: await store.settings(defaultStoragePath: defaultStorageURL.path),
             claudePolicy: await store.policy(for: .cowork),
-            codexPolicy: await store.policy(for: .codex)
+            codexPolicy: await store.policy(for: .codex),
+            runtimes: await runtimeManager.availableRuntimes()
         )
     }
 
@@ -62,45 +59,52 @@ public actor PrivacyPreflightCoordinator {
         try await store.upsertPolicy(policy)
     }
 
-    public func installModel() async throws -> PrivacyRuntimeStatus {
+    public func listRuntimes() async -> [PrivacyRuntimeDescriptor] {
+        await runtimeManager.availableRuntimes()
+    }
+
+    public func installRuntime(id runtimeID: String = PrivacyRuntimeDefaults.mlxRuntimeID) async throws -> PrivacyRuntimeStatus {
         var settings = try await store.settings(defaultStoragePath: defaultStorageURL.path)
         try FileManager.default.createDirectory(at: defaultStorageURL, withIntermediateDirectories: true)
 
-        switch settings.selectedBackend {
-        case .rulesOnly:
-            let info = try await rulesOnlyBackend.install()
+        do {
+            let installed = try await runtimeManager.install(runtimeID: runtimeID)
             settings.isEnabled = true
-            settings.installState = .installed
-            settings.modelVersion = info.modelVersion
-            settings.installedAt = ISO8601DateFormatter.shared.string(from: Date())
+            settings.selectedBackend = .mlx
+            if let installed {
+                settings.installState = .installed
+                settings.modelVersion = installed.manifest.version
+                settings.installedAt = ISO8601DateFormatter.shared.string(from: Date())
+            } else {
+                settings.installState = .downloading
+                settings.modelVersion = nil
+                settings.installedAt = nil
+            }
             settings.storagePath = defaultStorageURL.path
             try await store.upsertSettings(settings)
             lastError = nil
-        case .officialCLI:
-            let info = try await officialCLIBackend.install()
+        } catch {
             settings.isEnabled = true
-            settings.installState = .installed
-            settings.modelVersion = info.modelVersion
-            settings.installedAt = ISO8601DateFormatter.shared.string(from: Date())
+            settings.selectedBackend = .mlx
+            if let managerError = error as? PrivacyRuntimeManagerError,
+               case .unsupportedArchitecture = managerError {
+                settings.isEnabled = false
+                settings.installState = .unavailable
+            } else {
+                settings.installState = .downloadRequired
+            }
             settings.storagePath = defaultStorageURL.path
             try await store.upsertSettings(settings)
-            lastError = nil
-        case .mlx, .coreML:
-            settings.isEnabled = true
-            settings.installState = .downloadRequired
-            settings.storagePath = defaultStorageURL.path
-            try await store.upsertSettings(settings)
-            lastError = "Managed install is not available for \(settings.selectedBackend.displayName) yet. Rules only remains the effective backend."
+            lastError = error.localizedDescription
         }
 
         return try await runtimeStatus()
     }
 
-    public func uninstallModel() async throws -> PrivacyRuntimeStatus {
+    public func uninstallRuntime(id runtimeID: String = PrivacyRuntimeDefaults.mlxRuntimeID) async throws -> PrivacyRuntimeStatus {
         var settings = try await store.settings(defaultStoragePath: defaultStorageURL.path)
-        if settings.selectedBackend == .officialCLI {
-            try await officialCLIBackend.uninstall()
-        }
+        try await runtimeManager.uninstall(runtimeID: runtimeID)
+        await mlxBackend.unload()
         settings.isEnabled = false
         settings.installState = .notInstalled
         settings.modelVersion = nil
@@ -116,19 +120,36 @@ public actor PrivacyPreflightCoordinator {
     }
 
     public func runtimeStatus() async throws -> PrivacyRuntimeStatus {
-        let settings = try await store.settings(defaultStoragePath: defaultStorageURL.path)
+        var settings = try await store.settings(defaultStoragePath: defaultStorageURL.path)
+        let runtime = await runtimeManager.availableRuntimes().first
+        if let runtime, runtime.installState == .installed, settings.installState != .installed {
+            settings.selectedBackend = .mlx
+            settings.installState = .installed
+            settings.modelVersion = runtime.installedVersion
+            settings.installedAt = settings.installedAt ?? ISO8601DateFormatter.shared.string(from: Date())
+            try await store.upsertSettings(settings)
+        }
         let effective = await effectiveBackend(for: settings)
         let statuses = try await backendStatuses(for: settings)
+        let reportedInstallState = runtime?.installState ?? settings.installState
         return PrivacyRuntimeStatus(
             featureEnabled: settings.isEnabled,
             selectedBackend: settings.selectedBackend,
             effectiveBackend: effective.kind,
-            installState: settings.installState,
+            installState: reportedInstallState,
             modelLoaded: (await effective.modelInfo()).loaded,
             cacheEntryCount: try await store.cacheEntryCount(),
             lastError: lastError,
             storagePath: settings.storagePath,
-            backends: statuses
+            backends: statuses,
+            runtimeID: runtime?.id,
+            runtimeDisplayName: runtime?.displayName,
+            installedVersion: runtime?.installedVersion,
+            availableVersion: runtime?.availableVersion,
+            verificationState: runtime?.verificationState,
+            downloadedBytes: runtime?.downloadedBytes,
+            totalBytes: runtime?.totalBytes,
+            downloadProgress: runtime?.downloadProgress
         )
     }
 
@@ -415,7 +436,7 @@ public actor PrivacyPreflightCoordinator {
         switch settings.selectedBackend {
         case .rulesOnly:
             return rulesOnlyBackend
-        case .officialCLI, .mlx, .coreML:
+        case .mlx:
             if settings.installState == .installed && info.available {
                 return selected
             }
@@ -450,12 +471,8 @@ public actor PrivacyPreflightCoordinator {
         switch kind {
         case .rulesOnly:
             return rulesOnlyBackend
-        case .officialCLI:
-            return officialCLIBackend
         case .mlx:
             return mlxBackend
-        case .coreML:
-            return coreMLBackend
         }
     }
 

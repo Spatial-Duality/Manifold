@@ -31,12 +31,23 @@ struct PrivacyPreflightCoordinatorTests {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    func enablePrivacyPreflight(_ coordinator: PrivacyPreflightCoordinator, storageURL: URL) async throws {
+        try await coordinator.updateSettings(
+            PrivacyPreflightSettings(
+                isEnabled: true,
+                selectedBackend: .mlx,
+                installState: .downloadRequired,
+                storagePath: storageURL.path
+            )
+        )
+    }
+
     @Test("Document-like content is redacted by default")
     func redactsDocumentContent() async throws {
         let (_, coordinator, tempDir) = try makeCoordinator()
         defer { cleanup(tempDir) }
 
-        _ = try await coordinator.installModel()
+        try await enablePrivacyPreflight(coordinator, storageURL: tempDir.appendingPathComponent("privacy-models"))
 
         let delivery = try await coordinator.preflight(
             agent: .cowork,
@@ -60,7 +71,7 @@ struct PrivacyPreflightCoordinatorTests {
         let (_, coordinator, tempDir) = try makeCoordinator()
         defer { cleanup(tempDir) }
 
-        _ = try await coordinator.installModel()
+        try await enablePrivacyPreflight(coordinator, storageURL: tempDir.appendingPathComponent("privacy-models"))
 
         let delivery = try await coordinator.preflight(
             agent: .codex,
@@ -83,7 +94,7 @@ struct PrivacyPreflightCoordinatorTests {
         let (_, coordinator, tempDir) = try makeCoordinator()
         defer { cleanup(tempDir) }
 
-        _ = try await coordinator.installModel()
+        try await enablePrivacyPreflight(coordinator, storageURL: tempDir.appendingPathComponent("privacy-models"))
 
         let delivery = try await coordinator.preflight(
             agent: .cowork,
@@ -104,7 +115,7 @@ struct PrivacyPreflightCoordinatorTests {
         let (store, coordinator, tempDir) = try makeCoordinator()
         defer { cleanup(tempDir) }
 
-        _ = try await coordinator.installModel()
+        try await enablePrivacyPreflight(coordinator, storageURL: tempDir.appendingPathComponent("privacy-models"))
         let text = #"let ownerEmail = "jane@example.com""#
         let inputHash = sha256(text)
 
@@ -139,8 +150,8 @@ struct PrivacyPreflightCoordinatorTests {
         #expect(second.deliveredText == nil)
     }
 
-    @Test("Unavailable installed backend falls back to rules-only scanning")
-    func unavailableBackendFallsBackToRulesOnly() async throws {
+    @Test("Unavailable MLX MXFP8 model pack falls back to rules-only scanning")
+    func unavailableMLXRuntimeFallsBackToRulesOnly() async throws {
         let (_, coordinator, tempDir) = try makeCoordinator()
         defer { cleanup(tempDir) }
 

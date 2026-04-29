@@ -160,6 +160,7 @@ private struct AgentOSView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.s5) {
                 header
+                AgentOSControlMap()
                 summary
 
                 if isEmpty {
@@ -186,10 +187,16 @@ private struct AgentOSView: View {
     }
 
     private var header: some View {
-        HStack(spacing: Spacing.s3) {
-            Label("Agent OS", systemImage: "cpu")
-                .font(ManifoldType.title)
-                .accessibilityIdentifier("ledger.agentOS")
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Agent OS Controls", systemImage: "cpu")
+                    .font(ManifoldType.title)
+                    .accessibilityIdentifier("ledger.agentOS")
+                Text("Advanced MCP primitives that manage reusable skills, scoped data handles, deterministic plans, graph context, and claim proof.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
             Button {
                 Task { await store.personalDataOS.loadAgentOS() }
@@ -203,7 +210,11 @@ private struct AgentOSView: View {
     }
 
     private var summary: some View {
-        HStack(spacing: Spacing.s3) {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: Spacing.s3)],
+            alignment: .leading,
+            spacing: Spacing.s3
+        ) {
             LedgerMetricTile(title: "Skills", value: "\(store.personalDataOS.skills.count)", systemImage: "wand.and.sparkles", variant: .preview)
             LedgerMetricTile(title: "Exec runs", value: "\(store.personalDataOS.execRuns.count)", systemImage: "play.rectangle", variant: .scope)
             LedgerMetricTile(title: "Blocked", value: "\(store.personalDataOS.blockedExecRunCount)", systemImage: "hand.raised", variant: store.personalDataOS.blockedExecRunCount > 0 ? .attention : .neutral)
@@ -280,6 +291,50 @@ private struct AgentOSView: View {
             && store.personalDataOS.graphNodes.isEmpty
             && store.personalDataOS.fabricationFindings.isEmpty
             && !store.personalDataOS.isLoadingAgentOS
+    }
+}
+
+private struct AgentOSControlMap: View {
+    private let controls: [(String, String, String, Pill.Variant)] = [
+        ("lock.doc", "Deterministic Plans", "No shell, network, raw filesystem, or hidden state changes.", .scope),
+        ("number", "Capability Handles", "Sensitive values carry origin, trust level, and allowed sinks.", .attention),
+        ("point.3.connected.trianglepath.dotted", "Scoped Graph", "Searchable context stays tied to available source lineage.", .defaultScope),
+        ("checkmark.seal", "Claim Proof", "Agent claims are checked against recorded exposure evidence.", .preview),
+    ]
+
+    var body: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 220), spacing: Spacing.s3)],
+            alignment: .leading,
+            spacing: Spacing.s3
+        ) {
+            ForEach(controls, id: \.1) { control in
+                HStack(alignment: .top, spacing: Spacing.s2) {
+                    Image(systemName: control.0)
+                        .foregroundStyle(control.3.color)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(control.1)
+                            .font(ManifoldType.captionMedium)
+                        Text(control.2)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(Spacing.s3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                        .fill(ManifoldPalette.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                        .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+                )
+            }
+        }
+        .accessibilityIdentifier("ledger.agentOS.controlMap")
     }
 }
 
@@ -510,13 +565,16 @@ private func relativeDate(_ timestamp: Double) -> String {
 
 private struct ProvenanceLedgerView: View {
     @Environment(ManifoldStore.self) private var store
+    @State private var entryFilter: ProvenanceEntryFilter = .all
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.s5) {
                 header
                 verificationBanner
+                proofMap
                 toolCostSummary
+                entryFilterPicker
                 ledgerEntries
             }
             .padding(Spacing.s5)
@@ -526,10 +584,16 @@ private struct ProvenanceLedgerView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: Spacing.s3) {
-            Label("Provenance Ledger", systemImage: "checkmark.seal")
-                .font(ManifoldType.title)
-                .accessibilityIdentifier("ledger.provenance")
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Provenance Ledger", systemImage: "checkmark.seal")
+                    .font(ManifoldType.title)
+                    .accessibilityIdentifier("ledger.provenance")
+                Text("Proof for what was allowed, blocked, redacted, remembered, verified, and handed to agents.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
             Button {
                 Task { await store.personalDataOS.loadLedger() }
@@ -540,6 +604,20 @@ private struct ProvenanceLedgerView: View {
             .controlSize(.small)
             .accessibilityIdentifier("ledger.provenance.verify")
         }
+    }
+
+    private var proofMap: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 170), spacing: Spacing.s3)],
+            alignment: .leading,
+            spacing: Spacing.s3
+        ) {
+            ProvenanceProofTile(title: "Decisions", value: "\(count(.decisions))", detail: "Allowed, denied, warned", systemImage: "hand.raised", variant: .attention)
+            ProvenanceProofTile(title: "Exposures", value: "\(count(.exposures))", detail: "Content hashes and bytes", systemImage: "eye", variant: .defaultScope)
+            ProvenanceProofTile(title: "Memory", value: "\(count(.memory))", detail: "Saved or forgotten context", systemImage: "brain", variant: .preview)
+            ProvenanceProofTile(title: "Agent OS", value: "\(count(.agentOS))", detail: "Skills, handles, exec, graph", systemImage: "cpu", variant: .scope)
+        }
+        .accessibilityIdentifier("ledger.provenance.proofMap")
     }
 
     @ViewBuilder
@@ -584,7 +662,11 @@ private struct ProvenanceLedgerView: View {
             VStack(alignment: .leading, spacing: Spacing.s3) {
                 Label("Tool Costs", systemImage: "gauge.with.dots.needle.33percent")
                     .font(ManifoldType.bodyMedium)
-                HStack(spacing: Spacing.s3) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), spacing: Spacing.s3)],
+                    alignment: .leading,
+                    spacing: Spacing.s3
+                ) {
                     LedgerMetricTile(title: "Calls", value: "\(report.totalCalls)", systemImage: "terminal", variant: .scope)
                     LedgerMetricTile(title: "Output", value: ByteCountFormatter.string(fromByteCount: Int64(report.totalOutputBytes), countStyle: .file), systemImage: "doc.text", variant: .neutral)
                     LedgerMetricTile(title: "Avg latency", value: "\(Int(report.averageDurationMS.rounded())) ms", systemImage: "timer", variant: .defaultScope)
@@ -593,6 +675,16 @@ private struct ProvenanceLedgerView: View {
             }
             .accessibilityIdentifier("ledger.provenance.cost")
         }
+    }
+
+    private var entryFilterPicker: some View {
+        Picker("Ledger filter", selection: $entryFilter) {
+            ForEach(ProvenanceEntryFilter.allCases) { filter in
+                Text(filter.title).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("ledger.provenance.filter")
     }
 
     @ViewBuilder
@@ -614,15 +706,118 @@ private struct ProvenanceLedgerView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.s6)
                 .accessibilityIdentifier("ledger.provenance.empty")
+            } else if filteredEntries.isEmpty {
+                EmptyStateIllustration(
+                    systemImage: entryFilter.systemImage,
+                    title: "No \(entryFilter.title.lowercased()) entries",
+                    subtitle: "Choose another proof filter or wait for new governed activity."
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.s6)
+                .accessibilityIdentifier("ledger.provenance.filteredEmpty")
             } else {
                 LazyVStack(alignment: .leading, spacing: Spacing.s2) {
-                    ForEach(store.personalDataOS.ledgerEntries) { entry in
+                    ForEach(filteredEntries) { entry in
                         LedgerEntryRow(entry: entry)
                             .accessibilityIdentifier("ledger.provenance.row.\(entry.entryID)")
                     }
                 }
             }
         }
+    }
+
+    private var filteredEntries: [LedgerEntry] {
+        store.personalDataOS.ledgerEntries.filter(entryFilter.includes)
+    }
+
+    private func count(_ filter: ProvenanceEntryFilter) -> Int {
+        store.personalDataOS.ledgerEntries.filter(filter.includes).count
+    }
+}
+
+private enum ProvenanceEntryFilter: String, CaseIterable, Identifiable {
+    case all
+    case decisions
+    case exposures
+    case memory
+    case agentOS
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .decisions: return "Decisions"
+        case .exposures: return "Exposures"
+        case .memory: return "Memory"
+        case .agentOS: return "Agent OS"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: return "list.bullet.rectangle"
+        case .decisions: return "hand.raised"
+        case .exposures: return "eye"
+        case .memory: return "brain"
+        case .agentOS: return "cpu"
+        }
+    }
+
+    func includes(_ entry: LedgerEntry) -> Bool {
+        guard self != .all else { return true }
+        switch LedgerEntryType(rawValue: entry.entryType) {
+        case .accessDecision:
+            return self == .decisions
+        case .exposure:
+            return self == .exposures
+        case .memoryItem, .memoryChange:
+            return self == .memory
+        case .valueHandle, .execRun, .skill, .graph, .fabricationFinding:
+            return self == .agentOS
+        case .toolMetric:
+            return self == .agentOS || self == .decisions
+        case .none:
+            return false
+        }
+    }
+}
+
+private struct ProvenanceProofTile: View {
+    let title: String
+    let value: String
+    let detail: String
+    let systemImage: String
+    let variant: Pill.Variant
+
+    var body: some View {
+        HStack(spacing: Spacing.s2) {
+            Image(systemName: systemImage)
+                .foregroundStyle(variant.color)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(ManifoldType.bodyMedium)
+                    .monospacedDigit()
+                Text(title)
+                    .font(ManifoldType.captionMedium)
+                Text(detail)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.s3)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .fill(ManifoldPalette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+        )
     }
 }
 

@@ -68,8 +68,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 6)
-        #expect(try migrator.currentVersion() == 32)
+        #expect(applied == 9)
+        #expect(try migrator.currentVersion() == 35)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
     }
@@ -81,14 +81,14 @@ struct DatabaseMigratorTests {
 
         let migrator = try DatabaseMigrator(db: db)
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        for version in 1...32 {
+        for version in 1...35 {
             try db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 params: ["\(version)", now]
             )
         }
 
-        #expect(try migrator.currentVersion() == 32)
+        #expect(try migrator.currentVersion() == 35)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
 
@@ -657,6 +657,88 @@ struct DatabaseMigratorTests {
         #expect(!settingsTable.isEmpty)
     }
 
+    @Test("Migration v34 migrates legacy privacy backends to MLX MXFP8")
+    func mlxMXFP8RuntimeMigration() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        for version in 1...33 {
+            try db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                params: ["\(version)", now]
+            )
+        }
+
+        try db.execute("""
+            CREATE TABLE privacy_preflight_settings (
+                id TEXT PRIMARY KEY,
+                is_enabled INTEGER NOT NULL DEFAULT 0,
+                selected_backend TEXT NOT NULL DEFAULT 'rules_only',
+                install_state TEXT NOT NULL DEFAULT 'not_installed',
+                model_version TEXT,
+                storage_path TEXT,
+                installed_at TEXT,
+                cache_enabled INTEGER NOT NULL DEFAULT 1,
+                unload_on_memory_pressure INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try db.execute("""
+            CREATE TABLE privacy_scan_cache (
+                input_hash TEXT NOT NULL,
+                backend TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                operating_point TEXT NOT NULL,
+                category_set_json TEXT NOT NULL,
+                content_kind TEXT NOT NULL,
+                spans_json TEXT NOT NULL,
+                redacted_text TEXT NOT NULL,
+                findings_summary TEXT NOT NULL,
+                elapsed_ms INTEGER NOT NULL DEFAULT 0,
+                cached_at TEXT NOT NULL,
+                PRIMARY KEY(input_hash, backend, model_version, operating_point, category_set_json, content_kind)
+            )
+        """)
+        try db.execute(
+            """
+            INSERT INTO privacy_preflight_settings
+            (id, selected_backend, install_state, model_version, storage_path, installed_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            params: ["default", "official_cli", "installed", "openai/privacy-filter", "/tmp/official-cli", now, now]
+        )
+        try db.execute(
+            """
+            INSERT INTO privacy_scan_cache
+            (input_hash, backend, model_version, operating_point, category_set_json, content_kind, spans_json, redacted_text, findings_summary, elapsed_ms, cached_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params: ["hash-1", "official_cli", "legacy", "balanced", "[]", "text", "[]", "redacted", "summary", "1", now]
+        )
+        try db.execute(
+            """
+            INSERT INTO privacy_scan_cache
+            (input_hash, backend, model_version, operating_point, category_set_json, content_kind, spans_json, redacted_text, findings_summary, elapsed_ms, cached_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params: ["hash-2", "rules_only", "rules", "balanced", "[]", "text", "[]", "plain", "summary", "1", now]
+        )
+
+        let applied = try migrator.migrate()
+
+        #expect(applied == 2)
+        #expect(try migrator.currentVersion() == 35)
+        let settings = try #require(try db.queryAll("SELECT selected_backend, install_state, model_version, installed_at FROM privacy_preflight_settings").first)
+        #expect(settings["selected_backend"] == "mlx")
+        #expect(settings["install_state"] == "download_required")
+        #expect(settings["model_version"] == nil)
+        #expect(settings["installed_at"] == nil)
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM privacy_scan_cache WHERE backend = 'official_cli'") == "0")
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM privacy_scan_cache WHERE backend = 'rules_only'") == "1")
+    }
+
     @Test("Migration v31 preserves legacy presets created without target_app")
     func sessionTemplatesPreservesLegacyPresets() throws {
         let (db, tempDir) = try makeDB()
@@ -686,5 +768,87 @@ struct DatabaseMigratorTests {
         // legacy row should have target_app absent or empty, never crashing readers.
         let targetApp = rows.first?["target_app"]?.trimmingCharacters(in: .whitespaces) ?? ""
         #expect(targetApp.isEmpty)
+    }
+
+    /// v35 scrubs orphan rows in `file_visibility_overrides` that point at a
+    /// missing or removed source, and prunes dead source IDs out of every
+    /// `agent_access_policies.allowed_source_ids` JSON list. Without the
+    /// migration, the Folders matrix dot indicator lit up for removed rows
+    /// because those overrides lingered indefinitely.
+    @Test("Migration v35 scrubs orphan access records")
+    func migrationScrubsOrphanAccessRecords() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        // Run every migration honestly so the real `sources` and
+        // `agent_access_policies` tables exist before we stage stale data.
+        _ = try migrator.migrate()
+
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+
+        try db.execute("""
+            INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, params: ["src-live", "Live", "/tmp/live", "idle", now, now])
+        try db.execute("""
+            INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, params: ["src-removed", "Gone", "/tmp/gone", "removed", now, now])
+
+        try db.execute("""
+            INSERT INTO file_visibility_overrides (agent, source_id, relative_path, is_directory, decision, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, params: ["cowork", "src-live", "keep.txt", "0", "allow", now])
+        try db.execute("""
+            INSERT INTO file_visibility_overrides (agent, source_id, relative_path, is_directory, decision, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, params: ["cowork", "src-removed", "stale.txt", "0", "allow", now])
+        try db.execute("""
+            INSERT INTO file_visibility_overrides (agent, source_id, relative_path, is_directory, decision, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, params: ["cowork", "src-gone-entirely", "ghost.txt", "0", "deny", now])
+
+        try db.execute("""
+            INSERT INTO agent_access_policies
+            (policy_id, agent, allowed_source_ids, allowed_email_domains, email_sensitivity, default_email_policy, access_recording_level, is_paused, has_completed_first_grant, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            "p-cowork", "cowork",
+            #"["src-live","src-removed","src-gone-entirely"]"#,
+            "[]", "moderate", "allow_unless_blocked", "lightweight", "0", "1", now, now,
+        ])
+
+        // Re-arm v35 so migrate() runs it again over the seeded stale data.
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["35"])
+        let applied = try migrator.migrate()
+
+        #expect(applied == 1)
+        #expect(try migrator.currentVersion() == 35)
+
+        let liveOverride = try db.queryAll(
+            "SELECT relative_path FROM file_visibility_overrides WHERE source_id = ?",
+            params: ["src-live"]
+        )
+        #expect(liveOverride.count == 1)
+        #expect(liveOverride.first?["relative_path"] == "keep.txt")
+
+        let removedOverride = try db.queryAll(
+            "SELECT relative_path FROM file_visibility_overrides WHERE source_id = ?",
+            params: ["src-removed"]
+        )
+        #expect(removedOverride.isEmpty)
+
+        let ghostOverride = try db.queryAll(
+            "SELECT relative_path FROM file_visibility_overrides WHERE source_id = ?",
+            params: ["src-gone-entirely"]
+        )
+        #expect(ghostOverride.isEmpty)
+
+        let policy = try #require(try db.queryAll(
+            "SELECT allowed_source_ids FROM agent_access_policies WHERE policy_id = ?",
+            params: ["p-cowork"]
+        ).first)
+        #expect(policy["allowed_source_ids"] == #"["src-live"]"#)
     }
 }

@@ -104,6 +104,17 @@ private struct RulesPolicyHeader: View {
                     tint: ManifoldPalette.text3
                 )
             }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 170), spacing: Spacing.s2)],
+                alignment: .leading,
+                spacing: Spacing.s2
+            ) {
+                RulesPlaybookCard(systemImage: "hand.raised.fill", title: "Always Block", detail: "Secrets, tokens, account numbers", variant: .attention)
+                RulesPlaybookCard(systemImage: "text.badge.checkmark", title: "Redact", detail: "My Identity and private people", variant: .defaultScope)
+                RulesPlaybookCard(systemImage: "checkmark.shield", title: "Keep", detail: "Public/company allowlist", variant: .session)
+                RulesPlaybookCard(systemImage: "text.quote", title: "Downgrade", detail: "Summary or metadata only", variant: .preview)
+            }
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s3)
@@ -119,6 +130,39 @@ private struct RulesPolicyHeader: View {
             return "\(privacyBackendLabel(for: privacyStatus)) feeds privacy matchers. File and email rules run before sharing; agent behavior rules are tracked as advisory policies."
         }
         return "File and email rules are enforced live. Privacy filter rules enforce during preflight after the model is enabled."
+    }
+}
+
+private struct RulesPlaybookCard: View {
+    let systemImage: String
+    let title: String
+    let detail: String
+    let variant: Pill.Variant
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.s2) {
+            Image(systemName: systemImage)
+                .foregroundStyle(variant.color)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(ManifoldType.captionMedium)
+                Text(detail)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Spacing.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                .fill(variant.color.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                .strokeBorder(variant.color.opacity(0.18), lineWidth: 0.5)
+        )
     }
 }
 
@@ -185,8 +229,8 @@ private struct RulesMetric: View {
 
 private func privacyBackendLabel(for status: PrivacyRuntimeStatus) -> String {
     switch status.effectiveBackend {
-    case .officialCLI:
-        return "OpenAI privacy filter"
+    case .mlx:
+        return status.runtimeDisplayName ?? "Fast Local Scanner"
     default:
         return status.effectiveBackend.displayName
     }
@@ -290,43 +334,62 @@ private struct RulesToolbar: View {
             Menu {
                 Menu("Privacy Filter Rule") {
                     newRuleButton(
-                        "Deny sensitive content",
+                        "Block secrets",
                         systemImage: "hand.raised",
                         action: .deny
                     ) {
                         RuleRecord.newPrivacyFilterRule(
-                            name: "Deny privacy match",
+                            name: "Block secrets before sharing",
+                            category: .secret,
                             action: .deny
                         )
                     }
                     newRuleButton(
-                        "Redact sensitive spans",
+                        "Redact My Identity",
                         systemImage: "text.badge.checkmark",
                         action: .redact
                     ) {
-                        RuleRecord.newPrivacyFilterRule(
-                            name: "Redact privacy match",
-                            action: .redact
+                        RuleRecord.newPrivacyControlRule(
+                            name: "Redact My Identity before sharing",
+                            matcher: .privacyMatchesMyIdentity,
+                            action: .redact,
+                            explanation: "Redacts registered My Identity matches before content is shared with an agent."
                         )
                     }
                     newRuleButton(
-                        "Warn and record",
+                        "Keep allowlisted public data",
+                        systemImage: "checkmark.shield",
+                        action: .allow
+                    ) {
+                        RuleRecord.newPrivacyControlRule(
+                            name: "Keep public or company allowlist",
+                            matcher: .privacyInOrgAllowlist,
+                            action: .allow,
+                            explanation: "Allows findings when they are covered by the public/company allowlist."
+                        )
+                    }
+                    newRuleButton(
+                        "Warn on high severity",
                         systemImage: "exclamationmark.triangle",
                         action: .warn
                     ) {
-                        RuleRecord.newPrivacyFilterRule(
-                            name: "Warn on privacy match",
-                            action: .warn
+                        RuleRecord.newPrivacyControlRule(
+                            name: "Warn on high severity privacy findings",
+                            matcher: .privacySeverityAtLeast(.high),
+                            action: .warn,
+                            explanation: "Allows high-severity findings but records a warning in the provenance ledger."
                         )
                     }
                     newRuleButton(
-                        "Log only",
-                        systemImage: "list.bullet.rectangle",
-                        action: .log
+                        "Metadata only for medium severity",
+                        systemImage: "tag",
+                        action: .downgrade
                     ) {
-                        RuleRecord.newPrivacyFilterRule(
-                            name: "Log privacy match",
-                            action: .log
+                        RuleRecord.newPrivacyControlRule(
+                            name: "Metadata only for medium privacy findings",
+                            matcher: .privacySeverityAtLeast(.medium),
+                            action: .downgrade,
+                            explanation: "Shares metadata instead of raw content when privacy findings are medium severity or higher."
                         )
                     }
                 }

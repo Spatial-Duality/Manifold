@@ -59,7 +59,7 @@ struct MCPBridgeLogicTests {
 
     @Test("No active run when workspace not registered")
     func noActiveRun() async throws {
-        let (db, _, _, leaseManager, _, tempDir) = try makeStores()
+        let (db, _, _, _, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         let rows = try db.queryAll("SELECT * FROM workspaces WHERE status = 'active'")
@@ -121,7 +121,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Write creates snapshot via snapshot store")
     func writeCreatesSnapshot() async throws {
-        let (_, contentStore, snapshotStore, leaseManager, _, tempDir) = try makeStores()
+        let (_, _, snapshotStore, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-snap", profileID: "default", rootPath: tempDir.path, agent: "cowork")
@@ -139,7 +139,7 @@ struct MCPBridgeLogicTests {
 
     @Test("Modification records before and after hashes")
     func modificationTracking() async throws {
-        let (_, contentStore, snapshotStore, leaseManager, _, tempDir) = try makeStores()
+        let (_, _, snapshotStore, leaseManager, _, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
         try await leaseManager.registerWorkspace(id: "ws-mod", profileID: "default", rootPath: tempDir.path, agent: "cowork")

@@ -78,7 +78,9 @@ struct FoldersMatrixView: View {
 
             if inspectorVisible {
                 Divider()
-                FileTreeInspector(source: selectedSource)
+                FileTreeInspector(source: selectedSource) {
+                    Task { await loadOverrides() }
+                }
                     .frame(width: 320)
                     .background(ManifoldPalette.surface2)
             }
@@ -389,7 +391,14 @@ struct FoldersMatrixView: View {
     /// indicator next to the Sharing pill so the user knows there's
     /// extra detail in the inspector without cluttering the main
     /// label.
+    ///
+    /// Removed sources are excluded — overrides on a removed source
+    /// have no enforcement effect (resolveAccess intersects with
+    /// activeSources, which excludes status='removed'). Lighting the
+    /// dot for a Removed row would falsely suggest per-file sharing
+    /// is still active.
     private func hasFileOverrides(for source: SourceRecord) -> Bool {
+        guard !source.isRemoved else { return false }
         let breakdown = overrideAgentsByDecision(for: source)
         return !breakdown.allow.isEmpty || !breakdown.deny.isEmpty
     }

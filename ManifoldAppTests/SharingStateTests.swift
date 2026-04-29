@@ -20,7 +20,7 @@ final class SharingStateTests: XCTestCase {
         let state = SharingState(connectedAgents: [.cowork, .codex])
         state.toggleAgent(.cowork)
         XCTAssertEqual(state.label, .visibleTo(.cowork))
-        XCTAssertEqual(state.allAIsState, .off)
+        XCTAssertEqual(state.allAIsState, .mixed)
         XCTAssertEqual(state.agents[0].state, .on)
         XCTAssertEqual(state.agents[1].state, .off)
     }
@@ -46,8 +46,8 @@ final class SharingStateTests: XCTestCase {
         state.toggleAllAIs() // both on
         state.toggleAgent(.codex) // codex off
         XCTAssertEqual(state.label, .visibleTo(.cowork))
-        XCTAssertEqual(state.allAIsState, .off,
-            "All AIs must auto-flip off when any child disables")
+        XCTAssertEqual(state.allAIsState, .mixed,
+            "All AIs must become mixed when any child disables")
     }
 
     func testSingleModeToggleAllAIsTwiceReturnsToHidden() {

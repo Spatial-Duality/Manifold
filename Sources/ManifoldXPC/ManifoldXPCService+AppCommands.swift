@@ -635,11 +635,16 @@ extension ManifoldXPCService {
             }
             return ["ok": true]
 
-        case "installPrivacyModel":
-            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.installModel())]
+        case "listPrivacyRuntimes":
+            return ["runtimes": try XPCJSON.object(from: await runtime.privacyCoordinator.listRuntimes())]
 
-        case "uninstallPrivacyModel":
-            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.uninstallModel())]
+        case "installPrivacyRuntime":
+            let runtimeID = payload["runtimeID"] as? String ?? PrivacyRuntimeDefaults.mlxRuntimeID
+            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.installRuntime(id: runtimeID))]
+
+        case "uninstallPrivacyRuntime":
+            let runtimeID = payload["runtimeID"] as? String ?? PrivacyRuntimeDefaults.mlxRuntimeID
+            return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.uninstallRuntime(id: runtimeID))]
 
         case "privacyRuntimeStatus":
             return ["status": try XPCJSON.object(from: try await runtime.privacyCoordinator.runtimeStatus())]
@@ -1559,7 +1564,10 @@ extension ManifoldXPCService {
 
     private func accessibleEmails(for grant: GrantRecord, limit: Int = 1_000) throws -> [EmailMessageRecord] {
         if grant.explicitSelection {
-            return try runtime.emailStore.grantEmails(grantID: grant.grantID, limit: limit)
+            let selected = try runtime.emailStore.grantEmails(grantID: grant.grantID, limit: limit)
+            if !selected.isEmpty {
+                return selected
+            }
         }
         let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
         if filter.level == .strict {

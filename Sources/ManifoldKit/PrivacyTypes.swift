@@ -3,19 +3,47 @@
 
 import Foundation
 
+public enum PrivacyRuntimeDefaults {
+    public static let mlxRuntimeID = "openai-privacy-filter-mlx-mxfp8"
+}
+
 public enum PrivacyBackendKind: String, Sendable, Codable, CaseIterable {
     case rulesOnly = "rules_only"
-    case officialCLI = "official_cli"
     case mlx
-    case coreML = "core_ml"
 
     public var displayName: String {
         switch self {
         case .rulesOnly: return "Rules only"
-        case .officialCLI: return "Official CLI"
-        case .mlx: return "MLX"
-        case .coreML: return "Core ML"
+        case .mlx: return "Fast Local Scanner"
         }
+    }
+
+    public static func fromStoredRawValue(_ rawValue: String) -> PrivacyBackendKind? {
+        switch rawValue {
+        case Self.rulesOnly.rawValue:
+            return .rulesOnly
+        case Self.mlx.rawValue, "core_ml", "official_cli":
+            return .mlx
+        default:
+            return nil
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        guard let value = Self.fromStoredRawValue(rawValue) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid privacy backend kind: \(rawValue)"
+            )
+        }
+        self = value
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -23,6 +51,8 @@ public enum PrivacyInstallState: String, Sendable, Codable, CaseIterable {
     case notInstalled = "not_installed"
     case installed
     case downloadRequired = "download_required"
+    case downloading
+    case verifying
     case unavailable
 
     public var displayName: String {
@@ -30,8 +60,74 @@ public enum PrivacyInstallState: String, Sendable, Codable, CaseIterable {
         case .notInstalled: return "Not installed"
         case .installed: return "Installed"
         case .downloadRequired: return "Download required"
+        case .downloading: return "Downloading"
+        case .verifying: return "Verifying"
         case .unavailable: return "Unavailable"
         }
+    }
+}
+
+public enum PrivacyRuntimeVerificationState: String, Sendable, Codable, CaseIterable {
+    case notInstalled = "not_installed"
+    case unverified
+    case checksumVerified = "checksum_verified"
+    case signatureVerified = "signature_verified"
+    case failed
+
+    public var displayName: String {
+        switch self {
+        case .notInstalled: return "Not installed"
+        case .unverified: return "Unverified"
+        case .checksumVerified: return "Checksum verified"
+        case .signatureVerified: return "Signature verified"
+        case .failed: return "Verification failed"
+        }
+    }
+}
+
+public struct PrivacyRuntimeDescriptor: Sendable, Codable, Identifiable, Hashable {
+    public let id: String
+    public var displayName: String
+    public var publisher: String
+    public var installedVersion: String?
+    public var availableVersion: String?
+    public var sizeBytes: Int64?
+    public var installState: PrivacyInstallState
+    public var verificationState: PrivacyRuntimeVerificationState
+    public var downloadedBytes: Int64?
+    public var totalBytes: Int64?
+    public var downloadProgress: Double?
+    public var sourceRepository: String?
+    public var note: String?
+
+    public init(
+        id: String,
+        displayName: String,
+        publisher: String,
+        installedVersion: String? = nil,
+        availableVersion: String? = nil,
+        sizeBytes: Int64? = nil,
+        installState: PrivacyInstallState = .notInstalled,
+        verificationState: PrivacyRuntimeVerificationState = .notInstalled,
+        downloadedBytes: Int64? = nil,
+        totalBytes: Int64? = nil,
+        downloadProgress: Double? = nil,
+        sourceRepository: String? = nil,
+        note: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.publisher = publisher
+        self.installedVersion = installedVersion
+        self.availableVersion = availableVersion
+        self.sizeBytes = sizeBytes
+        self.installState = installState
+        self.verificationState = verificationState
+        self.downloadedBytes = downloadedBytes
+        self.totalBytes = totalBytes
+        self.downloadProgress = downloadProgress
+        self.sourceRepository = sourceRepository
+        self.note = note
     }
 }
 
@@ -879,6 +975,14 @@ public struct PrivacyRuntimeStatus: Sendable, Codable {
     public let lastError: String?
     public let storagePath: String?
     public let backends: [PrivacyBackendStatus]
+    public let runtimeID: String?
+    public let runtimeDisplayName: String?
+    public let installedVersion: String?
+    public let availableVersion: String?
+    public let verificationState: PrivacyRuntimeVerificationState?
+    public let downloadedBytes: Int64?
+    public let totalBytes: Int64?
+    public let downloadProgress: Double?
 
     public init(
         featureEnabled: Bool,
@@ -889,7 +993,15 @@ public struct PrivacyRuntimeStatus: Sendable, Codable {
         cacheEntryCount: Int,
         lastError: String?,
         storagePath: String?,
-        backends: [PrivacyBackendStatus]
+        backends: [PrivacyBackendStatus],
+        runtimeID: String? = nil,
+        runtimeDisplayName: String? = nil,
+        installedVersion: String? = nil,
+        availableVersion: String? = nil,
+        verificationState: PrivacyRuntimeVerificationState? = nil,
+        downloadedBytes: Int64? = nil,
+        totalBytes: Int64? = nil,
+        downloadProgress: Double? = nil
     ) {
         self.featureEnabled = featureEnabled
         self.selectedBackend = selectedBackend
@@ -900,6 +1012,14 @@ public struct PrivacyRuntimeStatus: Sendable, Codable {
         self.lastError = lastError
         self.storagePath = storagePath
         self.backends = backends
+        self.runtimeID = runtimeID
+        self.runtimeDisplayName = runtimeDisplayName
+        self.installedVersion = installedVersion
+        self.availableVersion = availableVersion
+        self.verificationState = verificationState
+        self.downloadedBytes = downloadedBytes
+        self.totalBytes = totalBytes
+        self.downloadProgress = downloadProgress
     }
 }
 
@@ -907,14 +1027,17 @@ public struct PrivacySettingsBundle: Sendable, Codable {
     public let settings: PrivacyPreflightSettings
     public let claudePolicy: AgentPrivacyPolicy
     public let codexPolicy: AgentPrivacyPolicy
+    public let runtimes: [PrivacyRuntimeDescriptor]
 
     public init(
         settings: PrivacyPreflightSettings,
         claudePolicy: AgentPrivacyPolicy,
-        codexPolicy: AgentPrivacyPolicy
+        codexPolicy: AgentPrivacyPolicy,
+        runtimes: [PrivacyRuntimeDescriptor] = []
     ) {
         self.settings = settings
         self.claudePolicy = claudePolicy
         self.codexPolicy = codexPolicy
+        self.runtimes = runtimes
     }
 }

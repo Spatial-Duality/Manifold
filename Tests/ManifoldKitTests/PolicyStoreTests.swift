@@ -183,6 +183,29 @@ struct PolicyStoreTests {
         #expect(reveals[0].id == reveal.id)
     }
 
+    /// Regression for the orphan-access-records bug surfaced 2026-04-29.
+    /// The XPC remove-source handler now drops the sourceID from every
+    /// agent's standing-access policy. removeSource must be a no-op
+    /// when the agent never had the source.
+    @Test("Removing a sourceID via removeSource cleans the agent's policy")
+    func removeSourceCleansPolicy() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.addSource("src-keep", to: .cowork)
+        try await store.addSource("src-drop", to: .cowork)
+        try await store.addSource("src-keep", to: .codex)
+
+        try await store.removeSource("src-drop", from: .cowork)
+        // Codex never had src-drop — must be a no-op, not a throw.
+        try await store.removeSource("src-drop", from: .codex)
+
+        let cowork = try await store.policy(for: .cowork)
+        let codex = try await store.policy(for: .codex)
+        #expect(cowork.allowedSourceIDs == ["src-keep"])
+        #expect(codex.allowedSourceIDs == ["src-keep"])
+    }
+
     @Test("Clear reveals by work block")
     func clearRevealsByWorkBlock() async throws {
         let (store, _, tempDir) = try makeStore()

@@ -12,7 +12,7 @@ public actor PrivacyIndexCoordinator {
     private let emailSyncEngine: EmailSyncEngine
     private let defaultStoragePath: String
     private let rulesOnlyBackend: RulesOnlyPrivacyBackend
-    private let officialCLIBackend: OfficialCLIPrivacyBackend
+    private let mlxBackend: MLXPrivacyBackend
     private let extractor = PrivacyContentExtractor()
     private let identityRegistry: PrivacyIdentityRegistryActor
     private let decisionEngine = PrivacyDecisionEngine()
@@ -30,7 +30,7 @@ public actor PrivacyIndexCoordinator {
         emailSyncEngine: EmailSyncEngine,
         defaultStoragePath: String,
         rulesOnlyBackend: RulesOnlyPrivacyBackend,
-        officialCLIBackend: OfficialCLIPrivacyBackend
+        mlxBackend: MLXPrivacyBackend
     ) {
         self.store = store
         self.grantStore = grantStore
@@ -38,7 +38,7 @@ public actor PrivacyIndexCoordinator {
         self.emailSyncEngine = emailSyncEngine
         self.defaultStoragePath = defaultStoragePath
         self.rulesOnlyBackend = rulesOnlyBackend
-        self.officialCLIBackend = officialCLIBackend
+        self.mlxBackend = mlxBackend
         self.identityRegistry = PrivacyIdentityRegistryActor(store: store, emailStore: emailStore, grantStore: grantStore)
     }
 
@@ -333,7 +333,7 @@ public actor PrivacyIndexCoordinator {
                 categories: PrivacyCategory.allCases,
                 operatingPoint: job.reason == "backfill" ? "high-recall" : "balanced",
                 contentKind: contentKind(for: record.subjectKind),
-                backend: .officialCLI,
+                backend: .mlx,
                 agent: .codex,
                 resourcePath: record.relativePath ?? record.emailID ?? record.attachmentID,
                 toolName: "privacy_index"
@@ -446,10 +446,10 @@ public actor PrivacyIndexCoordinator {
     }
 
     private func effectiveBackend(for settings: PrivacyPreflightSettings) async -> any PrivacyBackend {
-        if settings.selectedBackend == .officialCLI,
+        if settings.selectedBackend == .mlx,
            settings.installState == .installed,
-           (await officialCLIBackend.modelInfo()).available {
-            return officialCLIBackend
+           (await mlxBackend.modelInfo()).available {
+            return mlxBackend
         }
         return rulesOnlyBackend
     }

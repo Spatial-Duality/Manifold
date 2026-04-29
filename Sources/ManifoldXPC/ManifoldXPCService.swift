@@ -375,6 +375,15 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             _ = try await runtime.memoryStore.tombstoneMemories(contributingSourceID: sourceID)
             try await runtime.standingWriteApprovalStore.removeGrants(sourceID: sourceID)
             try await runtime.fileVisibilityOverrideStore.clearOverrides(sourceID: sourceID)
+            // Drop the sourceID from every agent's standing-access scope.
+            // Without this, the agent_access_policies row still references a
+            // dead sourceID — harmless for current MCP enforcement (which
+            // re-filters via activeSources()) but it leaves orphan data and
+            // can confuse future code that reads policies without the
+            // status filter. Defense in depth.
+            for agent in TargetApp.allCases {
+                try await runtime.policyStore.removeSource(sourceID, from: agent)
+            }
             try await runtime.privacyIndexCoordinator.sourceDidChange()
             return ["ok": true]
 

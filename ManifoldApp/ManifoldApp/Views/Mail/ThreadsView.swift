@@ -298,6 +298,7 @@ private struct ThreadToolbar: View {
                 .buttonStyle(.borderless)
                 .help(isInspectorVisible ? "Hide message inspector" : "Show message inspector")
                 .keyboardShortcut("0", modifiers: [.command, .option])
+                .accessibilityLabel(isInspectorVisible ? "Hide message inspector" : "Show message inspector")
                 .accessibilityIdentifier("mail.inspector.toggle")
             }
 
@@ -846,4 +847,3 @@ enum MailDisplayFormatter {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-

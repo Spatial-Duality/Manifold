@@ -195,13 +195,13 @@ private struct RuleGatePill: View {
 
     private var text: String {
         if rule.isPrivacyFilterBacked { return "Preflight" }
-        if rule.scope == .file { return "Live" }
+        if rule.scope == .file || rule.scope == .email { return "Live" }
         return "Preview"
     }
 
     private var variant: Pill.Variant {
         if rule.isPrivacyFilterBacked { return .agent(.codex) }
-        if rule.scope == .file { return .session }
+        if rule.scope == .file || rule.scope == .email { return .session }
         return .preview
     }
 
@@ -211,6 +211,9 @@ private struct RuleGatePill: View {
         }
         if rule.scope == .file {
             return "Enforced by the file-read gate."
+        }
+        if rule.scope == .email {
+            return "Enforced by the email-read gate."
         }
         return "Visible for planning until its structural runtime gate is complete."
     }

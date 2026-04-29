@@ -550,6 +550,34 @@ public struct RuleRecord: Sendable, Codable, Hashable, Identifiable {
     }
 }
 
+public struct RuleMatchPreview: Codable, Sendable, Hashable {
+    public struct Sample: Codable, Sendable, Hashable {
+        public let identifier: String
+        public let label: String
+
+        public init(identifier: String, label: String) {
+            self.identifier = identifier
+            self.label = label
+        }
+    }
+
+    public let ruleID: String
+    public let fileMatches: Int
+    public let emailMatches: Int
+    public let agentMatches: Int
+    public let sample: [Sample]
+
+    public init(ruleID: String, fileMatches: Int, emailMatches: Int, agentMatches: Int, sample: [Sample]) {
+        self.ruleID = ruleID
+        self.fileMatches = fileMatches
+        self.emailMatches = emailMatches
+        self.agentMatches = agentMatches
+        self.sample = sample
+    }
+
+    public var totalMatches: Int { fileMatches + emailMatches + agentMatches }
+}
+
 // MARK: - Eval context, request, decision
 
 public enum RuleRequest: Sendable, Hashable {

@@ -194,8 +194,9 @@ protocol RuntimeClientProtocol: Sendable {
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws
     func getPrivacySettings() async throws -> PrivacySettingsBundle
     func updatePrivacySettings(settings: PrivacyPreflightSettings?, policy: AgentPrivacyPolicy?) async throws
-    func installPrivacyModel() async throws -> PrivacyRuntimeStatus
-    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus
+    func listPrivacyRuntimes() async throws -> [PrivacyRuntimeDescriptor]
+    func installPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus
+    func uninstallPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus
     func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus
     func clearPrivacyCache() async throws -> Int
     func privacyIndexStatus() async throws -> PrivacyIndexRuntimeStatus
@@ -511,8 +512,9 @@ extension RuntimeClientProtocol {
     func updateAccessRecordingLevel(_ level: AccessRecordingLevel, for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("updateAccessRecordingLevel") }
     func getPrivacySettings() async throws -> PrivacySettingsBundle { throw RuntimeClientStubError.unimplemented("getPrivacySettings") }
     func updatePrivacySettings(settings: PrivacyPreflightSettings?, policy: AgentPrivacyPolicy?) async throws { throw RuntimeClientStubError.unimplemented("updatePrivacySettings") }
-    func installPrivacyModel() async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("installPrivacyModel") }
-    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("uninstallPrivacyModel") }
+    func listPrivacyRuntimes() async throws -> [PrivacyRuntimeDescriptor] { [] }
+    func installPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("installPrivacyRuntime") }
+    func uninstallPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("uninstallPrivacyRuntime") }
     func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus { throw RuntimeClientStubError.unimplemented("privacyRuntimeStatus") }
     func clearPrivacyCache() async throws -> Int { throw RuntimeClientStubError.unimplemented("clearPrivacyCache") }
     func privacyIndexStatus() async throws -> PrivacyIndexRuntimeStatus {
@@ -946,9 +948,9 @@ enum LocalRuntimeTestBootstrap {
         try await privacyStore.upsertSettings(
             PrivacyPreflightSettings(
                 isEnabled: true,
-                selectedBackend: .officialCLI,
+                selectedBackend: .mlx,
                 installState: .installed,
-                modelVersion: "openai/privacy-filter",
+                modelVersion: "openai-privacy-filter-mlx-mxfp8",
                 storagePath: privacyStorage.path,
                 installedAt: now
             )
@@ -1002,8 +1004,8 @@ enum LocalRuntimeTestBootstrap {
                 extractStatus: .ready,
                 scanStatus: .scanned,
                 contentHash: sha256(Data(sensitiveText.utf8)),
-                backend: .officialCLI,
-                modelVersion: "openai/privacy-filter",
+                backend: .mlx,
+                modelVersion: "openai-privacy-filter-mlx-mxfp8",
                 containsSensitive: true,
                 containsMyInfo: true,
                 containsSecret: true,
@@ -1040,8 +1042,8 @@ enum LocalRuntimeTestBootstrap {
                 extractStatus: .ready,
                 scanStatus: .scanned,
                 contentHash: sha256(Data("runtime-email-1".utf8)),
-                backend: .officialCLI,
-                modelVersion: "openai/privacy-filter",
+                backend: .mlx,
+                modelVersion: "openai-privacy-filter-mlx-mxfp8",
                 containsSensitive: true,
                 containsMyInfo: true,
                 containsThirdPartyPrivate: true,
@@ -1068,8 +1070,8 @@ enum LocalRuntimeTestBootstrap {
                 extractStatus: .ready,
                 scanStatus: .scanned,
                 contentHash: attachmentHash,
-                backend: .officialCLI,
-                modelVersion: "openai/privacy-filter",
+                backend: .mlx,
+                modelVersion: "openai-privacy-filter-mlx-mxfp8",
                 containsSensitive: true,
                 containsSecret: true,
                 severity: .critical,
@@ -1138,8 +1140,8 @@ enum LocalRuntimeTestBootstrap {
                 "privacy_outcome": PrivacyOutcome.approvalRequired.rawValue,
                 "privacy_summary": "Attachment contains an account number and a secret.",
                 "privacy_categories": "account_number,secret",
-                "privacy_backend": PrivacyBackendKind.officialCLI.rawValue,
-                "privacy_model_version": "openai/privacy-filter",
+                "privacy_backend": PrivacyBackendKind.mlx.rawValue,
+                "privacy_model_version": "openai-privacy-filter-mlx-mxfp8",
                 "privacy_content_kind": PrivacyContentKind.email.rawValue,
             ],
             grantID: grant.grantID
@@ -1212,6 +1214,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var claudeGovernance: AgentEmailGovernanceSummary
         var codexGovernance: AgentEmailGovernanceSummary
         var privacySettings: PrivacyPreflightSettings
+        var privacyRuntimes: [PrivacyRuntimeDescriptor]
         var claudePrivacyPolicy: AgentPrivacyPolicy
         var codexPrivacyPolicy: AgentPrivacyPolicy
         var privacyRuntimeStatus: PrivacyRuntimeStatus
@@ -1415,7 +1418,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         PrivacySettingsBundle(
             settings: state.privacySettings,
             claudePolicy: state.claudePrivacyPolicy,
-            codexPolicy: state.codexPrivacyPolicy
+            codexPolicy: state.codexPrivacyPolicy,
+            runtimes: state.privacyRuntimes
         )
     }
 
@@ -1432,38 +1436,71 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         }
     }
 
-    func installPrivacyModel() async throws -> PrivacyRuntimeStatus {
+    func listPrivacyRuntimes() async throws -> [PrivacyRuntimeDescriptor] {
+        state.privacyRuntimes
+    }
+
+    func installPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus {
         state.privacySettings.isEnabled = true
         state.privacySettings.installState = .installed
-        state.privacySettings.selectedBackend = .officialCLI
-        state.privacySettings.modelVersion = "openai/privacy-filter"
+        state.privacySettings.selectedBackend = .mlx
+        state.privacySettings.modelVersion = "openai-privacy-filter-mlx-mxfp8"
+        state.privacyRuntimes = state.privacyRuntimes.map { runtime in
+            guard runtime.id == id else { return runtime }
+            var updated = runtime
+            updated.installedVersion = runtime.availableVersion ?? "openai-privacy-filter-mlx-mxfp8"
+            updated.installState = .installed
+            updated.verificationState = .checksumVerified
+            updated.note = "Verified MLX MXFP8 model pack installed."
+            return updated
+        }
         state.privacyRuntimeStatus = PrivacyRuntimeStatus(
             featureEnabled: true,
             selectedBackend: state.privacySettings.selectedBackend,
-            effectiveBackend: .officialCLI,
+            effectiveBackend: .mlx,
             installState: .installed,
             modelLoaded: true,
             cacheEntryCount: 3,
             lastError: nil,
             storagePath: state.privacySettings.storagePath,
-            backends: state.privacyRuntimeStatus.backends
+            backends: state.privacyRuntimeStatus.backends,
+            runtimeID: id,
+            runtimeDisplayName: state.privacyRuntimes.first(where: { $0.id == id })?.displayName,
+            installedVersion: state.privacyRuntimes.first(where: { $0.id == id })?.installedVersion,
+            availableVersion: state.privacyRuntimes.first(where: { $0.id == id })?.availableVersion,
+            verificationState: state.privacyRuntimes.first(where: { $0.id == id })?.verificationState
         )
         return state.privacyRuntimeStatus
     }
 
-    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus {
+    func uninstallPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus {
         state.privacySettings.isEnabled = false
         state.privacySettings.installState = .notInstalled
+        state.privacySettings.modelVersion = nil
+        state.privacyRuntimes = state.privacyRuntimes.map { runtime in
+            guard runtime.id == id else { return runtime }
+            var updated = runtime
+            updated.installedVersion = nil
+            updated.installState = .notInstalled
+            updated.verificationState = .notInstalled
+            updated.note = "Download required."
+            return updated
+        }
         state.privacyRuntimeStatus = PrivacyRuntimeStatus(
             featureEnabled: false,
             selectedBackend: state.privacySettings.selectedBackend,
-            effectiveBackend: state.privacySettings.selectedBackend,
+            effectiveBackend: .rulesOnly,
             installState: .notInstalled,
             modelLoaded: false,
             cacheEntryCount: 0,
             lastError: nil,
             storagePath: state.privacySettings.storagePath,
-            backends: state.privacyRuntimeStatus.backends
+            backends: state.privacyRuntimeStatus.backends,
+            runtimeID: id,
+            runtimeDisplayName: state.privacyRuntimes.first(where: { $0.id == id })?.displayName,
+            installedVersion: nil,
+            availableVersion: state.privacyRuntimes.first(where: { $0.id == id })?.availableVersion,
+            verificationState: .notInstalled
         )
         return state.privacyRuntimeStatus
     }
@@ -1483,7 +1520,12 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             cacheEntryCount: 0,
             lastError: state.privacyRuntimeStatus.lastError,
             storagePath: state.privacyRuntimeStatus.storagePath,
-            backends: state.privacyRuntimeStatus.backends
+            backends: state.privacyRuntimeStatus.backends,
+            runtimeID: state.privacyRuntimeStatus.runtimeID,
+            runtimeDisplayName: state.privacyRuntimeStatus.runtimeDisplayName,
+            installedVersion: state.privacyRuntimeStatus.installedVersion,
+            availableVersion: state.privacyRuntimeStatus.availableVersion,
+            verificationState: state.privacyRuntimeStatus.verificationState
         )
         return count
     }
@@ -2159,7 +2201,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             agent: TargetApp.codex.rawValue,
             action: AuditAction.sensitivityWarning.rawValue,
             filePath: privacyEmailID,
-            metadata: #"{"privacy_outcome":"approval_required","privacy_summary":"Contains sensitive account context before sharing.","privacy_categories":"email,secret","privacy_backend":"official_cli","privacy_model_version":"openai/privacy-filter","privacy_content_kind":"email"}"#,
+            metadata: #"{"privacy_outcome":"approval_required","privacy_summary":"Contains sensitive account context before sharing.","privacy_categories":"email,secret","privacy_backend":"mlx","privacy_model_version":"openai-privacy-filter-mlx-mxfp8","privacy_content_kind":"email"}"#,
             sessionID: "session-2",
             grantID: "grant-fixture"
         )
@@ -2340,18 +2382,32 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         let activeWorkBlock = hasActiveFixtureSession ? WorkBlockRecord(id: "wb-fixture", agent: .codex, grantID: "grant-fixture", sourceIDs: ["src-shared"], startedAt: now, status: .active, modifiedFileCount: 1, newFileCount: 0) : nil
         let privacySettings = PrivacyPreflightSettings(
             isEnabled: profile != .onboarding,
-            selectedBackend: .officialCLI,
+            selectedBackend: .mlx,
             installState: profile == .onboarding ? .notInstalled : .installed,
-            modelVersion: profile == .onboarding ? nil : "openai/privacy-filter",
+            modelVersion: profile == .onboarding ? nil : "openai-privacy-filter-mlx-mxfp8",
             storagePath: "/Users/test/Library/Application Support/Manifold/privacy",
             installedAt: profile == .onboarding ? nil : now
         )
+        let privacyRuntimes = [
+            PrivacyRuntimeDescriptor(
+                id: "openai-privacy-filter-mlx-mxfp8",
+                displayName: "Fast Local Scanner",
+                publisher: "MLX Community / OpenAI",
+                installedVersion: profile == .onboarding ? nil : "openai-privacy-filter-mlx-mxfp8",
+                availableVersion: "openai-privacy-filter-mlx-mxfp8",
+                sizeBytes: 1_473_063_803,
+                installState: privacySettings.installState,
+                verificationState: profile == .onboarding ? .notInstalled : .checksumVerified,
+                sourceRepository: "https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8",
+                note: profile == .onboarding ? "Download required." : "Verified MLX MXFP8 model pack installed."
+            )
+        ]
         let claudePrivacyPolicy = AgentPrivacyPolicy(agent: .cowork, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
         let codexPrivacyPolicy = AgentPrivacyPolicy(agent: .codex, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
         let privacyRuntimeStatus = PrivacyRuntimeStatus(
             featureEnabled: privacySettings.isEnabled,
-            selectedBackend: .officialCLI,
-            effectiveBackend: .officialCLI,
+            selectedBackend: .mlx,
+            effectiveBackend: profile == .onboarding ? .rulesOnly : .mlx,
             installState: privacySettings.installState,
             modelLoaded: privacySettings.isEnabled,
             cacheEntryCount: profile == .onboarding ? 0 : 3,
@@ -2359,10 +2415,13 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             storagePath: privacySettings.storagePath,
             backends: [
                 PrivacyBackendStatus(kind: .rulesOnly, available: true, installed: privacySettings.installState == .installed, note: "Fast local heuristics."),
-                PrivacyBackendStatus(kind: .officialCLI, available: true, installed: privacySettings.installState == .installed, note: "openai/privacy-filter ready."),
-                PrivacyBackendStatus(kind: .mlx, available: false, installed: false, note: "Reserved for a later native runtime."),
-                PrivacyBackendStatus(kind: .coreML, available: false, installed: false, note: "Reserved for a later production experiment."),
-            ]
+                PrivacyBackendStatus(kind: .mlx, available: privacySettings.installState == .installed, installed: privacySettings.installState == .installed, note: "MLX MXFP8 model pack."),
+            ],
+            runtimeID: "openai-privacy-filter-mlx-mxfp8",
+            runtimeDisplayName: "Fast Local Scanner",
+            installedVersion: privacyRuntimes[0].installedVersion,
+            availableVersion: privacyRuntimes[0].availableVersion,
+            verificationState: privacyRuntimes[0].verificationState
         )
         let privacyIdentities = [
             PrivacyIdentityRecord(
@@ -2407,8 +2466,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 extractor: "email-body-cache",
                 extractStatus: .ready,
                 scanStatus: .scanned,
-                backend: .officialCLI,
-                modelVersion: "openai/privacy-filter",
+                backend: .mlx,
+                modelVersion: "openai-privacy-filter-mlx-mxfp8",
                 containsSensitive: true,
                 containsMyInfo: true,
                 containsThirdPartyPrivate: true,
@@ -2435,8 +2494,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 extractor: "plain-text",
                 extractStatus: .ready,
                 scanStatus: .stale,
-                backend: .officialCLI,
-                modelVersion: "openai/privacy-filter",
+                backend: .mlx,
+                modelVersion: "openai-privacy-filter-mlx-mxfp8",
                 containsSensitive: true,
                 containsMyInfo: true,
                 severity: .medium,
@@ -2714,6 +2773,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             claudeGovernance: claudeGovernance,
             codexGovernance: codexGovernance,
             privacySettings: privacySettings,
+            privacyRuntimes: privacyRuntimes,
             claudePrivacyPolicy: claudePrivacyPolicy,
             codexPrivacyPolicy: codexPrivacyPolicy,
             privacyRuntimeStatus: privacyRuntimeStatus,
@@ -2873,12 +2933,26 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         _ = try await xpc.command(name: "updatePrivacySettings", payload: payload)
     }
 
-    func installPrivacyModel() async throws -> PrivacyRuntimeStatus {
-        try await command(name: "installPrivacyModel", field: "status", as: PrivacyRuntimeStatus.self)
+    func listPrivacyRuntimes() async throws -> [PrivacyRuntimeDescriptor] {
+        try await command(name: "listPrivacyRuntimes", field: "runtimes", as: [PrivacyRuntimeDescriptor].self)
     }
 
-    func uninstallPrivacyModel() async throws -> PrivacyRuntimeStatus {
-        try await command(name: "uninstallPrivacyModel", field: "status", as: PrivacyRuntimeStatus.self)
+    func installPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus {
+        try await command(
+            name: "installPrivacyRuntime",
+            payload: ["runtimeID": id],
+            field: "status",
+            as: PrivacyRuntimeStatus.self
+        )
+    }
+
+    func uninstallPrivacyRuntime(id: String) async throws -> PrivacyRuntimeStatus {
+        try await command(
+            name: "uninstallPrivacyRuntime",
+            payload: ["runtimeID": id],
+            field: "status",
+            as: PrivacyRuntimeStatus.self
+        )
     }
 
     func privacyRuntimeStatus() async throws -> PrivacyRuntimeStatus {

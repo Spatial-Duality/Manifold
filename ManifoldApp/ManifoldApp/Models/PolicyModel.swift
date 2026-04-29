@@ -172,23 +172,23 @@ final class GovernanceModel {
         }
     }
 
-    func installPrivacyModel() async {
+    func installPrivacyRuntime(id: String = PrivacyRuntimeDefaults.mlxRuntimeID) async {
         guard let client else { return }
         do {
-            privacyRuntimeStatus = try await client.installPrivacyModel()
+            privacyRuntimeStatus = try await client.installPrivacyRuntime(id: id)
             await loadPolicies()
         } catch {
-            logger.error("Failed to install privacy model: \(error.localizedDescription)")
+            logger.error("Failed to install privacy scanner model: \(error.localizedDescription)")
         }
     }
 
-    func uninstallPrivacyModel() async {
+    func uninstallPrivacyRuntime(id: String = PrivacyRuntimeDefaults.mlxRuntimeID) async {
         guard let client else { return }
         do {
-            privacyRuntimeStatus = try await client.uninstallPrivacyModel()
+            privacyRuntimeStatus = try await client.uninstallPrivacyRuntime(id: id)
             await loadPolicies()
         } catch {
-            logger.error("Failed to uninstall privacy model: \(error.localizedDescription)")
+            logger.error("Failed to uninstall privacy scanner model: \(error.localizedDescription)")
         }
     }
 

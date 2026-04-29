@@ -29,23 +29,23 @@ struct EmptyRequestsView: View {
                 ) {
                     RequestPrincipleCard(
                         symbol: "hand.raised",
-                        title: "Default answer",
+                        title: "Block",
                         value: "Not this time",
-                        detail: "Agents do not get broader access just because the queue is empty.",
+                        detail: "Unclear requests and unsafe originals can be denied without changing policy.",
                         tint: ManifoldPalette.attention
                     )
                     RequestPrincipleCard(
-                        symbol: "arrow.triangle.2.circlepath",
-                        title: "Reversible writes",
-                        value: "Once or session",
-                        detail: "Write access can be scoped to one action or the protected work block.",
+                        symbol: "text.badge.checkmark",
+                        title: "Filter",
+                        value: "Share redacted",
+                        detail: "Sensitive spans are removed before the agent receives the content.",
                         tint: ManifoldPalette.selection
                     )
                     RequestPrincipleCard(
                         symbol: "text.badge.plus",
-                        title: "Patterns become policy",
+                        title: "Remember",
                         value: "Save as rule",
-                        detail: "Repeated denials and privacy findings can become durable rules.",
+                        detail: "A one-off privacy decision can become a durable block, redact, warn, or allow rule.",
                         tint: ManifoldPalette.active
                     )
                 }
@@ -109,7 +109,7 @@ private struct RequestClearStateCard: View {
         if pendingCount > 0 {
             return "\(pendingCount) request\(pendingCount == 1 ? "" : "s") need a decision."
         }
-        return "Claude and Codex can only continue through the file, mail, and privacy rules you have already set."
+        return "Claude and Codex can continue only through the file, mail, privacy, and agent rules you have already set."
     }
 
     private func lastExposureLine(_ exposure: DataControlSummary.Exposure) -> String {

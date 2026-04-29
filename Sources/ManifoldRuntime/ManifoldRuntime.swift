@@ -117,12 +117,14 @@ public actor ManifoldRuntime {
         let privacyStore = PrivacyStore(db: db)
         let privacyStorageURL = rootURL.appendingPathComponent("privacy")
         let rulesOnlyBackend = RulesOnlyPrivacyBackend()
-        let officialCLIBackend = OfficialCLIPrivacyBackend(storageURL: privacyStorageURL)
+        let privacyRuntimeManager = PrivacyRuntimeManager(storageURL: privacyStorageURL)
+        let mlxPrivacyBackend = MLXPrivacyBackend(runtimeManager: privacyRuntimeManager)
         let privacyCoordinator = PrivacyPreflightCoordinator(
             store: privacyStore,
             defaultStorageURL: privacyStorageURL,
             rulesOnlyBackend: rulesOnlyBackend,
-            officialCLIBackend: officialCLIBackend
+            runtimeManager: privacyRuntimeManager,
+            mlxBackend: mlxPrivacyBackend
         )
         let privacyIndexCoordinator = PrivacyIndexCoordinator(
             store: privacyStore,
@@ -131,7 +133,7 @@ public actor ManifoldRuntime {
             emailSyncEngine: emailSyncEngine,
             defaultStoragePath: privacyStorageURL.path,
             rulesOnlyBackend: rulesOnlyBackend,
-            officialCLIBackend: officialCLIBackend
+            mlxBackend: mlxPrivacyBackend
         )
 
         self.db = db
@@ -165,6 +167,10 @@ public actor ManifoldRuntime {
         self.privacyStore = privacyStore
         self.privacyCoordinator = privacyCoordinator
         self.privacyIndexCoordinator = privacyIndexCoordinator
+
+        Task {
+            await privacyRuntimeManager.cleanupLegacyPrivacyRuntimes()
+        }
 
         runtimeLogger.info("Initialized runtime at \(rootURL.path, privacy: .public)")
     }

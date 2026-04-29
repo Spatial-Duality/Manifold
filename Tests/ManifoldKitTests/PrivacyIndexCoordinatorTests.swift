@@ -29,6 +29,10 @@ struct PrivacyIndexCoordinatorTests {
         let emailStore = EmailStore(db: db)
         let privacyStore = PrivacyStore(db: db)
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
+        let runtimeManager = PrivacyRuntimeManager(
+            storageURL: tempDir.appendingPathComponent("privacy-models", isDirectory: true)
+        )
+        let mlxBackend = MLXPrivacyBackend(runtimeManager: runtimeManager)
         let coordinator = PrivacyIndexCoordinator(
             store: privacyStore,
             grantStore: grantStore,
@@ -36,7 +40,7 @@ struct PrivacyIndexCoordinatorTests {
             emailSyncEngine: emailSyncEngine,
             defaultStoragePath: tempDir.appendingPathComponent("privacy-models", isDirectory: true).path,
             rulesOnlyBackend: RulesOnlyPrivacyBackend(),
-            officialCLIBackend: OfficialCLIPrivacyBackend(storageURL: tempDir.appendingPathComponent("privacy-models", isDirectory: true))
+            mlxBackend: mlxBackend
         )
         return TestContext(
             tempDir: tempDir,

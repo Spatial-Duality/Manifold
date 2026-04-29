@@ -69,6 +69,7 @@ struct ApprovalRequestCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if request.kind == .privacyExposure {
+                privacyDecisionSummary
                 privacyDetails
             }
 
@@ -110,6 +111,44 @@ struct ApprovalRequestCard: View {
     }
 
     // MARK: - Privacy exposure details
+
+    private var privacyDecisionSummary: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: Spacing.s2)],
+            alignment: .leading,
+            spacing: Spacing.s2
+        ) {
+            PrivacyDecisionTile(
+                title: "Detected",
+                value: privacyDetectionLabel,
+                systemImage: "sparkles.rectangle.stack",
+                variant: request.severity == .critical || request.severity == .high ? .attention : .scope
+            )
+            PrivacyDecisionTile(
+                title: "Default Safe Share",
+                value: "Redacted",
+                systemImage: "text.badge.checkmark",
+                variant: .defaultScope
+            )
+            PrivacyDecisionTile(
+                title: "Remember",
+                value: primaryCategory?.displayName ?? "Rule option",
+                systemImage: "text.badge.plus",
+                variant: .preview
+            )
+        }
+        .accessibilityIdentifier("requests.privacy.decisionSummary")
+    }
+
+    private var privacyDetectionLabel: String {
+        if let severity = request.severity, severity != .none {
+            return severity.rawValue.capitalized
+        }
+        if let category = request.matchedCategories.first {
+            return category.displayName
+        }
+        return "Review"
+    }
 
     /// Severity bar + category chips + findings summary + redacted preview.
     /// The original payload is never persisted on-disk, so this surface
@@ -220,36 +259,183 @@ struct ApprovalRequestCard: View {
                 onDefault:     { Task { await store.answer(request, with: .addToDefault) } }
             )
         case .privacyExposure:
-            HStack(alignment: .center, spacing: Spacing.s2) {
-                PrivacyApprovalButtons(
-                    onDeny: { Task { await store.answer(request, with: .notThisTime) } },
-                    onShareRedacted: { Task { await store.answer(request, with: .shareRedacted) } },
-                    onShareOriginal: { Task { await store.answer(request, with: .shareOriginalOnce) } }
-                )
-                Spacer()
-                saveAsRuleButton
+            VStack(alignment: .leading, spacing: Spacing.s2) {
+                HStack(alignment: .center, spacing: Spacing.s2) {
+                    PrivacyApprovalButtons(
+                        onDeny: { Task { await store.answer(request, with: .notThisTime) } },
+                        onShareRedacted: { Task { await store.answer(request, with: .shareRedacted) } },
+                        onShareOriginal: { Task { await store.answer(request, with: .shareOriginalOnce) } }
+                    )
+                    Spacer()
+                    rememberRuleMenu
+                }
+
+                Text("Deny stops this share. Share Redacted sends only the filtered text above. Share Original Once does not change future policy.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    /// Promote the privacy finding into a persistent rule — one click for
-    /// the common case of "always block this pattern". Uses the highest-
-    /// severity matched category as the matcher and `.deny` as the action.
+    /// Promote the privacy finding into a persistent rule. The menu mirrors
+    /// the backend actions a privacy rule can actually take today: allow,
+    /// deny, warn, redact, or log. "Ask every time" still belongs to the
+    /// agent privacy policy, not RuleStore.
     @ViewBuilder
-    private var saveAsRuleButton: some View {
-        if let category = primaryCategory {
-            Button {
-                Task { await saveAsRule(for: category) }
-            } label: {
-                Label(savedRuleID == nil ? "Save as rule" : "Rule saved",
-                      systemImage: savedRuleID == nil ? "text.badge.plus" : "checkmark.seal.fill")
-                    .labelStyle(.titleAndIcon)
+    private var rememberRuleMenu: some View {
+        Menu {
+            if let category = primaryCategory {
+                Button {
+                    Task {
+                        await savePrivacyRule(
+                            name: "Redact \(category.displayName.lowercased()) before sharing",
+                            matcher: .privacyContainsCategory(category),
+                            action: .redact,
+                            explanation: "Created from a privacy review. Sends filtered text when \(category.displayName.lowercased()) appears."
+                        )
+                    }
+                } label: {
+                    Label("Redact this category", systemImage: "text.badge.checkmark")
+                }
+
+                Button {
+                    Task {
+                        await savePrivacyRule(
+                            name: "Block \(category.displayName.lowercased()) before sharing",
+                            matcher: .privacyContainsCategory(category),
+                            action: .deny,
+                            explanation: "Created from a privacy review. Blocks \(category.displayName.lowercased()) before an agent sees it."
+                        )
+                    }
+                } label: {
+                    Label("Block this category", systemImage: "hand.raised")
+                }
+
+                Button {
+                    Task {
+                        await savePrivacyRule(
+                            name: "Warn on \(category.displayName.lowercased())",
+                            matcher: .privacyContainsCategory(category),
+                            action: .warn,
+                            explanation: "Created from a privacy review. Allows the share but records a warning."
+                        )
+                    }
+                } label: {
+                    Label("Warn and record", systemImage: "exclamationmark.triangle")
+                }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(savedRuleID != nil)
-            .help("Create a rule that denies \(category.displayName.lowercased()) for \(request.agent.rawValue.capitalized) and similar agents.")
-            .accessibilityIdentifier("requests.action.saveRule")
+
+            if let severity = request.severity, severity != .none {
+                Divider()
+                Button {
+                    Task {
+                        await savePrivacyRule(
+                            name: "Block \(severity.rawValue) privacy findings",
+                            matcher: .privacySeverityAtLeast(severity),
+                            action: .deny,
+                            explanation: "Created from a privacy review. Blocks privacy findings at \(severity.rawValue) severity or above."
+                        )
+                    }
+                } label: {
+                    Label("Block this severity and above", systemImage: "gauge.with.dots.needle.67percent")
+                }
+            }
+
+            Divider()
+            Button {
+                Task {
+                    await savePrivacyRule(
+                        name: "Redact My Identity before sharing",
+                        matcher: .privacyMatchesMyIdentity,
+                        action: .redact,
+                        explanation: "Redacts registered My Identity matches before content is shared."
+                    )
+                }
+            } label: {
+                Label("Redact My Identity", systemImage: "person.text.rectangle")
+            }
+
+            Button {
+                Task {
+                    await savePrivacyRule(
+                        name: "Keep public or company allowlist",
+                        matcher: .privacyInOrgAllowlist,
+                        action: .allow,
+                        explanation: "Allows privacy findings only when they are covered by the public/company allowlist."
+                    )
+                }
+            } label: {
+                Label("Keep allowlisted public data", systemImage: "checkmark.shield")
+            }
+        } label: {
+            Label(savedRuleID == nil ? "Remember" : "Rule saved",
+                  systemImage: savedRuleID == nil ? "text.badge.plus" : "checkmark.seal.fill")
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .disabled(savedRuleID != nil)
+        .help("Turn this privacy decision into a durable rule.")
+        .accessibilityIdentifier("requests.action.saveRule")
+    }
+
+    private func savePrivacyRule(
+        name: String,
+        matcher: RuleMatcher,
+        action: ManifoldKit.RuleAction,
+        explanation: String
+    ) async {
+        let iso = ISO8601DateFormatter.shared.string(from: Date())
+        let rule = RuleRecord(
+            id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
+            name: name,
+            explanation: explanation,
+            scope: .agent,
+            matcher: matcher,
+            action: action,
+            agents: [request.agent],
+            window: .always,
+            source: .user,
+            enabled: true,
+            orderIndex: 100,
+            createdAt: iso,
+            updatedAt: iso
+        )
+        await store.rules.addRule(rule)
+        savedRuleID = rule.id
+    }
+
+    private struct PrivacyDecisionTile: View {
+        let title: String
+        let value: String
+        let systemImage: String
+        let variant: Pill.Variant
+
+        var body: some View {
+            HStack(spacing: Spacing.s2) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(variant.color)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Text(value)
+                        .font(ManifoldType.captionMedium)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                    .fill(variant.color.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                    .strokeBorder(variant.color.opacity(0.18), lineWidth: 0.5)
+            )
         }
     }
 
@@ -263,26 +449,6 @@ struct ApprovalRequestCard: View {
         return request.matchedCategories.first
     }
 
-    private func saveAsRule(for category: PrivacyCategory) async {
-        let iso = ISO8601DateFormatter.shared.string(from: Date())
-        let rule = RuleRecord(
-            id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
-            name: "Deny \(category.displayName.lowercased()) in agent traffic",
-            explanation: "Created from a privacy approval on \(request.createdAt.formatted(.dateTime.month().day().hour().minute())).",
-            scope: .agent,
-            matcher: .privacyContainsCategory(category),
-            action: .deny,
-            agents: [request.agent],
-            window: .always,
-            source: .user,
-            enabled: true,
-            orderIndex: 100,
-            createdAt: iso,
-            updatedAt: iso
-        )
-        await store.rules.addRule(rule)
-        savedRuleID = rule.id
-    }
 }
 
 struct PrivacyApprovalButtons: View {

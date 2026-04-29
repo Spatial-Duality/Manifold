@@ -838,7 +838,7 @@ public actor PrivacyStore {
     private static func settings(from row: [String: String]) -> PrivacyPreflightSettings? {
         guard let id = row["id"],
               let backendRaw = row["selected_backend"],
-              let backend = PrivacyBackendKind(rawValue: backendRaw),
+              let backend = PrivacyBackendKind.fromStoredRawValue(backendRaw),
               let installRaw = row["install_state"],
               let installState = PrivacyInstallState(rawValue: installRaw),
               let updatedAt = row["updated_at"] else {
@@ -887,7 +887,7 @@ public actor PrivacyStore {
 
     private static func cachedResult(from row: [String: String]) -> PrivacyScanResult? {
         guard let backendRaw = row["backend"],
-              let backend = PrivacyBackendKind(rawValue: backendRaw),
+              let backend = PrivacyBackendKind.fromStoredRawValue(backendRaw),
               let modelVersion = row["model_version"],
               let redactedText = row["redacted_text"],
               let findingsSummary = row["findings_summary"],
@@ -967,7 +967,7 @@ public actor PrivacyStore {
             extractStatus: extractStatus,
             scanStatus: scanStatus,
             contentHash: row["content_hash"]?.nilIfEmpty,
-            backend: row["backend"].flatMap(PrivacyBackendKind.init(rawValue:)),
+            backend: row["backend"].flatMap(PrivacyBackendKind.fromStoredRawValue),
             modelVersion: row["model_version"]?.nilIfEmpty,
             containsSensitive: row["contains_sensitive"] == "1",
             containsMyInfo: row["contains_my_info"] == "1",

@@ -272,7 +272,7 @@ struct RuleInspector: View {
 
     private func actionChoices(for rule: RuleRecord) -> [ManifoldKit.RuleAction] {
         if rule.isPrivacyFilterBacked {
-            return [.allow, .deny, .warn, .redact, .log]
+            return [.allow, .deny, .warn, .redact, .summarize, .downgrade, .log]
         }
         switch rule.scope {
         case .file:  return [.allow, .deny, .warn, .redact, .log]
@@ -340,8 +340,8 @@ private struct PrivacyFilterRuleBanner: View {
 
     private var title: String {
         guard let status else { return "Privacy filter rule" }
-        if status.effectiveBackend == .officialCLI {
-            return "OpenAI privacy filter rule"
+        if status.effectiveBackend == .mlx {
+            return "\(status.runtimeDisplayName ?? "Fast Local Scanner") rule"
         }
         return "\(status.effectiveBackend.displayName) privacy rule"
     }
@@ -351,7 +351,7 @@ private struct PrivacyFilterRuleBanner: View {
             return "This rule uses privacy matcher output during preflight before content is shared with Claude or Codex."
         }
         if status.modelLoaded {
-            return "The loaded privacy backend finds categories, identity matches, allowlist hits, and severity. This rule then decides whether to deny, redact, warn, or log the exposure."
+            return "The loaded privacy backend feeds category and severity matchers. Identity and allowlist matchers apply when live preflight supplies those enriched findings."
         }
         return "This rule is ready, but the privacy backend is not loaded. Enable the model in Privacy settings before relying on category or severity matches."
     }

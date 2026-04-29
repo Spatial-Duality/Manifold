@@ -3,7 +3,6 @@
 
 import Foundation
 import ManifoldKit
-import ManifoldXPC
 import os
 
 private let rulesLogger = Logger(subsystem: "com.spatialduality.manifold", category: "rules-model")
@@ -384,6 +383,30 @@ extension RuleRecord {
             explanation: "Uses the privacy filter model before content is shared with an agent.",
             scope: .agent,
             matcher: .privacyContainsCategory(category),
+            action: action,
+            agents: [],
+            window: .always,
+            source: .user,
+            enabled: true,
+            orderIndex: 100,
+            createdAt: iso,
+            updatedAt: iso
+        )
+    }
+
+    static func newPrivacyControlRule(
+        name: String,
+        matcher: RuleMatcher,
+        action: ManifoldKit.RuleAction,
+        explanation: String
+    ) -> RuleRecord {
+        let iso = ISO8601DateFormatter.shared.string(from: Date())
+        return RuleRecord(
+            id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
+            name: name,
+            explanation: explanation,
+            scope: .agent,
+            matcher: matcher,
             action: action,
             agents: [],
             window: .always,

@@ -3,7 +3,6 @@
 
 import XCTest
 import ManifoldKit
-import ManifoldXPC
 @testable import Manifold
 
 @MainActor

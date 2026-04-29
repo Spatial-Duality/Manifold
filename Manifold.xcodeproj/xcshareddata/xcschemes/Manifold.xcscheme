@@ -29,7 +29,7 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E10000000000000000000041"
+               BlueprintIdentifier = "A227F0E313129DE30F0086F0"
                BuildableName = "ManifoldAppTests.xctest"
                BlueprintName = "ManifoldAppTests"
                ReferencedContainer = "container:Manifold.xcodeproj">
@@ -43,7 +43,7 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E10000000000000000000042"
+               BlueprintIdentifier = "9BFDA9E65C644407209A6256"
                BuildableName = "ManifoldAppUITests.xctest"
                BlueprintName = "ManifoldAppUITests"
                ReferencedContainer = "container:Manifold.xcodeproj">
@@ -71,7 +71,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E10000000000000000000041"
+               BlueprintIdentifier = "A227F0E313129DE30F0086F0"
                BuildableName = "ManifoldAppTests.xctest"
                BlueprintName = "ManifoldAppTests"
                ReferencedContainer = "container:Manifold.xcodeproj">
@@ -81,7 +81,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E10000000000000000000042"
+               BlueprintIdentifier = "9BFDA9E65C644407209A6256"
                BuildableName = "ManifoldAppUITests.xctest"
                BlueprintName = "ManifoldAppUITests"
                ReferencedContainer = "container:Manifold.xcodeproj">

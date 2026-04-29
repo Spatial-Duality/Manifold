@@ -550,12 +550,12 @@ private struct PrivacyMatcherEditor: View {
                     .foregroundStyle(.secondary)
             }
         case .privacyMatchesMyIdentity:
-            Text("Matches when the content references something you've registered in My Identity.")
+            Text("Matches registered My Identity values when live preflight includes identity findings.")
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         case .privacyInOrgAllowlist:
-            Text("Matches when every privacy finding falls inside your org allowlist — safe to share.")
+            Text("Matches public or company allowlist findings when live preflight includes allowlist context.")
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -15,6 +15,7 @@ import ManifoldKit
 struct FileTreeInspector: View {
     @Environment(ManifoldStore.self) private var store
     let source: SourceRecord?
+    var onOverridesChanged: () -> Void = {}
 
     @State private var root: TreeNode?
     @State private var isLoading = false
@@ -195,6 +196,7 @@ struct FileTreeInspector: View {
             decision: decision
         )
         overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
+        onOverridesChanged()
     }
 
     private func clearOverride(for node: TreeNode) async {
@@ -206,6 +208,7 @@ struct FileTreeInspector: View {
             isDirectory: node.isDirectory
         )
         overrides = await store.fileVisibilityOverrides(agent: effectiveAgent)
+        onOverridesChanged()
     }
 
     private func setSourceScope(_ inScope: Bool) async {
@@ -418,6 +421,25 @@ private struct TreeRow: View {
                         onReset: onReset
                     )
                 }
+                if node.isTruncated {
+                    HStack(spacing: Spacing.s2) {
+                        Rectangle()
+                            .fill(ManifoldPalette.border)
+                            .frame(width: 1)
+                            .padding(.leading, CGFloat(depth + 1) * 12)
+                            .opacity(0.5)
+                        Image(systemName: "ellipsis.circle")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.tertiary)
+                        Text("More items not shown")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 3)
+                    .help("This inspector shows the first few folder levels. Use the Files tab to manage deeper items.")
+                    .accessibilityLabel("More items not shown. Use the Files tab to manage deeper items.")
+                }
             }
         }
     }
@@ -477,6 +499,7 @@ private struct TreeNode: Identifiable, Sendable {
     let relativePath: String
     let isDirectory: Bool
     let children: [TreeNode]
+    let isTruncated: Bool
 
     static func load(from source: SourceRecord) async -> TreeNode? {
         let root = URL(fileURLWithPath: source.originalRootPath)
@@ -496,6 +519,7 @@ private struct TreeNode: Identifiable, Sendable {
         }
         let isDirectory = (try? root.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
         var children: [TreeNode] = []
+        var isTruncated = false
 
         if isDirectory && depth < maxDepth {
             let skip: Set<String> = [".git", "node_modules", ".build", "Build", "DerivedData", "Pods", "__pycache__", ".DS_Store"]
@@ -511,6 +535,8 @@ private struct TreeNode: Identifiable, Sendable {
                     }
                 }
             }
+        } else if isDirectory {
+            isTruncated = hasVisibleChildren(root)
         }
 
         return TreeNode(
@@ -519,7 +545,20 @@ private struct TreeNode: Identifiable, Sendable {
             path: root.path,
             relativePath: relativePath,
             isDirectory: isDirectory,
-            children: children
+            children: children,
+            isTruncated: isTruncated
         )
+    }
+
+    private static func hasVisibleChildren(_ root: URL) -> Bool {
+        let skip: Set<String> = [".git", "node_modules", ".build", "Build", "DerivedData", "Pods", "__pycache__", ".DS_Store"]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+        return urls.contains { !skip.contains($0.lastPathComponent) }
     }
 }

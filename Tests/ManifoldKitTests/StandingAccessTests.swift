@@ -145,6 +145,30 @@ struct StandingAccessTests {
         )
     }
 
+    func materializeGrant(harness: Harness, grant: GrantRecord) async throws {
+        let grantSources = try await harness.grantStore.grantSources(grantID: grant.grantID)
+        var inputs: [MaterializationEngine.MaterializationSource] = []
+        for grantSource in grantSources {
+            guard let source = try await harness.grantStore.source(id: grantSource.sourceID) else { continue }
+            inputs.append(MaterializationEngine.MaterializationSource(
+                source: source,
+                mountName: grantSource.mountName
+            ))
+        }
+        let results = try MaterializationEngine.materialize(
+            grantID: grant.grantID,
+            sources: inputs,
+            materializationRoot: grant.materializationRoot
+        )
+        for result in results {
+            try await harness.grantStore.setBaselineHash(
+                grantID: grant.grantID,
+                sourceID: result.sourceID,
+                hash: result.manifestHash
+            )
+        }
+    }
+
     // MARK: - Status Tests
 
     @Test("Status shows no access when a block-by-default agent has no standing grants")
@@ -155,6 +179,20 @@ struct StandingAccessTests {
         let status = await h.bridge.getStatus()
         #expect(status.active == false)
         #expect(status.message.contains("No access configured"))
+    }
+
+    @Test("Denied status does not reveal configured source names")
+    func deniedStatusDoesNotRevealSourceNames() async throws {
+        let h = try makeHarness(targetApp: .codex)
+        defer { cleanup(h.tempDir) }
+
+        _ = try await createAndRegisterSource(harness: h, name: "SecretDocs")
+
+        let status = await h.bridge.getStatus()
+        #expect(status.active == false)
+        #expect(status.sources.isEmpty)
+        #expect(status.pausedSources.isEmpty)
+        #expect(status.message.contains("SecretDocs") == false)
     }
 
     @Test("Claude default email policy counts as standing access even before explicit rules")
@@ -354,6 +392,17 @@ struct StandingAccessTests {
                 Issue.record("Expected fileNotFound for non-allowed file, got \(error)")
             }
         }
+
+        do {
+            _ = try await h.bridge.fileInfo(path: "privatedocs/src/main.swift")
+            Issue.record("Expected file_info to hide non-allowed file metadata")
+        } catch let error as ManifoldMCPError {
+            if case .fileNotFound(let hiddenPath) = error {
+                #expect(hiddenPath.contains("privatedocs/src/main.swift"))
+            } else {
+                Issue.record("Expected fileNotFound for non-allowed file_info, got \(error)")
+            }
+        }
     }
 
     @Test("Standing write once approval allows one reversible write to the exact file")
@@ -382,7 +431,7 @@ struct StandingAccessTests {
         }
 
         let fileURL = h.tempDir.appendingPathComponent("sources/MyApp/README.md")
-        let updated = try String(contentsOf: fileURL)
+        let updated = try String(contentsOf: fileURL, encoding: .utf8)
         #expect(updated == "approved once")
 
         let snapshots = try await h.snapshotStore.fileHistory(filePath: "myapp/README.md")
@@ -613,6 +662,99 @@ struct StandingAccessTests {
 
         let content = try await h.bridge.readEmail(id: "email-default-allow")
         #expect(content.contains("Notes visible through standing access."))
+    }
+
+    @Test("Structured standing search returns scoped files and governed emails")
+    func standingStructuredSearchIncludesScopedFilesAndEmails() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        let source = try #require(try await h.grantStore.source(id: sourceID))
+        let readmeURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent("README.md")
+        try "Roadmap notes in the shared file.".write(to: readmeURL, atomically: true, encoding: .utf8)
+
+        try createEmail(
+            harness: h,
+            id: "email-roadmap",
+            sender: "Docs Team <updates@example.com>",
+            senderEmail: "updates@example.com",
+            senderDomain: "example.com",
+            subject: "Roadmap email",
+            body: "Roadmap notes in governed email."
+        )
+
+        let json = try await h.bridge.searchStructured(query: "Roadmap", limit: 10)
+        #expect(json.contains(#""path" : "myapp\/README.md""#))
+        #expect(json.contains("email-roadmap"))
+        #expect(json.contains("standing_email_search"))
+    }
+
+    @Test("Explicit file work block still exposes emails shared with the agent")
+    func explicitFileWorkBlockKeepsSharedEmailAccess() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        try createEmail(
+            harness: h,
+            id: "email-shared",
+            sender: "Docs Team <updates@example.com>",
+            senderEmail: "updates@example.com",
+            senderDomain: "example.com",
+            subject: "Shared note",
+            body: "Email shared alongside a file-only work block."
+        )
+        try h.emailStore.shareEmails(emailIDs: ["email-shared"], for: .cowork)
+
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: h.tempDir.appendingPathComponent("explicit-grant").path,
+            emailSensitivity: EmailSensitivityLevel.strict.rawValue,
+            explicitSelection: true
+        )
+        try await h.grantStore.replaceGrantFileScopes(
+            grantID: grant.grantID,
+            scopes: [FileSelectionScope(sourceID: sourceID, relativePath: "README.md", isDirectory: false)]
+        )
+        _ = try await h.workBlockStore.startBlock(agent: .cowork, grantID: grant.grantID, sourceIDs: [sourceID])
+
+        let emails = try await h.bridge.listEmails()
+        #expect(emails.contains { $0.id == "email-shared" })
+    }
+
+    @Test("Active default work block drops sources removed from the current agent policy")
+    func activeWorkBlockDropsUnsharedSources() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sharedSourceID = try await createAndRegisterSource(harness: h, name: "Shared")
+        let unsharedSourceID = try await createAndRegisterSource(harness: h, name: "Unshared")
+        try await h.policyStore.addSource(sharedSourceID, to: .cowork)
+        try await h.policyStore.addSource(unsharedSourceID, to: .cowork)
+
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sharedSourceID, unsharedSourceID],
+            materializationRoot: h.tempDir.appendingPathComponent("default-grant").path,
+            explicitSelection: false
+        )
+        try await materializeGrant(harness: h, grant: grant)
+        _ = try await h.workBlockStore.startBlock(
+            agent: .cowork,
+            grantID: grant.grantID,
+            sourceIDs: [sharedSourceID, unsharedSourceID]
+        )
+        try await h.policyStore.removeSource(unsharedSourceID, from: .cowork)
+
+        let files = try await h.bridge.listFiles()
+        #expect(files.contains { $0.path == "README.md" && $0.sourceName == "shared" })
+        #expect(files.contains { $0.sourceName == "unshared" } == false)
     }
 
     @Test("Session context redacts emails hidden by current policy")
