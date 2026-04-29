@@ -501,7 +501,12 @@ final class ManifoldStore {
 
     func loadSources() async {
         do {
-            sources = try await runtime.listSources()
+            // `removeSource` is a soft delete (status='removed') that
+            // preserves the audit trail. Removed sources must not appear
+            // in any UI surface — filtering here keeps every consumer of
+            // `store.sources` consistent without sprinkling the check
+            // through the views.
+            sources = (try await runtime.listSources()).filter { !$0.isRemoved }
         } catch {
             logger.error("Failed to load sources: \(error.localizedDescription)")
         }

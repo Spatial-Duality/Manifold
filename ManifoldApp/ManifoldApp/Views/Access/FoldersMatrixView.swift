@@ -185,9 +185,7 @@ struct FoldersMatrixView: View {
                             .font(ManifoldType.body)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        if source.isRemoved {
-                            Pill(text: "Removed", variant: .attention)
-                        } else if !source.isAccessible {
+                        if !source.isAccessible {
                             Pill(text: "Offline", variant: .attention)
                         }
                     }

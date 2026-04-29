@@ -40,6 +40,12 @@ extension ManifoldXPCService {
             let agent = TargetApp(rawValue: agentRaw) ?? .cowork
             try await runtime.policyStore.removeSource(sourceID, from: agent)
             try await runtime.standingWriteApprovalStore.removeGrants(agent: agent, sourceID: sourceID)
+            // Clearing the agent-scoped per-file overrides matches the
+            // user's mental model when they uncheck the source: "stop
+            // sharing this folder with this AI" should not silently
+            // preserve allow/deny decisions that re-attach the next time
+            // the folder gets shared again.
+            try await runtime.fileVisibilityOverrideStore.clearOverrides(agent: agent, sourceID: sourceID)
             return ["ok": true]
 
         case "sessionPreview":
