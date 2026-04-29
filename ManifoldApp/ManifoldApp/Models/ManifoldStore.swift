@@ -513,14 +513,14 @@ final class ManifoldStore {
     }
 
     func enumerateSourceFiles() async -> [SourceFile] {
-        let activeSources = sources.filter { $0.isAccessible && !$0.isRemoved }
+        let activeSources = Self.dedupedByPath(sources.filter { $0.isAccessible && !$0.isRemoved })
         return await Task.detached(priority: .userInitiated) {
             Self.walkSourceFiles(sources: activeSources)
         }.value
     }
 
     func enumerateSourceFilesProgressively(batchSize: Int = 200) -> AsyncStream<[SourceFile]> {
-        let activeSources = sources.filter { $0.isAccessible && !$0.isRemoved }
+        let activeSources = Self.dedupedByPath(sources.filter { $0.isAccessible && !$0.isRemoved })
         return AsyncStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 await Self.streamSourceFiles(
@@ -536,6 +536,22 @@ final class ManifoldStore {
                 task.cancel()
             }
         }
+    }
+
+    /// Older "ws-" workspaces and newer "src-" sources can both point at
+    /// the same folder — listSources returns both rows, the file walker
+    /// emits each file twice, and SwiftUI's Table logs the
+    /// duplicate-ID warning ("undefined results"). Dedupe on the actual
+    /// path so each file is yielded once. Order is preserved so the
+    /// most recently updated record wins, matching listSources's sort.
+    private nonisolated static func dedupedByPath(_ sources: [SourceRecord]) -> [SourceRecord] {
+        var seen: Set<String> = []
+        var result: [SourceRecord] = []
+        result.reserveCapacity(sources.count)
+        for source in sources where seen.insert(source.originalRootPath).inserted {
+            result.append(source)
+        }
+        return result
     }
 
     private nonisolated static func streamSourceFiles(

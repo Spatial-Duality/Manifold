@@ -59,6 +59,7 @@ public struct DatabaseMigrator {
     private static func repairCurrentSchema(_ db: DatabaseConnection) throws {
         try repairFileVisibilityOverrides(db)
         try repairRuleRecords(db)
+        try repairStandingWriteGrants(db)
         try MemoryStore.ensureSchema(db)
     }
 
@@ -79,6 +80,38 @@ public struct DatabaseMigrator {
         )
         try db.execute(
             "CREATE INDEX IF NOT EXISTS idx_file_visibility_overrides_agent ON file_visibility_overrides(agent)"
+        )
+    }
+
+    /// Some users hit "no such table: standing_write_default_grants" when
+    /// flipping the share checkbox: migration 21 was either skipped on
+    /// their install or the table was dropped manually. Re-creating
+    /// idempotently on every startup means setSourceScope no longer
+    /// rolls back its optimistic mutation, so the checkbox actually
+    /// stays unchecked.
+    private static func repairStandingWriteGrants(_ db: DatabaseConnection) throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS standing_write_default_grants (
+                agent TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(agent, source_id)
+            )
+        """)
+        try db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_standing_write_default_grants_source ON standing_write_default_grants(source_id)"
+        )
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS standing_write_once_grants (
+                agent TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(agent, source_id, relative_path)
+            )
+        """)
+        try db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_standing_write_once_grants_source ON standing_write_once_grants(source_id)"
         )
     }
 
