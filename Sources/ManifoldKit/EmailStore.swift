@@ -316,6 +316,15 @@ public struct EmailStore: Sendable {
                     SELECT email_id FROM email_messages WHERE account_id = ?
                 )
             """, params: [id])
+            // temporary_reveals usually expire with their work block, but
+            // removing an account is a permanent action and any reveals
+            // for orphaned email IDs would never resolve to a real
+            // message again. Drop them in the same transaction.
+            try db.execute("""
+                DELETE FROM temporary_reveals WHERE email_id IN (
+                    SELECT email_id FROM email_messages WHERE account_id = ?
+                )
+            """, params: [id])
             // Clean FTS5 entries before deleting rows (content-synced table requires manual sync)
             try db.execute("""
                 INSERT INTO email_fts(email_fts, rowid, email_id, body_text)

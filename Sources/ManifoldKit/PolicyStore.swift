@@ -12,6 +12,14 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 public actor PolicyStore {
     private let db: DatabaseConnection
 
+    /// In-memory cache keyed on the policy's `updated_at`. Every MCP call
+    /// reads `policy(for:)` so the JSON-decode cost adds up — caching the
+    /// decoded struct shaves the hot path. The actor's serialized access
+    /// gives single-process write coherence; the `updated_at` probe
+    /// catches the rare cross-process write (e.g., a CLI rewriting the
+    /// DB) so the cache can never serve a stale row.
+    private var cache: [TargetApp: AgentAccessPolicy] = [:]
+
     public init(db: DatabaseConnection) {
         self.db = db
     }
@@ -20,16 +28,29 @@ public actor PolicyStore {
 
     /// Get the policy for an agent. Creates a default (empty) policy if none exists.
     public func policy(for agent: TargetApp) throws -> AgentAccessPolicy {
+        if let cached = cache[agent] {
+            // Cheap probe: one column on a unique-by-agent row. If the
+            // timestamp matches, serve the cached struct.
+            let probe = try db.queryScalar(
+                "SELECT updated_at FROM agent_access_policies WHERE agent = ? LIMIT 1",
+                params: [agent.rawValue]
+            )
+            if let dbUpdatedAt = probe, dbUpdatedAt == cached.updatedAt {
+                return cached
+            }
+        }
         let rows = try db.queryAll(
             "SELECT * FROM agent_access_policies WHERE agent = ? LIMIT 1",
             params: [agent.rawValue]
         )
         if let row = rows.first, let policy = AgentAccessPolicy(row: row) {
+            cache[agent] = policy
             return policy
         }
         // Create default empty policy
         let policy = AgentAccessPolicy(agent: agent)
         try insertPolicy(policy)
+        cache[agent] = policy
         return policy
     }
 
@@ -61,6 +82,9 @@ public actor PolicyStore {
             now,
             policy.id,
         ])
+        var refreshed = policy
+        refreshed.updatedAt = now
+        cache[policy.agent] = refreshed
         logger.info("Updated policy \(policy.id) for \(policy.agent.rawValue)")
     }
 

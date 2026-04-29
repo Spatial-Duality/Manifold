@@ -105,6 +105,33 @@ struct PolicyStoreTests {
         #expect(policy.emailSensitivity == .strict)
     }
 
+    /// PolicyStore caches the decoded struct keyed on `updated_at`. A
+    /// mid-flight DB rewrite (rare but possible — CLI tool, manual sqlite
+    /// edit) must invalidate the cache; the cache must NOT serve stale
+    /// data when the timestamp moves.
+    @Test("Cache invalidates when an external write moves updated_at")
+    func cacheInvalidatesOnExternalWrite() async throws {
+        let (store, db, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.addSource("src-cache", to: .cowork)
+        let warm = try await store.policy(for: .cowork)
+        #expect(warm.allowedSourceIDs == ["src-cache"])
+
+        // Rewrite the row out-of-band — simulate a CLI editing the DB
+        // directly without going through PolicyStore.
+        let later = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(60))
+        try db.execute("""
+            UPDATE agent_access_policies
+            SET allowed_source_ids = ?, updated_at = ?
+            WHERE agent = ?
+        """, params: [#"["src-rewritten"]"#, later, "cowork"])
+
+        let after = try await store.policy(for: .cowork)
+        #expect(after.allowedSourceIDs == ["src-rewritten"])
+        #expect(after.updatedAt == later)
+    }
+
     @Test("Pause and resume agent")
     func pauseResume() async throws {
         let (store, _, tempDir) = try makeStore()

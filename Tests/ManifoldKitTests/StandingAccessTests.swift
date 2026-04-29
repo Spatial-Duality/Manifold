@@ -405,6 +405,56 @@ struct StandingAccessTests {
         }
     }
 
+    /// Symlink containment: a source folder may contain a symlink that
+    /// points outside the source root. The AI must NOT see those files —
+    /// the runtime resolves each entry's standardized URL and only
+    /// admits paths that hasPrefix the source's basePath. Verifies that
+    /// guard end-to-end for both list_files and read_file.
+    @Test("Symlinks pointing outside the source root are filtered out")
+    func symlinksOutsideSourceAreHidden() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        // Build a target file *outside* any source folder. This is the
+        // file the symlink would expose if containment was broken.
+        let secretRoot = h.tempDir.appendingPathComponent("outside-secret")
+        try FileManager.default.createDirectory(at: secretRoot, withIntermediateDirectories: true)
+        let secretFile = secretRoot.appendingPathComponent("secret.txt")
+        try Data("classified".utf8).write(to: secretFile)
+
+        // Build the source folder and drop a symlink inside it pointing
+        // at the outside-secret file.
+        let sourceID = try await createAndRegisterSource(harness: h, name: "Sneaky")
+        let sourceDir = h.tempDir.appendingPathComponent("sources/Sneaky")
+        let symlinkURL = sourceDir.appendingPathComponent("escape-hatch.txt")
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: secretFile)
+
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+
+        // list_files must NOT include the symlinked-outside file. Inner
+        // README/main.swift remain visible — they live inside the source.
+        let files = try await h.bridge.listFiles()
+        #expect(files.contains(where: { $0.path == "sneaky/README.md" }))
+        #expect(!files.contains(where: { $0.path == "sneaky/escape-hatch.txt" }))
+        #expect(!files.contains(where: { $0.path.contains("outside-secret") }))
+
+        // read_file via the symlink path must also fail. Either
+        // .invalidPath ("symlinks not allowed in governed paths" — the
+        // upstream guard) or .fileNotFound (the path-prefix containment
+        // check downstream) is acceptable; both are "denied".
+        do {
+            _ = try await h.bridge.readFile(path: "sneaky/escape-hatch.txt")
+            Issue.record("Expected escape-hatch.txt to be unreadable")
+        } catch let error as ManifoldMCPError {
+            switch error {
+            case .fileNotFound, .invalidPath:
+                break // expected — containment held
+            default:
+                Issue.record("Expected fileNotFound or invalidPath for symlink escape, got \(error)")
+            }
+        }
+    }
+
     /// Regression for the instant-propagation contract surfaced 2026-04-29.
     /// When the user toggles a sharing checkbox the AI's NEXT MCP call
     /// must reflect the new state — no waiting on the 10-second list cache

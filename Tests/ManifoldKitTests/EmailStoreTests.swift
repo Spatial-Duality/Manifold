@@ -772,4 +772,41 @@ struct EmailStoreTests {
         #expect(results.count == 1)
         #expect(results[0].emailID == "msg-flagged")
     }
+
+    /// Removing an email account drops every row that references one of
+    /// its messages — `shared_emails`, `temporary_reveals`, `grant_emails`,
+    /// `email_attachments`, and the messages themselves. Without this, an
+    /// account removal leaves orphan share + reveal rows pointing at
+    /// emails that no longer exist.
+    @Test("Removing an email account cascades shared_emails and temporary_reveals")
+    func removeAccountCascadesShareAndReveal() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let emailID = try await insertTestMessage(store: store, emailID: "msg-cascade")
+        try store.shareEmails(emailIDs: [emailID], for: .cowork)
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute("""
+            INSERT INTO temporary_reveals (reveal_id, agent, email_id, work_block_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, params: ["rev-1", "cowork", emailID, "wb-test", now])
+
+        let beforeShare = try store.sharedEmailIDs(agent: .cowork)
+        #expect(beforeShare.contains(emailID))
+        let beforeReveal = try db.queryScalar(
+            "SELECT COUNT(*) FROM temporary_reveals WHERE email_id = ?",
+            params: [emailID]
+        )
+        #expect(beforeReveal == "1")
+
+        try store.removeEmailAccount(id: Self.testAccountID)
+
+        let afterShare = try store.sharedEmailIDs(agent: .cowork)
+        #expect(!afterShare.contains(emailID))
+        let afterReveal = try db.queryScalar(
+            "SELECT COUNT(*) FROM temporary_reveals WHERE email_id = ?",
+            params: [emailID]
+        )
+        #expect(afterReveal == "0")
+    }
 }
