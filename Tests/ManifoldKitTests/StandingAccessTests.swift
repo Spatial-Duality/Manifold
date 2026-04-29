@@ -405,6 +405,60 @@ struct StandingAccessTests {
         }
     }
 
+    /// Regression for the instant-propagation contract surfaced 2026-04-29.
+    /// When the user toggles a sharing checkbox the AI's NEXT MCP call
+    /// must reflect the new state — no waiting on the 10-second list cache
+    /// or any other staleness window. listFilesFromOriginals keys its
+    /// cache on (mountPaths, allowedSourceIDs, override signatures), so
+    /// a policy mutation flips the key and forces a fresh enumeration.
+    @Test("Toggling source scope is reflected on the very next list_files call")
+    func scopeToggleReflectsImmediately() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "Realtime")
+
+        // Cowork has default standing email access, so listFiles always
+        // returns; empty mounts == empty list. Asserting on file count
+        // exercises the cache-key invalidation path instead of the
+        // throw-noAccessConfigured path.
+        let cold = try await h.bridge.listFiles()
+        #expect(cold.isEmpty)
+
+        // User toggles scope on. NEXT call must see the source.
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        let afterAdd = try await h.bridge.listFiles()
+        #expect(afterAdd.contains(where: { $0.path == "realtime/README.md" }))
+        #expect(afterAdd.contains(where: { $0.path == "realtime/src/main.swift" }))
+
+        // User toggles scope off. NEXT call must drop the files.
+        try await h.policyStore.removeSource(sourceID, from: .cowork)
+        let afterRemove = try await h.bridge.listFiles()
+        #expect(afterRemove.isEmpty)
+
+        // Per-file allow override on the unscoped source. NEXT call must
+        // surface only that one file — the cache key picks up the new
+        // override signature and re-enumerates.
+        try await h.fileVisibilityOverrideStore.setOverride(
+            agent: .cowork,
+            sourceID: sourceID,
+            relativePath: "README.md",
+            isDirectory: false,
+            decision: .allow
+        )
+        let afterOverride = try await h.bridge.listFiles()
+        #expect(afterOverride.contains(where: { $0.path == "realtime/README.md" }))
+        #expect(!afterOverride.contains(where: { $0.path == "realtime/src/main.swift" }))
+
+        // Clear the override. NEXT call must drop everything again.
+        try await h.fileVisibilityOverrideStore.clearOverrides(
+            agent: .cowork,
+            sourceID: sourceID
+        )
+        let afterClear = try await h.bridge.listFiles()
+        #expect(afterClear.isEmpty)
+    }
+
     @Test("Standing write once approval allows one reversible write to the exact file")
     func standingWriteOnceApprovalIsConsumed() async throws {
         let h = try makeHarness()
