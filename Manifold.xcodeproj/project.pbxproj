@@ -751,18 +751,26 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist",
+				"$(SRCROOT)/Package.swift",
 				"$(SRCROOT)/Sources/ManifoldAgent/main.swift",
+				"$(SRCROOT)/Sources/ManifoldMCP/ManifoldMCPServer.swift",
+				"$(SRCROOT)/Sources/ManifoldRuntime/ManifoldRuntime.swift",
+				"$(SRCROOT)/Sources/ManifoldXPC/ClientIdentityVerifier.swift",
+				"$(SRCROOT)/Sources/ManifoldXPC/ManifoldXPCService.swift",
+				"$(SRCROOT)/Sources/ManifoldXPC/ManifoldXPCService+AppCommands.swift",
+				"$(SRCROOT)/Sources/ManifoldXPC/SignedProcessVerifier.swift",
 			);
-			name = "Bundle Launch Agent";
+			name = "Bundle Runtime Helpers";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist",
 				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchServices/ManifoldAgent",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/manifold-mcp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\ncd \"${SRCROOT}\"\nconfig_name=\"$(printf '%s' \"${CONFIGURATION:-Debug}\" | tr '[:upper:]' '[:lower:]')\"\nswift build --product ManifoldAgent -c \"$config_name\" 2>&1\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nhelper_path=\"$launch_services_dir/ManifoldAgent\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${SRCROOT}/.build/$config_name/ManifoldAgent\" \"$helper_path\"\nchmod +x \"$helper_path\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none --options runtime --generate-entitlement-der \"$helper_path\"\nfi\n";
+			shellScript = "set -euo pipefail\ncd \"${SRCROOT}\"\nconfig_name=\"$(printf '%s' \"${CONFIGURATION:-Debug}\" | tr '[:upper:]' '[:lower:]')\"\nswift build --product ManifoldAgent --product manifold-mcp -c \"$config_name\" 2>&1\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nresources_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Resources\"\nhelper_path=\"$launch_services_dir/ManifoldAgent\"\nmcp_path=\"$resources_dir/manifold-mcp\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\" \"$resources_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${SRCROOT}/.build/$config_name/ManifoldAgent\" \"$helper_path\"\ncp \"${SRCROOT}/.build/$config_name/manifold-mcp\" \"$mcp_path\"\nchmod +x \"$helper_path\" \"$mcp_path\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none --options runtime --generate-entitlement-der \"$helper_path\"\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none --options runtime --generate-entitlement-der \"$mcp_path\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

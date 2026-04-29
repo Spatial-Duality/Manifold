@@ -182,27 +182,70 @@ public actor SnapshotStore {
         return rows.compactMap { SnapshotRecord(row: $0) }
     }
 
+    /// Get one snapshot by id.
+    public func snapshot(id: Int) throws -> SnapshotRecord? {
+        let rows = try db.queryAll("""
+            SELECT id, run_id, workspace_id, timestamp, file_path, after_hash, before_hash, is_baseline, is_delete, source
+            FROM snapshots
+            WHERE id = ?
+            LIMIT 1
+        """, params: ["\(id)"])
+
+        return rows.first.flatMap { SnapshotRecord(row: $0) }
+    }
+
+    /// Get the latest known non-delete hash for a canonical file path across all runs.
+    public func latestHash(filePath: String) throws -> String? {
+        try db.queryScalar("""
+            SELECT after_hash FROM snapshots
+            WHERE file_path = ? AND is_delete = 0 AND after_hash IS NOT NULL
+            ORDER BY id DESC LIMIT 1
+        """, params: [filePath])
+    }
+
     /// Get all distinct file paths that have at least one snapshot.
     public func allTrackedFiles() throws -> [String] {
         let rows = try db.queryAll("SELECT DISTINCT file_path FROM snapshots ORDER BY file_path")
         return rows.compactMap { $0["file_path"] }
     }
 
+    /// Count snapshots by canonical file path. Used by the app's Files
+    /// table so version badges line up with the same canonical paths that
+    /// MCP tools and the snapshot store use.
+    public func snapshotCountsByPath() throws -> [String: Int] {
+        let rows = try db.queryAll("""
+            SELECT file_path, COUNT(*) AS snapshot_count
+            FROM snapshots
+            GROUP BY file_path
+            ORDER BY file_path
+        """)
+        var result: [String: Int] = [:]
+        for row in rows {
+            guard let path = row["file_path"] else { continue }
+            result[path] = Int(row["snapshot_count"] ?? "0") ?? 0
+        }
+        return result
+    }
+
     /// File paths that have at least one non-baseline snapshot whose
-    /// `source` indicates an AI agent wrote the bytes. Used by the
+    /// `source` indicates an AI tool wrote the bytes. Used by the
     /// Files table to render the sparkle (✦) at a glance across the
     /// whole listing — Goal 6 from the redesign brief.
     ///
-    /// "agent"-flavored sources are detected by case-insensitive substring
-    /// match. The schema's source field is free-form ("agent",
-    /// "manifold-restore", "user", "baseline", etc.); the substring check
-    /// catches existing variants without depending on a future enum.
+    /// The schema's source field is free-form ("agent", "mcp",
+    /// "mcp_draft_workspace", "standing_write_auto", "manifold-restore",
+    /// etc.); keep this broad enough to catch current governed AI write
+    /// paths without marking restore/baseline rows.
     public func aiTouchedFilePaths() throws -> Set<String> {
         let rows = try db.queryAll(
             """
             SELECT DISTINCT file_path FROM snapshots
             WHERE is_baseline = 0
-              AND LOWER(source) LIKE '%agent%'
+              AND (
+                LOWER(source) LIKE '%agent%'
+                OR LOWER(source) LIKE '%mcp%'
+                OR LOWER(source) LIKE 'standing_write_%'
+              )
             """
         )
         return Set(rows.compactMap { $0["file_path"] })
@@ -228,6 +271,22 @@ public actor SnapshotStore {
               AND timestamp > ?
             """,
             params: [prefix + "%", sinceTimestamp]
+        )
+        return Int(result ?? "0") ?? 0
+    }
+
+    /// Count distinct files in one source/workspace with non-baseline snapshots
+    /// after `sinceTimestamp`. Direct original writes store `workspace_id` as
+    /// the source ID, while `file_path` remains canonical (`mount/file`).
+    public func driftCount(workspaceID: String, sinceTimestamp: String) throws -> Int {
+        let result = try db.queryScalar(
+            """
+            SELECT COUNT(DISTINCT file_path) FROM snapshots
+            WHERE is_baseline = 0
+              AND workspace_id = ?
+              AND timestamp > ?
+            """,
+            params: [workspaceID, sinceTimestamp]
         )
         return Int(result ?? "0") ?? 0
     }

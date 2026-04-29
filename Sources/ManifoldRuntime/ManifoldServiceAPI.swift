@@ -27,6 +27,21 @@ public protocol ManifoldServiceAPI: Sendable {
     func extractFile(connectionID: String, archivePath: String, filePath: String) async throws -> String
 
     func writeFile(connectionID: String, path: String, content: String) async throws -> WriteResult
+    func writeBinaryFile(
+        connectionID: String,
+        path: String,
+        contentBase64: String,
+        mimeType: String?,
+        expectedBeforeHash: String?,
+        writeMode: String?
+    ) async throws -> WriteResult
+    func annotatePDF(
+        connectionID: String,
+        path: String,
+        mark: String,
+        expectedBeforeHash: String?,
+        writeMode: String?
+    ) async throws -> WriteResult
 
     func startTrackedRun(connectionID: String, folderIDs: [String], fileScopes: [FileScope], emailIDs: [String]) async throws -> TrackedRun
     func pauseTrackedRun(connectionID: String) async throws

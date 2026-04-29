@@ -49,9 +49,19 @@ public enum AgentRulesTemplate {
     fire.
 
     - **Files in approved sources**: prefer `manifold.read_file`,
-      `manifold.write_file`, `manifold.search_files`, `manifold.read_range`,
-      `manifold.diff_file` over native Read/Edit/Bash for files inside
-      sources the user has shared with Manifold.
+      `manifold.write_file`, `manifold.write_binary_file`,
+      `manifold.annotate_pdf`, `manifold.search_files`,
+      `manifold.read_range`, `manifold.diff_file` over native
+      Read/Edit/Bash for files inside sources the user has shared with
+      Manifold.
+    - **Writes to governed files**: do not edit Manifold-managed source
+      files with native filesystem tools. Use Manifold write tools so
+      snapshots, restore, and the audit ledger all fire. `manifold.write_file`
+      is for UTF-8 text only: never
+      put base64 PDF/image/archive bytes into it. For PDFs and other binary
+      files, prefer `manifold.annotate_pdf` or
+      `manifold.write_binary_file`; Manifold writes governed changes to the
+      original shared folder and records a reversible snapshot.
     - **Cross-agent context** (the "what did the other agent do?" question):
       call `manifold.reuse_prior_context` or `manifold.was_exposed_before`
       first. Those return prior reads, edits, and saved memory from any

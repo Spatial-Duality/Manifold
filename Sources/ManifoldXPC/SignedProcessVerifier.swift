@@ -73,6 +73,26 @@ enum SignedProcessVerifier {
         return SecCodeCheckValidity(code, SecCSFlags(), requirement) == errSecSuccess
     }
 
+    static func satisfiesStaticDesignatedRequirement(
+        at url: URL,
+        identifier: String,
+        teamIdentifier: String?
+    ) -> Bool {
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(
+            url as CFURL,
+            SecCSFlags(),
+            &staticCode
+        )
+        guard createStatus == errSecSuccess,
+              let staticCode,
+              let requirement = designatedRequirement(identifier: identifier, teamIdentifier: teamIdentifier) else {
+            return false
+        }
+
+        return SecStaticCodeCheckValidity(staticCode, SecCSFlags(), requirement) == errSecSuccess
+    }
+
     private static func guestCode(processID: pid_t, auditTokenData: Data?) -> SecCode? {
         var attributes: [CFString: Any] = [
             kSecGuestAttributePid: NSNumber(value: processID),

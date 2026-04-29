@@ -29,7 +29,11 @@ extension ManifoldXPCService {
                   let agentRaw = payload["agent"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try await runtime.policyStore.addSource(sourceID, to: TargetApp(rawValue: agentRaw) ?? .cowork)
+            try await runtime.setSourceScope(
+                sourceID: sourceID,
+                agent: TargetApp(rawValue: agentRaw) ?? .cowork,
+                inScope: true
+            )
             return ["ok": true]
 
         case "removeSourceFromPolicy":
@@ -38,14 +42,7 @@ extension ManifoldXPCService {
                 throw ManifoldXPCError.invalidPayload
             }
             let agent = TargetApp(rawValue: agentRaw) ?? .cowork
-            try await runtime.policyStore.removeSource(sourceID, from: agent)
-            try await runtime.standingWriteApprovalStore.removeGrants(agent: agent, sourceID: sourceID)
-            // Clearing the agent-scoped per-file overrides matches the
-            // user's mental model when they uncheck the source: "stop
-            // sharing this folder with this AI" should not silently
-            // preserve allow/deny decisions that re-attach the next time
-            // the folder gets shared again.
-            try await runtime.fileVisibilityOverrideStore.clearOverrides(agent: agent, sourceID: sourceID)
+            try await runtime.setSourceScope(sourceID: sourceID, agent: agent, inScope: false)
             return ["ok": true]
 
         case "sessionPreview":
@@ -56,6 +53,9 @@ extension ManifoldXPCService {
 
         case "trackedFiles":
             return ["trackedFiles": try XPCJSON.object(from: await runtime.snapshotStore.allTrackedFiles())]
+
+        case "trackedFileCounts":
+            return ["counts": try XPCJSON.object(from: await runtime.snapshotStore.snapshotCountsByPath())]
 
         case "storageStats":
             return [
@@ -1000,7 +1000,7 @@ extension ManifoldXPCService {
         var counts: [String: Int] = [:]
         for source in activeSources {
             let count = try await runtime.snapshotStore.driftCount(
-                rootPath: source.originalRootPath,
+                workspaceID: source.sourceID,
                 sinceTimestamp: cutoff
             )
             if count > 0 {
@@ -1092,6 +1092,26 @@ extension ManifoldXPCService {
         return (nil, [], nil)
     }
 
+    func refreshWorkBlockCounts(_ block: WorkBlockRecord) async {
+        do {
+            let paths = try await runtime.snapshotStore.modifiedFiles(runID: block.grantID)
+            var modified = 0
+            var created = 0
+            for path in paths {
+                if try await runtime.snapshotStore.baselineHash(runID: block.grantID, filePath: path) == nil {
+                    created += 1
+                } else {
+                    modified += 1
+                }
+            }
+            if modified != block.modifiedFileCount || created != block.newFileCount {
+                try await runtime.workBlockStore.updateCounts(id: block.id, modifiedFiles: modified, newFiles: created)
+            }
+        } catch {
+            appCommandLogger.warning("Failed to refresh work block counts: \(error.localizedDescription)")
+        }
+    }
+
     private func computeSessionPreview(
         targetApp: TargetApp,
         fileScopes: [FileSelectionScope],
@@ -1113,7 +1133,7 @@ extension ManifoldXPCService {
                 guard let source = activeSourceMap[sourceID] else { return nil }
                 return MaterializationEngine.MaterializationSource(
                     source: source,
-                    mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased(),
+                    mountName: source.canonicalMountName,
                     selectedScopes: groupedScopes[sourceID] ?? []
                 )
             }
@@ -1121,7 +1141,7 @@ extension ManifoldXPCService {
             inputs = defaultSources.map { source in
                 MaterializationEngine.MaterializationSource(
                     source: source,
-                    mountName: URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased()
+                    mountName: source.canonicalMountName
                 )
             }
         }
@@ -1440,9 +1460,24 @@ extension ManifoldXPCService {
 
     private func restoreSnapshot(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
         do {
+            guard let snapshot = try await runtime.snapshotStore.snapshot(id: snapshotID),
+                  let data = try await runtime.snapshotStore.dataForRestore(snapshotID: snapshotID),
+                  snapshot.filePath == filePath else {
+                return RestoreSnapshotResult(
+                    status: "missingSnapshot",
+                    message: "Manifold couldn't find a snapshot for this file."
+                )
+            }
+            if let standingResult = try await restoreStandingSnapshot(
+                snapshot: snapshot,
+                data: data,
+                filePath: filePath
+            ) {
+                return standingResult
+            }
+
             let state = try await activeGrantState(preferredAgent: .cowork)
             guard let grant = state.grant,
-                  let data = try await runtime.snapshotStore.dataForRestore(snapshotID: snapshotID),
                   let resolved = Self.resolveGrantFilePath(
                     canonicalPath: filePath,
                     grant: grant,
@@ -1492,6 +1527,90 @@ extension ManifoldXPCService {
                 message: "Restored \(filePath) to the selected snapshot."
             )
         } catch {
+            return RestoreSnapshotResult(
+                status: "error",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    private func restoreStandingSnapshot(
+        snapshot: SnapshotRecord,
+        data: Data,
+        filePath: String
+    ) async throws -> RestoreSnapshotResult? {
+        guard snapshot.runID.hasPrefix("standing-write:") else {
+            return nil
+        }
+        guard let source = try await runtime.grantStore.source(id: snapshot.workspaceID),
+              !source.isRemoved else {
+            return RestoreSnapshotResult(
+                status: "missingSnapshot",
+                message: "Manifold couldn't find a live source folder for this snapshot."
+            )
+        }
+
+        let mountPrefix = source.canonicalMountName + "/"
+        guard filePath.hasPrefix(mountPrefix) else {
+            return nil
+        }
+        let relativePath = String(filePath.dropFirst(mountPrefix.count))
+
+        let previousData = try? ScopedFileAccess.readData(
+            relativePath: relativePath,
+            rootPath: source.originalRootPath
+        ).data
+        if let expectedHash = try await runtime.snapshotStore.latestHash(filePath: filePath) {
+            guard let previousData,
+                  Self.hashHex(for: previousData) == expectedHash else {
+                return RestoreSnapshotResult(
+                    status: "conflict",
+                    message: "This file changed after the snapshot was recorded. Review the current version before restoring it."
+                )
+            }
+        }
+
+        do {
+            _ = try ScopedFileAccess.writeDataAtomically(
+                data,
+                relativePath: relativePath,
+                rootPath: source.originalRootPath
+            )
+            try await runtime.snapshotStore.recordRestore(
+                runID: snapshot.runID,
+                workspaceID: source.sourceID,
+                filePath: filePath,
+                restoredData: data
+            )
+            try? await runtime.auditStore.log(
+                action: .restore,
+                runID: snapshot.runID,
+                workspaceID: source.sourceID,
+                agent: "manifold",
+                filePath: filePath,
+                metadata: [
+                    "snapshot_id": "\(snapshot.id)",
+                    "restore_scope": "standing_source",
+                ]
+            )
+            return RestoreSnapshotResult(
+                status: "success",
+                message: "Restored \(filePath) to the selected snapshot."
+            )
+        } catch {
+            if let previousData {
+                _ = try? ScopedFileAccess.writeDataAtomically(
+                    previousData,
+                    relativePath: relativePath,
+                    rootPath: source.originalRootPath
+                )
+            } else if let identity = try? ScopedFileAccess.resolve(
+                relativePath: relativePath,
+                rootPath: source.originalRootPath,
+                allowMissingLeaf: true
+            ), FileManager.default.fileExists(atPath: identity.fileURL.path) {
+                try? FileManager.default.removeItem(at: identity.fileURL)
+            }
             return RestoreSnapshotResult(
                 status: "error",
                 message: error.localizedDescription

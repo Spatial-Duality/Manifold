@@ -137,7 +137,7 @@ public actor GrantStore {
 
             // Link sources to this grant
             for (sourceID, source) in linkedSources {
-                let mountName = mountNames[sourceID] ?? URL(fileURLWithPath: source.originalRootPath).lastPathComponent
+                let mountName = mountNames[sourceID] ?? source.canonicalMountName
                 try db.execute("""
                     INSERT INTO grant_sources (grant_id, source_id, mount_name)
                     VALUES (?, ?, ?)
@@ -425,11 +425,6 @@ public actor GrantStore {
     }
 
     private static func sanitizedMountName(for source: SourceRecord) -> String {
-        let base = URL(fileURLWithPath: source.originalRootPath).lastPathComponent
-        let sanitized = base
-            .lowercased()
-            .replacingOccurrences(of: "[^a-z0-9._-]+", with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return sanitized.isEmpty ? source.sourceID : sanitized
+        source.canonicalMountName
     }
 }

@@ -94,10 +94,37 @@ enum ClientIdentityVerifier {
                   let hostBundleIdentifier else {
                 return nil
             }
+            let teamIdentifier = hostAttestation?.teamIdentifier
+            if hostAttestation?.identifier == hostBundleIdentifier {
+                return SignedProcessVerifier.satisfiesDesignatedRequirement(
+                    processID: hostPID,
+                    identifier: hostBundleIdentifier,
+                    teamIdentifier: teamIdentifier
+                )
+            }
+            if let hostExecutablePath,
+               let appBundleURL = appBundleURL(containingExecutablePath: hostExecutablePath),
+               Bundle(url: appBundleURL)?.bundleIdentifier == hostBundleIdentifier {
+                let appBundleSatisfied = SignedProcessVerifier.satisfiesStaticDesignatedRequirement(
+                    at: appBundleURL,
+                    identifier: hostBundleIdentifier,
+                    teamIdentifier: teamIdentifier
+                )
+                guard appBundleSatisfied else { return false }
+                guard let helperIdentifier = hostAttestation?.identifier,
+                      !helperIdentifier.isEmpty else {
+                    return hostAttestation?.signatureValid == true
+                }
+                return SignedProcessVerifier.satisfiesDesignatedRequirement(
+                    processID: hostPID,
+                    identifier: helperIdentifier,
+                    teamIdentifier: teamIdentifier
+                )
+            }
             return SignedProcessVerifier.satisfiesDesignatedRequirement(
                 processID: hostPID,
                 identifier: hostBundleIdentifier,
-                teamIdentifier: nil
+                teamIdentifier: teamIdentifier
             )
         }()
         return verify(
@@ -443,6 +470,11 @@ enum ClientIdentityVerifier {
     }
 
     private static func inferredBundleIdentifier(from executablePath: String?) -> String? {
+        if let appBundleURL = appBundleURL(containingExecutablePath: executablePath),
+           let bundleIdentifier = Bundle(url: appBundleURL)?.bundleIdentifier,
+           supportedHosts[bundleIdentifier] != nil {
+            return bundleIdentifier
+        }
         guard let executablePath else { return nil }
         let lowercased = executablePath.lowercased()
         if lowercased.contains("claude.app") {
@@ -464,6 +496,10 @@ enum ClientIdentityVerifier {
     }
 
     private static func inferredTargetApp(fromExecutablePath executablePath: String?) -> TargetApp? {
+        if let bundleIdentifier = inferredBundleIdentifier(from: executablePath),
+           let targetApp = supportedHosts[bundleIdentifier] {
+            return targetApp
+        }
         guard let executablePath else { return nil }
         let lowercased = executablePath.lowercased()
         if lowercased.contains("claude") {
@@ -471,6 +507,18 @@ enum ClientIdentityVerifier {
         }
         if lowercased.contains("codex") {
             return .codex
+        }
+        return nil
+    }
+
+    static func appBundleURL(containingExecutablePath executablePath: String?) -> URL? {
+        guard let executablePath else { return nil }
+        var url = URL(fileURLWithPath: executablePath).standardizedFileURL
+        while url.path != "/" {
+            if url.pathExtension.lowercased() == "app" {
+                return url
+            }
+            url.deleteLastPathComponent()
         }
         return nil
     }

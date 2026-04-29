@@ -110,6 +110,37 @@ struct SnapshotStoreTests {
         #expect(modified[0] == "a.txt")
     }
 
+    @Test("AI touched paths include governed MCP write sources")
+    func aiTouchedPathsIncludeGovernedMCPWrites() async throws {
+        let (_, snapshotStore, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        try await snapshotStore.recordBaseline(
+            runID: "run-ai",
+            workspaceID: "ws-1",
+            filePath: "source/original.pdf",
+            data: Data("before".utf8)
+        )
+        try await snapshotStore.recordModification(
+            runID: "run-ai",
+            workspaceID: "ws-1",
+            filePath: "source/original.pdf",
+            newData: Data("after".utf8),
+            source: "mcp_draft_workspace"
+        )
+        try await snapshotStore.recordModification(
+            runID: "run-ai",
+            workspaceID: "ws-1",
+            filePath: "source/direct.txt",
+            newData: Data("text".utf8),
+            source: "standing_write_once"
+        )
+
+        let touched = try await snapshotStore.aiTouchedFilePaths()
+        #expect(touched.contains("source/original.pdf"))
+        #expect(touched.contains("source/direct.txt"))
+    }
+
     @Test("File history shows complete chain")
     func fileHistory() async throws {
         let (_, snapshotStore, tempDir) = try makeStores()
@@ -194,6 +225,38 @@ struct SnapshotStoreTests {
 
         let restored = try await snapshotStore.dataForRestore(snapshotID: history[0].id)
         #expect(restored == original)
+    }
+
+    @Test("Workspace drift counts canonical source snapshots")
+    func workspaceDriftCountsCanonicalSnapshots() async throws {
+        let (_, snapshotStore, tempDir) = try makeStores()
+        defer { cleanup(tempDir) }
+
+        let old = ISO8601DateFormatter.shared.string(from: Date(timeIntervalSince1970: 0))
+        try await snapshotStore.recordBaseline(
+            runID: "standing-write:src-1",
+            workspaceID: "src-1",
+            filePath: "myapp/README.md",
+            data: Data("before".utf8)
+        )
+        try await snapshotStore.recordModification(
+            runID: "standing-write:src-1",
+            workspaceID: "src-1",
+            filePath: "myapp/README.md",
+            newData: Data("after".utf8),
+            source: "standing_write_auto"
+        )
+        try await snapshotStore.recordModification(
+            runID: "standing-write:src-2",
+            workspaceID: "src-2",
+            filePath: "other/README.md",
+            newData: Data("other".utf8),
+            source: "standing_write_auto"
+        )
+
+        #expect(try await snapshotStore.driftCount(workspaceID: "src-1", sinceTimestamp: old) == 1)
+        #expect(try await snapshotStore.driftCount(workspaceID: "src-2", sinceTimestamp: old) == 1)
+        #expect(try await snapshotStore.driftCount(workspaceID: "missing", sinceTimestamp: old) == 0)
     }
 
     @Test("Prune keeps recent runs")

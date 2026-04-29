@@ -20,6 +20,14 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
     public var isAccessible: Bool { status == "idle" || status == "active" }
     public var isPaused: Bool { status == "paused" }
     public var isRemoved: Bool { status == "removed" }
+    public var canonicalMountName: String {
+        let base = URL(fileURLWithPath: originalRootPath).lastPathComponent
+        let sanitized = base
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9._-]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return sanitized.isEmpty ? sourceID : sanitized
+    }
 
     public init(
         sourceID: String,

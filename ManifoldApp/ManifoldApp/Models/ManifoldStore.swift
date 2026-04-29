@@ -114,6 +114,7 @@ final class ManifoldStore {
             // app/agent versions never go out of sync across an auto-update.
             updater?.agentShutdown = { [weak self] in self?.unregisterAgent() }
 
+            syncInstalledMCPHelperIfNeeded()
             registerAgent()
             requestNotificationPermission()
             startConnectionMonitor()
@@ -195,7 +196,7 @@ final class ManifoldStore {
 
         do {
             let dashboard = try await runtime.dashboardState()
-            sources = dashboard.sources
+            sources = Self.visibleSources(from: dashboard.sources)
             governance.claudePolicy = dashboard.claudePolicy
             governance.codexPolicy = dashboard.codexPolicy
             governance.claudeEmailGovernance = dashboard.claudeEmailGovernance
@@ -503,10 +504,14 @@ final class ManifoldStore {
             // in any UI surface — filtering here keeps every consumer of
             // `store.sources` consistent without sprinkling the check
             // through the views.
-            sources = (try await runtime.listSources()).filter { !$0.isRemoved }
+            sources = Self.visibleSources(from: try await runtime.listSources())
         } catch {
             logger.error("Failed to load sources: \(error.localizedDescription)")
         }
+    }
+
+    private nonisolated static func visibleSources(from sources: [SourceRecord]) -> [SourceRecord] {
+        sources.filter { !$0.isRemoved }
     }
 
     func enumerateSourceFiles() async -> [SourceFile] {
@@ -592,6 +597,7 @@ final class ManifoldStore {
                     SourceFile(
                         name: url.lastPathComponent,
                         path: path,
+                        canonicalPath: "\(source.canonicalMountName)/\(relativePath)",
                         relativePath: relativePath,
                         sourceName: source.displayName,
                         sourceID: source.sourceID,
@@ -655,6 +661,7 @@ final class ManifoldStore {
                 result.append(SourceFile(
                     name: url.lastPathComponent,
                     path: path,
+                    canonicalPath: "\(source.canonicalMountName)/\(relativePath)",
                     relativePath: relativePath,
                     sourceName: source.displayName,
                     sourceID: source.sourceID,
@@ -695,6 +702,7 @@ final class ManifoldStore {
             return SourceFile(
                 name: url.lastPathComponent,
                 path: url.path,
+                canonicalPath: "\(source.canonicalMountName)/\(relativePath)",
                 relativePath: relativePath,
                 sourceName: source.displayName,
                 sourceID: source.sourceID,
@@ -730,6 +738,7 @@ final class ManifoldStore {
                     result.append(SourceFile(
                         name: url.lastPathComponent,
                         path: url.path,
+                        canonicalPath: relativePath,
                         relativePath: relativePath,
                         sourceName: mount.mountName,
                         sourceID: mount.sourceID,
@@ -832,6 +841,9 @@ final class ManifoldStore {
     var activeGrant: GrantRecord? { session.activeGrant }
     var activeGrantSources: [GrantSourceRecord] { session.activeGrantSources }
     var hasActiveSession: Bool { session.hasActiveSession }
+    func resolveActiveGrantFilePath(_ canonicalPath: String) -> ResolvedGrantPath? {
+        session.resolveGrantFilePath(canonicalPath)
+    }
     var activityEntries: [AuditEntry] { activity.activityEntries }
     var sessions: [Session] { activity.sessions }
     var selectedSession: Session? {
@@ -891,21 +903,65 @@ final class ManifoldStore {
 
     func installMCP() {
         do {
-            let destinationPath = Self.mcpBinaryPath
-            let destinationURL = URL(fileURLWithPath: destinationPath)
-            try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if let bundled = Bundle.main.url(forResource: "manifold-mcp", withExtension: nil) {
-                if FileManager.default.fileExists(atPath: destinationPath) {
-                    try FileManager.default.removeItem(at: destinationURL)
-                }
-                try FileManager.default.copyItem(at: bundled, to: destinationURL)
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destinationPath)
-            }
-            try ConfigWriter(binaryPath: destinationPath).installAll()
+            try Self.installBundledMCPHelper(force: true)
+            try ConfigWriter(binaryPath: Self.mcpBinaryPath).installAll()
             Task { await integrationHealth.checkAll(force: true) }
         } catch {
             integrationHealth.claude.errorDetail = error.localizedDescription
         }
+    }
+
+    private func syncInstalledMCPHelperIfNeeded() {
+        do {
+            guard try Self.installBundledMCPHelper(force: false) else { return }
+            logger.info("Updated installed manifold-mcp helper from bundled copy")
+            Task { await integrationHealth.checkAll(force: true) }
+        } catch {
+            logger.warning("Unable to update installed manifold-mcp helper: \(error.localizedDescription, privacy: .public)")
+            integrationHealth.claude.errorDetail = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    private nonisolated static func installBundledMCPHelper(force: Bool) throws -> Bool {
+        guard let bundled = Bundle.main.url(forResource: "manifold-mcp", withExtension: nil) else {
+            return false
+        }
+
+        let destinationPath = mcpBinaryPath
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+        let fileManager = FileManager.default
+        let destinationExists = fileManager.fileExists(atPath: destinationPath)
+
+        guard force || destinationExists else {
+            return false
+        }
+
+        if !force, destinationExists, filesMatch(bundled, destinationURL) {
+            return false
+        }
+
+        try fileManager.createDirectory(
+            at: destinationURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if destinationExists {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.copyItem(at: bundled, to: destinationURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destinationPath)
+        return true
+    }
+
+    private nonisolated static func filesMatch(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard let lhsValues = try? lhs.resourceValues(forKeys: [.fileSizeKey]),
+              let rhsValues = try? rhs.resourceValues(forKeys: [.fileSizeKey]),
+              lhsValues.fileSize == rhsValues.fileSize,
+              let lhsData = try? Data(contentsOf: lhs),
+              let rhsData = try? Data(contentsOf: rhs) else {
+            return false
+        }
+        return lhsData == rhsData
     }
 
     func loadSessions() async { await activity.loadSessions() }
@@ -1162,13 +1218,13 @@ final class ManifoldStore {
         )
     }
 
-    static var storeURL: URL {
+    nonisolated static var storeURL: URL {
         (ManifoldRuntimeEnvironment.appSupportRootURL()
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("Manifold/store")
     }
 
-    static var mcpBinaryPath: String {
+    nonisolated static var mcpBinaryPath: String {
         (ManifoldRuntimeEnvironment.appSupportRootURL()
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("Manifold/bin/manifold-mcp")

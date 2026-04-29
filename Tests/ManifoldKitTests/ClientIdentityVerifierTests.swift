@@ -31,6 +31,47 @@ struct ClientIdentityVerifierTests {
         #expect(identity.effectiveTargetApp == TargetApp.cowork.rawValue)
     }
 
+    @Test("Claude helper path resolves to Claude app bundle")
+    func claudeHelperPathResolvesToAppBundle() {
+        let bundleURL = ClientIdentityVerifier.appBundleURL(
+            containingExecutablePath: "/Applications/Claude.app/Contents/Helpers/disclaimer"
+        )
+
+        #expect(bundleURL?.path == "/Applications/Claude.app")
+    }
+
+    @Test("Signed runtime accepts Claude helper when enclosing app requirement passed")
+    func signedRuntimeAcceptsClaudeHelper() {
+        let identity = ClientIdentityVerifier.verify(
+            requestedAgent: TargetApp.cowork.rawValue,
+            clientProcessID: 42,
+            clientExecutablePath: "/Applications/Manifold.app/Contents/Library/LaunchServices/manifold-mcp",
+            hostProcessID: 99,
+            hostBundleIdentifier: "com.anthropic.claudefordesktop",
+            hostExecutablePath: "/Applications/Claude.app/Contents/Helpers/disclaimer",
+            clientAttestation: ProcessAttestation(
+                processID: 42,
+                identifier: "manifold-mcp",
+                teamIdentifier: "9FHKB788RP",
+                signatureValid: true,
+                usedAuditToken: true
+            ),
+            hostAttestation: ProcessAttestation(
+                processID: 99,
+                identifier: "disclaimer",
+                teamIdentifier: "Q6L2SF6YDW",
+                signatureValid: true,
+                usedAuditToken: false
+            ),
+            runtimeTeamIdentifier: "9FHKB788RP",
+            clientRequirementSatisfied: true,
+            hostRequirementSatisfied: true
+        )
+
+        #expect(identity.status == .verified)
+        #expect(identity.effectiveTargetApp == TargetApp.cowork.rawValue)
+    }
+
     @Test("Supported Codex host verifies Codex target")
     func supportedCodexHostVerifies() {
         let identity = ClientIdentityVerifier.verify(

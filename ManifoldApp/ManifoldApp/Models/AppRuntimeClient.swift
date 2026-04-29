@@ -242,6 +242,7 @@ protocol RuntimeClientProtocol: Sendable {
     func sessionEvents(sessionID: String) async throws -> [SessionEvent]
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult
     func trackedFiles() async throws -> [String]
+    func trackedFileCounts() async throws -> [String: Int]
     func storageStats() async throws -> StorageStatsSnapshot
     func recentLedgerEntries(limit: Int) async throws -> [LedgerEntry]
     func verifyLedger() async throws -> LedgerVerificationResult
@@ -563,6 +564,7 @@ extension RuntimeClientProtocol {
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { [] }
     func revertSessionEvent(event: SessionEvent, grantID: String, force: Bool) async throws -> RevertEventResult { throw RuntimeClientStubError.unimplemented("revertSessionEvent") }
     func trackedFiles() async throws -> [String] { [] }
+    func trackedFileCounts() async throws -> [String: Int] { [:] }
     func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: 0) }
     func recentLedgerEntries(limit: Int) async throws -> [LedgerEntry] { [] }
     func verifyLedger() async throws -> LedgerVerificationResult {
@@ -1719,6 +1721,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     }
     func sessionEvents(sessionID: String) async throws -> [SessionEvent] { state.sessionEvents[sessionID] ?? [] }
     func trackedFiles() async throws -> [String] { state.trackedFiles }
+    func trackedFileCounts() async throws -> [String: Int] {
+        Dictionary(uniqueKeysWithValues: state.trackedFiles.map { ($0, 1) })
+    }
     func storageStats() async throws -> StorageStatsSnapshot { StorageStatsSnapshot(storageUsed: state.storageUsed) }
     func recentLedgerEntries(limit: Int) async throws -> [LedgerEntry] { Array(state.ledgerEntries.prefix(limit)) }
     func verifyLedger() async throws -> LedgerVerificationResult { state.ledgerVerification }
@@ -3176,6 +3181,10 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func trackedFiles() async throws -> [String] {
         try await command(name: "trackedFiles", field: "trackedFiles", as: [String].self)
+    }
+
+    func trackedFileCounts() async throws -> [String: Int] {
+        try await command(name: "trackedFileCounts", field: "counts", as: [String: Int].self)
     }
 
     func storageStats() async throws -> StorageStatsSnapshot {

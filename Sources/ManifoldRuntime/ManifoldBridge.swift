@@ -3,8 +3,10 @@
 
 import Foundation
 import CryptoKit
+import AppKit
 import ManifoldKit
 import os
+import PDFKit
 
 /// Core logic layer between MCP protocol and ManifoldKit stores.
 /// Dual-path access: standing access via PolicyStore, work block via grant materialization.
@@ -25,6 +27,19 @@ public actor ManifoldBridge {
     // grabs at bridge state.
 
     static let maxExposurePreviewCharacters = 512
+    static let maxDirectBinaryWriteBytes = 25 * 1024 * 1024
+    static let maxPDFAnnotationBytes = 25 * 1024 * 1024
+    static let maxPDFAnnotationPages = 500
+    static let maxDirectBinaryWriteBase64Characters = ((maxDirectBinaryWriteBytes + 2) / 3) * 4 + 8_192
+    static let textWriteBlockedExtensions: Set<String> = [
+        "pdf",
+        "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "ico", "webp", "heic", "avif",
+        "zip", "gz", "tar", "rar", "7z", "pkg", "dmg",
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pages", "numbers", "key",
+        "sqlite", "sqlite3", "db", "bin", "dat",
+        "mp3", "mp4", "wav", "aiff", "avi", "mov", "mkv", "webm",
+        "ttf", "otf", "woff", "woff2",
+    ]
     let logger = Logger(subsystem: "com.spatialduality.manifold", category: "runtime")
     let db: DatabaseConnection
     let auditStore: AuditStore
@@ -1010,8 +1025,7 @@ public actor ManifoldBridge {
     /// Build mounts for standing access: each source gets a "mount" that points to the original path.
     private func standingMounts(sources: [SourceRecord]) -> [GrantMount] {
         sources.map { source in
-            let name = URL(fileURLWithPath: source.originalRootPath).lastPathComponent.lowercased()
-            return GrantMount(sourceID: source.sourceID, mountName: name, mountPath: source.originalRootPath)
+            GrantMount(sourceID: source.sourceID, mountName: source.canonicalMountName, mountPath: source.originalRootPath)
         }
     }
 
@@ -1133,8 +1147,35 @@ public actor ManifoldBridge {
     }
 
     private enum StandingWriteMode: String {
+        case automatic = "standing_write_auto"
         case once = "standing_write_once"
         case defaultScope = "standing_write_default"
+    }
+
+    private enum GovernedWriteMode: String {
+        case direct = "direct"
+        case directIfApproved = "direct_if_approved"
+        case draftWorkspace = "draft_workspace"
+    }
+
+    private struct GovernedWriteOptions {
+        let toolName: String
+        let data: Data
+        let mimeType: String?
+        let intent: AccessIntent?
+        let expectedBeforeHash: String?
+        let writeMode: GovernedWriteMode
+        let isBinary: Bool
+    }
+
+    private struct DraftWorkBlock {
+        let grant: GrantRecord
+        let sources: [GrantSourceRecord]
+    }
+
+    private enum StandingWriteResolution {
+        case ready(access: ResolvedMounts, writeID: String, writeSource: String, writeGrantID: String?, target: ResolvedWriteTarget)
+        case escalation(WriteResult)
     }
 
     private struct ResolvedWriteTarget {
@@ -1319,12 +1360,19 @@ public actor ManifoldBridge {
         }
     }
 
-    private func resolveWriteTarget(_ path: String, in mounts: [GrantMount]) throws -> ResolvedWriteTarget {
+    private func resolveWriteTarget(
+        _ path: String,
+        in mounts: [GrantMount],
+        requireMountPrefix: Bool = false
+    ) throws -> ResolvedWriteTarget {
         let targetMount: GrantMount
         let resolvedPath: String
         if let (mount, relPath) = resolveMountAndPath(path, in: mounts) {
             targetMount = mount
             resolvedPath = relPath
+        } else if requireMountPrefix {
+            let mountNames = mounts.map(\.mountName).sorted().joined(separator: ", ")
+            throw ManifoldMCPError.invalidPath("Writes to shared folders must use a mount-prefixed path. Available mounts: \(mountNames).")
         } else if mounts.count == 1, let first = mounts.first {
             targetMount = first
             resolvedPath = path
@@ -2054,12 +2102,155 @@ public actor ManifoldBridge {
         )
     }
 
-    // MARK: - Write File (P1 FIX: record snapshots, use canonical paths, reject ambiguous)
+    // MARK: - Governed Writes
 
-    /// Escalates file writes into tracked work instead of mutating originals directly.
-    public func writeFile(path: String, content: String) async throws -> WriteResult {
-        await logToolCall(tool: "write_file", arguments: ["path": path, "content_length": "\(content.count)"])
+    public func writeFile(
+        path: String,
+        content: String,
+        intent: AccessIntent? = nil,
+        expectedBeforeHash: String? = nil
+    ) async throws -> WriteResult {
         let cleaned = cleanPath(path)
+        let ext = (cleaned as NSString).pathExtension.lowercased()
+        if Self.textWriteBlockedExtensions.contains(ext) {
+            throw ManifoldMCPError.invalidPath(
+                "write_file is UTF-8 text only and refused to write .\(ext) binary content to \(cleaned). Use annotate_pdf for PDF stamps or write_binary_file with content_base64 for binary files."
+            )
+        }
+        let data = Data(content.utf8)
+        return try await writeBytes(
+            path: cleaned,
+            options: GovernedWriteOptions(
+                toolName: "write_file",
+                data: data,
+                mimeType: "text/plain; charset=utf-8",
+                intent: intent,
+                expectedBeforeHash: expectedBeforeHash,
+                writeMode: .direct,
+                isBinary: false
+            )
+        )
+    }
+
+    public func writeBinaryFile(
+        path: String,
+        contentBase64: String,
+        mimeType: String?,
+        intent: AccessIntent? = nil,
+        expectedBeforeHash: String? = nil,
+        writeMode: String? = nil
+    ) async throws -> WriteResult {
+        guard contentBase64.utf8.count <= Self.maxDirectBinaryWriteBase64Characters else {
+            throw ManifoldMCPError.invalidPath("write_binary_file payload is too large for a direct MCP write. Limit is \(Self.maxDirectBinaryWriteBytes) decoded bytes; use a draft workspace or a dedicated operation for larger files.")
+        }
+        let cleanedBase64 = contentBase64
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+        guard let data = Data(base64Encoded: cleanedBase64) else {
+            throw ManifoldMCPError.invalidPath("write_binary_file content_base64 is not valid base64")
+        }
+        guard data.count <= Self.maxDirectBinaryWriteBytes else {
+            throw ManifoldMCPError.invalidPath("write_binary_file decoded payload is too large for a direct MCP write. Limit is \(Self.maxDirectBinaryWriteBytes) bytes; use a draft workspace or a dedicated operation for larger files.")
+        }
+        let mode = writeMode.flatMap(GovernedWriteMode.init(rawValue:)) ?? .direct
+        return try await writeBytes(
+            path: path,
+            options: GovernedWriteOptions(
+                toolName: "write_binary_file",
+                data: data,
+                mimeType: mimeType,
+                intent: intent,
+                expectedBeforeHash: expectedBeforeHash,
+                writeMode: mode,
+                isBinary: true
+            )
+        )
+    }
+
+    public func annotatePDF(
+        path: String,
+        mark: String = "Viewed by Claude",
+        intent: AccessIntent? = nil,
+        expectedBeforeHash: String? = nil,
+        writeMode: String? = nil
+    ) async throws -> WriteResult {
+        let readIntent = intent ?? AccessIntent(summary: "Read PDF bytes to apply a governed annotation.", details: nil)
+        let original = try await readGovernedBytes(
+            path: path,
+            toolName: "annotate_pdf",
+            intent: readIntent,
+            maxBytes: Self.maxPDFAnnotationBytes
+        )
+        let ext = (original.canonicalPath as NSString).pathExtension.lowercased()
+        guard ext == "pdf" else {
+            throw ManifoldMCPError.invalidPath("annotate_pdf only accepts .pdf paths")
+        }
+        if let expectedBeforeHash = expectedBeforeHash?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !expectedBeforeHash.isEmpty {
+            let currentHash = Self.sha256Hex(original.data)
+            guard currentHash == expectedBeforeHash else {
+                throw ManifoldMCPError.invalidPath("Hash mismatch for \(original.canonicalPath). Expected \(expectedBeforeHash.prefix(12)), current \(currentHash.prefix(12)). Re-read the file before writing.")
+            }
+        }
+        guard original.data.starts(with: Data([0x25, 0x50, 0x44, 0x46])) else {
+            throw ManifoldMCPError.invalidPath("annotate_pdf refused a file that does not start with a PDF header")
+        }
+        guard let document = PDFDocument(data: original.data) else {
+            throw ManifoldMCPError.invalidPath("annotate_pdf can only modify readable PDF documents")
+        }
+        guard document.pageCount <= Self.maxPDFAnnotationPages else {
+            throw ManifoldMCPError.invalidPath("annotate_pdf refused a PDF with \(document.pageCount) pages; limit is \(Self.maxPDFAnnotationPages)")
+        }
+        guard let page = document.page(at: 0) else {
+            throw ManifoldMCPError.invalidPath("annotate_pdf cannot modify an empty PDF")
+        }
+
+        let pageBounds = page.bounds(for: .mediaBox)
+        let annotationBounds = CGRect(
+            x: max(pageBounds.minX + 24, pageBounds.maxX - 176),
+            y: pageBounds.minY + 24,
+            width: 152,
+            height: 24
+        )
+        let annotation = PDFAnnotation(bounds: annotationBounds, forType: .freeText, withProperties: nil)
+        annotation.contents = String(mark.prefix(80))
+        annotation.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        annotation.fontColor = .systemBlue
+        annotation.color = NSColor.systemBlue.withAlphaComponent(0.08)
+        page.addAnnotation(annotation)
+
+        guard let updatedData = document.dataRepresentation() else {
+            throw ManifoldMCPError.invalidPath("annotate_pdf could not serialize the modified PDF")
+        }
+
+        let mode = writeMode.flatMap(GovernedWriteMode.init(rawValue:)) ?? .direct
+        return try await writeBytes(
+            path: original.canonicalPath,
+            options: GovernedWriteOptions(
+                toolName: "annotate_pdf",
+                data: updatedData,
+                mimeType: "application/pdf",
+                intent: intent,
+                expectedBeforeHash: expectedBeforeHash,
+                writeMode: mode,
+                isBinary: true
+            )
+        )
+    }
+
+    private func writeBytes(path: String, options: GovernedWriteOptions) async throws -> WriteResult {
+        let data = options.data
+        await logToolCall(
+            tool: options.toolName,
+            arguments: [
+                "path": path,
+                "bytes": "\(data.count)",
+                "mime_type": options.mimeType ?? "",
+                "write_mode": options.writeMode.rawValue,
+            ]
+        )
+        let cleaned = cleanPath(path)
+        let validatedIntent = try await validatedAccessIntent(for: options.toolName, provided: options.intent)
 
         guard !cleaned.hasPrefix("_emails/") else {
             throw ManifoldMCPError.invalidPath("Cannot write to email files (read-only)")
@@ -2067,22 +2258,21 @@ public actor ManifoldBridge {
 
         let accessContext: AccessContext
         do {
-            accessContext = try await resolveAccess()
+            accessContext = try await resolveAccessForWrite(cleanedPath: cleaned)
         } catch {
             let denied = deniedDecisionContext(for: error)
             _ = await recordAccessDecision(
-                toolName: "write_file",
+                toolName: options.toolName,
                 resourcePath: cleaned,
                 action: "write",
                 allowed: false,
                 reason: denied.reason,
-                accessMode: denied.accessMode
+                accessMode: denied.accessMode,
+                intent: validatedIntent
             )
             throw error
         }
 
-        let data = content.data(using: .utf8) ?? Data()
-        let accessDecisionID: String?
         let access: ResolvedMounts
         let writeID: String
         let writeSource: String
@@ -2091,166 +2281,89 @@ public actor ManifoldBridge {
 
         switch accessContext {
         case .standing(let policy, let sources):
-            let mounts = standingMounts(sources: sources)
-            let target = try resolveWriteTarget(cleaned, in: mounts)
-            let visibilityResolver = try await standingFileVisibilityResolver(for: policy)
-            let visibility = visibilityResolver.evaluate(
-                sourceID: target.mount.sourceID,
-                relativePath: target.relativePath,
-                defaultVisible: policy.allowedSourceIDs.contains(target.mount.sourceID)
+            let standing = try await resolveStandingWrite(
+                cleanedPath: cleaned,
+                policy: policy,
+                sources: sources,
+                options: options,
+                intent: validatedIntent
             )
-            guard visibility.isVisible else {
-                _ = await recordAccessDecision(
-                    toolName: "write_file",
-                    resourcePath: target.canonicalPath,
-                    action: "write",
-                    allowed: false,
-                    reason: "standing_access",
-                    accessMode: "standing",
-                    policySnapshot: policySnapshot(for: policy)
-                )
-                throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+            switch standing {
+            case .ready(let resolvedAccess, let resolvedWriteID, let resolvedWriteSource, let resolvedWriteGrantID, let target):
+                access = resolvedAccess
+                writeID = resolvedWriteID
+                writeSource = resolvedWriteSource
+                writeGrantID = resolvedWriteGrantID
+                writeTarget = target
+            case .escalation(let result):
+                return result
             }
-            guard policy.allowedSourceIDs.contains(target.mount.sourceID) else {
-                _ = await recordAccessDecision(
-                    toolName: "write_file",
-                    resourcePath: target.canonicalPath,
-                    action: "write",
-                    allowed: false,
-                    reason: "standing_access",
-                    accessMode: "standing",
-                    policySnapshot: policySnapshot(for: policy)
-                )
-                throw ManifoldMCPError.invalidPath("Standing writes require the folder to remain in default scope. Explicit file overrides are read-only until a tracked session starts.")
-            }
-            let defaultApproved = try await standingWriteApprovalStore?.hasDefaultGrant(
-                agent: targetApp,
-                sourceID: target.mount.sourceID
-            ) ?? false
-            let onceApproved: Bool
-            if defaultApproved {
-                onceApproved = false
-            } else {
-                onceApproved = try await standingWriteApprovalStore?.consumeOnce(
-                    agent: targetApp,
-                    sourceID: target.mount.sourceID,
-                    relativePath: target.relativePath
-                ) ?? false
-            }
-
-            guard defaultApproved || onceApproved else {
-                _ = try? await approvalQueue?.submit(
-                    connectionID: runtimeContext.connectionID,
-                    agent: agentName,
-                    path: target.canonicalPath,
-                    action: "write",
-                    kind: .standingWrite,
-                    sourceID: target.mount.sourceID,
-                    mountName: target.mount.mountName,
-                    relativePath: target.relativePath
-                )
-                _ = await recordAccessDecision(
-                    toolName: "write_file",
-                    resourcePath: target.canonicalPath,
-                    action: "write",
-                    allowed: false,
-                    reason: "standing_access",
-                    accessMode: "standing",
-                    policySnapshot: policySnapshot(for: policy)
-                )
-                return .escalationRequired(
-                    message: "Always-on access reads by default. Approve one reversible write for this file, or add reversible write access for this shared folder through Manifold.",
-                    path: target.canonicalPath
-                )
-            }
-
-            accessDecisionID = await recordAccessDecision(
-                toolName: "write_file",
-                resourcePath: target.canonicalPath,
-                action: "write",
-                allowed: true,
-                reason: "standing_access",
-                accessMode: defaultApproved ? StandingWriteMode.defaultScope.rawValue : StandingWriteMode.once.rawValue,
-                policySnapshot: policySnapshot(for: policy)
-            )
-            access = ResolvedMounts(
-                mounts: mounts,
-                grantID: nil,
-                grant: nil,
-                isStanding: true,
-                decisionID: accessDecisionID,
-                standingPolicy: policy,
-                standingResolver: visibilityResolver
-            )
-            writeID = "standing-write:\(target.mount.sourceID)"
-            writeSource = defaultApproved ? StandingWriteMode.defaultScope.rawValue : StandingWriteMode.once.rawValue
-            writeGrantID = nil
-            writeTarget = target
 
         case .workBlock(let grant, let grantSources, _):
-            accessDecisionID = await recordAccessDecision(
-                toolName: "write_file",
-                resourcePath: cleaned,
-                action: "write",
-                allowed: true,
-                reason: "work_block",
-                accessMode: "tracked_run"
-            )
-            access = ResolvedMounts(
-                mounts: grantMounts(grant: grant, sources: grantSources),
-                grantID: grant.grantID,
+            let resolved = try await resolveTrackedWrite(
+                cleanedPath: cleaned,
                 grant: grant,
-                isStanding: false,
-                decisionID: accessDecisionID,
-                standingPolicy: nil,
-                standingResolver: nil
+                grantSources: grantSources,
+                toolName: options.toolName,
+                intent: validatedIntent
             )
-            let target = try resolveWriteTarget(cleaned, in: access.mounts)
-            try await assertWritableScope(relativePath: target.relativePath, mount: target.mount, grant: grant)
+            access = resolved.access
             writeID = grant.grantID
             writeSource = "mcp"
             writeGrantID = grant.grantID
-            writeTarget = target
+            writeTarget = resolved.target
 
         case .legacyGrant(let grant, let grantSources):
-            accessDecisionID = await recordAccessDecision(
-                toolName: "write_file",
-                resourcePath: cleaned,
-                action: "write",
-                allowed: true,
-                reason: "work_block",
-                accessMode: "tracked_run"
-            )
-            access = ResolvedMounts(
-                mounts: grantMounts(grant: grant, sources: grantSources),
-                grantID: grant.grantID,
+            let resolved = try await resolveTrackedWrite(
+                cleanedPath: cleaned,
                 grant: grant,
-                isStanding: false,
-                decisionID: accessDecisionID,
-                standingPolicy: nil,
-                standingResolver: nil
+                grantSources: grantSources,
+                toolName: options.toolName,
+                intent: validatedIntent
             )
-            let target = try resolveWriteTarget(cleaned, in: access.mounts)
-            try await assertWritableScope(relativePath: target.relativePath, mount: target.mount, grant: grant)
+            access = resolved.access
             writeID = grant.grantID
             writeSource = "mcp"
             writeGrantID = grant.grantID
-            writeTarget = target
+            writeTarget = resolved.target
         }
 
+        let effectiveWriteSource = (!access.isStanding && Self.isDraftWorkspaceGrant(access.grant)) ? "mcp_draft_workspace" : writeSource
         let targetMount = writeTarget.mount
         let resolvedPath = writeTarget.relativePath
         let targetIdentity = writeTarget.identity
         let canonicalPath = writeTarget.canonicalPath
-
         let existed = targetIdentity.exists
-        if access.isStanding,
-           existed,
-           try await snapshotStore.latestHash(runID: writeID, filePath: canonicalPath) == nil {
-            let existingData = try ScopedFileAccess.readData(
+
+        let existingData: Data?
+        if existed {
+            existingData = try ScopedFileAccess.readData(
                 relativePath: resolvedPath,
                 rootPath: targetMount.mountPath
             ).data
+        } else {
+            existingData = nil
+        }
+        let observedBeforeHash = existingData.map(Self.sha256Hex)
+        if let expectedBeforeHash = options.expectedBeforeHash?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !expectedBeforeHash.isEmpty {
+            guard existingData != nil else {
+                throw ManifoldMCPError.invalidPath("expected_before_hash was provided, but \(canonicalPath) does not exist")
+            }
+            guard observedBeforeHash == expectedBeforeHash else {
+                throw ManifoldMCPError.invalidPath("Hash mismatch for \(canonicalPath). Expected \(expectedBeforeHash.prefix(12)), current \((observedBeforeHash ?? "").prefix(12)). Re-read the file before writing.")
+            }
+        }
+
+        try await enforceFileWriteRules(
+            target: writeTarget,
+            options: options,
+            runID: writeID
+        )
+
+        if access.isStanding,
+           let existingData,
+           try await snapshotStore.latestHash(runID: writeID, filePath: canonicalPath) == nil {
             try await snapshotStore.recordBaseline(
                 runID: writeID,
                 workspaceID: targetMount.sourceID,
@@ -2258,6 +2371,15 @@ public actor ManifoldBridge {
                 data: existingData
             )
         }
+        try await revalidateWriteAccessBeforeMutation(
+            access: access,
+            target: writeTarget
+        )
+        try verifyWritePreconditionStillMatches(
+            target: writeTarget,
+            existed: existed,
+            observedBeforeHash: observedBeforeHash
+        )
         let writtenIdentity: ScopedFileIdentity
         do {
             writtenIdentity = try ScopedFileAccess.writeDataAtomically(
@@ -2269,29 +2391,51 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.invalidPath(error.localizedDescription)
         }
 
-        if let grant = access.grant {
-            try await artifactIndex.upsertFile(
-                grantID: grant.grantID,
-                mount: ArtifactMount(sourceID: targetMount.sourceID, mountName: targetMount.mountName, mountPath: targetMount.mountPath),
-                relativePath: resolvedPath,
-                fileURL: writtenIdentity.fileURL
-            )
-        }
+        let snapshot: SnapshotWriteResult
+        do {
+            if let grant = access.grant {
+                try await artifactIndex.upsertFile(
+                    grantID: grant.grantID,
+                    mount: ArtifactMount(sourceID: targetMount.sourceID, mountName: targetMount.mountName, mountPath: targetMount.mountPath),
+                    relativePath: resolvedPath,
+                    fileURL: writtenIdentity.fileURL
+                )
+            }
 
-        let snapshot = try await snapshotStore.recordModification(
-            runID: writeID,
-            workspaceID: targetMount.sourceID,
-            filePath: canonicalPath,
-            newData: data,
-            source: writeSource
-        )
+            snapshot = try await snapshotStore.recordModification(
+                runID: writeID,
+                workspaceID: targetMount.sourceID,
+                filePath: canonicalPath,
+                newData: data,
+                source: effectiveWriteSource
+            )
+        } catch {
+            rollbackWriteAfterVersioningFailure(
+                target: writeTarget,
+                existed: existed,
+                existingData: existingData
+            )
+            throw error
+        }
+        if let writeGrantID,
+           let block = try await workBlockStore?.activeBlock(for: targetApp),
+           block.grantID == writeGrantID {
+            try? await refreshWorkBlockCounts(blockID: block.id, runID: writeGrantID)
+        }
 
         var writeMetadata = mergedMetadata([
             "mount": targetMount.mountName,
             "bytes": "\(data.count)",
             "snapshot_id": "\(snapshot.id)",
-            "access_mode": access.isStanding ? writeSource : "tracked_run",
+            "access_mode": access.isStanding ? effectiveWriteSource : "tracked_run",
+            "tool": options.toolName,
+            "write_mode": options.writeMode.rawValue,
+            "mime_type": options.mimeType ?? "",
+            "is_binary": options.isBinary ? "true" : "false",
         ])
+        if let expectedBeforeHash = options.expectedBeforeHash, !expectedBeforeHash.isEmpty {
+            writeMetadata["expected_before_hash"] = expectedBeforeHash
+        }
         if let writeGrantID {
             writeMetadata["grant_id"] = writeGrantID
         }
@@ -2314,7 +2458,672 @@ public actor ManifoldBridge {
                 byteCount: data.count
             )
         }
-        return .written(message: "Wrote \(data.count) bytes to \(canonicalPath)", path: canonicalPath)
+        return .written(
+            message: writeSuccessMessage(
+                byteCount: data.count,
+                canonicalPath: canonicalPath,
+                snapshotID: snapshot.id,
+                existed: existed,
+                directOriginalWrite: access.isStanding,
+                writeSource: effectiveWriteSource
+            ),
+            path: canonicalPath
+        )
+    }
+
+    private func enforceFileWriteRules(
+        target: ResolvedWriteTarget,
+        options: GovernedWriteOptions,
+        runID: String
+    ) async throws {
+        guard let ruleStore else { return }
+        let rules: [RuleRecord]
+        do {
+            rules = try await ruleStore.rules(scope: .file)
+        } catch {
+            logger.error("Rule gate: failed to load file write rules — \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard !rules.isEmpty else { return }
+
+        let fileProbe = Self.makeWriteFileProbe(
+            canonicalPath: target.canonicalPath,
+            data: options.data,
+            isBinary: options.isBinary
+        )
+        let agentProbe = AgentProbe(
+            agent: targetApp,
+            tool: .write,
+            payloadBytes: Int64(options.data.count)
+        )
+        let decision = RuleEngine().evaluate(
+            .fileWrite(path: target.canonicalPath),
+            against: rules,
+            agent: targetApp,
+            context: RuleEvalContext(fileProbe: fileProbe, agentProbe: agentProbe)
+        )
+
+        switch decision.action {
+        case .deny:
+            if let ruleID = decision.matchedRuleID {
+                await ruleStore.recordMatch(id: ruleID)
+            }
+            try? await auditStore.log(
+                action: .toolCall,
+                runID: runID,
+                workspaceID: target.mount.sourceID,
+                agent: agentName,
+                filePath: target.canonicalPath,
+                metadata: mergedMetadata([
+                    "tool": options.toolName,
+                    "rule_scope": "file",
+                    "rule_request": "file_write",
+                    "rule_decision": "deny",
+                    "matched_rule_id": decision.matchedRuleID ?? "",
+                    "matched_rule_name": decision.matchedRuleName ?? "",
+                    "bytes": "\(options.data.count)",
+                ])
+            )
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: decision.matchedRuleName ?? "write rule",
+                explanation: decision.explanation
+            )
+
+        case .warn, .redact, .summarize, .downgrade, .log:
+            if let ruleID = decision.matchedRuleID {
+                await ruleStore.recordMatch(id: ruleID)
+            }
+            try? await auditStore.log(
+                action: .toolCall,
+                runID: runID,
+                workspaceID: target.mount.sourceID,
+                agent: agentName,
+                filePath: target.canonicalPath,
+                metadata: mergedMetadata([
+                    "tool": options.toolName,
+                    "rule_scope": "file",
+                    "rule_request": "file_write",
+                    "rule_decision": decision.action.rawValue,
+                    "matched_rule_id": decision.matchedRuleID ?? "",
+                    "matched_rule_name": decision.matchedRuleName ?? "",
+                    "bytes": "\(options.data.count)",
+                ])
+            )
+
+        case .allow:
+            break
+        }
+    }
+
+    private func revalidateWriteAccessBeforeMutation(
+        access: ResolvedMounts,
+        target: ResolvedWriteTarget
+    ) async throws {
+        if access.isStanding {
+            guard let policyStore else { return }
+            let policy = try await policyStore.policy(for: targetApp)
+            if policy.isPaused {
+                throw ManifoldMCPError.accessPaused
+            }
+            guard policy.allowedSourceIDs.contains(target.mount.sourceID) else {
+                throw ManifoldMCPError.invalidPath("The source for \(target.canonicalPath) is no longer shared with \(targetApp.rawValue). Re-list files before writing.")
+            }
+            guard let source = try await grantStore.source(id: target.mount.sourceID),
+                  source.isAccessible else {
+                throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+            }
+
+            let currentMounts = standingMounts(sources: [source])
+            let currentTarget = try resolveWriteTarget(
+                target.canonicalPath,
+                in: currentMounts,
+                requireMountPrefix: true
+            )
+            guard currentTarget.mount.sourceID == target.mount.sourceID,
+                  currentTarget.mount.mountPath == target.mount.mountPath,
+                  currentTarget.relativePath == target.relativePath else {
+                throw ManifoldMCPError.invalidPath("The source mapping for \(target.canonicalPath) changed while the write was in progress. Re-list files before writing.")
+            }
+
+            let resolver = try await standingFileVisibilityResolver(for: policy)
+            let visibility = resolver.evaluate(
+                sourceID: target.mount.sourceID,
+                relativePath: target.relativePath,
+                defaultVisible: true
+            )
+            guard visibility.isVisible else {
+                throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+            }
+        } else if let grant = access.grant {
+            guard let freshGrant = try await grantStore.grant(id: grant.grantID),
+                  freshGrant.isActive else {
+                throw ManifoldMCPError.noActiveSession
+            }
+            if let source = try await grantStore.source(id: target.mount.sourceID),
+               !source.isAccessible {
+                throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+            }
+        }
+    }
+
+    private func verifyWritePreconditionStillMatches(
+        target: ResolvedWriteTarget,
+        existed: Bool,
+        observedBeforeHash: String?
+    ) throws {
+        if existed {
+            do {
+                let currentData = try ScopedFileAccess.readData(
+                    relativePath: target.relativePath,
+                    rootPath: target.mount.mountPath
+                ).data
+                let currentHash = Self.sha256Hex(currentData)
+                guard currentHash == observedBeforeHash else {
+                    throw ManifoldMCPError.invalidPath("The governed file changed while the write was being prepared. Re-read \(target.canonicalPath) before writing.")
+                }
+            } catch let error as ManifoldMCPError {
+                throw error
+            } catch let error as ManifoldError {
+                throw ManifoldMCPError.invalidPath(error.localizedDescription)
+            }
+        } else {
+            do {
+                let currentIdentity = try ScopedFileAccess.resolve(
+                    relativePath: target.relativePath,
+                    rootPath: target.mount.mountPath,
+                    allowMissingLeaf: true
+                )
+                guard !currentIdentity.exists else {
+                    throw ManifoldMCPError.invalidPath("\(target.canonicalPath) was created while the write was being prepared. Re-read the folder before writing.")
+                }
+            } catch let error as ManifoldMCPError {
+                throw error
+            } catch let error as ManifoldError {
+                throw ManifoldMCPError.invalidPath(error.localizedDescription)
+            }
+        }
+    }
+
+    private func rollbackWriteAfterVersioningFailure(
+        target: ResolvedWriteTarget,
+        existed: Bool,
+        existingData: Data?
+    ) {
+        do {
+            if existed, let existingData {
+                _ = try ScopedFileAccess.writeDataAtomically(
+                    existingData,
+                    relativePath: target.relativePath,
+                    rootPath: target.mount.mountPath
+                )
+            } else {
+                let identity = try ScopedFileAccess.resolve(
+                    relativePath: target.relativePath,
+                    rootPath: target.mount.mountPath,
+                    allowMissingLeaf: true
+                )
+                if FileManager.default.fileExists(atPath: identity.fileURL.path) {
+                    try FileManager.default.removeItem(at: identity.fileURL)
+                }
+            }
+        } catch {
+            logger.error("Failed to roll back governed write after versioning failure for \(target.canonicalPath, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    private nonisolated static func makeWriteFileProbe(
+        canonicalPath: String,
+        data: Data,
+        isBinary: Bool
+    ) -> FileProbe {
+        FileProbe(
+            path: canonicalPath,
+            sizeBytes: { Int64(data.count) },
+            modifiedAt: { Date() },
+            isHidden: {
+                URL(fileURLWithPath: canonicalPath).lastPathComponent.hasPrefix(".")
+            },
+            isBinary: {
+                isBinary || data.prefix(512).contains(0)
+            },
+            isGitignored: { false },
+            containsSecret: {
+                Self.containsSecret(in: data)
+            }
+        )
+    }
+
+    private nonisolated static func containsSecret(in data: Data) -> Bool {
+        let prefix = Data(data.prefix(64 * 1024))
+        guard let text = String(data: prefix, encoding: .utf8) else { return false }
+        let needles = [
+            "AKIA",
+            "-----BEGIN PRIVATE KEY-----",
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "ghp_",
+            "ghs_",
+            "xoxb-",
+            "xoxp-",
+        ]
+        if needles.contains(where: { text.contains($0) }) { return true }
+        return text.range(
+            of: #"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private nonisolated static func isDraftWorkspaceGrant(_ grant: GrantRecord?) -> Bool {
+        grant?.summaryFraming == "Manifold draft workspace for governed AI file writes."
+    }
+
+    private func resolveAccessForWrite(cleanedPath: String) async throws -> AccessContext {
+        if let standing = try await directStandingAccessForWrite(cleanedPath: cleanedPath) {
+            return standing
+        }
+        return try await resolveAccess()
+    }
+
+    /// Normal governed writes should land in the original shared folder,
+    /// even if a previous draft/tracked work block is still active. Only
+    /// source-level shared folders are writable in standing mode; explicit
+    /// file overrides stay read-only unless a tracked work block is the only
+    /// available access path.
+    private func directStandingAccessForWrite(cleanedPath: String) async throws -> AccessContext? {
+        guard let policyStore else { return nil }
+        let policy = try await policyStore.policy(for: targetApp)
+        if policy.isPaused {
+            throw ManifoldMCPError.accessPaused
+        }
+        guard !policy.allowedSourceIDs.isEmpty else {
+            return nil
+        }
+
+        let allSources = try await grantStore.activeSources()
+        let allowedSources = allSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
+        guard !allowedSources.isEmpty else { return nil }
+
+        let mounts = standingMounts(sources: allowedSources)
+        if resolveMountAndPath(cleanedPath, in: mounts) != nil {
+            return .standing(policy: policy, sources: allowedSources)
+        }
+
+        if let first = cleanedPath.split(separator: "/", maxSplits: 1).first {
+            let firstComponent = String(first)
+            let allMountNames = Set(allSources.map(\.canonicalMountName))
+            let allowedMountNames = Set(mounts.map(\.mountName))
+            if allMountNames.contains(firstComponent), !allowedMountNames.contains(firstComponent) {
+                return nil
+            }
+        }
+
+        if mounts.count == 1 {
+            return .standing(policy: policy, sources: allowedSources)
+        }
+
+        let existingMatches = mounts.filter { mount in
+            guard let url = try? validatePath(cleanedPath, rootPath: mount.mountPath) else { return false }
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+        return existingMatches.count == 1 ? .standing(policy: policy, sources: allowedSources) : nil
+    }
+
+    private func refreshWorkBlockCounts(blockID: String, runID: String) async throws {
+        guard let workBlockStore else { return }
+        let paths = try await snapshotStore.modifiedFiles(runID: runID)
+        var modified = 0
+        var created = 0
+        for path in paths {
+            if try await snapshotStore.baselineHash(runID: runID, filePath: path) == nil {
+                created += 1
+            } else {
+                modified += 1
+            }
+        }
+        try await workBlockStore.updateCounts(id: blockID, modifiedFiles: modified, newFiles: created)
+    }
+
+    private nonisolated func writeSuccessMessage(
+        byteCount: Int,
+        canonicalPath: String,
+        snapshotID: Int,
+        existed: Bool,
+        directOriginalWrite: Bool,
+        writeSource: String
+    ) -> String {
+        let action = existed ? "Updated" : "Created"
+        if directOriginalWrite {
+            return "\(action) \(canonicalPath) in the original folder (\(byteCount) bytes). Manifold recorded snapshot #\(snapshotID) for version history."
+        }
+        let workspaceKind = writeSource == "mcp_draft_workspace" ? "draft workspace" : "tracked workspace"
+        return "\(action) \(canonicalPath) in the Manifold \(workspaceKind) (\(byteCount) bytes). The original folder is unchanged until the user applies/promotes the workspace. Manifold recorded snapshot #\(snapshotID)."
+    }
+
+    private func resolveStandingWrite(
+        cleanedPath: String,
+        policy: AgentAccessPolicy,
+        sources: [SourceRecord],
+        options: GovernedWriteOptions,
+        intent: AccessIntent?
+    ) async throws -> StandingWriteResolution {
+        let mounts = standingMounts(sources: sources)
+        let target = try resolveWriteTarget(cleanedPath, in: mounts, requireMountPrefix: true)
+        let visibilityResolver = try await standingFileVisibilityResolver(for: policy)
+        let visibility = visibilityResolver.evaluate(
+            sourceID: target.mount.sourceID,
+            relativePath: target.relativePath,
+            defaultVisible: policy.allowedSourceIDs.contains(target.mount.sourceID)
+        )
+        guard visibility.isVisible else {
+            _ = await recordAccessDecision(
+                toolName: options.toolName,
+                resourcePath: target.canonicalPath,
+                action: "write",
+                allowed: false,
+                reason: "standing_access",
+                accessMode: "standing",
+                policySnapshot: policySnapshot(for: policy),
+                intent: intent
+            )
+            throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+        }
+        guard policy.allowedSourceIDs.contains(target.mount.sourceID) else {
+            _ = await recordAccessDecision(
+                toolName: options.toolName,
+                resourcePath: target.canonicalPath,
+                action: "write",
+                allowed: false,
+                reason: "standing_access",
+                accessMode: "standing",
+                policySnapshot: policySnapshot(for: policy),
+                intent: intent
+            )
+            throw ManifoldMCPError.invalidPath("Standing writes require the folder to remain in default scope. Explicit file overrides are read-only until a tracked session starts.")
+        }
+
+        if options.writeMode == .draftWorkspace {
+            return try await resolveDraftWrite(
+                draftPath: target.relativePath,
+                sourceID: target.mount.sourceID,
+                toolName: options.toolName,
+                policy: policy,
+                intent: intent
+            )
+        }
+
+        let accessDecisionID = await recordAccessDecision(
+            toolName: options.toolName,
+            resourcePath: target.canonicalPath,
+            action: "write",
+            allowed: true,
+            reason: "standing_access",
+            accessMode: StandingWriteMode.automatic.rawValue,
+            policySnapshot: policySnapshot(for: policy),
+            intent: intent
+        )
+        return .ready(
+            access: ResolvedMounts(
+                mounts: mounts,
+                grantID: nil,
+                grant: nil,
+                isStanding: true,
+                decisionID: accessDecisionID,
+                standingPolicy: policy,
+                standingResolver: visibilityResolver
+            ),
+            writeID: "standing-write:\(target.mount.sourceID)",
+            writeSource: StandingWriteMode.automatic.rawValue,
+            writeGrantID: nil,
+            target: target
+        )
+    }
+
+    private func resolveTrackedWrite(
+        cleanedPath: String,
+        grant: GrantRecord,
+        grantSources: [GrantSourceRecord],
+        toolName: String,
+        intent: AccessIntent?
+    ) async throws -> (access: ResolvedMounts, target: ResolvedWriteTarget) {
+        let accessDecisionID = await recordAccessDecision(
+            toolName: toolName,
+            resourcePath: cleanedPath,
+            action: "write",
+            allowed: true,
+            reason: "work_block",
+            accessMode: "tracked_run",
+            intent: intent
+        )
+        let access = ResolvedMounts(
+            mounts: grantMounts(grant: grant, sources: grantSources),
+            grantID: grant.grantID,
+            grant: grant,
+            isStanding: false,
+            decisionID: accessDecisionID,
+            standingPolicy: nil,
+            standingResolver: nil
+        )
+        let target = try resolveWriteTarget(cleanedPath, in: access.mounts)
+        try await assertWritableScope(relativePath: target.relativePath, mount: target.mount, grant: grant)
+        return (access, target)
+    }
+
+    private func resolveDraftWrite(
+        draftPath: String,
+        sourceID: String,
+        toolName: String,
+        policy: AgentAccessPolicy,
+        intent: AccessIntent?
+    ) async throws -> StandingWriteResolution {
+        let draft = try await ensureDraftWorkBlock(sourceID: sourceID)
+        let resolved = try await resolveTrackedWrite(
+            cleanedPath: draftPath,
+            grant: draft.grant,
+            grantSources: draft.sources,
+            toolName: toolName,
+            intent: intent
+        )
+        let target = resolved.target
+        _ = await recordAccessDecision(
+            toolName: toolName,
+            resourcePath: target.canonicalPath,
+            action: "write",
+            allowed: true,
+            reason: "standing_access",
+            accessMode: GovernedWriteMode.draftWorkspace.rawValue,
+            policySnapshot: policySnapshot(for: policy),
+            intent: intent
+        )
+        return .ready(
+            access: resolved.access,
+            writeID: draft.grant.grantID,
+            writeSource: "mcp_draft_workspace",
+            writeGrantID: draft.grant.grantID,
+            target: target
+        )
+    }
+
+    private func ensureDraftWorkBlock(sourceID: String) async throws -> DraftWorkBlock {
+        if let block = try await workBlockStore?.activeBlock(for: targetApp),
+           let grant = try await grantStore.grant(id: block.grantID),
+           block.sourceIDs.contains(sourceID) {
+            return DraftWorkBlock(grant: grant, sources: try await grantStore.grantSources(grantID: grant.grantID))
+        }
+
+        guard let source = try await grantStore.source(id: sourceID), !source.isRemoved else {
+            throw ManifoldMCPError.fileNotFound(sourceID)
+        }
+
+        let grant = try await grantStore.startGrant(
+            targetApp: targetApp,
+            profileID: profileID,
+            sourceIDs: [sourceID],
+            materializationRoot: Self.materializationRoot(grantID: "").path,
+            emailSensitivity: "strict",
+            summaryFraming: "Manifold draft workspace for governed AI file writes.",
+            explicitSelection: false,
+            noteCaptureMode: .off
+        )
+        let actualRoot = Self.materializationRoot(grantID: grant.grantID)
+        try await grantStore.updateMaterializationRoot(grantID: grant.grantID, root: actualRoot.path)
+        let updatedGrant = try await grantStore.grant(id: grant.grantID) ?? grant
+        let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+        let mountInputs = grantSources.compactMap { grantSource -> MaterializationEngine.MaterializationSource? in
+            guard grantSource.sourceID == sourceID else { return nil }
+            return MaterializationEngine.MaterializationSource(
+                source: source,
+                mountName: grantSource.mountName
+            )
+        }
+        let results = try MaterializationEngine.materialize(
+            grantID: grant.grantID,
+            sources: mountInputs,
+            materializationRoot: actualRoot.path
+        )
+        for result in results {
+            try await grantStore.setBaselineHash(
+                grantID: grant.grantID,
+                sourceID: result.sourceID,
+                hash: result.manifestHash
+            )
+            try await baselineSnapshotMount(
+                grantID: grant.grantID,
+                sourceID: result.sourceID,
+                mountName: result.mountName,
+                mountPath: result.mountPath
+            )
+        }
+        try await artifactIndex.ensureGrantIndexed(
+            grantID: grant.grantID,
+            materializationRoot: actualRoot.path,
+            mounts: results.map {
+                ArtifactMount(sourceID: $0.sourceID, mountName: $0.mountName, mountPath: $0.mountPath)
+            }
+        )
+        _ = try await workBlockStore?.startBlock(
+            agent: targetApp,
+            grantID: grant.grantID,
+            sourceIDs: [sourceID]
+        )
+        try? await auditStore.log(
+            action: .runStart,
+            runID: grant.grantID,
+            agent: agentName,
+            metadata: [
+                "grant_id": grant.grantID,
+                "write_mode": GovernedWriteMode.draftWorkspace.rawValue,
+                "source_id": sourceID,
+            ],
+            grantID: grant.grantID
+        )
+        return DraftWorkBlock(grant: updatedGrant, sources: grantSources)
+    }
+
+    private func readGovernedBytes(
+        path: String,
+        toolName: String,
+        intent: AccessIntent?,
+        maxBytes: Int? = nil
+    ) async throws -> (data: Data, canonicalPath: String) {
+        let cleaned = cleanPath(path)
+        let validatedIntent = try await validatedAccessIntent(for: toolName, provided: intent)
+        let access = try await resolveAccessMounts(toolName: toolName, action: "read", resourcePath: cleaned, intent: validatedIntent)
+        let target = try resolveWriteTarget(cleaned, in: access.mounts)
+        try assertStandingVisibility(
+            relativePath: target.relativePath,
+            mount: target.mount,
+            access: access,
+            originalPath: cleaned
+        )
+        guard target.identity.exists else {
+            throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+        }
+        if let maxBytes,
+           let size = try? target.identity.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size > maxBytes {
+            throw ManifoldMCPError.invalidPath("\(toolName) refused \(target.canonicalPath) because it is \(size) bytes; limit is \(maxBytes) bytes")
+        }
+        let data = try ScopedFileAccess.readData(
+            relativePath: target.relativePath,
+            rootPath: target.mount.mountPath
+        ).data
+        await recordExposure(
+            toolName: toolName,
+            resourcePath: target.canonicalPath,
+            data: data,
+            exposureType: "file_bytes",
+            decisionID: access.decisionID,
+            intent: validatedIntent
+        )
+        return (data, target.canonicalPath)
+    }
+
+    private func standingWriteContextJSON(
+        target: ResolvedWriteTarget,
+        options: GovernedWriteOptions
+    ) -> String? {
+        let object: [String: String] = [
+            "path": target.canonicalPath,
+            "source_id": target.mount.sourceID,
+            "mount_name": target.mount.mountName,
+            "relative_path": target.relativePath,
+            "tool": options.toolName,
+            "bytes": "\(options.data.count)",
+            "mime_type": options.mimeType ?? "",
+            "write_mode": options.writeMode.rawValue,
+            "is_binary": options.isBinary ? "true" : "false",
+            "intent_summary": options.intent?.summary ?? "",
+            "expected_before_hash": options.expectedBeforeHash ?? "",
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func baselineSnapshotMount(
+        grantID: String,
+        sourceID: String,
+        mountName: String,
+        mountPath: String
+    ) async throws {
+        let root = URL(fileURLWithPath: mountPath)
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        while let url = enumerator.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let relative = Self.relativePath(for: url, base: root)
+            guard !relative.hasPrefix(".manifold-") else { continue }
+            let canonical = "\(mountName)/\(relative)"
+            let data = try Data(contentsOf: url)
+            try await snapshotStore.recordBaseline(
+                runID: grantID,
+                workspaceID: sourceID,
+                filePath: canonical,
+                data: data
+            )
+        }
+    }
+
+    private static func materializationRoot(grantID: String) -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Manifold/materializations/\(grantID)/workspace")
+    }
+
+    private static func relativePath(for url: URL, base: URL) -> String {
+        let basePath = base.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(basePath + "/") else { return url.lastPathComponent }
+        return String(filePath.dropFirst(basePath.count + 1))
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     public func searchFiles(query: String, intent: AccessIntent? = nil) async throws -> [(path: String, source: String, matches: [String])] {
@@ -3445,7 +4254,7 @@ public actor ManifoldBridge {
         let deniedOps: Set<String> = [
             "shell", "bash", "sh", "zsh", "python", "javascript", "node",
             "curl", "fetch", "network", "http", "read_file", "read_email",
-            "write_file", "send_email", "save_memory_note", "forget_memory", "save_skill", "run_code",
+            "write_file", "write_binary_file", "annotate_pdf", "send_email", "save_memory_note", "forget_memory", "save_skill", "run_code",
         ]
         let ops = steps.compactMap { ($0["op"] as? String)?.lowercased() }
         if let denied = ops.first(where: deniedOps.contains) {
@@ -3548,7 +4357,7 @@ public actor ManifoldBridge {
                 [
                     $0.sourceID,
                     $0.displayName,
-                    URL(fileURLWithPath: $0.originalRootPath).lastPathComponent.lowercased(),
+                    $0.canonicalMountName,
                 ]
             }
         case .workBlock(_, let grantSources, _), .legacyGrant(_, let grantSources):

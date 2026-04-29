@@ -143,6 +143,35 @@ public actor ApprovalQueue {
         try update(id: id, status: .denied, resolutionAction: "deny")
     }
 
+    @discardableResult
+    public func denyPending(sourceID: String, agent: TargetApp? = nil, resolutionAction: String = "source_revoked") throws -> Int {
+        let now = String(Date().timeIntervalSince1970)
+        if let agent {
+            try db.execute(
+                """
+                UPDATE approval_requests
+                SET status = 'denied', resolved_at = ?, resolution_action = ?
+                WHERE status = 'pending' AND source_id = ? AND agent = ?
+                """,
+                params: [now, resolutionAction, sourceID, agent.rawValue]
+            )
+        } else {
+            try db.execute(
+                """
+                UPDATE approval_requests
+                SET status = 'denied', resolved_at = ?, resolution_action = ?
+                WHERE status = 'pending' AND source_id = ?
+                """,
+                params: [now, resolutionAction, sourceID]
+            )
+        }
+        return Int(
+            try db.queryScalar(
+                "SELECT changes()"
+            ) ?? "0"
+        ) ?? 0
+    }
+
     public func pending() throws -> [PendingRequest] {
         let rows = try db.queryAll(
             """

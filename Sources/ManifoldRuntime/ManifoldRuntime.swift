@@ -188,6 +188,41 @@ public actor ManifoldRuntime {
         await privacyIndexCoordinator.bootstrap()
     }
 
+    /// Mutates standing source scope through the same runtime-owned path the
+    /// MCP bridge reads from. Revocation is intentionally stronger than a
+    /// policy-list edit: any file-level allows and standing write approvals
+    /// for this source/agent are removed at the same time, so the AI's next
+    /// tool call cannot keep seeing files through stale overrides.
+    public func setSourceScope(sourceID: String, agent: TargetApp, inScope: Bool) async throws {
+        if inScope {
+            try await policyStore.addSource(sourceID, to: agent)
+        } else {
+            try await revokeSourceScope(sourceID: sourceID, agent: agent)
+        }
+    }
+
+    /// Fully revokes one agent's standing access to a source.
+    public func revokeSourceScope(sourceID: String, agent: TargetApp) async throws {
+        try await policyStore.removeSource(sourceID, from: agent)
+        try await standingWriteApprovalStore.removeGrants(agent: agent, sourceID: sourceID)
+        try await fileVisibilityOverrideStore.clearOverrides(agent: agent, sourceID: sourceID)
+        _ = try await approvalQueue.denyPending(sourceID: sourceID, agent: agent)
+    }
+
+    /// Soft-removes a source and scrubs every access record that could still
+    /// expose it through standing access, write approvals, or per-file allows.
+    public func removeSourceEverywhere(sourceID: String) async throws {
+        try await grantStore.removeSource(sourceID: sourceID)
+        _ = try await memoryStore.tombstoneMemories(contributingSourceID: sourceID)
+        try await standingWriteApprovalStore.removeGrants(sourceID: sourceID)
+        try await fileVisibilityOverrideStore.clearOverrides(sourceID: sourceID)
+        _ = try await approvalQueue.denyPending(sourceID: sourceID)
+        for agent in TargetApp.allCases {
+            try await policyStore.removeSource(sourceID, from: agent)
+        }
+        try await privacyIndexCoordinator.sourceDidChange()
+    }
+
     /// Returns the bridge for a connection, creating it if this is the first request for that connection.
     public func bridge(for connectionID: String, targetApp: TargetApp, version: String) -> ManifoldBridge {
         if let existing = bridges[connectionID] {

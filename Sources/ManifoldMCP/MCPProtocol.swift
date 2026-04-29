@@ -138,7 +138,7 @@ actor MCPServer {
         return [
             "protocolVersion": "2024-11-05",
             "capabilities": [
-                "tools": ["listChanged": false],
+                "tools": ["listChanged": true],
                 "resources": ["listChanged": true],
             ] as [String: Any],
             "serverInfo": [

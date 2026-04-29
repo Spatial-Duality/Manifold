@@ -38,7 +38,7 @@ struct FileInspectorPane: View {
             } else if let file {
                 singleFileContent(file)
                     .padding(Spacing.s4)
-                    .task(id: file.path) { await loadExposures(for: file) }
+                    .task(id: file.canonicalPath) { await loadExposures(for: file) }
             } else {
                 empty
             }
@@ -46,10 +46,10 @@ struct FileInspectorPane: View {
     }
 
     private func loadExposures(for file: SourceFile) async {
-        guard exposuresFilePath != file.path else { return }
-        exposuresFilePath = file.path
+        guard exposuresFilePath != file.canonicalPath else { return }
+        exposuresFilePath = file.canonicalPath
         do {
-            exposures = try await store.runtime.fileExposures(resourcePath: file.path, limit: 200)
+            exposures = try await store.runtime.fileExposures(resourcePath: file.canonicalPath, limit: 200)
         } catch {
             exposures = []
         }
@@ -88,6 +88,14 @@ struct FileInspectorPane: View {
                         if let touched = aiTouchedSummary {
                             sparkleBadge(touched)
                         }
+                        if file.isDraftWorkspace {
+                            Text("DRAFT")
+                                .font(ManifoldType.captionMedium)
+                                .foregroundStyle(ManifoldPalette.paused)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(ManifoldPalette.pausedSoft, in: Capsule())
+                        }
                     }
                     Text(file.relativePath)
                         .font(ManifoldType.mono)
@@ -99,6 +107,10 @@ struct FileInspectorPane: View {
             }
 
             accessSection(file: file, visible: visible)
+
+            if file.isDraftWorkspace {
+                draftWorkspaceNotice
+            }
 
             auditSection(file: file)
 
@@ -157,13 +169,15 @@ struct FileInspectorPane: View {
 
     /// Summary of AI authorship for the current file. Computed from the
     /// existing snapshot timeline — non-baseline, non-restore snapshots
-    /// with source "agent" mean an AI wrote bytes. Returns nil when no
+    /// from MCP/agent write paths mean an AI wrote bytes. Returns nil when no
     /// AI authorship is present (so the badge stays out of the way).
     private var aiTouchedSummary: AITouchSummary? {
         let agentSnapshots = activity.filter { snap in
-            !snap.isBaseline
-                && !snap.isDelete
-                && snap.source.lowercased().contains("agent")
+            guard !snap.isBaseline, !snap.isDelete else { return false }
+            let source = snap.source.lowercased()
+            return source.contains("agent")
+                || source.contains("mcp")
+                || source.hasPrefix("standing_write_")
         }
         guard let mostRecent = agentSnapshots.max(by: { $0.timestamp < $1.timestamp }) else {
             return nil
@@ -198,6 +212,21 @@ struct FileInspectorPane: View {
             ?? Date(timeIntervalSinceReferenceDate: 0)
         let relative = Self.relativeFormatter.localizedString(for: date, relativeTo: .now)
         return "AI-touched · \(summary.count) write\(plural), most recent \(relative)"
+    }
+
+    @ViewBuilder
+    private var draftWorkspaceNotice: some View {
+        HStack(alignment: .top, spacing: Spacing.s2) {
+            Image(systemName: "tray.and.arrow.down")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(ManifoldPalette.paused)
+            Text("Draft workspace copy. The original folder is unchanged until this work is applied.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Spacing.s2)
+        .background(ManifoldPalette.pausedSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     /// Per-agent exposure counts for the current file. Honest: when an
@@ -448,7 +477,7 @@ struct FileInspectorPane: View {
                         Spacer()
                         Button("Restore") {
                             Task {
-                                _ = await store.restoreFile(snapshotID: snapshot.id, filePath: file.path)
+                                _ = await store.restoreFile(snapshotID: snapshot.id, filePath: file.canonicalPath)
                             }
                         }
                         .buttonStyle(.borderless)

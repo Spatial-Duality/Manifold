@@ -249,26 +249,32 @@ struct FoldersMatrixView: View {
                 tint: ManifoldPalette.selection,
                 accessibilityIdentifier: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent).all"
             ) {
-                // Read live scope at click time. Two reasons:
-                // 1. .mixed should always go ON (toward all-shared), never OFF —
-                //    `!allScoped` would flip it OFF first, which is surprising.
-                // 2. If the cell rendered with a stale snapshot of governance
-                //    (TableColumn cells on macOS occasionally lag the
-                //    @Observable store), recomputing here avoids a no-op
-                //    click that looked like the toggle was broken.
+                // Read live scope at click time. TableColumn cells on macOS
+                // occasionally lag the @Observable store; recomputing here
+                // avoids a stale no-op click. For a mixed row, the aggregate
+                // checkbox behaves like "clear sharing" because the row is
+                // already shared with at least one agent.
                 Task {
                     let liveScoped = scopedAgents(for: source)
-                    let liveAll = !connectedAgents.isEmpty
-                        && connectedAgents.allSatisfy { liveScoped.contains($0) }
                     await setSourceScope(
                         sourceID: source.sourceID,
                         agents: connectedAgents,
-                        inScope: !liveAll
+                        inScope: Self.aggregateScopeTarget(
+                            connectedAgents: connectedAgents,
+                            scopedAgents: liveScoped
+                        )
                     )
                 }
             }
         }
         .width(min: 46, ideal: 56, max: 68)
+    }
+
+    static func aggregateScopeTarget(connectedAgents: [TargetApp], scopedAgents: Set<TargetApp>) -> Bool {
+        let allScoped = !connectedAgents.isEmpty
+            && connectedAgents.allSatisfy { scopedAgents.contains($0) }
+        let anyScoped = !scopedAgents.isEmpty
+        return !allScoped && !anyScoped
     }
 
     private func agentColumn(for agent: TargetApp) -> TableColumn<SourceRecord, Never, some View, Text> {
@@ -280,7 +286,7 @@ struct FoldersMatrixView: View {
             ) {
                 let currently = scopeByAgent[agent]?.contains(source.sourceID) == true
                 Task {
-                    await store.setSourceScope(sourceID: source.sourceID, agent: agent, inScope: !currently)
+                    await setSourceScope(sourceID: source.sourceID, agent: agent, inScope: !currently)
                 }
             }
         }
@@ -296,7 +302,7 @@ struct FoldersMatrixView: View {
                 accessibilityIDPrefix: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent)",
                 onToggleAgent: { agent, wasVisible in
                     Task {
-                        await store.setSourceScope(sourceID: source.sourceID, agent: agent, inScope: !wasVisible)
+                        await setSourceScope(sourceID: source.sourceID, agent: agent, inScope: !wasVisible)
                     }
                 },
                 onSetAll: { inScope in
@@ -314,6 +320,9 @@ struct FoldersMatrixView: View {
                 let label = sharingLabel(for: source)
                 Pill(text: label.text, variant: label.variant)
                     .help(label.help)
+                let write = writeLabel(for: source)
+                Pill(text: write.text, variant: write.variant)
+                    .help(write.help)
                 if hasFileOverrides(for: source) {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 5))
@@ -332,14 +341,31 @@ struct FoldersMatrixView: View {
         let help: String
     }
 
-    /// Compute the sharing pill for a source. Reads the source-level
-    /// scope only — i.e., the same checkboxes the user can tick on
-    /// this row. Per-file overrides have their own surface in the
-    /// inspector, so we don't conflate them here. Health states
-    /// (removed / offline) live in the Folder column inline.
+    private func writeLabel(for source: SourceRecord) -> SharingLabel {
+        let scoped = scopedAgents(for: source)
+        guard !scoped.isEmpty else {
+            return SharingLabel(
+                text: "Read only",
+                variant: .neutral,
+                help: "This folder is not shared with an agent, so Manifold blocks reads and writes."
+            )
+        }
+        return SharingLabel(
+            text: "Versioned writes",
+            variant: .defaultScope,
+            help: "Claude or Codex writes to the original shared folder through Manifold. Each write records a restorable snapshot."
+        )
+    }
+
+    /// Compute the sharing pill for a source. Source-level scope drives the
+    /// main checked state, but explicit allow overrides are also effective
+    /// runtime visibility. A row with no checked agent can still expose
+    /// individual files, so call that out here instead of showing the
+    /// misleading "Not shared" label.
     private func sharingLabel(for source: SourceRecord) -> SharingLabel {
         let scoped = scopedAgents(for: source)
         let total = connectedAgents.count
+        let explicitAllowAgents = overrideAgentsByDecision(for: source).allow
 
         guard total > 0 else {
             return SharingLabel(
@@ -350,6 +376,19 @@ struct FoldersMatrixView: View {
         }
 
         if scoped.isEmpty {
+            if !explicitAllowAgents.isEmpty {
+                let names = connectedAgents
+                    .filter { explicitAllowAgents.contains($0) }
+                    .map(AgentMeta.label(_:))
+                let target = names.isEmpty ? "an AI" : names.joined(separator: " and ")
+                return SharingLabel(
+                    text: explicitAllowAgents.count == 1
+                        ? "Some files for \(names.first ?? "AI")"
+                        : "Some files shared",
+                    variant: .scope,
+                    help: "Individual files or subfolders are visible to \(target). Open the inspector to review them."
+                )
+            }
             return SharingLabel(
                 text: "Not shared",
                 variant: .neutral,
@@ -488,6 +527,7 @@ struct FoldersMatrixView: View {
         for id in selectedIDs {
             await store.setSourceScope(sourceID: id, agent: agent, inScope: inScope)
         }
+        await loadOverrides()
     }
 
     private func bulkShare(agents: [TargetApp], inScope: Bool) async {
@@ -496,10 +536,16 @@ struct FoldersMatrixView: View {
         }
     }
 
+    private func setSourceScope(sourceID: String, agent: TargetApp, inScope: Bool) async {
+        await store.setSourceScope(sourceID: sourceID, agent: agent, inScope: inScope)
+        await loadOverrides()
+    }
+
     private func setSourceScope(sourceID: String, agents: [TargetApp], inScope: Bool) async {
         for agent in agents {
             await store.setSourceScope(sourceID: sourceID, agent: agent, inScope: inScope)
         }
+        await loadOverrides()
     }
 
     private var selectedSource: SourceRecord? {

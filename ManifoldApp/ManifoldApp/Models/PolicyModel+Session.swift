@@ -107,7 +107,25 @@ extension GovernanceModel {
         switch record.kind {
         case "standing_write":
             let mountLabel = record.mountName ?? "shared folder"
-            return "Reads are ambient here. Once allows one reversible write to this file. Add to default allows reversible writes anywhere in \(mountLabel)."
+            var parts = ["Writes to \(mountLabel) are governed by Manifold snapshots and can be restored from version history."]
+            if let context = standingWriteContext(for: record) {
+                if let tool = context["tool"], !tool.isEmpty {
+                    parts.append("Tool: \(tool).")
+                }
+                if let bytes = context["bytes"], !bytes.isEmpty {
+                    parts.append("Size: \(bytes) bytes.")
+                }
+                if let mime = context["mime_type"], !mime.isEmpty {
+                    parts.append("Type: \(mime).")
+                }
+                if let mode = context["write_mode"], !mode.isEmpty {
+                    parts.append("Requested mode: \(mode).")
+                }
+                if let intent = context["intent_summary"], !intent.isEmpty {
+                    parts.append("Intent: \(intent)")
+                }
+            }
+            return parts.joined(separator: " ")
         case "privacy_exposure":
             if let privacyContext {
                 return "\(privacyContext.findingsSummary). \(privacyContext.recommendation)"
@@ -137,6 +155,16 @@ extension GovernanceModel {
             return nil
         }
         return try? JSONDecoder().decode(PrivacyApprovalContext.self, from: data)
+    }
+
+    private static func standingWriteContext(for record: PendingApprovalRecord) -> [String: String]? {
+        guard record.kind == "standing_write",
+              let raw = record.contextJSON,
+              let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return nil
+        }
+        return object
     }
 
     /// Recent sessions, most recent first. The app-level store supplies

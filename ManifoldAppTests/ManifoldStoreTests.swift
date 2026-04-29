@@ -72,6 +72,25 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertTrue(store.pendingRequests.isEmpty)
     }
 
+    func testRefreshAllFiltersRemovedSourcesFromDashboard() async {
+        let runtime = RemovedSourceDashboardRuntime()
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard))
+        let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
+
+        await store.refreshAll(force: true)
+
+        XCTAssertEqual(store.sources.map(\.sourceID), ["src-live"])
+        XCTAssertFalse(store.sources.contains(where: \.isRemoved))
+    }
+
+    func testAggregateFolderCheckboxClearsPartiallySharedSource() {
+        let agents: [TargetApp] = [.cowork, .codex]
+
+        XCTAssertTrue(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: []))
+        XCTAssertFalse(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: [.cowork]))
+        XCTAssertFalse(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: [.cowork, .codex]))
+    }
+
     func testMailBrowserPrefersSyncedAccountAndInbox() async throws {
         let runtime = FixtureRuntimeClient(profile: .trackedWork)
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
@@ -349,5 +368,58 @@ private actor PendingApprovalsFailureRuntime: RuntimeClientProtocol {
 
     func listPendingApprovals() async throws -> [PendingApprovalRecord] {
         throw PendingApprovalsFailure.unavailable
+    }
+}
+
+private actor RemovedSourceDashboardRuntime: RuntimeClientProtocol {
+    func ping() async -> RuntimePingResult {
+        RuntimePingResult(ok: true, agentVersion: nil)
+    }
+
+    func dashboardState() async throws -> DashboardState {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        let live = SourceRecord(
+            sourceID: "src-live",
+            displayName: "Live",
+            originalRootPath: "/tmp/live",
+            status: "idle",
+            createdAt: now,
+            updatedAt: now
+        )
+        let removed = SourceRecord(
+            sourceID: "src-removed",
+            displayName: "Removed",
+            originalRootPath: "/tmp/removed",
+            status: "removed",
+            createdAt: now,
+            updatedAt: now
+        )
+
+        return DashboardState(
+            runtimeConnected: true,
+            activeBridgeCount: 0,
+            connectedAgents: [],
+            sources: [live, removed],
+            claudePolicy: AgentAccessPolicy(agent: .cowork),
+            codexPolicy: AgentAccessPolicy(agent: .codex),
+            claudeEmailGovernance: Self.emailGovernance(for: .cowork),
+            codexEmailGovernance: Self.emailGovernance(for: .codex),
+            activeSession: nil,
+            pendingApprovalCount: 0,
+            agentCoverages: [],
+            coverageEvents: []
+        )
+    }
+
+    private static func emailGovernance(for agent: TargetApp) -> AgentEmailGovernanceSummary {
+        AgentEmailGovernanceSummary(
+            agent: agent,
+            enabledShieldCount: 0,
+            domainRuleCount: 0,
+            contactRuleCount: 0,
+            keywordRuleCount: 0,
+            defaultPolicy: .defaultValue(for: agent),
+            emailSensitivity: .moderate
+        )
     }
 }

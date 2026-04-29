@@ -82,6 +82,13 @@ struct FilesFlatView: View {
             .joined(separator: "|")
     }
 
+    private var filesReloadKey: String {
+        let grant = store.activeGrant?.grantID ?? "no-grant"
+        let block = store.dataControlSummary?.activeWorkBlock
+        let blockKey = block.map { "\($0.id):\($0.modifiedFileCount):\($0.newFileCount):\($0.status.rawValue)" } ?? "no-block"
+        return "\(sourceReloadKey)|\(grant)|\(blockKey)"
+    }
+
     private var defaultScopeByAgent: [TargetApp: Set<String>] {
         var result: [TargetApp: Set<String>] = [:]
         for agent in connectedAgents {
@@ -181,7 +188,7 @@ struct FilesFlatView: View {
             case .changed:
                 matches = file.versionCount > 0
             case .aiTouched:
-                matches = aiTouchedPaths.contains(file.path)
+                matches = aiTouchedPaths.contains(file.canonicalPath)
             }
             guard matches else { return false }
 
@@ -247,7 +254,7 @@ struct FilesFlatView: View {
             // searchable handles focus natively; kept for forward-compat.
         }
         .manifoldFileDropTarget(store: store)
-        .task(id: sourceReloadKey) {
+        .task(id: filesReloadKey) {
             await loadFilesProgressively()
             await loadAITouched()
         }
@@ -255,11 +262,13 @@ struct FilesFlatView: View {
             await loadOverrides()
         }
         .task(id: selectedFilePaths) {
-            guard selectedFilePaths.count == 1, let path = selectedFilePaths.first else {
+            guard selectedFilePaths.count == 1,
+                  let path = selectedFilePaths.first,
+                  let file = files.first(where: { $0.path == path }) else {
                 selectedHistory = []
                 return
             }
-            selectedHistory = await store.fileHistory(filePath: path)
+            selectedHistory = await store.fileHistory(filePath: file.canonicalPath)
         }
     }
 
@@ -469,12 +478,20 @@ struct FilesFlatView: View {
                         .font(ManifoldType.body)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if aiTouchedPaths.contains(file.path) {
+                    if aiTouchedPaths.contains(file.canonicalPath) {
                         Image(systemName: "sparkle")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.tint)
                             .help("AI has written to this file")
                             .accessibilityLabel("AI-touched")
+                    }
+                    if file.isDraftWorkspace {
+                        Text("DRAFT")
+                            .font(ManifoldType.captionMedium)
+                            .foregroundStyle(ManifoldPalette.paused)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(ManifoldPalette.pausedSoft, in: Capsule())
                     }
                 }
             }
@@ -760,13 +777,68 @@ struct FilesFlatView: View {
     // MARK: - Loading
 
     private func loadFilesProgressively() async {
+        await store.refreshGrantState()
+        let versionCounts = (try? await store.runtime.trackedFileCounts()) ?? [:]
+        let touchedPaths = (try? await store.runtime.aiTouchedFilePaths()) ?? []
+        aiTouchedPaths = touchedPaths
         files = []
         selectedFilePaths = []
         isLoading = true
         for await batch in store.enumerateSourceFilesProgressively() {
-            files.append(contentsOf: batch)
+            files.append(contentsOf: batch.map {
+                trackedFile($0, versionCounts: versionCounts, aiTouchedPaths: touchedPaths)
+            })
         }
+        let existing = Set(files.map(\.canonicalPath))
+        files.append(contentsOf: activeDraftFiles(
+            versionCounts: versionCounts,
+            aiTouchedPaths: touchedPaths,
+            existingCanonicalPaths: existing
+        ))
         isLoading = false
+    }
+
+    private func trackedFile(
+        _ file: SourceFile,
+        versionCounts: [String: Int],
+        aiTouchedPaths: Set<String>
+    ) -> SourceFile {
+        var updated = file
+        updated.versionCount = versionCounts[file.canonicalPath] ?? 0
+        updated.hasAIActivity = aiTouchedPaths.contains(file.canonicalPath)
+        return updated
+    }
+
+    private func activeDraftFiles(
+        versionCounts: [String: Int],
+        aiTouchedPaths: Set<String>,
+        existingCanonicalPaths: Set<String>
+    ) -> [SourceFile] {
+        guard store.activeGrant != nil else { return [] }
+        let fm = FileManager.default
+        return versionCounts.keys.sorted().compactMap { canonicalPath in
+            guard !existingCanonicalPaths.contains(canonicalPath),
+                  let resolved = store.resolveActiveGrantFilePath(canonicalPath) else { return nil }
+            let url = resolved.fileURL
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                  values.isRegularFile == true else { return nil }
+            guard fm.fileExists(atPath: url.path) else { return nil }
+            return SourceFile(
+                name: url.lastPathComponent,
+                path: url.path,
+                canonicalPath: canonicalPath,
+                relativePath: resolved.relativePath,
+                sourceName: "\(resolved.mount.mountName) draft",
+                sourceID: resolved.mount.sourceID,
+                fileExtension: url.pathExtension.lowercased(),
+                sizeBytes: values.fileSize ?? 0,
+                modifiedDate: values.contentModificationDate ?? .distantPast,
+                isGrantedToClaude: true,
+                versionCount: versionCounts[canonicalPath] ?? 0,
+                hasAIActivity: aiTouchedPaths.contains(canonicalPath),
+                isDraftWorkspace: true
+            )
+        }
     }
 
     private func loadOverrides() async {

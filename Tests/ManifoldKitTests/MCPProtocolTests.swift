@@ -61,7 +61,7 @@ struct MCPProtocolTests {
         let result: [String: Any] = [
             "protocolVersion": "2024-11-05",
             "capabilities": [
-                "tools": ["listChanged": false],
+                "tools": ["listChanged": true],
                 "resources": ["listChanged": true],
             ] as [String: Any],
             "serverInfo": [
@@ -75,6 +75,8 @@ struct MCPProtocolTests {
         let caps = result["capabilities"] as? [String: Any]
         #expect(caps?["tools"] != nil)
         #expect(caps?["resources"] != nil)
+        let toolCaps = caps?["tools"] as? [String: Bool]
+        #expect(toolCaps?["listChanged"] == true)
     }
 
     @Test("Tool call result format with text content")

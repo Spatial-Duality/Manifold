@@ -10,13 +10,35 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 
 private actor MCPConnectionState {
     private var connectionID: String?
+    private var connectionError: String?
+    private var initializeParams: [String: Any] = [:]
 
-    func set(_ connectionID: String) {
+    func set(_ connectionID: String, initializeParams: [String: Any]? = nil) {
         self.connectionID = connectionID
+        connectionError = nil
+        if let initializeParams {
+            self.initializeParams = initializeParams
+        }
+    }
+
+    func fail(_ error: Error) {
+        connectionID = nil
+        connectionError = error.localizedDescription
     }
 
     func get() -> String? {
         connectionID
+    }
+
+    func params() -> JSONDict {
+        JSONDict(initializeParams)
+    }
+
+    func unavailableMessage() -> String {
+        if let connectionError, !connectionError.isEmpty {
+            return "Runtime connection not initialized: \(connectionError). Make sure the Manifold app/runtime helper is running, then retry the Manifold tool call."
+        }
+        return "Runtime connection not initialized. Make sure the Manifold app/runtime helper is running, then retry the Manifold tool call."
     }
 }
 
@@ -24,7 +46,7 @@ private actor MCPConnectionState {
 /// Launches the stdio MCP adapter that forwards governed tool calls into the local runtime.
 struct ManifoldMCPServer {
     static func main() async throws {
-        let version = "0.4.0"
+        let version = "0.4.1"
         let targetApp = parsedTargetApp(from: CommandLine.arguments)
 
         // Handle --version flag
@@ -46,9 +68,13 @@ struct ManifoldMCPServer {
         let xpc = ManifoldXPCClient()
         let connectionState = MCPConnectionState()
 
-        // Create MCP server
-        let server = MCPServer(name: "manifold", version: version)
-        await server.registerInitializeHandler { params in
+        @Sendable func connectRuntime(initializeParams paramsOverride: JSONDict? = nil) async -> String? {
+            let params: JSONDict
+            if let paramsOverride {
+                params = paramsOverride
+            } else {
+                params = await connectionState.params()
+            }
             do {
                 let connectionID = try await xpc.connectAgent(
                     agent: targetApp.rawValue,
@@ -56,19 +82,39 @@ struct ManifoldMCPServer {
                     clientVersion: version,
                     initializeParams: params.value
                 )
-                await connectionState.set(connectionID)
+                await connectionState.set(connectionID, initializeParams: params.value)
+                return connectionID
             } catch {
+                await connectionState.fail(error)
                 logger.error("Failed to connect MCP client to runtime: \(error.localizedDescription, privacy: .public)")
+                return nil
             }
+        }
+
+        // Create MCP server
+        let server = MCPServer(name: "manifold", version: version)
+        await server.registerInitializeHandler { params in
+            _ = await connectRuntime(initializeParams: params)
         }
 
         // Register tools
         await server.registerTools(ToolDefinitions.allTools()) { name, arguments in
-            guard let connectionID = await connectionState.get() else {
-                return JSONDict(["content": [["type": "text", "text": "Runtime connection not initialized"]], "isError": true])
+            let existingConnectionID = await connectionState.get()
+            let runtimeConnectionID: String?
+            if let existingConnectionID {
+                runtimeConnectionID = existingConnectionID
+            } else {
+                runtimeConnectionID = await connectRuntime()
+            }
+            guard let connectionID = runtimeConnectionID else {
+                return JSONDict(["content": [["type": "text", "text": await connectionState.unavailableMessage()]], "isError": true])
             }
             do {
-                let result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments.value)
+                var result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments.value)
+                if isInactiveRuntimeResult(result),
+                   let reconnectedID = await connectRuntime() {
+                    result = try await xpc.callTool(connectionID: reconnectedID, toolName: name, arguments: arguments.value)
+                }
                 return JSONDict(result)
             } catch {
                 return JSONDict(["content": [["type": "text", "text": error.localizedDescription]], "isError": true])
@@ -87,12 +133,23 @@ struct ManifoldMCPServer {
             MCPResource(name: "Exec Status", uri: "manifold://exec/status", description: "ManifoldExec sandbox status"),
             MCPResource(name: "Knowledge Graph", uri: "manifold://graph", description: "Scoped graph query status"),
         ]) { uri in
-            guard let connectionID = await connectionState.get() else {
-                return "Runtime connection not initialized."
+            let existingConnectionID = await connectionState.get()
+            let runtimeConnectionID: String?
+            if let existingConnectionID {
+                runtimeConnectionID = existingConnectionID
+            } else {
+                runtimeConnectionID = await connectRuntime()
+            }
+            guard let connectionID = runtimeConnectionID else {
+                return await connectionState.unavailableMessage()
             }
             func toolText(_ name: String, arguments: [String: Any] = [:]) async -> String {
                 do {
-                    let result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments)
+                    var result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments)
+                    if isInactiveRuntimeResult(result),
+                       let reconnectedID = await connectRuntime() {
+                        result = try await xpc.callTool(connectionID: reconnectedID, toolName: name, arguments: arguments)
+                    }
                     return textContent(from: result)
                 } catch {
                     return error.localizedDescription
@@ -146,5 +203,10 @@ struct ManifoldMCPServer {
     static func textContent(from result: [String: Any]) -> String {
         guard let content = result["content"] as? [[String: Any]] else { return "" }
         return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    static func isInactiveRuntimeResult(_ result: [String: Any]) -> Bool {
+        guard result["isError"] as? Bool == true else { return false }
+        return textContent(from: result).contains("No active runtime connection")
     }
 }

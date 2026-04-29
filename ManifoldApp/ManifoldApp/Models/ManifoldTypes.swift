@@ -11,6 +11,7 @@ struct SourceFile: Identifiable, Sendable {
     var id: String { path }
     let name: String
     let path: String
+    let canonicalPath: String
     let relativePath: String
     let sourceName: String
     let sourceID: String
@@ -20,6 +21,7 @@ struct SourceFile: Identifiable, Sendable {
     let isGrantedToClaude: Bool
     var versionCount: Int = 0
     var hasAIActivity: Bool = false
+    var isDraftWorkspace: Bool = false
 }
 
 struct SearchResult: Identifiable, Sendable {

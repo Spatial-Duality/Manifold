@@ -20,11 +20,33 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "write_file",
-                description: "Write content to a file. The change is versioned.",
-                inputSchema: objectSchema(properties: [
+                description: "Write UTF-8 text to a governed file. Text only: never use this for PDFs, images, archives, Office documents, or base64-encoded binary bytes. For PDFs use annotate_pdf; for other binary files use write_binary_file. The change is written to the original shared folder and versioned by Manifold.",
+                inputSchema: objectSchema(properties: withAccessIntent([
                     "path": ["type": "string", "description": "Relative path"],
-                    "content": ["type": "string", "description": "File content"],
-                ], required: ["path", "content"])
+                    "content": ["type": "string", "description": "UTF-8 text content. Do not pass base64 binary data."],
+                    "expected_before_hash": ["type": "string", "description": "Optional SHA-256 hash of the current file content. If it does not match, the write is rejected."],
+                ]), required: ["path", "content"])
+            ),
+            MCPTool(
+                name: "write_binary_file",
+                description: "Write base64-encoded bytes to a governed file such as a PDF, image, zip, Pages, Word, or spreadsheet file. Use this instead of write_file for binary bytes. Direct MCP binary writes are limited to 25 MB decoded bytes. Defaults to writing the original shared folder with a Manifold snapshot for rollback.",
+                inputSchema: objectSchema(properties: withAccessIntent([
+                    "path": ["type": "string", "description": "Relative path"],
+                    "content_base64": ["type": "string", "description": "Base64-encoded raw file bytes"],
+                    "mime_type": ["type": "string", "description": "Optional MIME type, for example application/pdf"],
+                    "expected_before_hash": ["type": "string", "description": "Optional SHA-256 hash of the current file content. If it does not match, the write is rejected."],
+                    "write_mode": ["type": "string", "description": "direct or draft_workspace. Defaults to direct. Legacy direct_if_approved is accepted as direct."],
+                ]), required: ["path", "content_base64"])
+            ),
+            MCPTool(
+                name: "annotate_pdf",
+                description: "Add a small governed text stamp to an existing PDF. PDFs are bounded to 25 MB and 500 pages. Prefer this over reading a PDF, modifying it in a local VM, and writing binary bytes back. Manifold performs the PDF mutation itself and versions the previous bytes.",
+                inputSchema: objectSchema(properties: withAccessIntent([
+                    "path": ["type": "string", "description": "Relative path to a PDF"],
+                    "mark": ["type": "string", "description": "Short stamp text. Defaults to Viewed by Claude."],
+                    "expected_before_hash": ["type": "string", "description": "Optional SHA-256 hash of the current PDF bytes. If it does not match, the write is rejected."],
+                    "write_mode": ["type": "string", "description": "direct or draft_workspace. Defaults to direct. Legacy direct_if_approved is accepted as direct."],
+                ]), required: ["path"])
             ),
             MCPTool(
                 name: "search_files",

@@ -208,7 +208,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
 
         case "getStatus":
             await runtime.scanForActiveWorkBlockDrift()
-            let sources = try await runtime.grantStore.allSources()
+            let sources = try await runtime.grantStore.allSources().filter { !$0.isRemoved }
             let claudePolicy = try await runtime.policyStore.policy(for: .cowork)
             let codexPolicy = try await runtime.policyStore.policy(for: .codex)
             let claudeEmailGovernance = try await runtime.emailGovernanceSummary(for: .cowork)
@@ -352,7 +352,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             return ["exposures": exposures.map(Self.exposureJSON)]
 
         case "listSources":
-            let sources = try await runtime.grantStore.allSources()
+            let sources = try await runtime.grantStore.allSources().filter { !$0.isRemoved }
             return ["sources": sources.map(Self.sourceJSON)]
 
         case "addSource":
@@ -371,20 +371,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             guard let sourceID = payload["sourceID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try await runtime.grantStore.removeSource(sourceID: sourceID)
-            _ = try await runtime.memoryStore.tombstoneMemories(contributingSourceID: sourceID)
-            try await runtime.standingWriteApprovalStore.removeGrants(sourceID: sourceID)
-            try await runtime.fileVisibilityOverrideStore.clearOverrides(sourceID: sourceID)
-            // Drop the sourceID from every agent's standing-access scope.
-            // Without this, the agent_access_policies row still references a
-            // dead sourceID — harmless for current MCP enforcement (which
-            // re-filters via activeSources()) but it leaves orphan data and
-            // can confuse future code that reads policies without the
-            // status filter. Defense in depth.
-            for agent in TargetApp.allCases {
-                try await runtime.policyStore.removeSource(sourceID, from: agent)
-            }
-            try await runtime.privacyIndexCoordinator.sourceDidChange()
+            try await runtime.removeSourceEverywhere(sourceID: sourceID)
             return ["ok": true]
 
         case "pauseSource":
@@ -438,7 +425,11 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         await runtime.scanForActiveWorkBlockDrift()
         let connectedAgents = await runtime.connectedAgents
         let coverageSnapshots = await runtime.connectedClientSnapshots()
-        let activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
+        var activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
+        if let block = activeWorkBlock {
+            await refreshWorkBlockCounts(block)
+            activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
+        }
         let pendingApprovals = try await runtime.approvalQueue.pending()
         let recentEntries = try await runtime.auditStore.recentEntries(limit: 1)
         let lastExposure = recentEntries.first.map(Self.summaryExposure)
@@ -525,7 +516,40 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                       let content = arguments["content"] as? String else {
                     return errorResult("'path' and 'content' parameters required")
                 }
-                let result = try await bridge.writeFile(path: path, content: content)
+                let result = try await bridge.writeFile(
+                    path: path,
+                    content: content,
+                    intent: intent,
+                    expectedBeforeHash: arguments["expected_before_hash"] as? String
+                )
+                return textResult(result.message)
+
+            case "write_binary_file":
+                guard let path = arguments["path"] as? String,
+                      let contentBase64 = arguments["content_base64"] as? String else {
+                    return errorResult("'path' and 'content_base64' parameters required")
+                }
+                let result = try await bridge.writeBinaryFile(
+                    path: path,
+                    contentBase64: contentBase64,
+                    mimeType: arguments["mime_type"] as? String,
+                    intent: intent,
+                    expectedBeforeHash: arguments["expected_before_hash"] as? String,
+                    writeMode: arguments["write_mode"] as? String
+                )
+                return textResult(result.message)
+
+            case "annotate_pdf":
+                guard let path = arguments["path"] as? String else {
+                    return errorResult("'path' parameter required")
+                }
+                let result = try await bridge.annotatePDF(
+                    path: path,
+                    mark: arguments["mark"] as? String ?? "Viewed by Claude",
+                    intent: intent,
+                    expectedBeforeHash: arguments["expected_before_hash"] as? String,
+                    writeMode: arguments["write_mode"] as? String
+                )
                 return textResult(result.message)
 
             case "search_files":
