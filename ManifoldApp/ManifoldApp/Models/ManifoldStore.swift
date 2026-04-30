@@ -51,6 +51,13 @@ final class ManifoldStore {
     private var didAttemptDefaultSessionStart = false
     private var suppressDefaultSessionUntilNextLaunch = false
 
+    /// Per-agent snapshot of the access-recording level taken when a
+    /// session-scoped request-detail override is applied, so we can
+    /// restore the prior level when the session ends. The dictionary
+    /// is keyed by agent and only populated while an override is in
+    /// effect for that agent.
+    private var requestDetailRestoreLevels: [TargetApp: AccessRecordingLevel] = [:]
+
     var menuBarIcon: String {
         guard isRuntimeConnected else { return "shield.slash" }
         if dataControlSummary?.pendingApprovalCount ?? governance.pendingApprovals.count > 0 {
@@ -845,10 +852,18 @@ final class ManifoldStore {
     func endSession() async {
         let endingGrantID = session.activeGrant?.grantID
         let endingWasDefault = session.activeGrant?.summaryFraming == "Default"
+        let endingAgent = session.activeGrant.flatMap { TargetApp(rawValue: $0.targetApp) }
         await session.endSession(
             onError: { [weak self] message in self?.lastError = message },
             onConflict: { [weak self] count in self?.lastError = "\(count) conflict(s) while ending the session. Check activity for details." }
         )
+        // Restore the agent's prior request-detail level if a
+        // session-scoped override was applied at activation. Doing
+        // this BEFORE refreshAll ensures the dashboard reflects the
+        // restored level on the next pass.
+        if let endingAgent {
+            await restoreRequestDetailIfNeeded(for: endingAgent)
+        }
         await refreshAll()
         if let endingGrantID {
             session.lastCompletedSession = activity.sessions.first(where: { $0.id == endingGrantID })
@@ -984,11 +999,52 @@ final class ManifoldStore {
         do {
             try await startGatewaySession(draft: draft)
             suppressDefaultSessionUntilNextLaunch = false
+            // Apply the per-session request-detail override after the
+            // gateway is live. Snapshot the agent's prior level first
+            // so endSession can restore it.
+            if let override = preload.requestDetailOverride {
+                await applyRequestDetailOverride(override, for: preload.agent)
+            }
             sessionWorkbench.lastMessage = "Activated \(draft.name)."
             sessionWorkbench.lastError = nil
         } catch {
             sessionWorkbench.lastError = "Couldn't activate session: \(error.localizedDescription)"
         }
+    }
+
+    /// Apply a session-scoped request-detail override. Snapshots the
+    /// agent's current level so endSession can restore it. If the
+    /// override matches the current level, no snapshot is taken.
+    func applyRequestDetailOverride(_ level: AccessRecordingLevel, for agent: TargetApp) async {
+        let current = governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight
+        guard current != level else { return }
+        // Only snapshot once per session — don't clobber an existing
+        // restore level if the user updates the override mid-session.
+        if requestDetailRestoreLevels[agent] == nil {
+            requestDetailRestoreLevels[agent] = current
+        }
+        await governance.updateAccessRecordingLevel(level, for: agent)
+    }
+
+    /// Clear the override and restore the snapshotted level (no-op if
+    /// no override was applied).
+    func restoreRequestDetailIfNeeded(for agent: TargetApp) async {
+        guard let restoreLevel = requestDetailRestoreLevels.removeValue(forKey: agent) else { return }
+        await governance.updateAccessRecordingLevel(restoreLevel, for: agent)
+    }
+
+    /// True when the active session has a request-detail override in
+    /// effect for the given agent. Used by the UI so it can label the
+    /// picker as session-scoped vs agent-default.
+    func hasActiveRequestDetailOverride(for agent: TargetApp) -> Bool {
+        requestDetailRestoreLevels[agent] != nil
+    }
+
+    /// Effective request-detail level for the given agent — the
+    /// session-scoped override if one is in effect, otherwise the
+    /// agent's persistent default.
+    func effectiveRequestDetail(for agent: TargetApp) -> AccessRecordingLevel {
+        governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight
     }
 
     func displayName(for agent: TargetApp) -> String {

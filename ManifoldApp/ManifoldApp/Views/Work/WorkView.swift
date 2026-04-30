@@ -121,7 +121,7 @@ private struct WorkSessionListColumn: View {
                 statusLabel: "Active",
                 statusVariant: .session,
                 folderCount: store.session.activeGrantSources.count,
-                mailboxCount: store.session.activeMailboxCount,
+                mailboxCount: activeMailboxCount(for: store),
                 pendingCount: store.pendingRequests.count,
                 lastActivity: nil,
                 isSelected: work.sessionSelection == .active,
@@ -502,7 +502,7 @@ private struct WorkCurrentSessionSummary: View {
             return ActiveSummary(
                 agent: active.agents.first ?? store.defaultSessionAgent,
                 folders: store.session.activeGrantSources.count,
-                mailboxes: store.session.activeMailboxCount
+                mailboxes: activeMailboxCount(for: store)
             )
         }
         if store.sessionStartupMode == .defaultSession {
@@ -590,15 +590,37 @@ private struct WorkCurrentSessionSummary: View {
 
     private var sessionRequestDetailControl: some View {
         let agent = store.activeSession?.agents.first ?? store.defaultSessionAgent
-        let detail = SessionRequestDetail(level: store.governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight)
+        let detail = SessionRequestDetail(level: store.effectiveRequestDetail(for: agent))
+        let isSessionScoped = store.hasActiveRequestDetailOverride(for: agent)
+        let scopeLabel = isSessionScoped
+            ? "This session overrides \(store.displayName(for: agent))'s default."
+            : (store.activeSession != nil
+                ? "Using \(store.displayName(for: agent))'s default. Changes apply only to this session."
+                : "Sets \(store.displayName(for: agent))'s default until a session-scoped override replaces it.")
         return VStack(alignment: .leading, spacing: Spacing.s2) {
-            Label("Request detail", systemImage: "text.append")
-                .font(ManifoldType.captionMedium)
-                .foregroundStyle(.secondary)
+            HStack(spacing: Spacing.s2) {
+                Label("Request detail", systemImage: "text.append")
+                    .font(ManifoldType.captionMedium)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isSessionScoped {
+                    Pill(text: "Session", variant: .session)
+                }
+            }
             Picker("Request detail", selection: Binding(
                 get: { detail },
                 set: { newValue in
-                    Task { await store.governance.updateAccessRecordingLevel(newValue.backingLevel, for: agent) }
+                    Task {
+                        if store.activeSession != nil {
+                            // Active session: apply as a session-scoped
+                            // override that reverts on session end.
+                            await store.applyRequestDetailOverride(newValue.backingLevel, for: agent)
+                        } else {
+                            // No active session: this is a direct edit
+                            // to the agent's persistent default.
+                            await store.governance.updateAccessRecordingLevel(newValue.backingLevel, for: agent)
+                        }
+                    }
                 }
             )) {
                 ForEach(SessionRequestDetail.allCases) { option in
@@ -607,7 +629,7 @@ private struct WorkCurrentSessionSummary: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("work.summary.requestDetail")
-            Text(detail.subtitle)
+            Text("\(detail.subtitle) \(scopeLabel)")
                 .font(ManifoldType.tiny)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -749,12 +771,31 @@ private struct WorkApprovalRow: View {
             .buttonStyle(.borderless)
             .controlSize(.small)
             .accessibilityIdentifier("work.approval.\(request.id).deny")
-            Button("Allow once") {
-                Task { await store.answer(request, with: .once) }
+            // Standing-write requests get an inline "Add to default"
+            // shortcut; everything else just gets "Allow once" inline,
+            // with extra options in the inspector.
+            if request.kind == .standingWrite {
+                Menu {
+                    Button("Allow once") {
+                        Task { await store.answer(request, with: .once) }
+                    }
+                    Button("Add to default") {
+                        Task { await store.answer(request, with: .addToDefault) }
+                    }
+                } label: {
+                    Text("Allow…")
+                }
+                .menuStyle(.borderlessButton)
+                .controlSize(.small)
+                .accessibilityIdentifier("work.approval.\(request.id).allowMenu")
+            } else {
+                Button("Allow once") {
+                    Task { await store.answer(request, with: .once) }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityIdentifier("work.approval.\(request.id).once")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .accessibilityIdentifier("work.approval.\(request.id).once")
         }
     }
 }
@@ -839,19 +880,32 @@ private struct WorkTimelineSection: View {
         if !work.timelineSearch.trimmingCharacters(in: .whitespaces).isEmpty {
             return "No activity matches your search."
         }
+        // Honest empty state: if Active/Default is selected but no
+        // session is live, say so plainly. Prepared sessions have no
+        // events yet by definition.
+        switch work.sessionSelection {
+        case .active, .defaultSession:
+            if store.session.activeGrant == nil {
+                return "No session is active. Activate a prepared session or wait for the default to start."
+            }
+        case .prepared:
+            return "Prepared sessions have no activity until you activate them."
+        case .recent:
+            break
+        }
         switch work.timelineFilter {
         case .all:
-            return "When agents read files or write changes inside a session, the activity will appear here."
+            return "Nothing has happened in this session yet. Reads, writes, and approvals will appear here as the agent works."
         case .approvals:
-            return "Approval-related activity will appear here when an agent asks for new access."
+            return "No approval-related activity in this session."
         case .writes:
-            return "File writes inside a session will appear here with restorable snapshots."
+            return "No file writes in this session yet. Writes appear with restorable snapshots."
         case .reads:
-            return "File reads will appear here once a session is active."
+            return "No file reads in this session yet."
         case .search:
-            return "Searches across shared content will appear here."
+            return "No searches in this session yet."
         case .blocked:
-            return "Blocked access attempts will appear here."
+            return "Nothing was blocked in this session."
         }
     }
 
@@ -868,11 +922,23 @@ private struct WorkTimelineSection: View {
     }
 
     private var scopedEntries: [AuditEntry] {
+        // The timeline answers "what happened in this session?" — when
+        // the user picks Active or Default, scope to the matching
+        // grant/session so the event list reflects ONLY that session's
+        // work. Prepared sessions have no events yet, so we show an
+        // explicit empty.
         switch work.sessionSelection {
         case .recent(let id):
             return store.activityEntries.filter { $0.sessionID == id || $0.grantID == id }
-        case .active, .defaultSession, .prepared:
-            return store.activityEntries
+        case .active, .defaultSession:
+            if let grant = store.session.activeGrant {
+                return store.activityEntries.filter {
+                    $0.grantID == grant.grantID || $0.sessionID == grant.grantID
+                }
+            }
+            return []
+        case .prepared:
+            return []
         }
     }
 }
@@ -1168,8 +1234,12 @@ private struct WorkRequestInspector: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            divider(label: "Operation")
+            operationDetails
+
             divider(label: "Actions")
             VStack(alignment: .leading, spacing: Spacing.s1) {
+                // Deny first — the modeless default per Principle 3.
                 Button {
                     Task { await store.answer(request, with: .notThisTime) }
                 } label: {
@@ -1189,6 +1259,21 @@ private struct WorkRequestInspector: View {
                 .controlSize(.regular)
                 .accessibilityIdentifier("work.inspector.request.once")
 
+                if request.kind == .standingWrite {
+                    Button {
+                        Task { await store.answer(request, with: .addToDefault) }
+                    } label: {
+                        Label("Add to default", systemImage: "plus.rectangle.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.regular)
+                    .accessibilityIdentifier("work.inspector.request.addToDefault")
+                    Text("Promotes the requested folder to the agent's standing scope so future writes don't ask again.")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if request.kind == .privacyExposure {
                     Button {
                         Task { await store.answer(request, with: .shareRedacted) }
@@ -1198,8 +1283,71 @@ private struct WorkRequestInspector: View {
                     }
                     .controlSize(.regular)
                     .accessibilityIdentifier("work.inspector.request.redact")
+
+                    Button {
+                        Task { await store.answer(request, with: .shareOriginalOnce) }
+                    } label: {
+                        Label("Share original once", systemImage: "doc.text")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.regular)
+                    .accessibilityIdentifier("work.inspector.request.shareOriginalOnce")
+                    Text("Shares the unredacted payload one time; the privacy filter still records the exposure.")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
+
+    /// Reveals the operation, agent, and a one-line description of
+    /// what allowing the request would let the agent do. Closes the
+    /// "what does this actually mean?" gap the review flagged.
+    private var operationDetails: some View {
+        VStack(alignment: .leading, spacing: Spacing.s1) {
+            HStack(spacing: Spacing.s2) {
+                Text("Agent")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(AgentMeta.label(request.agent))
+                    .font(ManifoldType.caption)
+            }
+            HStack(spacing: Spacing.s2) {
+                Text("Operation")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(operationLabel)
+                    .font(ManifoldType.caption)
+            }
+            HStack(spacing: Spacing.s2) {
+                Text("Kind")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(kindLabel)
+                    .font(ManifoldType.caption)
+            }
+        }
+    }
+
+    private var operationLabel: String {
+        switch request.operation {
+        case .readFile:       return "Read file"
+        case .readFolder:     return "Read folder"
+        case .write:          return "Write file"
+        case .searchContent:  return "Search content"
+        case .listDirectory:  return "List directory"
+        case .mailboxRead:    return "Read mailbox"
+        }
+    }
+
+    private var kindLabel: String {
+        switch request.kind {
+        case .standingWrite:    return "Standing write"
+        case .privacyExposure:  return "Privacy review"
         }
     }
 
@@ -1289,18 +1437,24 @@ private struct WorkWriteInspector: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let event = matchingEvent {
-                if let before = event.beforeHash {
-                    hashRow(label: "Before", value: shortHash(before))
-                }
-                if let after = event.afterHash {
-                    hashRow(label: "After", value: shortHash(after))
-                }
-                hashRow(label: "Snapshot", value: "#\(snapshotID)")
-            } else {
-                Text("Snapshot #\(snapshotID)")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
+            // Hashes prefer the SessionEvent (loaded only when the
+            // user picks a recent session), but fall back to the
+            // matching AuditEntry from the global activity feed so
+            // the inspector still shows real before/after hashes for
+            // active-session writes without forcing a synchronous
+            // load.
+            let (beforeHash, afterHash) = matchingHashes
+            if let beforeHash {
+                hashRow(label: "Before", value: shortHash(beforeHash))
+            }
+            if let afterHash {
+                hashRow(label: "After", value: shortHash(afterHash))
+            }
+            hashRow(label: "Snapshot", value: "#\(snapshotID)")
+            if beforeHash == nil && afterHash == nil {
+                Text("Hashes load when the session events finish syncing.")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
             }
 
             Button {
@@ -1336,6 +1490,27 @@ private struct WorkWriteInspector: View {
         store.activity.sessionEvents.first { event in
             event.snapshotID == snapshotID && event.filePath == filePath
         }
+    }
+
+    /// Returns the best available before/after hash pair for this
+    /// snapshot. SessionEvent first (richest metadata), AuditEntry
+    /// from the global feed second (always loaded for active sessions).
+    private var matchingHashes: (before: String?, after: String?) {
+        if let event = matchingEvent {
+            return (event.beforeHash, event.afterHash)
+        }
+        // Fallback: match against the global activity entries by file
+        // path AND snapshot id (parsed from metadata).
+        for entry in store.activityEntries where entry.filePath == filePath {
+            if let metadata = entry.metadata,
+               let data = metadata.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+               let snap = json["snapshot_id"].flatMap(Int.init),
+               snap == snapshotID {
+                return (entry.beforeHash, entry.afterHash)
+            }
+        }
+        return (nil, nil)
     }
 
     private func hashRow(label: String, value: String) -> some View {
@@ -1383,7 +1558,7 @@ private struct WorkSessionInspector: View {
                 .fixedSize(horizontal: false, vertical: true)
             inspectorRow(label: "Agent", value: session.agents.first.map { store.displayName(for: $0) } ?? "Agent")
             inspectorRow(label: "Folders", value: "\(store.session.activeGrantSources.count)")
-            inspectorRow(label: "Mailboxes", value: "\(store.session.activeMailboxCount)")
+            inspectorRow(label: "Mailboxes", value: "\(activeMailboxCount(for: store))")
             inspectorRow(label: "Pending", value: "\(store.pendingRequests.count)")
             Button(role: .destructive) {
                 Task { await store.endSession() }
@@ -1414,32 +1589,28 @@ private struct WorkSessionInspector: View {
 
     @ViewBuilder
     private var preparedInspector: some View {
-        if let preload = store.sessionWorkbench.preload {
+        if store.sessionWorkbench.preload != nil {
+            WorkPreloadEditor()
+        } else {
             Label("Prepared", systemImage: "rectangle.stack")
                 .font(ManifoldType.bodyMedium)
-            Text(preload.name.isEmpty ? "New session" : preload.name)
-                .font(ManifoldType.heading)
-            inspectorRow(label: "Agent", value: store.displayName(for: preload.agent))
-            inspectorRow(label: "Base", value: preload.baseMode.label)
-            inspectorRow(
-                label: "Folders",
-                value: "\(preload.effectiveSourceIDs(defaultSourceIDs: store.defaultSourceIDs(for: preload.agent)).count)"
-            )
-            Button {
-                Task { await store.activateSessionPreload() }
-            } label: {
-                Label("Activate", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .accessibilityIdentifier("work.inspector.prepared.activate")
-
-            Button("Clear") { store.clearSessionPreload() }
+            Text("No prepared session.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: Spacing.s2) {
+                Button {
+                    store.beginSessionPreload(agent: store.defaultSessionAgent, baseMode: .buildOnDefault)
+                } label: {
+                    Label("Build on Default", systemImage: "plus.rectangle.on.rectangle")
+                }
                 .controlSize(.small)
-                .buttonStyle(.borderless)
-        } else {
-            Text("No prepared session.").font(ManifoldType.caption).foregroundStyle(.secondary)
+                Button {
+                    store.beginSessionPreload(agent: store.defaultSessionAgent, baseMode: .blank)
+                } label: {
+                    Label("Start Blank", systemImage: "plus.rectangle")
+                }
+                .controlSize(.small)
+            }
         }
     }
 
@@ -1466,6 +1637,267 @@ private struct WorkSessionInspector: View {
             Text(value).foregroundStyle(.primary)
         }
         .font(ManifoldType.caption)
+    }
+}
+
+// MARK: - Preload editor (used by the prepared-session inspector)
+
+/// Full-fidelity editor for a `SessionPreloadDraft`. Lets the user
+/// name the prepared session, switch agents, choose `buildOnDefault`
+/// vs `blank`, toggle individual folders, save it as a template, and
+/// activate it. Reuses the existing `SessionWorkbenchModel` so changes
+/// are durable across navigation.
+private struct WorkPreloadEditor: View {
+    @Environment(ManifoldStore.self) private var store
+
+    private var availableSources: [SourceRecord] {
+        store.sources
+            .filter { !$0.isRemoved }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    var body: some View {
+        if let preload = store.sessionWorkbench.preload {
+            let defaultIDs = store.defaultSourceIDs(for: preload.agent)
+            let effective = preload.effectiveSourceIDs(defaultSourceIDs: defaultIDs)
+
+            VStack(alignment: .leading, spacing: Spacing.s3) {
+                Label("Prepared session", systemImage: "rectangle.stack")
+                    .font(ManifoldType.bodyMedium)
+
+                TextField("Session name", text: nameBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("work.preload.name")
+
+                Picker("Agent", selection: agentBinding) {
+                    ForEach(store.connectedOrDefaultAgents(), id: \.self) { agent in
+                        Text(store.displayName(for: agent)).tag(agent)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("work.preload.agent")
+
+                Picker("Base", selection: baseModeBinding) {
+                    ForEach(PreloadBaseMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("work.preload.base")
+
+                Text(preload.baseMode.subtitle)
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                requestDetailPicker(preload: preload)
+
+                folderList(preload: preload, defaultIDs: defaultIDs, effective: effective)
+
+                HStack(spacing: Spacing.s1) {
+                    Image(systemName: "folder")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
+                    Text("\(effective.count) folder\(effective.count == 1 ? "" : "s") selected")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
+                }
+
+                actionRow(preload: preload)
+
+                if let message = store.sessionWorkbench.lastMessage {
+                    Label(message, systemImage: "checkmark.circle.fill")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(ManifoldPalette.active)
+                }
+                if let error = store.sessionWorkbench.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    private struct PreloadDetailOption: Hashable, Identifiable {
+        let label: String
+        let level: AccessRecordingLevel?
+        var id: String { level?.rawValue ?? "default" }
+    }
+
+    private static let preloadDetailOptions: [PreloadDetailOption] = [
+        PreloadDetailOption(label: "Agent default", level: nil),
+        PreloadDetailOption(label: "Off", level: .lightweight),
+        PreloadDetailOption(label: "Brief", level: .summary),
+        PreloadDetailOption(label: "Detailed", level: .detailed),
+    ]
+
+    @ViewBuilder
+    private func requestDetailPicker(preload: SessionPreloadDraft) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Request detail", systemImage: "text.append")
+                .font(ManifoldType.captionMedium)
+                .foregroundStyle(.secondary)
+            Picker("Request detail", selection: Binding(
+                get: { preload.requestDetailOverride },
+                set: { newValue in
+                    guard var draft = store.sessionWorkbench.preload else { return }
+                    draft.requestDetailOverride = newValue
+                    store.sessionWorkbench.preload = draft
+                }
+            )) {
+                ForEach(Self.preloadDetailOptions) { option in
+                    Text(option.label).tag(option.level)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("work.preload.requestDetail")
+            Text(preload.requestDetailOverride == nil
+                 ? "Will use \(store.displayName(for: preload.agent))'s default request detail."
+                 : "Overrides the agent default for this session only. Reverts when the session ends.")
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func folderList(preload: SessionPreloadDraft, defaultIDs: Set<String>, effective: Set<String>) -> some View {
+        if availableSources.isEmpty {
+            Text("Add a folder in Access first.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(availableSources) { source in
+                    folderRow(source, preload: preload, defaultIDs: defaultIDs, effective: effective)
+                    if source.sourceID != availableSources.last?.sourceID {
+                        Divider()
+                    }
+                }
+            }
+            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+            )
+        }
+    }
+
+    private func folderRow(_ source: SourceRecord, preload: SessionPreloadDraft, defaultIDs: Set<String>, effective: Set<String>) -> some View {
+        Toggle(isOn: Binding(
+            get: { effective.contains(source.sourceID) },
+            set: { store.setPreloadSource(sourceID: source.sourceID, included: $0) }
+        )) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(ManifoldPalette.selection)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(source.displayName)
+                            .font(ManifoldType.body)
+                            .lineLimit(1)
+                        if let badge = badge(sourceID: source.sourceID, preload: preload, defaultIDs: defaultIDs, effective: effective) {
+                            Text(badge)
+                                .font(ManifoldType.tiny)
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(.tertiary.opacity(0.15), in: Capsule())
+                        }
+                    }
+                    Text(source.originalRootPath)
+                        .font(ManifoldType.tiny.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+            }
+        }
+        .toggleStyle(.checkbox)
+        .padding(.horizontal, Spacing.s2)
+        .padding(.vertical, Spacing.s1)
+        .accessibilityIdentifier("work.preload.source.\(source.sourceID)")
+    }
+
+    private func badge(sourceID: String, preload: SessionPreloadDraft, defaultIDs: Set<String>, effective: Set<String>) -> String? {
+        guard preload.baseMode == .buildOnDefault else { return nil }
+        let inDefault = defaultIDs.contains(sourceID)
+        let selected = effective.contains(sourceID)
+        if inDefault && !selected { return "removed" }
+        if !inDefault && selected { return "added" }
+        if inDefault { return "default" }
+        return nil
+    }
+
+    private func actionRow(preload: SessionPreloadDraft) -> some View {
+        HStack(spacing: Spacing.s2) {
+            Button {
+                Task { await store.activateSessionPreload() }
+            } label: {
+                if store.sessionWorkbench.isActivating {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.small)
+                        Text("Activating…")
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Label("Activate", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .disabled(store.sessionWorkbench.isActivating)
+            .accessibilityIdentifier("work.preload.activate")
+
+            Button {
+                Task { await store.saveSessionPreload() }
+            } label: {
+                if store.sessionWorkbench.isSaving {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Save", systemImage: "tray.and.arrow.down")
+                }
+            }
+            .controlSize(.regular)
+            .disabled(preload.hasUnsavedName || store.sessionWorkbench.isSaving)
+            .accessibilityIdentifier("work.preload.save")
+
+            Button("Clear") { store.clearSessionPreload() }
+                .controlSize(.regular)
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("work.preload.clear")
+        }
+    }
+
+    // MARK: Bindings
+
+    private var nameBinding: Binding<String> {
+        Binding(
+            get: { store.sessionWorkbench.preload?.name ?? "" },
+            set: { value in
+                guard var draft = store.sessionWorkbench.preload else { return }
+                draft.name = value
+                store.sessionWorkbench.preload = draft
+            }
+        )
+    }
+
+    private var agentBinding: Binding<TargetApp> {
+        Binding(
+            get: { store.sessionWorkbench.preload?.agent ?? store.defaultSessionAgent },
+            set: { store.setPreloadAgent($0) }
+        )
+    }
+
+    private var baseModeBinding: Binding<PreloadBaseMode> {
+        Binding(
+            get: { store.sessionWorkbench.preload?.baseMode ?? .buildOnDefault },
+            set: { store.setPreloadBaseMode($0) }
+        )
     }
 }
 
@@ -1583,10 +2015,17 @@ private struct WorkRuntimeIssueInspector: View {
 
 // MARK: - Helpers
 
-extension SessionModel {
-    /// Best-effort mailbox count derived from the active grant; mailboxes
-    /// aren't surfaced as `GrantSourceRecord` entries today, so this stays
-    /// at zero unless the surface adds support later. Keeping the helper
-    /// here so the WorkView UI doesn't have to know that.
-    var activeMailboxCount: Int { 0 }
+/// Reads the active session's mailbox/email count from the data
+/// control summary the runtime publishes. Falls back to 0 if no
+/// snapshot is available yet — but unlike the previous hardcoded 0,
+/// this value updates when the runtime reports new email sharing
+/// state.
+@MainActor
+private func activeMailboxCount(for store: ManifoldStore) -> Int {
+    guard let active = store.activeSession else { return 0 }
+    let agent = active.agents.first ?? store.defaultSessionAgent
+    if let snapshot = store.dataControlSummary?.agents.first(where: { $0.agent == agent }) {
+        return snapshot.sharedEmailCount
+    }
+    return 0
 }

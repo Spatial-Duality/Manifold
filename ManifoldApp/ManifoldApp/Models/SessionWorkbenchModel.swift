@@ -36,6 +36,11 @@ struct SessionPreloadDraft: Identifiable, Hashable, Sendable {
     var includedSourceIDs: Set<String>
     var excludedSourceIDs: Set<String>
     var selectedEmailIDs: Set<String>
+    /// Optional per-session request-detail override. When set, the
+    /// store applies this access-recording level on activation and
+    /// restores the agent's prior level when the session ends. nil
+    /// means "use the agent's default" — no override.
+    var requestDetailOverride: AccessRecordingLevel?
 
     init(
         id: UUID = UUID(),
@@ -45,7 +50,8 @@ struct SessionPreloadDraft: Identifiable, Hashable, Sendable {
         baseMode: PreloadBaseMode = .buildOnDefault,
         includedSourceIDs: Set<String> = [],
         excludedSourceIDs: Set<String> = [],
-        selectedEmailIDs: Set<String> = []
+        selectedEmailIDs: Set<String> = [],
+        requestDetailOverride: AccessRecordingLevel? = nil
     ) {
         self.id = id
         self.presetID = presetID
@@ -55,6 +61,7 @@ struct SessionPreloadDraft: Identifiable, Hashable, Sendable {
         self.includedSourceIDs = includedSourceIDs
         self.excludedSourceIDs = excludedSourceIDs
         self.selectedEmailIDs = selectedEmailIDs
+        self.requestDetailOverride = requestDetailOverride
     }
 
     func effectiveSourceIDs(defaultSourceIDs: Set<String>) -> Set<String> {
