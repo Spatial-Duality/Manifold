@@ -12,7 +12,7 @@ import ManifoldKit
 
 struct EventTable: View {
     enum Filter: Hashable, CaseIterable {
-        case all, reads, writes, denials, searches, trackedEdits, privacy
+        case all, reads, writes, denials, searches, versions, privacy
 
         var label: String {
             switch self {
@@ -21,7 +21,7 @@ struct EventTable: View {
             case .writes:        return "Writes"
             case .denials:       return "Denials"
             case .searches:      return "Searches"
-            case .trackedEdits:  return "Tracked edits"
+            case .versions:      return "Versions"
             case .privacy:       return "Privacy"
             }
         }
@@ -228,7 +228,7 @@ extension EventTable.Filter {
             return entry.action.contains("deny") || entry.action.contains("denied")
         case .searches:
             return entry.action.contains("search")
-        case .trackedEdits:
+        case .versions:
             return entry.action.contains("snapshot") ||
                    entry.action.contains("promote") ||
                    entry.action.contains("revert") ||
@@ -245,7 +245,7 @@ extension EventTable.Filter {
         case .writes: return "pencil"
         case .denials: return "hand.raised"
         case .searches: return "magnifyingglass"
-        case .trackedEdits: return "arrow.triangle.2.circlepath"
+        case .versions: return "arrow.triangle.2.circlepath"
         case .privacy: return "shield.lefthalf.filled"
         }
     }
@@ -305,7 +305,7 @@ struct ActivityEventPresentation {
             outcomeSymbol = "shield"
         } else if action == AuditAction.coverageWarning.rawValue {
             title = "Coverage warning"
-            detail = targetPath.map { "\(agent) touched \($0) near the protected boundary." } ?? "\(agent) produced a coverage warning."
+            detail = targetPath.map { "\(agent) touched \($0) near the Manifold boundary." } ?? "\(agent) produced a coverage warning."
             symbol = "exclamationmark.triangle.fill"
             color = ManifoldPalette.attention
             outcomeLabel = "Review"
@@ -323,7 +323,7 @@ struct ActivityEventPresentation {
             needsAttention = false
         } else if action.contains("write") || action == AuditAction.fileModified.rawValue || action == AuditAction.fileCreated.rawValue || action == AuditAction.fileDeleted.rawValue {
             title = Self.writeTitle(action: action, targetName: targetName)
-            detail = targetPath.map { "\(agent) changed \($0)." } ?? "\(agent) wrote to a protected workspace."
+            detail = targetPath.map { "\(agent) changed \($0)." } ?? "\(agent) wrote through Manifold."
             symbol = "pencil"
             color = ManifoldPalette.claude
             outcomeLabel = "Written"
@@ -353,7 +353,7 @@ struct ActivityEventPresentation {
             detail = targetPath.map { "Manifold recorded a recoverable version for \($0)." } ?? "Manifold recorded a recoverable version."
             symbol = "arrow.triangle.2.circlepath"
             color = ManifoldPalette.active
-            outcomeLabel = "Tracked"
+            outcomeLabel = "Versioned"
             outcomeSymbol = "clock.arrow.circlepath"
             outcomeVariant = .defaultScope
             needsAttention = false

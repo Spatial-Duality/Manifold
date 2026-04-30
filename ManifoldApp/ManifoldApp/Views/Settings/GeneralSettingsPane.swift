@@ -27,6 +27,24 @@ struct GeneralSettingsPane: View {
                 Toggle("Launch at Login", isOn: $store.launchAtLogin)
             }
 
+            Section("Sessions") {
+                Picker("On launch", selection: $store.sessionStartupMode) {
+                    ForEach(SessionStartupMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                if store.sessionStartupMode == .defaultSession {
+                    Picker("Default agent", selection: $store.defaultSessionAgent) {
+                        Text("Claude").tag(TargetApp.cowork)
+                        Text("Codex").tag(TargetApp.codex)
+                    }
+                }
+                Text("Sessions only gate access. Files written through Manifold stay in their original folders and are visible to any later session that has access to those folders.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Notifications") {
                 Toggle("Session start and finish", isOn: $store.notifyOnSessionEnd)
                 Toggle("Access denied alerts", isOn: $store.notifyOnAccessDenied)

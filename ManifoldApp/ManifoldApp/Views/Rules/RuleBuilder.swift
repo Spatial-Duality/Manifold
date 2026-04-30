@@ -18,12 +18,109 @@ struct RuleBuilder: View {
     var body: some View {
         Group {
             switch scope {
-            case .file:  FileBuilder(matcher: $matcher, isEditable: isEditable)
-            case .email: EmailBuilder(matcher: $matcher, isEditable: isEditable)
-            case .agent: AgentBuilder(matcher: $matcher, isEditable: isEditable)
+            case .file:    FileBuilder(matcher: $matcher, isEditable: isEditable)
+            case .email:   EmailBuilder(matcher: $matcher, isEditable: isEditable)
+            case .content: ContentBuilder(matcher: $matcher, isEditable: isEditable)
+            case .agent:   AgentBuilder(matcher: $matcher, isEditable: isEditable)
             }
         }
         .accessibilityIdentifier("rules.builder")
+    }
+}
+
+// MARK: - Cross-content scope (Files + Mail)
+//
+// Content rules apply to both file reads and email reads, so the only
+// payload-agnostic predicates that make sense here are the privacy
+// matchers. The picker exposes those plus a generic "Always" fallback.
+
+private struct ContentBuilder: View {
+    @Binding var matcher: RuleMatcher
+    let isEditable: Bool
+
+    enum Kind: String, CaseIterable, Identifiable {
+        case privacyContainsCategory
+        case privacyMatchesMyIdentity
+        case privacyInOrgAllowlist
+        case privacySeverityAtLeast
+        case always
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .privacyContainsCategory: return "Contains privacy category"
+            case .privacyMatchesMyIdentity: return "Matches My Identity"
+            case .privacyInOrgAllowlist:    return "On org allowlist"
+            case .privacySeverityAtLeast:   return "Privacy severity at least"
+            case .always:                   return "Always (every payload)"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            Picker("Condition", selection: Binding(
+                get: { currentKind() },
+                set: { newKind in
+                    matcher = defaultMatcher(for: newKind)
+                }
+            )) {
+                ForEach(Kind.allCases) { kind in
+                    Text(kind.title).tag(kind)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!isEditable)
+
+            switch matcher {
+            case .privacyContainsCategory(let category):
+                Picker("Category", selection: Binding(
+                    get: { category },
+                    set: { matcher = .privacyContainsCategory($0) }
+                )) {
+                    ForEach(PrivacyCategory.allCases, id: \.self) { c in
+                        Text(c.displayName).tag(c)
+                    }
+                }
+                .disabled(!isEditable)
+            case .privacySeverityAtLeast(let severity):
+                Picker("Severity", selection: Binding(
+                    get: { severity },
+                    set: { matcher = .privacySeverityAtLeast($0) }
+                )) {
+                    ForEach(PrivacySeverity.allCases, id: \.self) { s in
+                        Text(s.rawValue.capitalized).tag(s)
+                    }
+                }
+                .disabled(!isEditable)
+            default:
+                EmptyView()
+            }
+
+            Text("Cross-content rules apply to both file reads and email reads. Privacy-backed matchers depend on the privacy filter being enabled in Settings.")
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func currentKind() -> Kind {
+        switch matcher {
+        case .privacyContainsCategory:  return .privacyContainsCategory
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist:    return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast:   return .privacySeverityAtLeast
+        default:                        return .always
+        }
+    }
+
+    private func defaultMatcher(for kind: Kind) -> RuleMatcher {
+        switch kind {
+        case .privacyContainsCategory:  return .privacyContainsCategory(.secret)
+        case .privacyMatchesMyIdentity: return .privacyMatchesMyIdentity
+        case .privacyInOrgAllowlist:    return .privacyInOrgAllowlist
+        case .privacySeverityAtLeast:   return .privacySeverityAtLeast(.medium)
+        case .always:                   return .always
+        }
     }
 }
 

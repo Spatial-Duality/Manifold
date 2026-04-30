@@ -256,7 +256,7 @@ struct MailboxInspector: View {
                         .foregroundStyle(.secondary)
                         .tracking(0.5)
                     SensitivitySelector(level: $level)
-                    Text("Use this as the mailbox default when deciding which messages to share in a protected session.")
+                    Text("Use this as the mailbox default when deciding which messages to share in a Manifold session.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

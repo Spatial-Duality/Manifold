@@ -47,8 +47,8 @@ struct RuntimeCoverageTests {
         #expect(events[0].coverageState == .outsideCoverage)
     }
 
-    @Test("Connected snapshot reports tracked workspace when active block exists")
-    func connectedSnapshotReportsTrackedWorkspace() async throws {
+    @Test("Connected snapshot reports manifold routed for a normal session gateway")
+    func connectedSnapshotReportsNormalSessionGateway() async throws {
         let (runtime, tempDir) = try makeRuntime()
         defer { cleanup(tempDir) }
 
@@ -60,6 +60,42 @@ struct RuntimeCoverageTests {
             profileID: "profile-test",
             sourceIDs: [sourceID],
             materializationRoot: tempDir.appendingPathComponent("workspace").path
+        )
+        _ = try await runtime.workBlockStore.startBlock(agent: .codex, grantID: grant.grantID, sourceIDs: [sourceID])
+        let bridge = await runtime.bridge(for: "coverage-test", targetApp: .codex, version: "test")
+        await bridge.registerVerifiedClientIdentity(
+            VerifiedClientIdentity(
+                requestedTargetApp: TargetApp.codex.rawValue,
+                effectiveTargetApp: TargetApp.codex.rawValue,
+                clientProcessID: 123,
+                clientExecutablePath: nil,
+                hostProcessID: 456,
+                hostBundleIdentifier: "com.openai.codex",
+                hostExecutablePath: nil,
+                status: .verified,
+                reason: "test"
+            )
+        )
+
+        let snapshots = await runtime.connectedClientSnapshots()
+        let codex = try #require(snapshots.first(where: { $0.agent == TargetApp.codex.rawValue }))
+        #expect(codex.coverageState == .manifoldRouted)
+    }
+
+    @Test("Connected snapshot reports tracked workspace for a draft workspace block")
+    func connectedSnapshotReportsDraftWorkspace() async throws {
+        let (runtime, tempDir) = try makeRuntime()
+        defer { cleanup(tempDir) }
+
+        let sourceRoot = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let sourceID = try await runtime.grantStore.addSource(displayName: "Shared", rootPath: sourceRoot.path)
+        let grant = try await runtime.grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "profile-test",
+            sourceIDs: [sourceID],
+            materializationRoot: tempDir.appendingPathComponent("workspace").path,
+            summaryFraming: "Manifold draft workspace for governed AI file writes."
         )
         _ = try await runtime.workBlockStore.startBlock(agent: .codex, grantID: grant.grantID, sourceIDs: [sourceID])
 

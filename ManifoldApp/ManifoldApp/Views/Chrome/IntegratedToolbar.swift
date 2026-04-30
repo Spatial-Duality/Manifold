@@ -26,9 +26,9 @@ struct LedgerToolbar: ToolbarContent {
                 } label: {
                     Label("Finish session", systemImage: "stop.fill")
                 }
-                .help("Finish the active session")
+                .help("End the active session")
             } else {
-                if let command = commandPalette.command(.protectNextSession, for: store) {
+                if let command = commandPalette.command(.startSession, for: store) {
                     Button {
                         Task { await command.action(store) }
                     } label: {

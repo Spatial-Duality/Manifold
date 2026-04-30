@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // AppRootView — wrapper that presents either the FirstRunFlow or
-// the LedgerView, plus sheet presentations for session start and
-// the command palette.
+// the LedgerView, plus command palette presentation.
 //
 // Keeping this separate from ManifoldApp lets the @State sheet flags
 // live inside the window (SwiftUI-idiomatic) instead of polluting the
@@ -13,7 +12,7 @@ import SwiftUI
 import ManifoldKit
 
 extension Notification.Name {
-    static let manifoldShowSessionStartSheet = Notification.Name("manifold.showSessionStartSheet")
+    static let manifoldShowSessions = Notification.Name("manifold.showSessions")
     static let manifoldShowActivityLedger = Notification.Name("manifold.showActivityLedger")
     static let manifoldShowLedgerDestination = Notification.Name("manifold.showLedgerDestination")
     static let manifoldFocusCurrentSearch = Notification.Name("manifold.focusCurrentSearch")
@@ -27,7 +26,6 @@ extension Notification.Name {
 struct AppRootView: View {
     @Environment(ManifoldStore.self) private var store
     @Environment(CommandPaletteModel.self) private var commandPalette
-    @State private var isPresentingSessionStartSheet = false
     @State private var hasLoadedInitialSummary = false
 
     private var shouldShowFirstRun: Bool {
@@ -42,23 +40,26 @@ struct AppRootView: View {
                 LedgerView()
             }
         }
-        .sheet(isPresented: $isPresentingSessionStartSheet) {
-            SessionStartSheet()
-        }
         .sheet(isPresented: Binding(
             get: { commandPalette.isPresented },
             set: { commandPalette.isPresented = $0 }
         )) {
             CommandPaletteView()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .manifoldShowSessionStartSheet)) { _ in
-            isPresentingSessionStartSheet = true
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldShowSessions)) { _ in
+            presentMainLedger(destination: .work)
         }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldStartSessionFromIntent)) { _ in
-            isPresentingSessionStartSheet = true
+            presentMainLedger(destination: .work)
+            if store.sessionWorkbench.preload == nil {
+                store.beginSessionPreload(
+                    agent: store.defaultSessionAgent,
+                    baseMode: .buildOnDefault
+                )
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldOpenActivityFromIntent)) { _ in
-            presentMainLedger(destination: .activity)
+            presentMainLedger(destination: .work)
         }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldPauseAllFromIntent)) { _ in
             Task { await store.governance.pauseAllAgents() }

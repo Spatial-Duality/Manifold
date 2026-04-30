@@ -4,9 +4,7 @@
 // SessionChip — "a session is live" marker.
 //
 // Green pulsing dot + "SESSION" kicker + session name. Appears in the
-// menu bar panel and in the Ledger window's integrated toolbar. When a
-// session is ALSO tracking edits, we render a tracked-edit variant with
-// the timeline symbol instead of the pulse.
+// menu bar panel and in the Ledger window's integrated toolbar.
 
 import SwiftUI
 
@@ -42,7 +40,7 @@ struct SessionChip: View {
                 .frame(width: 14, height: 14)
             }
 
-            Text(isTrackedEdit ? "TRACKED" : "SESSION")
+            Text("SESSION")
                 .font(ManifoldType.tiny)
                 .foregroundStyle(.secondary)
                 .tracking(0.5)
@@ -75,9 +73,7 @@ struct SessionChip: View {
                 )
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(isTrackedEdit
-            ? "Tracked edit session: \(name)"
-            : "Session live: \(name)")
+        .accessibilityLabel("Session live: \(name)")
     }
 
     static func format(_ interval: TimeInterval) -> String {

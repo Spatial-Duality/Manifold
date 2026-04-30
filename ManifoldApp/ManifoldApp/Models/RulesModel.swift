@@ -40,7 +40,7 @@ final class RulesModel {
         }
 
         static var allCases: [Filter] {
-            [.all, .privacy, .scope(.file), .scope(.email), .scope(.agent), .seeded, .userAuthored, .suggested]
+            [.all, .privacy, .scope(.file), .scope(.email), .scope(.content), .scope(.agent), .seeded, .userAuthored, .suggested]
         }
 
         var title: String {
@@ -49,7 +49,8 @@ final class RulesModel {
             case .privacy: return "Privacy Filter"
             case .scope(.file): return "Files"
             case .scope(.email): return "Emails"
-            case .scope(.agent): return "Agents"
+            case .scope(.content): return "Files + Mail"
+            case .scope(.agent): return "Agent Behaviour"
             case .seeded: return "Auto (seeded)"
             case .userAuthored: return "My Rules"
             case .suggested: return "Suggested"
@@ -62,6 +63,7 @@ final class RulesModel {
             case .privacy: return "sparkles.rectangle.stack"
             case .scope(.file): return "folder"
             case .scope(.email): return "envelope"
+            case .scope(.content): return "doc.on.doc"
             case .scope(.agent): return "sparkles"
             case .seeded: return "lock.shield"
             case .userAuthored: return "person.crop.circle"
@@ -371,6 +373,32 @@ extension RuleRecord {
         )
     }
 
+    /// A `content`-scoped rule applies to BOTH file and email payloads.
+    /// Use this for cross-content rules (e.g. "redact privacy findings").
+    static func newUserContentRule(
+        name: String = "New cross-content rule",
+        action: ManifoldKit.RuleAction = .redact
+    ) -> RuleRecord {
+        let iso = ISO8601DateFormatter.shared.string(from: Date())
+        return RuleRecord(
+            id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
+            name: name,
+            explanation: "Applies to file reads and email reads.",
+            scope: .content,
+            matcher: .privacySeverityAtLeast(.medium),
+            action: action,
+            agents: [],
+            window: .always,
+            source: .user,
+            enabled: true,
+            orderIndex: 100,
+            createdAt: iso,
+            updatedAt: iso
+        )
+    }
+
+    /// A privacy-filter rule that applies to ALL payloads. Stored as
+    /// `.content` so the engine evaluates it on file + email requests.
     static func newPrivacyFilterRule(
         name: String = "New privacy filter rule",
         category: PrivacyCategory = .secret,
@@ -381,7 +409,7 @@ extension RuleRecord {
             id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
             name: name,
             explanation: "Uses the privacy filter model before content is shared with an agent.",
-            scope: .agent,
+            scope: .content,
             matcher: .privacyContainsCategory(category),
             action: action,
             agents: [],
@@ -405,7 +433,7 @@ extension RuleRecord {
             id: "rule-\(UUID().uuidString.prefix(8).lowercased())",
             name: name,
             explanation: explanation,
-            scope: .agent,
+            scope: .content,
             matcher: matcher,
             action: action,
             agents: [],

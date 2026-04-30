@@ -34,7 +34,9 @@ public struct RuleEngine: Sendable {
     ) -> RuleDecision {
         let candidates = rules.filter { rule in
             guard rule.enabled else { return false }
-            guard rule.scope == request.scope else { return false }
+            // Cross-content rules (`.content`) apply to both file and
+            // email requests. All other scopes match only their own.
+            guard rule.scope.matches(requestScope: request.scope) else { return false }
             guard rule.applies(to: agent) else { return false }
             guard rule.window.isActive(
                 now: context.now,

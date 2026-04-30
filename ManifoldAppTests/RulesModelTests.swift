@@ -142,7 +142,9 @@ final class RulesModelTests: XCTestCase {
     func testPrivacyFilterFactoryCreatesPreflightRule() {
         let rule = RuleRecord.newPrivacyFilterRule(category: .accountNumber)
 
-        XCTAssertEqual(rule.scope, .agent)
+        // Privacy-filter rules use the cross-content scope so the engine
+        // evaluates them on both file and email requests.
+        XCTAssertEqual(rule.scope, .content)
         XCTAssertEqual(rule.action, .deny)
         XCTAssertEqual(rule.matcher, .privacyContainsCategory(.accountNumber))
         XCTAssertTrue(rule.isPrivacyFilterBacked)

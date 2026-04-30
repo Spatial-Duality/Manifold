@@ -105,13 +105,16 @@ struct SessionDrift: Hashable, Sendable {
     }
 }
 
-/// Form-backing draft for the SessionStartSheet / ReloadDriftSheet.
+/// Form-backing draft for gateway session activation.
 struct SessionDraft: Hashable, Sendable {
     var name: String = ""
     var durationHours: Double = 2
     var agents: Set<TargetApp> = [.cowork]
     var baseMode: SessionRecord.BaseMode = .defaultScope
     var trackWrites: Bool = false
+    var usesExplicitFileSelection: Bool = false
+    var selectedSourceIDs: Set<String> = []
+    var selectedEmailIDs: Set<String> = []
 }
 
 // MARK: - Approval queue
@@ -279,8 +282,8 @@ protocol ManifoldCommands: AnyObject {
 
     // Sessions
     func startSession(_ draft: SessionDraft) async throws
-    func previewProtectedRun(draft: SessionDraft) async throws
-    func startProtectedRun(draft: SessionDraft) async throws
+    func previewSession(draft: SessionDraft) async throws
+    func startGatewaySession(draft: SessionDraft) async throws
     func finishActiveSession() async throws
     func reloadSession(historyID: String) async throws
 

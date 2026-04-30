@@ -43,12 +43,10 @@ public protocol ManifoldServiceAPI: Sendable {
         writeMode: String?
     ) async throws -> WriteResult
 
-    func startTrackedRun(connectionID: String, folderIDs: [String], fileScopes: [FileScope], emailIDs: [String]) async throws -> TrackedRun
-    func pauseTrackedRun(connectionID: String) async throws
-    func resumeTrackedRun(connectionID: String) async throws
-    func finishTrackedRun(connectionID: String) async throws -> PromotionPreview
-    func applyTrackedRun(connectionID: String) async throws -> PromotionResult
-    func discardTrackedRun(connectionID: String) async throws
+    func startGatewaySession(connectionID: String, folderIDs: [String], fileScopes: [FileScope], emailIDs: [String]) async throws -> GatewaySession
+    func pauseGatewaySession(connectionID: String) async throws
+    func resumeGatewaySession(connectionID: String) async throws
+    func endGatewaySession(connectionID: String) async throws
     func listChanges(connectionID: String) async throws -> [ChangeEntry]
 
     func listEmails(connectionID: String) async throws -> [EmailEntry]

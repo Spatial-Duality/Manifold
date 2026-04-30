@@ -109,7 +109,7 @@ private struct StatusHeader: View {
             return "Manifold can't reach the runtime."
         }
         if let block = store.dataControlSummary?.activeWorkBlock {
-            return "\(AgentMeta.label(block.agent)) protected run is live."
+            return "\(AgentMeta.label(block.agent)) session is live."
         }
         if let summary = store.dataControlSummary, !summary.agents.isEmpty {
             return summary.agents
@@ -128,7 +128,7 @@ private struct StatusHeader: View {
             let session = store.activeSession
             return "Session running: \(session?.name ?? "unnamed")."
         case .trackedEdit:
-            return "Tracked edit in progress."
+            return "Session in progress."
         }
     }
 
@@ -149,12 +149,12 @@ private struct StatusHeader: View {
         }
         switch state {
         case .idle:
-            return "Manifold is running. Add a folder or mailbox to protect your next session."
+            return "Manifold is running. Add a folder or mailbox for your next session."
         case .idleWithRecent:
             if let last = store.recentSessionEntries.first {
                 return "Last session: \(last.name), \(last.displayLastRun)."
             }
-            return "No protected session running."
+            return "No session running."
         case .activeWithQueue:
             let count = store.pendingRequests.count
             if count > 0 { return "\(count) request\(count == 1 ? "" : "s") waiting on you." }
@@ -233,7 +233,7 @@ private struct SessionChipStrip: View {
     }
 }
 
-// MARK: - Tracked edit strip
+// MARK: - Session strip
 
 private struct TrackedEditStrip: View {
     let session: SessionRecord
@@ -245,7 +245,7 @@ private struct TrackedEditStrip: View {
                 .font(ManifoldType.caption)
                 .foregroundStyle(ManifoldPalette.claude)
             VStack(alignment: .leading, spacing: 1) {
-                Text("TRACKED EDIT")
+                Text("SESSION")
                     .font(ManifoldType.tiny)
                     .foregroundStyle(.primary)
                     .tracking(0.5)
@@ -661,7 +661,7 @@ private struct FooterActions: View {
                 commandFooterItem(.finishTrackedEdit)
                 FooterDivider()
             } else if state == .idle || state == .idleWithRecent {
-                commandFooterItem(.protectNextSession)
+                commandFooterItem(.startSession)
                 commandFooterItem(.addFolder)
                 FooterDivider()
             }
@@ -672,7 +672,7 @@ private struct FooterActions: View {
 
             if !store.pendingRequests.isEmpty {
                 FooterItem(icon: "hand.raised", label: "Review requests", shortcut: nil) {
-                    presentMainLedger(destination: .requests)
+                    presentMainLedger(destination: .work)
                 }
             }
 
@@ -806,6 +806,6 @@ private func openSessionRecap(for entry: SessionHistoryEntry, store: ManifoldSto
         if let session = store.sessions.first(where: { $0.id == entry.id }) {
             await store.activity.selectSession(session)
         }
-        presentMainLedger(destination: .activity)
+        presentMainLedger(destination: .work)
     }
 }

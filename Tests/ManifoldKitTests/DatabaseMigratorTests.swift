@@ -91,12 +91,29 @@ struct DatabaseMigratorTests {
         #expect(try migrator.currentVersion() == 35)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
+        try db.execute("""
+            CREATE TABLE approval_requests (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                path TEXT NOT NULL,
+                action TEXT NOT NULL,
+                requested_at REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                resolved_at REAL
+            )
+        """)
 
         let applied = try migrator.migrate()
 
         #expect(applied == 0)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
+        let approvalColumns = Set(try db.queryAll("PRAGMA table_info(approval_requests)").compactMap { $0["name"] })
+        #expect(approvalColumns.contains("source_id"))
+        #expect(approvalColumns.contains("request_kind"))
+        #expect(approvalColumns.contains("context_json"))
+        #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='runtime_settings'")).isEmpty))
     }
 
     @Test("Migration v2 adds session_id to existing audit_log")

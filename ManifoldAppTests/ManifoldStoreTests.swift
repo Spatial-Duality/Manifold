@@ -91,6 +91,43 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertFalse(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: [.cowork, .codex]))
     }
 
+    // MARK: - Redesign IA
+
+    func testLedgerDestinationHasOnlyFourCases() {
+        let cases = LedgerDestination.allCases.map(\.rawValue)
+        XCTAssertEqual(Set(cases), ["work", "access", "mail", "rules"])
+    }
+
+    func testLedgerDestinationLegacyRawValuesRouteToWork() {
+        XCTAssertEqual(LedgerDestination(rawValue: "activity"), .work)
+        XCTAssertEqual(LedgerDestination(rawValue: "sessions"), .work)
+        XCTAssertEqual(LedgerDestination(rawValue: "requests"), .work)
+        XCTAssertEqual(LedgerDestination(rawValue: "provenance"), .work)
+        XCTAssertEqual(LedgerDestination(rawValue: "agentOS"), .work)
+        XCTAssertNil(LedgerDestination(rawValue: "settings"))
+    }
+
+    func testWorkTimelineFilterApprovalsIncludesDeniedActions() {
+        let denied = AuditEntry(id: 1, timestamp: "2026-04-30T00:00:00Z", action: "deny_write")
+        let warning = AuditEntry(id: 2, timestamp: "2026-04-30T00:00:00Z", action: AuditAction.sensitivityWarning.rawValue)
+        let read = AuditEntry(id: 3, timestamp: "2026-04-30T00:00:00Z", action: AuditAction.fileRead.rawValue)
+
+        XCTAssertTrue(WorkTimelineFilter.approvals.includes(denied))
+        XCTAssertTrue(WorkTimelineFilter.approvals.includes(warning))
+        XCTAssertFalse(WorkTimelineFilter.approvals.includes(read))
+        XCTAssertTrue(WorkTimelineFilter.reads.includes(read))
+        XCTAssertTrue(WorkTimelineFilter.all.includes(read))
+    }
+
+    func testSessionRequestDetailMapsToBackingLevel() {
+        XCTAssertEqual(SessionRequestDetail.off.backingLevel, .lightweight)
+        XCTAssertEqual(SessionRequestDetail.brief.backingLevel, .summary)
+        XCTAssertEqual(SessionRequestDetail.detailed.backingLevel, .detailed)
+        XCTAssertEqual(SessionRequestDetail(level: .lightweight), .off)
+        XCTAssertEqual(SessionRequestDetail(level: .summary), .brief)
+        XCTAssertEqual(SessionRequestDetail(level: .detailed), .detailed)
+    }
+
     func testMailBrowserPrefersSyncedAccountAndInbox() async throws {
         let runtime = FixtureRuntimeClient(profile: .trackedWork)
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
@@ -274,15 +311,14 @@ final class CommandPaletteModelTests: XCTestCase {
         XCTAssertEqual(
             commandCenter.filteredCommands().map(\.title),
             [
-                "Open Activity",
+                "Open Work",
                 "Open Access",
                 "Open Mail",
-                "Open Requests",
                 "Open Rules",
-                "Protect Next Session…",
+                "New Session",
                 "Open Session Recap",
                 "Add Folder…",
-                "Refresh Runtime",
+                "Restart Runtime Helper",
                 "Settings…",
                 "Open Manifold",
             ]
@@ -317,15 +353,14 @@ final class CommandPaletteModelTests: XCTestCase {
         XCTAssertEqual(
             commandCenter.filteredCommands().map(\.title),
             [
-                "Open Activity",
+                "Open Work",
                 "Open Access",
                 "Open Mail",
-                "Open Requests",
                 "Open Rules",
-                "Protect Next Session…",
+                "New Session",
                 "Open Session Recap",
                 "Add Folder…",
-                "Refresh Runtime",
+                "Restart Runtime Helper",
                 "Settings…",
                 "Open Manifold",
             ]

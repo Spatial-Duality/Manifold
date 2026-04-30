@@ -194,26 +194,27 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(app.buttons["Choose folder…"].waitForExistence(timeout: 5))
 
         app.buttons["Skip setup"].click()
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.sidebar.activity").exists)
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.sidebar.work").exists)
     }
 
     func testSidebarNavigationShowsCurrentLedgerSurfaces() {
         let app = launchFixture(profile: "tracked-work")
 
         XCTAssertTrue(element(in: app, id: "ledger.sidebar").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, labelContaining: "Tracked session live").waitForExistence(timeout: 5))
+        // Default destination is Work.
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
 
+        // The redesign collapses to four sidebar entries. Provenance and
+        // Agent OS are no longer reachable from normal UI.
         openSidebarDestination("ledger.sidebar.access", expectedSurface: "ledger.surface.access", in: app)
         openSidebarDestination("ledger.sidebar.mail", expectedSurface: "ledger.surface.mail", in: app)
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 8))
-        openSidebarDestination("ledger.sidebar.requests", expectedSurface: "ledger.surface.requests", in: app)
         openSidebarDestination("ledger.sidebar.rules", expectedSurface: "ledger.surface.rules", in: app)
-        openSidebarDestination("ledger.sidebar.provenance", expectedSurface: "ledger.surface.provenance", in: app)
-        XCTAssertTrue(element(in: app, id: "ledger.provenance.verified").waitForExistence(timeout: 8))
-        openSidebarDestination("ledger.sidebar.agentOS", expectedSurface: "ledger.surface.agentOS", in: app)
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.summary").waitForExistence(timeout: 8))
+        openSidebarDestination("ledger.sidebar.work", expectedSurface: "ledger.surface.work", in: app)
+
+        XCTAssertFalse(element(in: app, id: "ledger.sidebar.provenance").exists)
+        XCTAssertFalse(element(in: app, id: "ledger.sidebar.agentOS").exists)
     }
 
     func testMailFixtureLoadsCurrentReviewSurfaceAndInspector() {
@@ -274,39 +275,31 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "access.memory.item.mem-fixture-review-routine").waitForExistence(timeout: 8))
     }
 
-    func testAgentOSFixtureShowsLatePhaseArtifacts() {
+    /// Agent OS is no longer a user-visible destination after the
+    /// 2026-04-29 redesign. Its data is still recorded for developer
+    /// diagnostics, but the surface is not reachable from the sidebar.
+    func testAgentOSSurfaceIsNotReachableFromSidebar() {
         let app = launchFixture(profile: "tracked-work")
-
-        openSidebarDestination("ledger.sidebar.agentOS", expectedSurface: "ledger.surface.agentOS", in: app)
-
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.summary").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.skill.skill-fixture-recall-routine").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.exec.exec-fixture-recall-routine").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.handle.handle-fixture-sensitive-email").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.node.node-fixture-routine").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.agentOS.finding.finding-fixture-supported-read").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.sidebar").waitForExistence(timeout: 8))
+        XCTAssertFalse(element(in: app, id: "ledger.sidebar.agentOS").exists)
+        XCTAssertFalse(element(in: app, id: "ledger.sidebar.provenance").exists)
     }
 
     func testRequestsQueueCanResolveFixtureApproval() {
         let app = launchFixture(profile: "tracked-work")
 
-        openSidebarDestination("ledger.sidebar.requests", expectedSurface: "ledger.surface.requests", in: app)
+        openSidebarDestination("ledger.sidebar.work", expectedSurface: "ledger.surface.work", in: app)
 
-        let requestCard = element(in: app, id: "requests.card.approval-1")
-        XCTAssertTrue(requestCard.waitForExistence(timeout: 8))
-        XCTAssertTrue(
-            element(in: app, id: "requests.action.notThisTime").waitForExistence(timeout: 5) ||
-            app.buttons["Not this time"].waitForExistence(timeout: 2)
-        )
-
-        clickElement(in: app, id: "requests.action.notThisTime", fallbackButtonTitle: "Not this time")
-        XCTAssertTrue(waitForNonExistence(requestCard, timeout: 8))
+        let approvalRow = element(in: app, id: "work.approval.approval-1")
+        XCTAssertTrue(approvalRow.waitForExistence(timeout: 8))
+        clickElement(in: app, id: "work.approval.approval-1.deny", fallbackButtonTitle: "Deny")
+        XCTAssertTrue(waitForNonExistence(approvalRow, timeout: 8))
     }
 
     func testCommandPaletteOpensAndAcceptsSearchInput() {
         let app = launchFixture(profile: "tracked-work")
 
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
         app.typeKey("k", modifierFlags: .command)
 
         let palette = element(in: app, id: "commandPalette.sheet")
@@ -323,7 +316,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
     func testPrivacySettingsFixtureShowsPaneAndIndexStatus() {
         let app = launchFixture(profile: "privacy")
 
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
         openSettings(in: app)
 
         clickSettingsTab("Privacy", contentID: "settings.privacy.model.enabled", in: app)
@@ -339,16 +332,16 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
     func testPrivacyActivityEvidenceRendersCurrentInspector() {
         let app = launchFixture(profile: "privacy")
 
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 8))
-        clickElement(in: app, id: "activity.filter.privacy", fallbackButtonTitle: "Privacy")
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
+        // Approvals filter scopes the Work timeline to privacy / coverage
+        // events.
+        clickElement(in: app, id: "work.timeline.filter.approvals", fallbackButtonTitle: "Approvals")
 
         let privacyRow = element(in: app, labelContaining: "Contains sensitive account context")
         XCTAssertTrue(privacyRow.waitForExistence(timeout: 8))
         privacyRow.click()
 
-        XCTAssertTrue(element(in: app, id: "activity.evidence.privacy").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "activity.evidence.privacy.summary").exists)
-        XCTAssertTrue(element(in: app, id: "activity.evidence.privacy.categories").exists)
+        XCTAssertTrue(element(in: app, id: "work.inspector").waitForExistence(timeout: 8))
     }
 
     func testRulesFixtureSupportsSearchInspectorAndEmptySuggestedState() {
@@ -399,22 +392,20 @@ final class ManifoldRuntimeE2ETests: ManifoldUITestCase {
     func testLocalRuntimeScenarioBootsAndShowsPrivacyRequest() {
         let app = launchLocalRuntime()
 
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 15))
-        openSidebarDestination("ledger.sidebar.requests", expectedSurface: "ledger.surface.requests", in: app, timeout: 15)
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 15))
 
-        let requestCard = element(in: app, id: "requests.card.approval-runtime-privacy")
-        XCTAssertTrue(requestCard.waitForExistence(timeout: 15))
-        XCTAssertTrue(element(in: app, id: "requests.action.shareRedacted").exists)
-        XCTAssertTrue(element(in: app, id: "requests.action.shareOriginalOnce").exists)
-
-        element(in: app, id: "requests.action.shareRedacted").click()
-        XCTAssertTrue(waitForNonExistence(requestCard, timeout: 15))
+        let approvalRow = element(in: app, id: "work.approval.approval-runtime-privacy")
+        XCTAssertTrue(approvalRow.waitForExistence(timeout: 15))
+        // Drill into the inspector for redacted/original actions.
+        approvalRow.click()
+        clickElement(in: app, id: "work.inspector.request.redact", fallbackButtonTitle: "Share redacted")
+        XCTAssertTrue(waitForNonExistence(approvalRow, timeout: 15))
     }
 
     func testLocalRuntimeMailAndActivityReflectSeededRuntimeData() {
         let app = launchLocalRuntime()
 
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 15))
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 15))
         openSidebarDestination("ledger.sidebar.mail", expectedSurface: "ledger.surface.mail", in: app, timeout: 15)
 
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 15))
@@ -424,21 +415,20 @@ final class ManifoldRuntimeE2ETests: ManifoldUITestCase {
 
         XCTAssertTrue(element(in: app, id: "mail.message.inspector.visibility.runtime-email-1").waitForExistence(timeout: 8))
 
-        openSidebarDestination("ledger.sidebar.activity", expectedSurface: "ledger.surface.activity", in: app, timeout: 15)
-        element(in: app, id: "activity.filter.privacy").click()
+        openSidebarDestination("ledger.sidebar.work", expectedSurface: "ledger.surface.work", in: app, timeout: 15)
+        element(in: app, id: "work.timeline.filter.approvals").click()
 
-        let target = element(in: app, id: "activity.event.3")
+        let target = element(in: app, id: "work.timeline.entry.3")
         XCTAssertTrue(target.waitForExistence(timeout: 15))
         target.click()
 
-        XCTAssertTrue(element(in: app, id: "activity.evidence.privacy").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "activity.evidence.privacy.summary").exists)
+        XCTAssertTrue(element(in: app, id: "work.inspector").waitForExistence(timeout: 8))
     }
 
     func testLocalRuntimeSettingsPrivacyPaneShowsDiscoveryData() {
         let app = launchLocalRuntime()
 
-        XCTAssertTrue(element(in: app, id: "ledger.surface.activity").waitForExistence(timeout: 15))
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 15))
         openSettings(in: app)
 
         clickSettingsTab("Privacy", contentID: "settings.privacy.model.enabled", in: app)

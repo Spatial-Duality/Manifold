@@ -41,10 +41,9 @@ struct AdvancedSettingsPane: View {
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                 }
-                Button("Reconnect runtime") {
+                Button("Restart runtime helper") {
                     Task {
-                        store.registerAgent()
-                        await store.refreshAll(force: true)
+                        await store.restartRuntimeHelper()
                     }
                 }
                 .controlSize(.small)

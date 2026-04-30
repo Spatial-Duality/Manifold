@@ -35,7 +35,7 @@ struct ManifoldApp: App {
         .windowStyle(.automatic)
         .commands {
             CommandGroup(after: .newItem) {
-                if let command = commandPalette.command(.protectNextSession, for: store) {
+                if let command = commandPalette.command(.startSession, for: store) {
                     Button(command.title) {
                         Task { await command.action(store) }
                     }
@@ -73,13 +73,20 @@ struct ManifoldApp: App {
             }
 
             CommandMenu("View") {
-                ForEach([ManifoldCommandID.openActivity, .openAccess, .openMail, .openRequests], id: \.self) { commandID in
+                ForEach([ManifoldCommandID.openWork, .openAccess, .openMail, .openRules], id: \.self) { commandID in
                     if let command = commandPalette.command(commandID, for: store) {
                         Button(command.title) {
                             Task { await command.action(store) }
                         }
                         .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
                     }
+                }
+                Divider()
+                if let command = commandPalette.command(.startSession, for: store) {
+                    Button(command.title) {
+                        Task { await command.action(store) }
+                    }
+                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
                 }
 
                 Divider()

@@ -138,7 +138,7 @@ struct WorkBlockPreview: Codable, Sendable {
     let skipped: Int
 }
 
-struct ApplyTrackedRunResult: Codable, Sendable {
+struct ApplyWorkspaceResult: Codable, Sendable {
     let grantID: String
     let filesApplied: [String]
     let filesConflicted: [String]
@@ -215,13 +215,15 @@ protocol RuntimeClientProtocol: Sendable {
     func updateEmailRuleSet(agent: TargetApp, ruleSet: EmailRuleSet) async throws
     func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState
+    func sessionAccessMode() async throws -> SessionAccessMode
+    func setSessionAccessMode(_ mode: SessionAccessMode) async throws
     func sessionPreview(
         targetApp: TargetApp,
         fileScopes: [FileSelectionScope],
         selectedEmailIDs: Set<String>,
         emailSensitivity: String?
     ) async throws -> SessionPreview
-    func startTrackedRun(
+    func startGatewaySession(
         targetApp: TargetApp,
         fileScopes: [FileSelectionScope],
         selectedEmailIDs: Set<String>,
@@ -229,14 +231,15 @@ protocol RuntimeClientProtocol: Sendable {
         noteCaptureMode: SessionNoteCaptureMode,
         emailSensitivity: String?
     ) async throws -> ActiveGrantState
+    func endSession(grantID: String) async throws
     func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult
     func markWorkBlockReviewing(id: String) async throws
     func cancelWorkBlockReview(id: String) async throws
-    func pauseTrackedRun(id: String) async throws
-    func resumeTrackedRun(id: String) async throws
-    func discardTrackedRun(id: String, grantID: String?, endSession: Bool) async throws
+    func pauseGatewaySession(id: String) async throws
+    func resumeGatewaySession(id: String) async throws
+    func discardDraftWorkspace(id: String, grantID: String?, endSession: Bool) async throws
     func promotionPreview(grantID: String) async throws -> WorkBlockPreview
-    func applyTrackedRun(grantID: String, endSession: Bool) async throws -> ApplyTrackedRunResult
+    func applyDraftWorkspace(grantID: String, endSession: Bool) async throws -> ApplyWorkspaceResult
     func recentActivity(limit: Int) async throws -> [AuditEntry]
     func recentSessions(limit: Int) async throws -> [Session]
     func sessionEvents(sessionID: String) async throws -> [SessionEvent]
@@ -325,6 +328,8 @@ protocol RuntimeClientProtocol: Sendable {
 
     /// List saved templates visible to an agent (target_app match + unscoped).
     func accessTemplates(for agent: TargetApp) async throws -> [AccessPresetRecord]
+    /// Load a saved template and its scopes.
+    func loadAccessTemplate(presetID: String) async throws -> AccessPresetSnapshot
     /// Create or update a saved template.
     func saveAccessTemplate(
         presetID: String?,
@@ -335,7 +340,7 @@ protocol RuntimeClientProtocol: Sendable {
     ) async throws -> AccessPresetRecord
     /// Remove a saved template.
     func deleteAccessTemplate(presetID: String) async throws
-    /// Start a tracked run using a saved template's scope. Lenient on
+    /// Start a gateway session using a saved template's scope. Lenient on
     /// stale references — see `StartSessionFromTemplateResult` for details.
     func startSessionFromTemplate(
         presetID: String,
@@ -406,8 +411,14 @@ protocol RuntimeClientProtocol: Sendable {
 // implementations stay green. Concrete clients (AppRuntimeClient) override
 // these via their own implementations.
 extension RuntimeClientProtocol {
+    func sessionAccessMode() async throws -> SessionAccessMode { .defaultSession }
+    func setSessionAccessMode(_ mode: SessionAccessMode) async throws {}
+
     // Lane B-rest defaults
     func accessTemplates(for agent: TargetApp) async throws -> [AccessPresetRecord] { [] }
+    func loadAccessTemplate(presetID: String) async throws -> AccessPresetSnapshot {
+        throw RuntimeClientStubError.unimplemented("loadAccessTemplate")
+    }
     func saveAccessTemplate(
         presetID: String?,
         name: String,
@@ -546,17 +557,18 @@ extension RuntimeClientProtocol {
     func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary { throw RuntimeClientStubError.unimplemented("getEmailRuleActivitySummary") }
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("activeGrantState") }
     func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview { throw RuntimeClientStubError.unimplemented("sessionPreview") }
-    func startTrackedRun(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("startTrackedRun") }
+    func startGatewaySession(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("startGatewaySession") }
+    func endSession(grantID: String) async throws { throw RuntimeClientStubError.unimplemented("endSession") }
     func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult { throw RuntimeClientStubError.unimplemented("restoreSnapshot") }
     func markWorkBlockReviewing(id: String) async throws { throw RuntimeClientStubError.unimplemented("markWorkBlockReviewing") }
     func cancelWorkBlockReview(id: String) async throws { throw RuntimeClientStubError.unimplemented("cancelWorkBlockReview") }
-    func pauseTrackedRun(id: String) async throws { throw RuntimeClientStubError.unimplemented("pauseTrackedRun") }
-    func resumeTrackedRun(id: String) async throws { throw RuntimeClientStubError.unimplemented("resumeTrackedRun") }
-    func discardTrackedRun(id: String, grantID: String?, endSession: Bool) async throws { throw RuntimeClientStubError.unimplemented("discardTrackedRun") }
-    func discardTrackedRun(id: String, grantID: String?) async throws { try await discardTrackedRun(id: id, grantID: grantID, endSession: false) }
+    func pauseGatewaySession(id: String) async throws { throw RuntimeClientStubError.unimplemented("pauseGatewaySession") }
+    func resumeGatewaySession(id: String) async throws { throw RuntimeClientStubError.unimplemented("resumeGatewaySession") }
+    func discardDraftWorkspace(id: String, grantID: String?, endSession: Bool) async throws { throw RuntimeClientStubError.unimplemented("discardDraftWorkspace") }
+    func discardDraftWorkspace(id: String, grantID: String?) async throws { try await discardDraftWorkspace(id: id, grantID: grantID, endSession: false) }
     func promotionPreview(grantID: String) async throws -> WorkBlockPreview { throw RuntimeClientStubError.unimplemented("promotionPreview") }
-    func applyTrackedRun(grantID: String, endSession: Bool) async throws -> ApplyTrackedRunResult { throw RuntimeClientStubError.unimplemented("applyTrackedRun") }
-    func applyTrackedRun(grantID: String) async throws -> ApplyTrackedRunResult { try await applyTrackedRun(grantID: grantID, endSession: false) }
+    func applyDraftWorkspace(grantID: String, endSession: Bool) async throws -> ApplyWorkspaceResult { throw RuntimeClientStubError.unimplemented("applyDraftWorkspace") }
+    func applyDraftWorkspace(grantID: String) async throws -> ApplyWorkspaceResult { try await applyDraftWorkspace(grantID: grantID, endSession: false) }
     func recentActivity(limit: Int) async throws -> [AuditEntry] { [] }
     func recentSessions(limit: Int) async throws -> [Session] { [] }
     func listPendingApprovals() async throws -> [PendingApprovalRecord] { [] }
@@ -1227,6 +1239,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var coverages: [AgentCoverageSnapshot]
         var coverageEvents: [CoverageEvent]
         var activeWorkBlock: WorkBlockRecord?
+        var sessionAccessMode: SessionAccessMode
         var connectedAgents: [String]
         var activityEntries: [AuditEntry]
         var sessions: [Session]
@@ -1633,6 +1646,14 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         ActiveGrantState(activeGrant: state.activeGrant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
     }
 
+    func sessionAccessMode() async throws -> SessionAccessMode {
+        state.sessionAccessMode
+    }
+
+    func setSessionAccessMode(_ mode: SessionAccessMode) async throws {
+        state.sessionAccessMode = mode
+    }
+
     func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview {
         let estimates = state.sources.filter { source in
             governance(for: targetApp).allowedSourceIDs.contains(source.sourceID)
@@ -1654,7 +1675,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         )
     }
 
-    func startTrackedRun(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState {
+    func startGatewaySession(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState {
+        let explicitSourceIDs = Set(fileScopes.map(\.sourceID))
         let grant = GrantRecord(
             grantID: "grant-\(UUID().uuidString.prefix(8).lowercased())",
             targetApp: targetApp.rawValue,
@@ -1665,20 +1687,30 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             inactivityDeadline: nil,
             emailSensitivity: (EmailSensitivityLevel(rawValue: emailSensitivity ?? "") ?? governance(for: targetApp).emailSensitivity).rawValue,
             summaryFraming: summaryFraming,
-            explicitSelection: !selectedEmailIDs.isEmpty,
+            explicitSelection: !explicitSourceIDs.isEmpty || !selectedEmailIDs.isEmpty,
             noteCaptureMode: noteCaptureMode.rawValue
         )
         state.activeGrant = grant
-        state.activeGrantSources = state.sources.filter { governance(for: targetApp).allowedSourceIDs.contains($0.sourceID) }.map {
+        state.activeGrantSources = state.sources.filter { source in
+            explicitSourceIDs.isEmpty
+                ? governance(for: targetApp).allowedSourceIDs.contains(source.sourceID)
+                : explicitSourceIDs.contains(source.sourceID)
+        }.map {
             GrantSourceRecord(grantID: grant.grantID, sourceID: $0.sourceID, mountName: $0.displayName.replacingOccurrences(of: " ", with: "-").lowercased())
         }
         state.activeWorkBlock = WorkBlockRecord(agent: targetApp, grantID: grant.grantID, sourceIDs: state.activeGrantSources.map(\.sourceID))
         state.coverages = state.coverages.map { snapshot in
             snapshot.agent == targetApp.rawValue
-                ? AgentCoverageSnapshot(agent: snapshot.agent, coverageState: .trackedWorkspace, verificationStatus: snapshot.verificationStatus, hostBundleIdentifier: snapshot.hostBundleIdentifier, reason: snapshot.reason)
+                ? AgentCoverageSnapshot(agent: snapshot.agent, coverageState: .manifoldRouted, verificationStatus: snapshot.verificationStatus, hostBundleIdentifier: snapshot.hostBundleIdentifier, reason: snapshot.reason)
                 : snapshot
         }
         return ActiveGrantState(activeGrant: grant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
+    }
+
+    func endSession(grantID: String) async throws {
+        state.activeWorkBlock = nil
+        state.activeGrant = nil
+        state.activeGrantSources = []
     }
 
     func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult {
@@ -1686,10 +1718,10 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     }
     func markWorkBlockReviewing(id: String) async throws { state.activeWorkBlock?.status = .reviewing }
     func cancelWorkBlockReview(id: String) async throws { state.activeWorkBlock?.status = .active }
-    func pauseTrackedRun(id: String) async throws { state.activeWorkBlock?.status = .paused }
-    func resumeTrackedRun(id: String) async throws { state.activeWorkBlock?.status = .active }
+    func pauseGatewaySession(id: String) async throws { state.activeWorkBlock?.status = .paused }
+    func resumeGatewaySession(id: String) async throws { state.activeWorkBlock?.status = .active }
 
-    func discardTrackedRun(id: String, grantID: String?, endSession: Bool) async throws {
+    func discardDraftWorkspace(id: String, grantID: String?, endSession: Bool) async throws {
         state.activeWorkBlock = nil
         state.activeGrant = nil
         state.activeGrantSources = []
@@ -1702,9 +1734,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         WorkBlockPreview(applied: ["shared/worklog.md"], conflicts: [], newFiles: [], skipped: 0)
     }
 
-    func applyTrackedRun(grantID: String, endSession: Bool) async throws -> ApplyTrackedRunResult {
-        try await discardTrackedRun(id: state.activeWorkBlock?.id ?? "", grantID: grantID, endSession: endSession)
-        return ApplyTrackedRunResult(
+    func applyDraftWorkspace(grantID: String, endSession: Bool) async throws -> ApplyWorkspaceResult {
+        try await discardDraftWorkspace(id: state.activeWorkBlock?.id ?? "", grantID: grantID, endSession: endSession)
+        return ApplyWorkspaceResult(
             grantID: grantID,
             filesApplied: ["shared/worklog.md"],
             filesConflicted: [],
@@ -2789,6 +2821,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             coverages: coverages,
             coverageEvents: (profile == .activity || isTrackedProfile) ? coverageEvents : [],
             activeWorkBlock: activeWorkBlock,
+            sessionAccessMode: .defaultSession,
             connectedAgents: profile == .onboarding ? [] : [TargetApp.cowork.rawValue, TargetApp.codex.rawValue],
             activityEntries: activity,
             sessions: sessions,
@@ -3068,6 +3101,19 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         try await command(name: "activeGrantState", payload: ["targetApp": targetApp.rawValue], as: ActiveGrantState.self)
     }
 
+    func sessionAccessMode() async throws -> SessionAccessMode {
+        let response = try await xpc.command(name: "sessionAccessMode", payload: [:])
+        guard let raw = response["mode"] as? String,
+              let mode = SessionAccessMode(rawValue: raw) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return mode
+    }
+
+    func setSessionAccessMode(_ mode: SessionAccessMode) async throws {
+        _ = try await xpc.command(name: "setSessionAccessMode", payload: ["mode": mode.rawValue])
+    }
+
     func sessionPreview(
         targetApp: TargetApp,
         fileScopes: [FileSelectionScope],
@@ -3085,7 +3131,7 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         return try await command(name: "sessionPreview", payload: payload, field: "preview", as: SessionPreview.self)
     }
 
-    func startTrackedRun(
+    func startGatewaySession(
         targetApp: TargetApp,
         fileScopes: [FileSelectionScope],
         selectedEmailIDs: Set<String>,
@@ -3105,7 +3151,11 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         if let emailSensitivity {
             payload["emailSensitivity"] = emailSensitivity
         }
-        return try await command(name: "startTrackedRun", payload: payload, as: ActiveGrantState.self)
+        return try await command(name: "startGatewaySession", payload: payload, as: ActiveGrantState.self)
+    }
+
+    func endSession(grantID: String) async throws {
+        _ = try await xpc.command(name: "endSession", payload: ["grantID": grantID])
     }
 
     func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult {
@@ -3125,32 +3175,32 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         _ = try await xpc.command(name: "cancelWorkBlockReview", payload: ["workBlockID": id])
     }
 
-    func pauseTrackedRun(id: String) async throws {
-        _ = try await xpc.command(name: "pauseTrackedRun", payload: ["workBlockID": id])
+    func pauseGatewaySession(id: String) async throws {
+        _ = try await xpc.command(name: "pauseGatewaySession", payload: ["workBlockID": id])
     }
 
-    func resumeTrackedRun(id: String) async throws {
-        _ = try await xpc.command(name: "resumeTrackedRun", payload: ["workBlockID": id])
+    func resumeGatewaySession(id: String) async throws {
+        _ = try await xpc.command(name: "resumeGatewaySession", payload: ["workBlockID": id])
     }
 
-    func discardTrackedRun(id: String, grantID: String?, endSession: Bool = false) async throws {
+    func discardDraftWorkspace(id: String, grantID: String?, endSession: Bool = false) async throws {
         var payload: [String: Any] = ["workBlockID": id, "endSession": endSession]
         if let grantID {
             payload["grantID"] = grantID
         }
-        _ = try await xpc.command(name: "discardTrackedRun", payload: payload)
+        _ = try await xpc.command(name: "discardDraftWorkspace", payload: payload)
     }
 
     func promotionPreview(grantID: String) async throws -> WorkBlockPreview {
         try await command(name: "promotionPreview", payload: ["grantID": grantID], field: "preview", as: WorkBlockPreview.self)
     }
 
-    func applyTrackedRun(grantID: String, endSession: Bool = false) async throws -> ApplyTrackedRunResult {
+    func applyDraftWorkspace(grantID: String, endSession: Bool = false) async throws -> ApplyWorkspaceResult {
         try await command(
-            name: "applyTrackedRun",
+            name: "applyDraftWorkspace",
             payload: ["grantID": grantID, "endSession": endSession],
             field: "result",
-            as: ApplyTrackedRunResult.self
+            as: ApplyWorkspaceResult.self
         )
     }
 

@@ -7,6 +7,20 @@ import ManifoldKit
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "setup")
 
+enum SessionStartupMode: String, CaseIterable, Identifiable, Sendable {
+    case manual
+    case defaultSession
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .manual: return "No session on launch"
+        case .defaultSession: return "Start default session"
+        }
+    }
+}
+
 /// Slimmed SetupModel — preferences only.
 /// MCP/agent config checks moved to IntegrationHealthModel.
 @Observable
@@ -32,6 +46,12 @@ final class SetupModel {
     var sessionNotesMode: SessionNoteCaptureMode {
         didSet { defaults.set(sessionNotesMode.rawValue, forKey: "manifold.sessionNotes.mode") }
     }
+    var sessionStartupMode: SessionStartupMode {
+        didSet { defaults.set(sessionStartupMode.rawValue, forKey: "manifold.sessionStartup.mode") }
+    }
+    var defaultSessionAgent: TargetApp {
+        didSet { defaults.set(defaultSessionAgent.rawValue, forKey: "manifold.sessionStartup.agent") }
+    }
 
     init() {
         let defaults = AppTestEnvironment.userDefaults()
@@ -43,5 +63,11 @@ final class SetupModel {
         sessionNotesMode = SessionNoteCaptureMode(
             rawValue: defaults.string(forKey: "manifold.sessionNotes.mode") ?? ""
         ) ?? .off
+        sessionStartupMode = SessionStartupMode(
+            rawValue: defaults.string(forKey: "manifold.sessionStartup.mode") ?? ""
+        ) ?? .manual
+        defaultSessionAgent = TargetApp(
+            rawValue: defaults.string(forKey: "manifold.sessionStartup.agent") ?? ""
+        ) ?? .cowork
     }
 }

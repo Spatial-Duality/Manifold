@@ -143,7 +143,7 @@ public enum WriteResult: Sendable {
     }
 }
 
-public struct TrackedRun: Sendable {
+public struct GatewaySession: Sendable {
     public let grantID: String
     public let targetApp: String
     public let startedAt: String

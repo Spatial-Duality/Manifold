@@ -5,7 +5,7 @@ import Foundation
 import ManifoldKit
 import ManifoldXPC
 
-/// Result of starting a tracked run from a saved access template. Carries
+/// Result of starting a gateway session from a saved access template. Carries
 /// the active grant alongside any stale references that were skipped, so
 /// the UI can render a "Started, skipped 2 missing folders" banner.
 public struct StartSessionFromTemplateResult: Sendable {
@@ -75,6 +75,26 @@ extension AppRuntimeClient {
             throw ManifoldXPCError.malformedReply
         }
         return try XPCJSON.decode([AccessPresetRecord].self, from: object)
+    }
+
+    func loadAccessTemplate(presetID: String) async throws -> AccessPresetSnapshot {
+        let response = try await xpc.command(
+            name: "loadAccessTemplate",
+            payload: ["presetID": presetID]
+        )
+        guard let presetObject = response["template"],
+              let scopesObject = response["fileScopes"],
+              let emailsObject = response["emailIDs"],
+              !(presetObject is NSNull),
+              !(scopesObject is NSNull),
+              !(emailsObject is NSNull) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return AccessPresetSnapshot(
+            preset: try XPCJSON.decode(AccessPresetRecord.self, from: presetObject),
+            fileScopes: try XPCJSON.decode([FileSelectionScope].self, from: scopesObject),
+            emailIDs: try XPCJSON.decode([String].self, from: emailsObject)
+        )
     }
 
     @discardableResult

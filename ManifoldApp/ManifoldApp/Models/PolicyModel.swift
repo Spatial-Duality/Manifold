@@ -322,7 +322,7 @@ final class GovernanceModel {
     func completeSession() async {
         guard let client, let block = activeSessionRecord else { return }
         do {
-            _ = try await client.applyTrackedRun(grantID: block.grantID)
+            try await client.endSession(grantID: block.grantID)
             await loadActiveSession()
         } catch {
             logger.error("Failed to complete session: \(error.localizedDescription)")
@@ -333,9 +333,9 @@ final class GovernanceModel {
         guard let client, let block = activeSessionRecord else { return }
         do {
             if block.isPaused {
-                try await client.resumeTrackedRun(id: block.id)
+                try await client.resumeGatewaySession(id: block.id)
             } else {
-                try await client.pauseTrackedRun(id: block.id)
+                try await client.pauseGatewaySession(id: block.id)
             }
             await loadActiveSession()
         } catch {
@@ -346,7 +346,7 @@ final class GovernanceModel {
     func stopSession() async {
         guard let client, let block = activeSessionRecord else { return }
         do {
-            try await client.discardTrackedRun(id: block.id, grantID: block.grantID)
+            try await client.endSession(grantID: block.grantID)
             await loadActiveSession()
         } catch {
             logger.error("Failed to stop session: \(error.localizedDescription)")

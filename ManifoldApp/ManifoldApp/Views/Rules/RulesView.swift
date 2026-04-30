@@ -431,7 +431,37 @@ private struct RulesToolbar: View {
                     }
                 }
 
-                Menu("Agent Rule") {
+                Menu("Files + Mail Rule") {
+                    newRuleButton("Redact medium-severity findings", systemImage: "text.badge.checkmark", action: .redact) {
+                        RuleRecord.newUserContentRule(
+                            name: "Redact medium severity in files and email",
+                            action: .redact
+                        )
+                    }
+                    newRuleButton("Block secrets in any payload", systemImage: "hand.raised", action: .deny) {
+                        RuleRecord.newPrivacyFilterRule(
+                            name: "Block secrets before sharing",
+                            category: .secret,
+                            action: .deny
+                        )
+                    }
+                    newRuleButton("Warn on high severity", systemImage: "exclamationmark.triangle", action: .warn) {
+                        RuleRecord.newPrivacyControlRule(
+                            name: "Warn on high severity findings",
+                            matcher: .privacySeverityAtLeast(.high),
+                            action: .warn,
+                            explanation: "Records a warning on high-severity findings in either files or email."
+                        )
+                    }
+                    newRuleButton("Log only", systemImage: "list.bullet.rectangle", action: .log) {
+                        RuleRecord.newUserContentRule(
+                            name: "Log cross-content findings",
+                            action: .log
+                        )
+                    }
+                }
+
+                Menu("Agent Behaviour Rule") {
                     newRuleButton("Deny matching action", systemImage: "hand.raised", action: .deny) {
                         RuleRecord.newUserAgentRule(name: "Deny agent rule", action: .deny)
                     }

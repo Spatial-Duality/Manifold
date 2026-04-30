@@ -19,7 +19,7 @@ struct MailReviewView: View {
     @State private var sortOrder = [KeyPathComparator(\MailReviewRow.receivedDate, order: .reverse)]
 
     private var connectedAgents: [TargetApp] {
-        AgentMeta.connected(from: store.connectedAgents)
+        TargetApp.allCases
     }
 
     private var connectedAgentsKey: String {

@@ -142,10 +142,10 @@ struct ScopeReviewPanel: View {
             Spacer(minLength: 0)
 
             VStack(spacing: Spacing.s3) {
-                Text("Review your first protected scope")
+                Text("Review your first session scope")
                     .font(ManifoldType.display)
                     .multilineTextAlignment(.center)
-                Text("Only these folders are visible when you start a protected session. Everything else stays outside this governed path unless you choose to share more later.")
+                Text("Only these folders are visible when you start a Manifold session. Everything else stays outside this governed path unless you choose to share more later.")
                     .font(ManifoldType.body)
                     .foregroundStyle(ManifoldPalette.text2)
                     .multilineTextAlignment(.center)
@@ -156,7 +156,7 @@ struct ScopeReviewPanel: View {
             VStack(alignment: .leading, spacing: Spacing.s3) {
                 HStack(spacing: Spacing.s2) {
                     Pill(text: folderCountLabel, variant: .defaultScope)
-                    Text("ready for your next protected session")
+                    Text("ready for your next session")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -204,7 +204,7 @@ struct ScopeReviewPanel: View {
             HStack(spacing: Spacing.s3) {
                 Button("Back", action: back)
                     .buttonStyle(.bordered)
-                Button("Protect next session", action: finish)
+                Button("Start session", action: finish)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)

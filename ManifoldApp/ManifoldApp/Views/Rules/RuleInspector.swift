@@ -275,9 +275,10 @@ struct RuleInspector: View {
             return [.allow, .deny, .warn, .redact, .summarize, .downgrade, .log]
         }
         switch rule.scope {
-        case .file:  return [.allow, .deny, .warn, .redact, .log]
-        case .email: return [.allow, .deny, .warn, .redact, .summarize, .downgrade, .log]
-        case .agent: return [.allow, .deny, .warn, .log]
+        case .file:    return [.allow, .deny, .warn, .redact, .log]
+        case .email:   return [.allow, .deny, .warn, .redact, .summarize, .downgrade, .log]
+        case .content: return [.allow, .deny, .warn, .redact, .summarize, .downgrade, .log]
+        case .agent:   return [.allow, .deny, .warn, .log]
         }
     }
 

@@ -159,7 +159,7 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertEqual(request.headline, "Codex wants reversible write access.")
         XCTAssertEqual(
             request.context,
-            "Reads are ambient here. Once allows one reversible write to this file. Add to default allows reversible writes anywhere in shared."
+            "Writes to shared are governed by Manifold snapshots and can be restored from version history."
         )
     }
 

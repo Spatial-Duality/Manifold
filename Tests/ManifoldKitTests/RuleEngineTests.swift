@@ -407,6 +407,83 @@ struct RuleEngineTests {
         )
         #expect(throws: RuleValidationError.self) { try RuleValidator.validate(bad) }
     }
+
+    // MARK: - Cross-content scope
+
+    @Test("Content-scoped rule fires on both file and email requests")
+    func contentScopeMatchesFileAndEmail() {
+        let rule = RuleRecord(
+            id: "content-1",
+            name: "Redact privacy findings everywhere",
+            scope: .content,
+            matcher: .privacySeverityAtLeast(.medium),
+            action: .redact,
+            source: .user
+        )
+
+        let probe = PrivacyProbe(
+            categories: [.privatePerson],
+            severity: .high
+        )
+        let fileContext = RuleEvalContext(privacyProbe: probe)
+        let emailContext = RuleEvalContext(emailProbe: EmailProbe(
+            emailID: "m", senderEmail: "a@x.com", senderDomain: "x.com", subject: "x"
+        ), privacyProbe: probe)
+
+        #expect(engine.evaluate(.fileRead(path: "/tmp/x"), against: [rule], agent: .cowork, context: fileContext).action == .redact)
+        #expect(engine.evaluate(.emailRead(emailID: "m"), against: [rule], agent: .cowork, context: emailContext).action == .redact)
+    }
+
+    @Test("Validator accepts content scope with privacy matchers")
+    func contentScopeValidatorAcceptsPrivacy() {
+        let rule = RuleRecord(
+            id: "content-2",
+            name: "Block secrets in any payload",
+            scope: .content,
+            matcher: .privacyContainsCategory(.secret),
+            action: .deny,
+            source: .user
+        )
+        try? RuleValidator.validate(rule)
+        #expect((try? RuleValidator.validate(rule)) != nil)
+    }
+
+    @Test("Validator rejects content scope with agent-only matcher")
+    func contentScopeValidatorRejectsAgentMatcher() {
+        let rule = RuleRecord(
+            id: "content-3",
+            name: "Bad mix",
+            scope: .content,
+            matcher: .agentWrite,
+            action: .deny,
+            source: .user
+        )
+        #expect(throws: RuleValidationError.self) { try RuleValidator.validate(rule) }
+    }
+
+    @Test("File-scoped rule does not match email requests")
+    func fileScopeIsolatedFromEmail() {
+        let rule = RuleRecord(
+            id: "file-only",
+            name: "Block secrets in files",
+            scope: .file,
+            matcher: .privacyContainsCategory(.secret),
+            action: .deny,
+            source: .user
+        )
+        let probe = PrivacyProbe(categories: [.secret], severity: .critical)
+        let context = RuleEvalContext(privacyProbe: probe)
+        let emailContext = RuleEvalContext(emailProbe: EmailProbe(
+            emailID: "m", senderEmail: "a@x.com", senderDomain: "x.com", subject: "x"
+        ), privacyProbe: probe)
+
+        // File scope: matcher should match.
+        #expect(engine.evaluate(.fileRead(path: "/x"), against: [rule], agent: .cowork, context: context).action == .deny)
+        // Email scope: file rule should NOT participate, so default allow.
+        let emailDecision = engine.evaluate(.emailRead(emailID: "m"), against: [rule], agent: .cowork, context: emailContext)
+        #expect(emailDecision.action == .allow)
+        #expect(emailDecision.defaultPolicyApplied == true)
+    }
 }
 
 @Suite("Rule store — persistence")

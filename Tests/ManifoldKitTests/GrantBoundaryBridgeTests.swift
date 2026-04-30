@@ -765,6 +765,60 @@ struct GrantBoundaryBridgeTests {
         #expect(status.emailCount == 1)
     }
 
+    @Test("Shared emails outside newest slice remain visible")
+    func sharedEmailsOutsideNewestSliceRemainVisible() async throws {
+        let harness = try makeHarness(targetApp: .codex)
+        defer { cleanup(harness.tempDir) }
+
+        let emailAccount = try harness.emailStore.addEmailAccount(
+            displayName: "Test Account",
+            providerType: "other",
+            server: "imap.example.com",
+            port: 993,
+            username: "test@example.com",
+            authType: "password"
+        )
+
+        try harness.emailStore.upsertEmailMessage(
+            emailID: "shared-old",
+            accountID: emailAccount.accountID,
+            mailbox: "Inbox",
+            sender: "updates@example.test",
+            recipients: "team@example.test",
+            subject: "Shared old message",
+            receivedAt: "2020-01-01T00:00:00Z",
+            emlPath: nil,
+            sizeBytes: 128,
+            preview: "Shared old message"
+        )
+        try harness.emailStore.shareEmails(emailIDs: ["shared-old"], for: .codex)
+
+        for index in 0..<250 {
+            try harness.emailStore.upsertEmailMessage(
+                emailID: "new-\(index)",
+                accountID: emailAccount.accountID,
+                mailbox: "Inbox",
+                sender: "bulk\(index)@example.test",
+                recipients: "team@example.test",
+                subject: "New message \(index)",
+                receivedAt: "2026-04-29T12:\(String(format: "%02d", index % 60)):00Z",
+                emlPath: nil,
+                sizeBytes: 128,
+                preview: "New message \(index)"
+            )
+        }
+
+        _ = try await harness.grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "default",
+            sourceIDs: [],
+            materializationRoot: harness.tempDir.appendingPathComponent("email-shared").path
+        )
+
+        let emails = try await harness.bridge.listEmails()
+        #expect(emails.contains { $0.id == "shared-old" })
+    }
+
     @Test("Bridge search_structured includes email and session summary artifacts")
     func bridgeSearchStructuredIncludesNonFileArtifacts() async throws {
         let harness = try makeHarness()

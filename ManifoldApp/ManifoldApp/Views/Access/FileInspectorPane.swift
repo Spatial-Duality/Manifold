@@ -453,11 +453,11 @@ struct FileInspectorPane: View {
 
     @ViewBuilder
     private func versions(file: SourceFile) -> some View {
-        Text("Tracked versions")
+        Text("Version history")
             .font(ManifoldType.captionMedium)
 
         if activity.isEmpty {
-            Text("No tracked versions yet.")
+            Text("No versions yet.")
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
         } else {

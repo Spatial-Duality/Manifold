@@ -48,8 +48,19 @@ extension ManifoldXPCService {
         case "sessionPreview":
             return try await sessionPreviewCommand(payload: payload)
 
-        case "startTrackedRun":
-            return try await startTrackedRunCommand(payload: payload)
+        case "startGatewaySession":
+            return try await startGatewaySessionCommand(payload: payload)
+
+        case "sessionAccessMode":
+            return ["mode": try await runtime.runtimeSettingsStore.sessionAccessMode().rawValue]
+
+        case "setSessionAccessMode":
+            guard let raw = payload["mode"] as? String,
+                  let mode = SessionAccessMode(rawValue: raw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.runtimeSettingsStore.setSessionAccessMode(mode)
+            return ["ok": true, "mode": mode.rawValue]
 
         case "trackedFiles":
             return ["trackedFiles": try XPCJSON.object(from: await runtime.snapshotStore.allTrackedFiles())]
@@ -180,6 +191,17 @@ extension ManifoldXPCService {
                 throw ManifoldXPCError.invalidPayload
             }
             return ["templates": try XPCJSON.object(from: try await runtime.accessStore.templatesForAgent(agent))]
+
+        case "loadAccessTemplate":
+            guard let presetID = payload["presetID"] as? String,
+                  let snapshot = try await runtime.accessStore.loadPreset(id: presetID) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return [
+                "template": try XPCJSON.object(from: snapshot.preset),
+                "fileScopes": try XPCJSON.object(from: snapshot.fileScopes),
+                "emailIDs": try XPCJSON.object(from: snapshot.emailIDs),
+            ]
 
         case "saveAccessTemplate":
             guard let name = payload["name"] as? String else {
@@ -341,21 +363,21 @@ extension ManifoldXPCService {
             try await runtime.workBlockStore.resumeBlock(id: workBlockID)
             return ["ok": true]
 
-        case "pauseTrackedRun":
+        case "pauseGatewaySession":
             guard let workBlockID = payload["workBlockID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
             try await runtime.workBlockStore.pauseBlock(id: workBlockID)
             return ["ok": true]
 
-        case "resumeTrackedRun":
+        case "resumeGatewaySession":
             guard let workBlockID = payload["workBlockID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
             try await runtime.workBlockStore.resumeBlock(id: workBlockID)
             return ["ok": true]
 
-        case "discardTrackedRun":
+        case "discardDraftWorkspace":
             guard let workBlockID = payload["workBlockID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
@@ -372,16 +394,24 @@ extension ManifoldXPCService {
             guard let grantID else {
                 throw ManifoldXPCError.invalidPayload
             }
-            return ["preview": try await previewTrackedRun(grantID: grantID)]
+            return ["preview": try await previewDraftWorkspace(grantID: grantID)]
 
-        case "applyTrackedRun":
+        case "applyDraftWorkspace":
             let activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
             let grantID = payload["grantID"] as? String ?? activeWorkBlock?.grantID
             guard let grantID else {
                 throw ManifoldXPCError.invalidPayload
             }
             let endSession = payload["endSession"] as? Bool ?? false
-            return ["result": try await applyTrackedRun(grantID: grantID, endSession: endSession)]
+            return ["result": try await applyDraftWorkspace(grantID: grantID, endSession: endSession)]
+
+        case "endSession":
+            let activeWorkBlock = try await runtime.workBlockStore.anyActiveBlock()
+            let grantID = payload["grantID"] as? String ?? activeWorkBlock?.grantID
+            guard let grantID else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["ok": try await endSessionGateway(grantID: grantID)]
 
         case "listEmailAccounts":
             return ["accounts": try XPCJSON.object(from: runtime.emailStore.allEmailAccounts())]
@@ -938,14 +968,14 @@ extension ManifoldXPCService {
         )]
     }
 
-    private func startTrackedRunCommand(payload: [String: Any]) async throws -> [String: Any] {
+    private func startGatewaySessionCommand(payload: [String: Any]) async throws -> [String: Any] {
         let targetApp = (payload["targetApp"] as? String).flatMap(TargetApp.init(rawValue:)) ?? .cowork
         let fileScopes = try decodePayload([FileSelectionScope].self, key: "fileScopes", from: payload, default: [])
         let selectedEmailIDs = Set(payload["selectedEmailIDs"] as? [String] ?? [])
         let summaryFraming = payload["summaryFraming"] as? String
         let noteCaptureMode = (payload["noteCaptureMode"] as? String).flatMap(SessionNoteCaptureMode.init(rawValue:)) ?? .off
         let sensitivity = (payload["emailSensitivity"] as? String).flatMap(EmailSensitivityFilter.Level.init(rawValue:))
-        let state = try await startTrackedRun(
+        let state = try await startGatewaySession(
             targetApp: targetApp,
             fileScopes: fileScopes,
             selectedEmailIDs: selectedEmailIDs,
@@ -959,7 +989,7 @@ extension ManifoldXPCService {
         ]
     }
 
-    /// Start a tracked run from a saved access template.
+    /// Start a gateway session from a saved access template.
     ///
     /// Lenient on stale references (per eng-review Issue 2): sources that
     /// have been deleted, removed, or paused are silently dropped from the
@@ -1063,7 +1093,7 @@ extension ManifoldXPCService {
         let noteCaptureMode = (payload["noteCaptureMode"] as? String).flatMap(SessionNoteCaptureMode.init(rawValue:)) ?? .off
         let sensitivity = (payload["emailSensitivity"] as? String).flatMap(EmailSensitivityFilter.Level.init(rawValue:))
 
-        let state = try await startTrackedRun(
+        let state = try await startGatewaySession(
             targetApp: targetApp,
             fileScopes: survivingScopes,
             selectedEmailIDs: survivingEmailIDs,
@@ -1183,7 +1213,7 @@ extension ManifoldXPCService {
         ]
     }
 
-    private func startTrackedRun(
+    private func startGatewaySession(
         targetApp: TargetApp,
         fileScopes: [FileSelectionScope],
         selectedEmailIDs: Set<String>,
@@ -1198,7 +1228,6 @@ extension ManifoldXPCService {
             : activeSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
         let explicitScopes = normalizedScopes(fileScopes)
         let usingExplicitSelection = !explicitScopes.isEmpty || !selectedEmailIDs.isEmpty
-        let activeSourceMap = Dictionary(uniqueKeysWithValues: activeSources.map { ($0.sourceID, $0) })
         let explicitSourceIDs = Array(Set(explicitScopes.map(\.sourceID))).sorted()
         let sourceIDs = usingExplicitSelection ? explicitSourceIDs : defaultSources.map(\.sourceID)
         let emailSensitivity = (sensitivityOverride ?? (usingExplicitSelection ? .strict : .moderate)).rawValue
@@ -1213,62 +1242,17 @@ extension ManifoldXPCService {
             noteCaptureMode: noteCaptureMode
         )
 
-        let actualRoot = Self.materializationRoot(grantID: grant.grantID)
-        try await runtime.grantStore.updateMaterializationRoot(grantID: grant.grantID, root: actualRoot.path)
         let grantSources = try await runtime.grantStore.grantSources(grantID: grant.grantID)
-        let scopesBySource = Dictionary(grouping: explicitScopes, by: \.sourceID)
-        let mountInputs = grantSources.compactMap { grantSource -> MaterializationEngine.MaterializationSource? in
-            guard let source = activeSourceMap[grantSource.sourceID] else { return nil }
-            return MaterializationEngine.MaterializationSource(
-                source: source,
-                mountName: grantSource.mountName,
-                selectedScopes: scopesBySource[grantSource.sourceID] ?? []
-            )
-        }
-
-        let results = try MaterializationEngine.materialize(
-            grantID: grant.grantID,
-            sources: mountInputs,
-            materializationRoot: actualRoot.path
-        )
 
         if usingExplicitSelection {
             try await runtime.grantStore.replaceGrantFileScopes(grantID: grant.grantID, scopes: explicitScopes)
             try runtime.emailStore.replaceGrantEmails(grantID: grant.grantID, emailIDs: Array(selectedEmailIDs))
         }
 
-        for result in results {
-            try await runtime.grantStore.setBaselineHash(
-                grantID: grant.grantID,
-                sourceID: result.sourceID,
-                hash: result.manifestHash
-            )
-            try await baselineSnapshotMount(
-                grantID: grant.grantID,
-                sourceID: result.sourceID,
-                mountName: result.mountName,
-                mountPath: result.mountPath
-            )
-        }
-
-        try await runtime.artifactIndex.ensureGrantIndexed(
+        _ = try await runtime.workBlockStore.startBlock(
+            agent: targetApp,
             grantID: grant.grantID,
-            materializationRoot: actualRoot.path,
-            mounts: results.map {
-                ArtifactMount(
-                    sourceID: $0.sourceID,
-                    mountName: $0.mountName,
-                    mountPath: $0.mountPath
-                )
-            }
-        )
-
-        let emails = try accessibleEmails(for: grant)
-        let attachments = try runtime.emailStore.emailAttachments(emailIDs: emails.map(\.emailID))
-        try await runtime.artifactIndex.syncEmails(
-            grantID: grant.grantID,
-            emails: emails,
-            attachments: attachments
+            sourceIDs: sourceIDs
         )
 
         try await runtime.auditStore.log(
@@ -1285,7 +1269,28 @@ extension ManifoldXPCService {
         return (grant, grantSources)
     }
 
-    private func previewTrackedRun(grantID: String) async throws -> [String: Any] {
+    private func endSessionGateway(grantID: String) async throws -> Bool {
+        guard let grant = try await runtime.grantStore.grant(id: grantID) else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        if let block = try await runtime.workBlockStore.anyActiveBlock(), block.grantID == grantID {
+            try await runtime.workBlockStore.endBlock(id: block.id, status: .discarded)
+        }
+        try await runtime.grantStore.endGrant(grantID: grantID)
+        try? await runtime.auditStore.log(
+            action: .runEnd,
+            runID: grantID,
+            agent: grant.targetApp,
+            metadata: [
+                "grant_id": grantID,
+                "session_mode": "gateway",
+            ],
+            grantID: grantID
+        )
+        return true
+    }
+
+    private func previewDraftWorkspace(grantID: String) async throws -> [String: Any] {
         let grantSources = try await runtime.grantStore.grantSources(grantID: grantID)
         guard let grant = try await runtime.grantStore.grant(id: grantID) else {
             throw ManifoldXPCError.invalidPayload
@@ -1341,7 +1346,7 @@ extension ManifoldXPCService {
         ]
     }
 
-    private func applyTrackedRun(grantID: String, endSession: Bool) async throws -> [String: Any] {
+    private func applyDraftWorkspace(grantID: String, endSession: Bool) async throws -> [String: Any] {
         guard let grant = try await runtime.grantStore.grant(id: grantID) else {
             throw ManifoldXPCError.invalidPayload
         }
@@ -1539,8 +1544,11 @@ extension ManifoldXPCService {
         data: Data,
         filePath: String
     ) async throws -> RestoreSnapshotResult? {
-        guard snapshot.runID.hasPrefix("standing-write:") else {
-            return nil
+        if !snapshot.runID.hasPrefix("standing-write:") {
+            guard let grant = try await runtime.grantStore.grant(id: snapshot.runID),
+                  grant.summaryFraming != "Manifold draft workspace for governed AI file writes." else {
+                return nil
+            }
         }
         guard let source = try await runtime.grantStore.source(id: snapshot.workspaceID),
               !source.isRemoved else {
@@ -1550,11 +1558,11 @@ extension ManifoldXPCService {
             )
         }
 
-        let mountPrefix = source.canonicalMountName + "/"
-        guard filePath.hasPrefix(mountPrefix) else {
+        let components = filePath.split(separator: "/", maxSplits: 1).map(String.init)
+        guard components.count == 2 else {
             return nil
         }
-        let relativePath = String(filePath.dropFirst(mountPrefix.count))
+        let relativePath = components[1]
 
         let previousData = try? ScopedFileAccess.readData(
             relativePath: relativePath,
@@ -1865,9 +1873,10 @@ extension ManifoldXPCService {
         var agentMatches = 0
         var sampleMatches: [RuleMatchPreview.Sample] = []
 
-        switch rule.scope {
-        case .file:
-            // Use snapshot-tracked files as a fast, bounded probe surface.
+        let evaluateFiles: Bool = (rule.scope == .file || rule.scope == .content)
+        let evaluateEmails: Bool = (rule.scope == .email || rule.scope == .content)
+
+        if evaluateFiles {
             let paths = (try? await runtime.snapshotStore.allTrackedFiles()) ?? []
             let bounded = paths.prefix(2_000)
             for path in bounded {
@@ -1885,7 +1894,9 @@ extension ManifoldXPCService {
                     }
                 }
             }
-        case .email:
+        }
+
+        if evaluateEmails {
             let messages = (try? runtime.emailStore.allEmailMessages(limit: 2_000)) ?? []
             for message in messages {
                 let resolvedSender = message.senderEmail ?? message.sender
@@ -1911,6 +1922,11 @@ extension ManifoldXPCService {
                     }
                 }
             }
+        }
+
+        switch rule.scope {
+        case .file, .email, .content:
+            break
         case .agent:
             // Agent rules are stateless — we just report whether the rule would apply to this agent.
             let probe = AgentProbe(agent: agent, tool: .read, payloadBytes: nil, sessionStartedAt: Date())

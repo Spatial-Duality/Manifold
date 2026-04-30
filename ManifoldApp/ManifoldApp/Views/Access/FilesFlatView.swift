@@ -563,7 +563,7 @@ struct FilesFlatView: View {
                 EmptyStateIllustration(
                     systemImage: "doc.on.doc",
                     title: "No files indexed yet",
-                    subtitle: "Once you share a folder, its files appear here with default scope, overrides, and tracked activity.",
+                    subtitle: "Once you share a folder, its files appear here with default scope, overrides, and version history.",
                     tint: ManifoldPalette.selection,
                     style: .access
                 )

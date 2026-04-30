@@ -110,7 +110,7 @@ private struct EventDetailCard: View {
 
             if entry.beforeHash != nil || entry.afterHash != nil {
                 HStack(spacing: Spacing.s2) {
-                    Pill(text: "Tracked", variant: .defaultScope, systemImage: "clock.arrow.circlepath")
+                    Pill(text: "Versioned", variant: .defaultScope, systemImage: "clock.arrow.circlepath")
                     Text("A recoverable before/after record exists.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)

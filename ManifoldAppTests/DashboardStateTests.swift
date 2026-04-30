@@ -23,7 +23,7 @@ final class DashboardStateTests: XCTestCase {
 
     func testFixtureDefaultTrackedRunUsesTargetAgentPolicy() async throws {
         let client = FixtureRuntimeClient(profile: .dashboard)
-        let state = try await client.startTrackedRun(
+        let state = try await client.startGatewaySession(
             targetApp: .codex,
             fileScopes: [],
             selectedEmailIDs: [],

@@ -8,13 +8,31 @@ import Foundation
 public enum RuleScope: String, Sendable, Codable, CaseIterable {
     case file
     case email
+    /// Cross-content rule: applies to BOTH file and email payloads.
+    /// Used for privacy/personal-data rules that should fire regardless
+    /// of where the content originated (a secret in a file, or in an
+    /// email body, should be redacted either way).
+    case content
     case agent
 
     public var displayName: String {
         switch self {
         case .file: return "Files"
         case .email: return "Emails"
+        case .content: return "Files + Mail"
         case .agent: return "Agents"
+        }
+    }
+
+    /// Returns true if a rule with this scope should be considered for
+    /// requests in the given request scope. `.content` matches both file
+    /// and email requests; the others match only their own scope.
+    public func matches(requestScope: RuleScope) -> Bool {
+        switch self {
+        case .content:
+            return requestScope == .file || requestScope == .email
+        default:
+            return self == requestScope
         }
     }
 }
@@ -812,7 +830,17 @@ public enum RuleValidator {
         }
         let scopes = rule.matcher.inferredScopes
         if !scopes.isEmpty, scopes != [rule.scope] {
-            throw RuleValidationError.matcherScopeMismatch(expected: rule.scope, actual: scopes)
+            // .content allows matchers that touch file and/or email
+            // predicates (the cross-content scope is meant for rules
+            // like "redact privacy findings, whether it came from a
+            // file or an email"). Reject only if the matcher touches
+            // .agent predicates.
+            let isContentScope = rule.scope == .content
+            let touchesAgent = scopes.contains(.agent)
+            let touchesContentOnly = scopes.subtracting([.file, .email]).isEmpty
+            if !(isContentScope && !touchesAgent && touchesContentOnly) {
+                throw RuleValidationError.matcherScopeMismatch(expected: rule.scope, actual: scopes)
+            }
         }
         if case .all(let children) = rule.matcher, children.isEmpty {
             throw RuleValidationError.matcherEmpty

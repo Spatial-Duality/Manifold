@@ -5,12 +5,11 @@ import SwiftUI
 import ManifoldKit
 
 enum ManifoldCommandID: String, Hashable {
-    case openActivity
+    case openWork
     case openAccess
     case openMail
-    case openRequests
     case openRules
-    case protectNextSession
+    case startSession
     case openSessionRecap
     case addFolder
     case refreshRuntime
@@ -82,12 +81,12 @@ final class CommandPaletteModel {
 
     private static let commandCatalog: [ManifoldCommand] = [
         ManifoldCommand(
-            id: .openActivity,
-            title: "Open Activity",
-            icon: "list.bullet.rectangle",
+            id: .openWork,
+            title: "Open Work",
+            icon: "square.stack.3d.up",
             shortcut: ManifoldShortcut(key: "1", modifiers: .command, label: "⌘1")
         ) { _ in
-            presentMainLedger(destination: .activity)
+            presentMainLedger(destination: .work)
         },
         ManifoldCommand(
             id: .openAccess,
@@ -106,29 +105,26 @@ final class CommandPaletteModel {
             presentMainLedger(destination: .mail)
         },
         ManifoldCommand(
-            id: .openRequests,
-            title: "Open Requests",
-            icon: "hand.raised",
-            shortcut: ManifoldShortcut(key: "4", modifiers: .command, label: "⌘4")
-        ) { _ in
-            presentMainLedger(destination: .requests)
-        },
-        ManifoldCommand(
             id: .openRules,
             title: "Open Rules",
             icon: "checklist",
-            shortcut: ManifoldShortcut(key: "5", modifiers: .command, label: "⌘5")
+            shortcut: ManifoldShortcut(key: "4", modifiers: .command, label: "⌘4")
         ) { _ in
             presentMainLedger(destination: .rules)
         },
         ManifoldCommand(
-            id: .protectNextSession,
-            title: "Protect Next Session\u{2026}",
-            icon: "play.fill",
+            id: .startSession,
+            title: "New Session",
+            icon: "plus.rectangle.on.rectangle",
             shortcut: ManifoldShortcut(key: "n", modifiers: .command, label: "⌘N")
-        ) { _ in
-            presentMainLedger()
-            NotificationCenter.default.post(name: .manifoldShowSessionStartSheet, object: nil)
+        ) { store in
+            presentMainLedger(destination: .work)
+            if store.sessionWorkbench.preload == nil {
+                store.beginSessionPreload(
+                    agent: store.defaultSessionAgent,
+                    baseMode: .buildOnDefault
+                )
+            }
         },
         ManifoldCommand(
             id: .openSessionRecap,
@@ -136,7 +132,7 @@ final class CommandPaletteModel {
             icon: "list.bullet.rectangle",
             shortcut: nil
         ) { _ in
-            presentMainLedger(destination: .activity)
+            presentMainLedger(destination: .work)
         },
         ManifoldCommand(
             id: .addFolder,
@@ -148,11 +144,11 @@ final class CommandPaletteModel {
         },
         ManifoldCommand(
             id: .refreshRuntime,
-            title: "Refresh Runtime",
+            title: "Restart Runtime Helper",
             icon: "arrow.clockwise",
             shortcut: ManifoldShortcut(key: "r", modifiers: .command, label: "⌘R")
         ) { store in
-            await store.refreshAll(force: true)
+            await store.restartRuntimeHelper()
         },
         ManifoldCommand(
             id: .settings,
@@ -172,10 +168,10 @@ final class CommandPaletteModel {
         },
         ManifoldCommand(
             id: .finishTrackedEdit,
-            title: "Finish Tracked Edit",
+            title: "End Session",
             icon: "checkmark.seal",
             shortcut: ManifoldShortcut(key: "f", modifiers: [.command, .shift], label: "⇧⌘F"),
-            isAvailable: { $0.activeSession?.isTrackedEdit == true }
+            isAvailable: { $0.activeSession != nil }
         ) { store in
             try? await store.finishActiveSession()
         },

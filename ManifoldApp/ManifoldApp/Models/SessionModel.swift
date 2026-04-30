@@ -90,7 +90,7 @@ final class SessionModel {
     ) async {
         guard let client else { return }
         do {
-            let state = try await client.startTrackedRun(
+            let state = try await client.startGatewaySession(
                 targetApp: targetApp,
                 fileScopes: normalizedScopes(fileScopes),
                 selectedEmailIDs: selectedEmailIDs,
@@ -112,10 +112,7 @@ final class SessionModel {
     func endSession(onError: (String) -> Void, onConflict: (Int) -> Void) async {
         guard let client, let grant = activeGrant else { return }
         do {
-            let result = try await client.applyTrackedRun(grantID: grant.grantID, endSession: true)
-            if result.conflictCount > 0 {
-                onConflict(result.conflictCount)
-            }
+            try await client.endSession(grantID: grant.grantID)
             activeGrant = nil
             activeGrantSources = []
         } catch {

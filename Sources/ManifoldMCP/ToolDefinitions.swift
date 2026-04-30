@@ -81,7 +81,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "get_coverage_status",
-                description: "Check whether the current connection is Manifold-routed, in a tracked workspace, or outside coverage.",
+                description: "Check whether the current connection is Manifold-routed, using a draft workspace, or outside coverage.",
                 inputSchema: emptySchema
             ),
             MCPTool(
@@ -120,14 +120,14 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "list_sessions",
-                description: "List past session summaries. Each session represents a grant lifecycle (start → agent work → promote → end).",
+                description: "List past session summaries. Each session represents a gateway lifecycle (start → agent work → end).",
                 inputSchema: objectSchema(properties: [
                     "limit": ["type": "string", "description": "Max sessions to return (default 20)"],
                 ], required: [])
             ),
             MCPTool(
                 name: "get_session",
-                description: "Get full detail for a past session: summary, files modified, files conflicted, and promotion results.",
+                description: "Get full detail for a past session: summary, files modified, files conflicted, and versioned changes.",
                 inputSchema: objectSchema(properties: [
                     "grant_id": ["type": "string", "description": "The grant ID from list_sessions"],
                 ], required: ["grant_id"])

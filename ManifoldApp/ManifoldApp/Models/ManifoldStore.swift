@@ -38,6 +38,7 @@ final class ManifoldStore {
     let mailReview: MailReviewModel
     let governance: GovernanceModel
     let rules: RulesModel
+    let sessionWorkbench: SessionWorkbenchModel
     let personalDataOS: PersonalDataOSModel
     let integrationHealth: IntegrationHealthModel
     let diagnostics: DiagnosticsModel
@@ -46,6 +47,8 @@ final class ManifoldStore {
     let runtime: any RuntimeClientProtocol
     private var connectionMonitorTask: Task<Void, Never>?
     private var didAttemptAgentRestart = false
+    private var didAttemptDefaultSessionStart = false
+    private var suppressDefaultSessionUntilNextLaunch = false
 
     var menuBarIcon: String {
         guard isRuntimeConnected else { return "shield.slash" }
@@ -76,6 +79,7 @@ final class ManifoldStore {
         mailReview = MailReviewModel()
         governance = GovernanceModel()
         rules = RulesModel()
+        sessionWorkbench = SessionWorkbenchModel()
         personalDataOS = PersonalDataOSModel()
         diagnostics = DiagnosticsModel()
         // Sparkle is only meaningful when the bundle has a feed URL and a
@@ -122,6 +126,7 @@ final class ManifoldStore {
 
             Task {
                 await refreshAll(force: true)
+                await maybeStartDefaultSessionOnLaunch()
                 await integrationHealth.checkAll()
             }
         }
@@ -240,6 +245,35 @@ final class ManifoldStore {
         await personalDataOS.loadOverview()
         await mailAccounts.loadAccounts()
         await rules.load()
+    }
+
+    private func maybeStartDefaultSessionOnLaunch() async {
+        guard !didAttemptDefaultSessionStart else { return }
+        didAttemptDefaultSessionStart = true
+        await syncRuntimeSessionAccessMode()
+        await startDefaultSessionIfNeeded()
+    }
+
+    private func startDefaultSessionIfNeeded() async {
+        guard sessionStartupMode == .defaultSession else { return }
+        guard !suppressDefaultSessionUntilNextLaunch else { return }
+        guard session.activeGrant == nil else { return }
+        var draft = SessionDraft()
+        draft.name = "Default"
+        draft.agents = [defaultSessionAgent]
+        draft.usesExplicitFileSelection = false
+        try? await startGatewaySession(draft: draft)
+    }
+
+    private func syncRuntimeSessionAccessMode() async {
+        let mode: SessionAccessMode = sessionStartupMode == .defaultSession
+            ? .defaultSession
+            : .manualRequiresSession
+        do {
+            try await runtime.setSessionAccessMode(mode)
+        } catch {
+            logger.error("Failed to sync session access mode: \(error.localizedDescription)")
+        }
     }
 
     private func startConnectionMonitor() {
@@ -804,16 +838,173 @@ final class ManifoldStore {
     func startSession(targetApp: TargetApp = .cowork) async {
         var draft = SessionDraft()
         draft.agents = [targetApp]
-        try? await startProtectedRun(draft: draft)
+        try? await startGatewaySession(draft: draft)
     }
 
     func endSession() async {
+        let endingGrantID = session.activeGrant?.grantID
+        let endingWasDefault = session.activeGrant?.summaryFraming == "Default"
         await session.endSession(
             onError: { [weak self] message in self?.lastError = message },
-            onConflict: { [weak self] count in self?.lastError = "\(count) conflict(s) during promote. Check activity for details." }
+            onConflict: { [weak self] count in self?.lastError = "\(count) conflict(s) while ending the session. Check activity for details." }
         )
         await refreshAll()
-        session.lastCompletedSession = activity.sessions.first(where: { $0.id == session.activeGrant?.grantID })
+        if let endingGrantID {
+            session.lastCompletedSession = activity.sessions.first(where: { $0.id == endingGrantID })
+        }
+        if endingWasDefault {
+            suppressDefaultSessionUntilNextLaunch = true
+        } else {
+            await startDefaultSessionIfNeeded()
+        }
+    }
+
+    func stopAllSessions() async {
+        suppressDefaultSessionUntilNextLaunch = true
+        await endSession()
+    }
+
+    func defaultSourceIDs(for agent: TargetApp) -> Set<String> {
+        governance.policy(for: agent)?.allowedSourceIDs ?? []
+    }
+
+    func connectedOrDefaultAgents() -> [TargetApp] {
+        let agents = connectedAgents.compactMap { TargetApp(rawValue: $0) }
+        return agents.isEmpty ? [.cowork, .codex] : agents
+    }
+
+    func beginSessionPreload(agent: TargetApp? = nil, baseMode: PreloadBaseMode = .buildOnDefault) {
+        let resolvedAgent = agent ?? defaultSessionAgent
+        sessionWorkbench.newPreload(
+            agent: resolvedAgent,
+            baseMode: baseMode,
+            defaultSourceIDs: defaultSourceIDs(for: resolvedAgent)
+        )
+    }
+
+    func clearSessionPreload() {
+        sessionWorkbench.clearPreload()
+    }
+
+    func setPreloadAgent(_ agent: TargetApp) {
+        sessionWorkbench.setAgent(agent, defaultSourceIDs: defaultSourceIDs(for: agent))
+    }
+
+    func setPreloadBaseMode(_ baseMode: PreloadBaseMode) {
+        guard let preload = sessionWorkbench.preload else { return }
+        sessionWorkbench.setBaseMode(baseMode, defaultSourceIDs: defaultSourceIDs(for: preload.agent))
+    }
+
+    func setPreloadSource(sourceID: String, included: Bool) {
+        guard let preload = sessionWorkbench.preload else { return }
+        sessionWorkbench.setSource(
+            sourceID,
+            included: included,
+            defaultSourceIDs: defaultSourceIDs(for: preload.agent)
+        )
+    }
+
+    func loadSessionTemplates() async {
+        guard !sessionWorkbench.isLoadingTemplates else { return }
+        sessionWorkbench.isLoadingTemplates = true
+        defer { sessionWorkbench.isLoadingTemplates = false }
+        do {
+            var seen: Set<String> = []
+            var templates: [AccessPresetRecord] = []
+            for agent in connectedOrDefaultAgents() {
+                for template in try await runtime.accessTemplates(for: agent) where seen.insert(template.presetID).inserted {
+                    templates.append(template)
+                }
+            }
+            sessionWorkbench.templates = templates.sorted {
+                if $0.updatedAt == $1.updatedAt { return $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                return $0.updatedAt > $1.updatedAt
+            }
+            sessionWorkbench.lastError = nil
+        } catch {
+            sessionWorkbench.lastError = "Couldn't load sessions: \(error.localizedDescription)"
+        }
+    }
+
+    func loadSessionTemplate(_ template: AccessPresetRecord) async {
+        do {
+            let snapshot = try await runtime.loadAccessTemplate(presetID: template.presetID)
+            sessionWorkbench.loadPreload(snapshot: snapshot, fallbackAgent: template.targetApp ?? defaultSessionAgent)
+            sessionWorkbench.lastError = nil
+        } catch {
+            sessionWorkbench.lastError = "Couldn't load \(template.name): \(error.localizedDescription)"
+        }
+    }
+
+    func saveSessionPreload() async {
+        guard let preload = sessionWorkbench.preload else { return }
+        guard let name = preload.trimmedName else {
+            sessionWorkbench.lastError = "Name the session before saving it."
+            return
+        }
+        let defaultIDs = defaultSourceIDs(for: preload.agent)
+        let sourceScopes = preload.effectiveSourceIDs(defaultSourceIDs: defaultIDs)
+            .sorted()
+            .map { FileSelectionScope(sourceID: $0, relativePath: "", isDirectory: true) }
+        sessionWorkbench.isSaving = true
+        defer { sessionWorkbench.isSaving = false }
+        do {
+            let saved = try await runtime.saveAccessTemplate(
+                presetID: preload.presetID,
+                name: name,
+                targetApp: preload.agent,
+                fileScopes: sourceScopes,
+                emailIDs: Array(preload.selectedEmailIDs).sorted()
+            )
+            var updated = preload
+            updated.presetID = saved.presetID
+            updated.name = saved.name
+            sessionWorkbench.preload = updated
+            sessionWorkbench.lastMessage = "Saved \(saved.name)."
+            sessionWorkbench.lastError = nil
+            await loadSessionTemplates()
+        } catch {
+            sessionWorkbench.lastError = "Couldn't save session: \(error.localizedDescription)"
+        }
+    }
+
+    func activateSessionPreload() async {
+        guard let preload = sessionWorkbench.preload else { return }
+        let defaultIDs = defaultSourceIDs(for: preload.agent)
+        let sourceIDs = preload.effectiveSourceIDs(defaultSourceIDs: defaultIDs)
+        var draft = SessionDraft()
+        draft.name = preload.trimmedName ?? "\(displayName(for: preload.agent)) session"
+        draft.agents = [preload.agent]
+        draft.usesExplicitFileSelection = true
+        draft.selectedSourceIDs = sourceIDs
+        draft.selectedEmailIDs = preload.selectedEmailIDs
+        sessionWorkbench.isActivating = true
+        defer { sessionWorkbench.isActivating = false }
+        do {
+            try await startGatewaySession(draft: draft)
+            suppressDefaultSessionUntilNextLaunch = false
+            sessionWorkbench.lastMessage = "Activated \(draft.name)."
+            sessionWorkbench.lastError = nil
+        } catch {
+            sessionWorkbench.lastError = "Couldn't activate session: \(error.localizedDescription)"
+        }
+    }
+
+    func displayName(for agent: TargetApp) -> String {
+        switch agent {
+        case .cowork: return "Claude"
+        case .codex: return "Codex"
+        }
+    }
+
+    func restartRuntimeHelper() async {
+        runtimeLaunchError = nil
+        lastError = nil
+        unregisterAgent()
+        registerAgent()
+        try? await Task.sleep(for: .seconds(1))
+        await refreshAll(force: true)
+        await integrationHealth.checkAll(force: true)
     }
 
     func restoreFile(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
@@ -880,6 +1071,39 @@ final class ManifoldStore {
     var notifyOnAccessDenied: Bool {
         get { setup.notifyOnAccessDenied }
         set { setup.notifyOnAccessDenied = newValue }
+    }
+    var sessionStartupMode: SessionStartupMode {
+        get { setup.sessionStartupMode }
+        set {
+            setup.sessionStartupMode = newValue
+            suppressDefaultSessionUntilNextLaunch = false
+            Task {
+                await syncRuntimeSessionAccessMode()
+                if newValue == .manual {
+                    await endSession()
+                } else {
+                    await startDefaultSessionIfNeeded()
+                }
+            }
+        }
+    }
+    var defaultSessionAgent: TargetApp {
+        get { setup.defaultSessionAgent }
+        set {
+            setup.defaultSessionAgent = newValue
+            suppressDefaultSessionUntilNextLaunch = false
+            Task {
+                guard sessionStartupMode == .defaultSession else { return }
+                if session.activeGrant?.summaryFraming == "Default" {
+                    await session.endSession(
+                        onError: { [weak self] message in self?.lastError = message },
+                        onConflict: { [weak self] count in self?.lastError = "\(count) conflict(s) while changing the default session." }
+                    )
+                    await refreshAll()
+                }
+                await startDefaultSessionIfNeeded()
+            }
+        }
     }
     var hasCompletedOnboarding: Bool {
         get { setup.hasCompletedOnboarding }

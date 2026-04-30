@@ -15,18 +15,21 @@ struct LedgerStatusBar: View {
     @Environment(ManifoldStore.self) private var store
 
     private var status: (AgentStatusDot.Status, String) {
-        if let error = store.runtimeLaunchError ?? store.lastError {
-            return (.denied, error)
+        // Errors are kept concise on the always-visible strip. The full
+        // technical message lives in the Work surface's runtime issue
+        // banner with a disclosure for details.
+        if (store.runtimeLaunchError ?? store.lastError) != nil {
+            return (.denied, "Runtime needs restart")
         }
         if !store.isRuntimeConnected {
-            return (.offline, "Runtime is not connected. Check that ManifoldAgent is running.")
+            return (.offline, "Runtime unavailable")
         }
         if let summary = store.dataControlSummary {
             if summary.pendingApprovalCount > 0 {
                 return (.paused, "\(summary.pendingApprovalCount) request\(summary.pendingApprovalCount == 1 ? "" : "s") waiting.")
             }
             if let block = summary.activeWorkBlock {
-                return (.active, "\(AgentMeta.label(block.agent)) protected run live · \(block.sourceIDs.count) folder\(block.sourceIDs.count == 1 ? "" : "s")")
+                return (.active, "\(AgentMeta.label(block.agent)) session live · \(block.sourceIDs.count) folder\(block.sourceIDs.count == 1 ? "" : "s")")
             }
             let agentLine = summary.agents.map { agent in
                 let connection = agent.isPaused ? "paused" : (agent.isConnected ? "connected" : "offline")
@@ -37,9 +40,6 @@ struct LedgerStatusBar: View {
             }
         }
         if let session = store.activeSession {
-            if session.isTrackedEdit {
-                return (.active, "Tracked session live · \(session.name)")
-            }
             return (.active, "Session live · \(session.name)")
         }
         let agents = [store.isClaudeConnected ? "Claude" : nil, store.isCodexConnected ? "Codex" : nil]
@@ -60,10 +60,9 @@ struct LedgerStatusBar: View {
                 .truncationMode(.tail)
             Spacer()
             if !store.isRuntimeConnected {
-                Button("Reconnect") {
+                Button("Restart Helper") {
                     Task {
-                        store.registerAgent()
-                        await store.refreshAll(force: true)
+                        await store.restartRuntimeHelper()
                     }
                 }
                 .buttonStyle(.borderless)

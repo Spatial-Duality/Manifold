@@ -73,7 +73,7 @@ public enum CoverageState: String, Sendable, Codable, CaseIterable {
         case .manifoldRouted:
             return "Manifold-Routed"
         case .trackedWorkspace:
-            return "Tracked Workspace"
+            return "Draft Workspace"
         case .outsideCoverage:
             return "Outside Coverage"
         }

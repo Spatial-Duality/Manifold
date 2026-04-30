@@ -74,7 +74,7 @@ public enum AgentRulesTemplate {
       (`tool_name` + `resource_path`, or `content_hash`). Text-only claims
       come back ambiguous by design.
     - **Coverage check**: `manifold.get_coverage_status` tells you whether
-      this connection is Manifold-routed, in a tracked workspace, or
+      this connection is Manifold-routed, using a draft workspace, or
       outside coverage.
 
     Out of Manifold's scope (use native tools, no governance applied):

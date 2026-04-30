@@ -28,6 +28,8 @@ public actor ManifoldRuntime {
     public nonisolated let artifactIndex: ArtifactIndex
     /// Per-agent standing access policy store.
     public nonisolated let policyStore: PolicyStore
+    /// Runtime-wide access mode toggles shared by the app and MCP bridge.
+    public nonisolated let runtimeSettingsStore: RuntimeSettingsStore
     /// Runtime-owned email governance store.
     public nonisolated let emailRuleStore: EmailRuleStore
     /// Persistent tracked work block store.
@@ -95,6 +97,7 @@ public actor ManifoldRuntime {
         let emailStore = EmailStore(db: db)
         let artifactIndex = try ArtifactIndex(db: db)
         let policyStore = PolicyStore(db: db)
+        let runtimeSettingsStore = RuntimeSettingsStore(db: db)
         let emailRuleStore = EmailRuleStore(db: db, policyStore: policyStore)
         let workBlockStore = WorkBlockStore(db: db)
         let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
@@ -145,6 +148,7 @@ public actor ManifoldRuntime {
         self.emailStore = emailStore
         self.artifactIndex = artifactIndex
         self.policyStore = policyStore
+        self.runtimeSettingsStore = runtimeSettingsStore
         self.emailRuleStore = emailRuleStore
         self.workBlockStore = workBlockStore
         self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
@@ -238,6 +242,7 @@ public actor ManifoldRuntime {
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
             policyStore: policyStore,
+            runtimeSettingsStore: runtimeSettingsStore,
             emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore,
             fileVisibilityOverrideStore: fileVisibilityOverrideStore,
@@ -291,7 +296,19 @@ public actor ManifoldRuntime {
             let bestIdentity = identities.first(where: \.isVerified) ?? identities.first
             let coverageState: CoverageState
             if activeBlock?.agent == agent {
-                coverageState = .trackedWorkspace
+                let activeGrant: GrantRecord?
+                if let activeBlock {
+                    activeGrant = try? await grantStore.grant(id: activeBlock.grantID)
+                } else {
+                    activeGrant = nil
+                }
+                if activeGrant?.summaryFraming == "Manifold draft workspace for governed AI file writes." {
+                    coverageState = .trackedWorkspace
+                } else if bestIdentity?.status == .verified {
+                    coverageState = .manifoldRouted
+                } else {
+                    coverageState = .outsideCoverage
+                }
             } else if bestIdentity?.status == .verified {
                 coverageState = .manifoldRouted
             } else {

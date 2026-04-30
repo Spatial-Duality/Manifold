@@ -29,11 +29,11 @@ struct OpenManifoldIntent: AppIntent {
     }
 }
 
-// MARK: - Start Protected Session
+// MARK: - Start Session
 
 struct StartSessionIntent: AppIntent {
-    static let title: LocalizedStringResource = "Start Protected Session"
-    static let description: IntentDescription = "Opens Manifold to start a protected session with change monitoring."
+    static let title: LocalizedStringResource = "Open Sessions"
+    static let description: IntentDescription = "Opens Manifold to prepare or activate a named AI access session."
     static let openAppWhenRun = true
 
     @MainActor
@@ -74,10 +74,10 @@ struct ManifoldShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartSessionIntent(),
             phrases: [
-                "Start tracking changes in \(.applicationName)"
+                "Open sessions in \(.applicationName)"
             ],
-            shortTitle: "Start Session",
-            systemImageName: "timeline.selection"
+            shortTitle: "Sessions",
+            systemImageName: "rectangle.stack.badge.play"
         )
 
         AppShortcut(

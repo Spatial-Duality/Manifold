@@ -36,24 +36,30 @@ extension ManifoldStore: ManifoldCommands {
     // MARK: - Sessions
 
     func startSession(_ draft: SessionDraft) async throws {
-        try await startProtectedRun(draft: draft)
+        try await startGatewaySession(draft: draft)
     }
 
-    func previewProtectedRun(draft: SessionDraft) async throws {
+    func previewSession(draft: SessionDraft) async throws {
         let target = draft.agents.first ?? .cowork
         session.previewError = nil
-        await session.computePreview(targetApp: target)
+        await session.computePreview(
+            targetApp: target,
+            fileScopes: fileScopes(for: draft),
+            selectedEmailIDs: draft.selectedEmailIDs
+        )
         if let error = session.previewError {
             throw StoreCommandError.message(error)
         }
         await refreshAll()
     }
 
-    func startProtectedRun(draft: SessionDraft) async throws {
+    func startGatewaySession(draft: SessionDraft) async throws {
         let target = draft.agents.first ?? .cowork
         var capturedError: String?
         await session.startSession(
             targetApp: target,
+            fileScopes: fileScopes(for: draft),
+            selectedEmailIDs: draft.selectedEmailIDs,
             summaryFraming: draft.name.trimmedNilIfEmpty,
             noteCaptureMode: draft.trackWrites ? .basic : .off,
             onError: { [weak self] message in
@@ -69,6 +75,13 @@ extension ManifoldStore: ManifoldCommands {
 
     func finishActiveSession() async throws {
         await endSession()
+    }
+
+    private func fileScopes(for draft: SessionDraft) -> [FileSelectionScope] {
+        guard draft.usesExplicitFileSelection else { return [] }
+        return draft.selectedSourceIDs.sorted().map {
+            FileSelectionScope(sourceID: $0, relativePath: "", isDirectory: true)
+        }
     }
 
     func reloadSession(historyID: String) async throws {

@@ -82,6 +82,6 @@ struct FirstRunFlow: View {
 
     private func finish() {
         store.hasCompletedOnboarding = true
-        NotificationCenter.default.post(name: .manifoldShowSessionStartSheet, object: nil)
+        NotificationCenter.default.post(name: .manifoldShowSessions, object: nil)
     }
 }

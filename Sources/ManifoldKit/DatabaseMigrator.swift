@@ -57,10 +57,52 @@ public struct DatabaseMigrator {
     }
 
     private static func repairCurrentSchema(_ db: DatabaseConnection) throws {
+        try repairApprovalRequests(db)
         try repairFileVisibilityOverrides(db)
         try repairRuleRecords(db)
         try repairStandingWriteGrants(db)
+        try repairRuntimeSettings(db)
         try MemoryStore.ensureSchema(db)
+    }
+
+    private static func repairApprovalRequests(_ db: DatabaseConnection) throws {
+        let tables = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='approval_requests'"
+        )
+        guard !tables.isEmpty else { return }
+
+        let columns = try db.queryAll("PRAGMA table_info(approval_requests)")
+        let columnNames = Set(columns.compactMap { $0["name"] })
+        if !columnNames.contains("request_kind") {
+            try db.execute("ALTER TABLE approval_requests ADD COLUMN request_kind TEXT NOT NULL DEFAULT 'standing_write'")
+        }
+        if !columnNames.contains("source_id") {
+            try db.execute("ALTER TABLE approval_requests ADD COLUMN source_id TEXT")
+        }
+        if !columnNames.contains("mount_name") {
+            try db.execute("ALTER TABLE approval_requests ADD COLUMN mount_name TEXT")
+        }
+        if !columnNames.contains("relative_path") {
+            try db.execute("ALTER TABLE approval_requests ADD COLUMN relative_path TEXT")
+        }
+        if !columnNames.contains("context_json") {
+            try db.execute("ALTER TABLE approval_requests ADD COLUMN context_json TEXT")
+        }
+        if !columnNames.contains("resolution_action") {
+            try db.execute("ALTER TABLE approval_requests ADD COLUMN resolution_action TEXT")
+        }
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status)")
+        try db.execute("CREATE INDEX IF NOT EXISTS idx_approval_requests_source ON approval_requests(source_id)")
+    }
+
+    private static func repairRuntimeSettings(_ db: DatabaseConnection) throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
     }
 
     private static func repairFileVisibilityOverrides(_ db: DatabaseConnection) throws {

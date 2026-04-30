@@ -9,7 +9,7 @@ import os
 import PDFKit
 
 /// Core logic layer between MCP protocol and ManifoldKit stores.
-/// Dual-path access: standing access via PolicyStore, work block via grant materialization.
+/// Dual-path access: standing access via PolicyStore, session grants for gateway scope.
 /// Fail-closed: no policy and no grant = no access.
 public actor ManifoldBridge {
     // MARK: - Internal state — only for ManifoldBridge+* extensions
@@ -49,6 +49,7 @@ public actor ManifoldBridge {
     let snapshotStore: SnapshotStore
     let artifactIndex: ArtifactIndex
     let policyStore: PolicyStore?
+    let runtimeSettingsStore: RuntimeSettingsStore?
     let emailRuleStore: EmailRuleStore?
     let workBlockStore: WorkBlockStore?
     let fileVisibilityOverrideStore: FileVisibilityOverrideStore?
@@ -80,6 +81,7 @@ public actor ManifoldBridge {
         snapshotStore: SnapshotStore,
         artifactIndex: ArtifactIndex,
         policyStore: PolicyStore? = nil,
+        runtimeSettingsStore: RuntimeSettingsStore? = nil,
         emailRuleStore: EmailRuleStore? = nil,
         workBlockStore: WorkBlockStore? = nil,
         fileVisibilityOverrideStore: FileVisibilityOverrideStore? = nil,
@@ -111,6 +113,7 @@ public actor ManifoldBridge {
         self.snapshotStore = snapshotStore
         self.artifactIndex = artifactIndex
         self.policyStore = policyStore
+        self.runtimeSettingsStore = runtimeSettingsStore
         self.emailRuleStore = emailRuleStore
         self.workBlockStore = workBlockStore
         self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
@@ -192,9 +195,10 @@ public actor ManifoldBridge {
                 policySnapshot: policySnapshot(for: policy)
             )
         case .workBlock(let grant, _, let block):
+            let isDraft = Self.isDraftWorkspaceGrant(grant)
             return DecisionContext(
-                reason: "work_block",
-                accessMode: "tracked_run",
+                reason: isDraft ? "work_block" : "session_gateway",
+                accessMode: isDraft ? "tracked_run" : "session_gateway",
                 policySnapshot: "{\"grant_id\":\"\(grant.grantID)\",\"work_block_id\":\"\(block.id)\"}"
             )
         case .legacyGrant(let grant, _):
@@ -799,7 +803,9 @@ public actor ManifoldBridge {
         let verificationStatus = runtimeContext.verifiedClientIdentity?.status ?? .unknown
         let coverageState: CoverageState
         if let workBlockStore,
-           let _ = try? await workBlockStore.activeBlock(for: targetApp) {
+           let block = try? await workBlockStore.activeBlock(for: targetApp),
+           let grant = try? await grantStore.grant(id: block.grantID),
+           Self.isDraftWorkspaceGrant(grant) {
             coverageState = .trackedWorkspace
         } else if verificationStatus == .verified {
             coverageState = .manifoldRouted
@@ -845,22 +851,22 @@ public actor ManifoldBridge {
             .map { $0 }
     }
 
-    // MARK: - Access Resolution (dual-path: standing policy + work block grant)
+    // MARK: - Access Resolution (standing policy + session grant)
 
     /// Resolved access context for a tool call.
-    /// Standing access: reads go to original source paths (no materialization).
-    /// Work block: reads/writes go to materialized workspace via grant.
+    /// Standing and gateway access read original source paths; explicit draft
+    /// workspaces remain isolated until the user applies them.
     enum AccessContext {
         /// Standing access via persistent policy. Files are read from original paths.
         case standing(policy: AgentAccessPolicy, sources: [SourceRecord])
-        /// Work block with materialized workspace via grant.
+        /// Active session gateway or explicit draft workspace via grant.
         case workBlock(grant: GrantRecord, grantSources: [GrantSourceRecord], block: WorkBlockRecord)
         /// Legacy grant-only path (no PolicyStore available).
         case legacyGrant(grant: GrantRecord, grantSources: [GrantSourceRecord])
     }
 
     /// Resolve access for the current agent. Tries standing policy first,
-    /// then work block grant, then legacy grant. Fail-closed.
+    /// then session grant, then legacy grant. Fail-closed.
     private func resolveAccess() async throws -> AccessContext {
         // Path 1: Standing access via PolicyStore (v4.1)
         if let policyStore {
@@ -871,15 +877,20 @@ public actor ManifoldBridge {
                 throw ManifoldMCPError.accessPaused
             }
 
-            // Check for active work block
+            // Check for active session gateway
             if let wbStore = workBlockStore,
                let block = try await wbStore.activeBlock(for: targetApp) {
-                // Work block active — route through grant/materialization
+                // Session active — route through its grant scope.
                 if let grant = try await grantStore.grant(id: block.grantID) {
                     let grantSources = try await scopedGrantSources(grant: grant, policy: policy)
                     try await grantStore.touchGrant(grantID: grant.grantID)
                     return .workBlock(grant: grant, grantSources: grantSources, block: block)
                 }
+            }
+
+            if let runtimeSettingsStore,
+               try await runtimeSettingsStore.sessionAccessMode() == .manualRequiresSession {
+                throw ManifoldMCPError.noAccessConfigured
             }
 
             // Standing access — fail only when neither file policy nor the
@@ -1029,17 +1040,52 @@ public actor ManifoldBridge {
         }
     }
 
+    /// Build original-source mounts for a session grant. The grant keeps the
+    /// session gateway boundary; the filesystem path remains the user's live
+    /// governed folder so writes are immediately visible to later sessions.
+    private func originalMounts(sources grantSources: [GrantSourceRecord]) async throws -> [GrantMount] {
+        var mounts: [GrantMount] = []
+        for grantSource in grantSources {
+            guard let source = try await grantStore.source(id: grantSource.sourceID),
+                  source.isAccessible else {
+                continue
+            }
+            mounts.append(
+                GrantMount(
+                    sourceID: grantSource.sourceID,
+                    mountName: grantSource.mountName,
+                    mountPath: source.originalRootPath
+                )
+            )
+        }
+        return mounts
+    }
+
+    private func grantFileScopes(for grant: GrantRecord) async throws -> [FileSelectionScope] {
+        try await grantStore.grantFileScopes(grantID: grant.grantID).map {
+            FileSelectionScope(
+                sourceID: $0.sourceID,
+                relativePath: $0.relativePath,
+                isDirectory: $0.isDirectory
+            )
+        }
+    }
+
     /// Resolved mounts + optional grant for read operations.
-    /// Standing access: mounts point to original source paths, grantID is nil.
-    /// Work block / legacy grant: mounts point to materialized workspace, grantID is set.
+    /// Standing access and normal sessions point to original source paths.
+    /// Legacy grants and explicit draft workspaces point to materialized roots.
     private struct ResolvedMounts {
         let mounts: [GrantMount]
         let grantID: String?
         let grant: GrantRecord?
         let isStanding: Bool
+        let usesOriginalSources: Bool
         let decisionID: String?
         let standingPolicy: AgentAccessPolicy?
         let standingResolver: FileVisibilityResolver?
+        /// Nil means no grant-scoped file filter; non-nil means the listed
+        /// source-relative scopes are the complete session file gateway.
+        let fileScopes: [FileSelectionScope]?
     }
 
     /// Resolve access and return mounts suitable for file operations.
@@ -1064,19 +1110,43 @@ public actor ManifoldBridge {
                 grantID: nil,
                 grant: nil,
                 isStanding: true,
+                usesOriginalSources: true,
                 decisionID: decisionID,
                 standingPolicy: policy,
-                standingResolver: resolver
+                standingResolver: resolver,
+                fileScopes: nil
             )
         case .workBlock(let grant, let grantSources, _):
+            if !Self.isDraftWorkspaceGrant(grant) {
+                let policy = try await policyStore?.policy(for: targetApp)
+                let resolver: FileVisibilityResolver?
+                if let policy {
+                    resolver = try await standingFileVisibilityResolver(for: policy)
+                } else {
+                    resolver = nil
+                }
+                return ResolvedMounts(
+                    mounts: try await originalMounts(sources: grantSources),
+                    grantID: grant.grantID,
+                    grant: grant,
+                    isStanding: false,
+                    usesOriginalSources: true,
+                    decisionID: decisionID,
+                    standingPolicy: grant.explicitSelection ? nil : policy,
+                    standingResolver: grant.explicitSelection ? nil : resolver,
+                    fileScopes: grant.explicitSelection ? try await grantFileScopes(for: grant) : nil
+                )
+            }
             return ResolvedMounts(
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
                 isStanding: false,
+                usesOriginalSources: false,
                 decisionID: decisionID,
                 standingPolicy: nil,
-                standingResolver: nil
+                standingResolver: nil,
+                fileScopes: nil
             )
         case .legacyGrant(let grant, let grantSources):
             return ResolvedMounts(
@@ -1084,9 +1154,11 @@ public actor ManifoldBridge {
                 grantID: grant.grantID,
                 grant: grant,
                 isStanding: false,
+                usesOriginalSources: false,
                 decisionID: decisionID,
                 standingPolicy: nil,
-                standingResolver: nil
+                standingResolver: nil,
+                fileScopes: nil
             )
         }
     }
@@ -1100,7 +1172,7 @@ public actor ManifoldBridge {
         mount: GrantMount,
         access: ResolvedMounts
     ) -> FileVisibilityEvaluation? {
-        guard access.isStanding,
+        guard access.usesOriginalSources,
               let policy = access.standingPolicy,
               let resolver = access.standingResolver else {
             return nil
@@ -1112,12 +1184,20 @@ public actor ManifoldBridge {
         )
     }
 
-    private func assertStandingVisibility(
+    private func assertFileVisible(
         relativePath: String,
         mount: GrantMount,
         access: ResolvedMounts,
         originalPath: String
     ) throws {
+        if let fileScopes = access.fileScopes {
+            let scopesForSource = fileScopes.filter { $0.sourceID == mount.sourceID }
+            guard !scopesForSource.isEmpty,
+                  FileSelectionScope.allows(relativePath, in: scopesForSource) else {
+                throw ManifoldMCPError.fileNotFound(originalPath)
+            }
+        }
+
         guard let evaluation = standingFileEvaluation(relativePath: relativePath, mount: mount, access: access),
               !evaluation.isVisible else {
             return
@@ -1206,22 +1286,56 @@ public actor ManifoldBridge {
 
     private func accessibleEmails(grant: GrantRecord, limit: Int) async throws -> [EmailMessageRecord] {
         let policy = try await policyStore?.policy(for: targetApp) ?? AgentAccessPolicy(agent: targetApp)
+        let explicitEmailIDs = try explicitGrantEmailIDs(for: grant, limit: limit)
         let context = try await emailPolicyContext(
             policy: policy,
             sensitivity: EmailSensitivityLevel(rawValue: grant.emailSensitivity) ?? policy.emailSensitivity,
-            explicitGrantEmailIDs: explicitGrantEmailIDs(for: grant, limit: limit)
+            explicitGrantEmailIDs: explicitEmailIDs
         )
-        let allEmails = try emailStore.allEmailMessages(limit: limit)
-        return allEmails.filter { email in
+        let emails = try emailCandidates(
+            policy: policy,
+            explicitGrantEmailIDs: explicitEmailIDs,
+            limit: limit
+        )
+        return emails.filter { email in
             EmailPolicyEngine.decision(for: email, context: context).allowed
         }
     }
 
     private func accessibleEmails(policy: AgentAccessPolicy, limit: Int) async throws -> [EmailMessageRecord] {
         let context = try await emailPolicyContext(policy: policy, explicitGrantEmailIDs: nil)
-        let allEmails = try emailStore.allEmailMessages(limit: limit)
-        return allEmails.filter { email in
+        let emails = try emailCandidates(policy: policy, explicitGrantEmailIDs: nil, limit: limit)
+        return emails.filter { email in
             EmailPolicyEngine.decision(for: email, context: context).allowed
+        }
+    }
+
+    private func emailCandidates(
+        policy: AgentAccessPolicy,
+        explicitGrantEmailIDs: Set<String>?,
+        limit: Int
+    ) throws -> [EmailMessageRecord] {
+        var byID: [String: EmailMessageRecord] = [:]
+
+        for email in try emailStore.allEmailMessages(limit: limit) {
+            byID[email.emailID] = email
+        }
+
+        for email in try emailStore.sharedEmails(agent: policy.agent, limit: limit) {
+            byID[email.emailID] = email
+        }
+
+        if let explicitGrantEmailIDs, !explicitGrantEmailIDs.isEmpty {
+            for email in try emailStore.emailMessages(ids: Array(explicitGrantEmailIDs)) {
+                byID[email.emailID] = email
+            }
+        }
+
+        return byID.values.sorted { lhs, rhs in
+            if lhs.receivedAt == rhs.receivedAt {
+                return lhs.emailID < rhs.emailID
+            }
+            return lhs.receivedAt > rhs.receivedAt
         }
     }
 
@@ -1465,15 +1579,41 @@ public actor ManifoldBridge {
                 return status
 
             case .workBlock(let grant, let grantSources, let block):
-                let mounts = grantMounts(grant: grant, sources: grantSources)
-                try await ensureIndexed(grant: grant, mounts: mounts)
-                let totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
+                let mounts: [GrantMount]
+                let totalFiles: Int
+                if Self.isDraftWorkspaceGrant(grant) {
+                    mounts = grantMounts(grant: grant, sources: grantSources)
+                    try await ensureIndexed(grant: grant, mounts: mounts)
+                    totalFiles = (try? await artifactIndex.fileCount(grantID: grant.grantID)) ?? 0
+                } else {
+                    mounts = try await originalMounts(sources: grantSources)
+                    let policy = try? await policyStore?.policy(for: targetApp)
+                    let resolver: FileVisibilityResolver?
+                    if let policy {
+                        resolver = try? await standingFileVisibilityResolver(for: policy)
+                    } else {
+                        resolver = nil
+                    }
+                    let scopes: [FileSelectionScope]?
+                    if grant.explicitSelection {
+                        scopes = try? await grantFileScopes(for: grant)
+                    } else {
+                        scopes = nil
+                    }
+                    totalFiles = (try? listFilesFromOriginals(
+                        mounts: mounts,
+                        policy: grant.explicitSelection ? nil : policy,
+                        resolver: grant.explicitSelection ? nil : resolver,
+                        fileScopes: scopes ?? nil
+                    ).count) ?? 0
+                }
                 let emailCount = (try? await accessibleEmails(grant: grant, limit: 5_000).count) ?? 0
                 let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
                 let noteGuidance = noteGuidance(for: grant, summaries: summaries)
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
                 let blockStatus = block.isPaused ? " (paused)" : ""
-                let message = "Manifold work block active\(blockStatus) (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
+                let mode = Self.isDraftWorkspaceGrant(grant) ? "draft workspace" : "session gateway"
+                let message = "Manifold \(mode) active\(blockStatus) (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
                 let status = StatusResult(
                     active: true,
                     grantID: grant.grantID,
@@ -1560,12 +1700,14 @@ public actor ManifoldBridge {
         let resolved = try await resolveAccessMounts(toolName: "list_files", action: "list", intent: validatedIntent)
         let files: [FileInfo]
 
-        // Standing access: enumerate files from original source paths
-        if resolved.isStanding {
+        // Standing access and normal named sessions enumerate the live
+        // governed folders. Draft/legacy grant paths still use the index.
+        if resolved.usesOriginalSources {
             files = try listFilesFromOriginals(
                 mounts: resolved.mounts,
                 policy: resolved.standingPolicy,
-                resolver: resolved.standingResolver
+                resolver: resolved.standingResolver,
+                fileScopes: resolved.fileScopes
             )
         } else {
             // Grant-based: use artifact index
@@ -1600,32 +1742,42 @@ public actor ManifoldBridge {
     private func listFilesFromOriginals(
         mounts: [GrantMount],
         policy: AgentAccessPolicy? = nil,
-        resolver: FileVisibilityResolver? = nil
+        resolver: FileVisibilityResolver? = nil,
+        fileScopes: [FileSelectionScope]? = nil
     ) throws -> [FileInfo] {
         let currentPaths = Set(mounts.map(\.mountPath))
-        let visibilityKey = cacheKey(policy: policy, resolver: resolver)
+        let visibilityKey = cacheKey(policy: policy, resolver: resolver, fileScopes: fileScopes)
         if let cache = fileListCache,
            Date().timeIntervalSince(cache.timestamp) < fileListCacheTTL,
            cache.mountPaths == currentPaths,
            cache.visibilityKey == visibilityKey {
             return cache.entries
         }
-        let files = try enumerateOriginalFiles(mounts: mounts, policy: policy, resolver: resolver)
+        let files = try enumerateOriginalFiles(mounts: mounts, policy: policy, resolver: resolver, fileScopes: fileScopes)
         fileListCache = (files, Date(), currentPaths, visibilityKey)
         return files
     }
 
-    private func cacheKey(policy: AgentAccessPolicy?, resolver: FileVisibilityResolver?) -> String {
+    private func cacheKey(
+        policy: AgentAccessPolicy?,
+        resolver: FileVisibilityResolver?,
+        fileScopes: [FileSelectionScope]?
+    ) -> String {
         let allowed = policy?.allowedSourceIDs.sorted().joined(separator: ",") ?? ""
         let overrideKey = resolver?.cacheKey ?? ""
-        return "\(allowed)|\(overrideKey)"
+        let scopeKey = fileScopes?
+            .map { "\($0.sourceID):\($0.normalizedRelativePath):\($0.isDirectory ? "d" : "f")" }
+            .sorted()
+            .joined(separator: ",") ?? ""
+        return "\(allowed)|\(overrideKey)|\(scopeKey)"
     }
 
     /// Actual file enumeration — only called when cache is stale or mount set changed.
     private func enumerateOriginalFiles(
         mounts: [GrantMount],
         policy: AgentAccessPolicy? = nil,
-        resolver: FileVisibilityResolver? = nil
+        resolver: FileVisibilityResolver? = nil,
+        fileScopes: [FileSelectionScope]? = nil
     ) throws -> [FileInfo] {
         let fm = FileManager.default
         var files: [FileInfo] = []
@@ -1656,6 +1808,14 @@ public actor ManifoldBridge {
 
                 guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
                       values.isRegularFile == true else { continue }
+
+                if let fileScopes {
+                    let scopesForSource = fileScopes.filter { $0.sourceID == mount.sourceID }
+                    guard !scopesForSource.isEmpty,
+                          FileSelectionScope.allows(relativePath, in: scopesForSource) else {
+                        continue
+                    }
+                }
 
                 if let policy, let resolver {
                     let evaluation = resolver.evaluate(
@@ -1701,7 +1861,7 @@ public actor ManifoldBridge {
 
         // Try mount-prefixed resolution first (e.g. "MyProject/src/main.swift")
         if let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) {
-            try assertStandingVisibility(relativePath: relPath, mount: mount, access: resolved, originalPath: cleaned)
+            try assertFileVisible(relativePath: relPath, mount: mount, access: resolved, originalPath: cleaned)
             return try await readFromMount(
                 relativePath: relPath,
                 mountPath: mount.mountPath,
@@ -1714,7 +1874,7 @@ public actor ManifoldBridge {
 
         // Bare path: resolve unambiguously or reject
         let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
-        try assertStandingVisibility(relativePath: relPath, mount: mount, access: resolved, originalPath: cleaned)
+        try assertFileVisible(relativePath: relPath, mount: mount, access: resolved, originalPath: cleaned)
         return try await readFromMount(
             relativePath: relPath,
             mountPath: mount.mountPath,
@@ -2300,18 +2460,33 @@ public actor ManifoldBridge {
             }
 
         case .workBlock(let grant, let grantSources, _):
-            let resolved = try await resolveTrackedWrite(
-                cleanedPath: cleaned,
-                grant: grant,
-                grantSources: grantSources,
-                toolName: options.toolName,
-                intent: validatedIntent
-            )
-            access = resolved.access
-            writeID = grant.grantID
-            writeSource = "mcp"
-            writeGrantID = grant.grantID
-            writeTarget = resolved.target
+            if Self.isDraftWorkspaceGrant(grant) {
+                let resolved = try await resolveTrackedWrite(
+                    cleanedPath: cleaned,
+                    grant: grant,
+                    grantSources: grantSources,
+                    toolName: options.toolName,
+                    intent: validatedIntent
+                )
+                access = resolved.access
+                writeID = grant.grantID
+                writeSource = "mcp"
+                writeGrantID = grant.grantID
+                writeTarget = resolved.target
+            } else {
+                let resolved = try await resolveSessionGatewayWrite(
+                    cleanedPath: cleaned,
+                    grant: grant,
+                    grantSources: grantSources,
+                    toolName: options.toolName,
+                    intent: validatedIntent
+                )
+                access = resolved.access
+                writeID = grant.grantID
+                writeSource = "mcp_session_gateway"
+                writeGrantID = grant.grantID
+                writeTarget = resolved.target
+            }
 
         case .legacyGrant(let grant, let grantSources):
             let resolved = try await resolveTrackedWrite(
@@ -2361,7 +2536,7 @@ public actor ManifoldBridge {
             runID: writeID
         )
 
-        if access.isStanding,
+        if access.usesOriginalSources,
            let existingData,
            try await snapshotStore.latestHash(runID: writeID, filePath: canonicalPath) == nil {
             try await snapshotStore.recordBaseline(
@@ -2427,7 +2602,7 @@ public actor ManifoldBridge {
             "mount": targetMount.mountName,
             "bytes": "\(data.count)",
             "snapshot_id": "\(snapshot.id)",
-            "access_mode": access.isStanding ? effectiveWriteSource : "tracked_run",
+            "access_mode": access.usesOriginalSources ? effectiveWriteSource : "tracked_run",
             "tool": options.toolName,
             "write_mode": options.writeMode.rawValue,
             "mime_type": options.mimeType ?? "",
@@ -2464,7 +2639,7 @@ public actor ManifoldBridge {
                 canonicalPath: canonicalPath,
                 snapshotID: snapshot.id,
                 existed: existed,
-                directOriginalWrite: access.isStanding,
+                directOriginalWrite: access.usesOriginalSources,
                 writeSource: effectiveWriteSource
             ),
             path: canonicalPath
@@ -2559,21 +2734,53 @@ public actor ManifoldBridge {
         access: ResolvedMounts,
         target: ResolvedWriteTarget
     ) async throws {
-        if access.isStanding {
-            guard let policyStore else { return }
-            let policy = try await policyStore.policy(for: targetApp)
-            if policy.isPaused {
-                throw ManifoldMCPError.accessPaused
+        if access.usesOriginalSources {
+            let freshGrant: GrantRecord?
+            if let grant = access.grant {
+                guard let activeGrant = try await grantStore.grant(id: grant.grantID),
+                      activeGrant.isActive else {
+                    throw ManifoldMCPError.noActiveSession
+                }
+                freshGrant = activeGrant
+            } else {
+                freshGrant = nil
             }
-            guard policy.allowedSourceIDs.contains(target.mount.sourceID) else {
-                throw ManifoldMCPError.invalidPath("The source for \(target.canonicalPath) is no longer shared with \(targetApp.rawValue). Re-list files before writing.")
+
+            let policy: AgentAccessPolicy?
+            if let policyStore {
+                policy = try await policyStore.policy(for: targetApp)
+                if policy?.isPaused == true {
+                    throw ManifoldMCPError.accessPaused
+                }
+            } else {
+                policy = nil
             }
+
+            if let freshGrant, freshGrant.explicitSelection {
+                let scopes = try await grantFileScopes(for: freshGrant)
+                let scopesForSource = scopes.filter { $0.sourceID == target.mount.sourceID }
+                guard !scopesForSource.isEmpty,
+                      FileSelectionScope.allows(target.relativePath, in: scopesForSource) else {
+                    throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+                }
+            } else if let policy {
+                guard policy.allowedSourceIDs.contains(target.mount.sourceID) else {
+                    throw ManifoldMCPError.invalidPath("The source for \(target.canonicalPath) is no longer shared with \(targetApp.rawValue). Re-list files before writing.")
+                }
+            }
+
             guard let source = try await grantStore.source(id: target.mount.sourceID),
                   source.isAccessible else {
                 throw ManifoldMCPError.fileNotFound(target.canonicalPath)
             }
 
-            let currentMounts = standingMounts(sources: [source])
+            let currentMounts = [
+                GrantMount(
+                    sourceID: source.sourceID,
+                    mountName: target.mount.mountName,
+                    mountPath: source.originalRootPath
+                )
+            ]
             let currentTarget = try resolveWriteTarget(
                 target.canonicalPath,
                 in: currentMounts,
@@ -2585,14 +2792,16 @@ public actor ManifoldBridge {
                 throw ManifoldMCPError.invalidPath("The source mapping for \(target.canonicalPath) changed while the write was in progress. Re-list files before writing.")
             }
 
-            let resolver = try await standingFileVisibilityResolver(for: policy)
-            let visibility = resolver.evaluate(
-                sourceID: target.mount.sourceID,
-                relativePath: target.relativePath,
-                defaultVisible: true
-            )
-            guard visibility.isVisible else {
-                throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+            if let policy, freshGrant?.explicitSelection != true {
+                let resolver = try await standingFileVisibilityResolver(for: policy)
+                let visibility = resolver.evaluate(
+                    sourceID: target.mount.sourceID,
+                    relativePath: target.relativePath,
+                    defaultVisible: policy.allowedSourceIDs.contains(target.mount.sourceID)
+                )
+                guard visibility.isVisible else {
+                    throw ManifoldMCPError.fileNotFound(target.canonicalPath)
+                }
             }
         } else if let grant = access.grant {
             guard let freshGrant = try await grantStore.grant(id: grant.grantID),
@@ -2718,16 +2927,35 @@ public actor ManifoldBridge {
     }
 
     private func resolveAccessForWrite(cleanedPath: String) async throws -> AccessContext {
+        if let session = try await activeSessionAccessForWrite() {
+            return session
+        }
         if let standing = try await directStandingAccessForWrite(cleanedPath: cleanedPath) {
             return standing
         }
         return try await resolveAccess()
     }
 
+    private func activeSessionAccessForWrite() async throws -> AccessContext? {
+        guard let policyStore,
+              let wbStore = workBlockStore,
+              let block = try await wbStore.activeBlock(for: targetApp),
+              let grant = try await grantStore.grant(id: block.grantID),
+              !Self.isDraftWorkspaceGrant(grant) else {
+            return nil
+        }
+        let policy = try await policyStore.policy(for: targetApp)
+        if policy.isPaused {
+            throw ManifoldMCPError.accessPaused
+        }
+        let grantSources = try await scopedGrantSources(grant: grant, policy: policy)
+        return .workBlock(grant: grant, grantSources: grantSources, block: block)
+    }
+
     /// Normal governed writes should land in the original shared folder,
-    /// even if a previous draft/tracked work block is still active. Only
+    /// even if a previous draft session is still active. Only
     /// source-level shared folders are writable in standing mode; explicit
-    /// file overrides stay read-only unless a tracked work block is the only
+    /// file overrides stay read-only unless a draft workspace is the only
     /// available access path.
     private func directStandingAccessForWrite(cleanedPath: String) async throws -> AccessContext? {
         guard let policyStore else { return nil }
@@ -2795,8 +3023,8 @@ public actor ManifoldBridge {
         if directOriginalWrite {
             return "\(action) \(canonicalPath) in the original folder (\(byteCount) bytes). Manifold recorded snapshot #\(snapshotID) for version history."
         }
-        let workspaceKind = writeSource == "mcp_draft_workspace" ? "draft workspace" : "tracked workspace"
-        return "\(action) \(canonicalPath) in the Manifold \(workspaceKind) (\(byteCount) bytes). The original folder is unchanged until the user applies/promotes the workspace. Manifold recorded snapshot #\(snapshotID)."
+        let workspaceKind = writeSource == "mcp_draft_workspace" ? "draft workspace" : "workspace"
+        return "\(action) \(canonicalPath) in the Manifold \(workspaceKind) (\(byteCount) bytes). The original folder is unchanged until the user applies the workspace. Manifold recorded snapshot #\(snapshotID)."
     }
 
     private func resolveStandingWrite(
@@ -2867,9 +3095,11 @@ public actor ManifoldBridge {
                 grantID: nil,
                 grant: nil,
                 isStanding: true,
+                usesOriginalSources: true,
                 decisionID: accessDecisionID,
                 standingPolicy: policy,
-                standingResolver: visibilityResolver
+                standingResolver: visibilityResolver,
+                fileScopes: nil
             ),
             writeID: "standing-write:\(target.mount.sourceID)",
             writeSource: StandingWriteMode.automatic.rawValue,
@@ -2899,12 +3129,60 @@ public actor ManifoldBridge {
             grantID: grant.grantID,
             grant: grant,
             isStanding: false,
+            usesOriginalSources: false,
             decisionID: accessDecisionID,
             standingPolicy: nil,
-            standingResolver: nil
+            standingResolver: nil,
+            fileScopes: nil
         )
         let target = try resolveWriteTarget(cleanedPath, in: access.mounts)
         try await assertWritableScope(relativePath: target.relativePath, mount: target.mount, grant: grant)
+        return (access, target)
+    }
+
+    private func resolveSessionGatewayWrite(
+        cleanedPath: String,
+        grant: GrantRecord,
+        grantSources: [GrantSourceRecord],
+        toolName: String,
+        intent: AccessIntent?
+    ) async throws -> (access: ResolvedMounts, target: ResolvedWriteTarget) {
+        let policy = try await policyStore?.policy(for: targetApp)
+        let resolver: FileVisibilityResolver?
+        if let policy, !grant.explicitSelection {
+            resolver = try await standingFileVisibilityResolver(for: policy)
+        } else {
+            resolver = nil
+        }
+        let scopes = grant.explicitSelection ? try await grantFileScopes(for: grant) : nil
+        let accessDecisionID = await recordAccessDecision(
+            toolName: toolName,
+            resourcePath: cleanedPath,
+            action: "write",
+            allowed: true,
+            reason: "session_gateway",
+            accessMode: "session_gateway",
+            policySnapshot: "{\"grant_id\":\"\(grant.grantID)\"}",
+            intent: intent
+        )
+        let access = ResolvedMounts(
+            mounts: try await originalMounts(sources: grantSources),
+            grantID: grant.grantID,
+            grant: grant,
+            isStanding: false,
+            usesOriginalSources: true,
+            decisionID: accessDecisionID,
+            standingPolicy: grant.explicitSelection ? nil : policy,
+            standingResolver: resolver,
+            fileScopes: scopes
+        )
+        let target = try resolveWriteTarget(cleanedPath, in: access.mounts, requireMountPrefix: true)
+        try assertFileVisible(
+            relativePath: target.relativePath,
+            mount: target.mount,
+            access: access,
+            originalPath: cleanedPath
+        )
         return (access, target)
     }
 
@@ -2946,6 +3224,7 @@ public actor ManifoldBridge {
     private func ensureDraftWorkBlock(sourceID: String) async throws -> DraftWorkBlock {
         if let block = try await workBlockStore?.activeBlock(for: targetApp),
            let grant = try await grantStore.grant(id: block.grantID),
+           Self.isDraftWorkspaceGrant(grant),
            block.sourceIDs.contains(sourceID) {
             return DraftWorkBlock(grant: grant, sources: try await grantStore.grantSources(grantID: grant.grantID))
         }
@@ -3029,7 +3308,7 @@ public actor ManifoldBridge {
         let validatedIntent = try await validatedAccessIntent(for: toolName, provided: intent)
         let access = try await resolveAccessMounts(toolName: toolName, action: "read", resourcePath: cleaned, intent: validatedIntent)
         let target = try resolveWriteTarget(cleaned, in: access.mounts)
-        try assertStandingVisibility(
+        try assertFileVisible(
             relativePath: target.relativePath,
             mount: target.mount,
             access: access,
@@ -3132,13 +3411,14 @@ public actor ManifoldBridge {
         let resolved = try await resolveAccessMounts(toolName: "search_files", action: "search", intent: validatedIntent)
         let results: [(path: String, source: String, matches: [String])]
 
-        // Standing access: grep through original source files
-        if resolved.isStanding {
+        // Standing access and normal sessions grep through live governed folders.
+        if resolved.usesOriginalSources {
             results = try searchFilesInOriginals(
                 query: query,
                 mounts: resolved.mounts,
                 policy: resolved.standingPolicy,
-                resolver: resolved.standingResolver
+                resolver: resolved.standingResolver,
+                fileScopes: resolved.fileScopes
             )
         } else {
             // Grant-based: use artifact index
@@ -3194,7 +3474,8 @@ public actor ManifoldBridge {
         query: String,
         mounts: [GrantMount],
         policy: AgentAccessPolicy? = nil,
-        resolver: FileVisibilityResolver? = nil
+        resolver: FileVisibilityResolver? = nil,
+        fileScopes: [FileSelectionScope]? = nil
     ) throws -> [(path: String, source: String, matches: [String])] {
         let fm = FileManager.default
         let queryLower = query.lowercased()
@@ -3224,6 +3505,14 @@ public actor ManifoldBridge {
 
                 guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                       values.isRegularFile == true else { continue }
+
+                if let fileScopes {
+                    let scopesForSource = fileScopes.filter { $0.sourceID == mount.sourceID }
+                    guard !scopesForSource.isEmpty,
+                          FileSelectionScope.allows(relativePath, in: scopesForSource) else {
+                        continue
+                    }
+                }
 
                 if let policy, let resolver {
                     let evaluation = resolver.evaluate(
@@ -3282,13 +3571,13 @@ public actor ManifoldBridge {
             mountPath = mount.mountPath
             mountName = mount.mountName
             resolvedPath = relPath
-            try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
+            try assertFileVisible(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
         } else {
             let (mount, relPath) = try resolveBarePath(cleaned, in: mounts)
             mountPath = mount.mountPath
             mountName = mount.mountName
             resolvedPath = relPath
-            try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
+            try assertFileVisible(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
         }
 
         let fileURL = try validatePath(resolvedPath, rootPath: mountPath)
@@ -3350,7 +3639,7 @@ public actor ManifoldBridge {
         guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
             throw ManifoldMCPError.fileNotFound(path)
         }
-        try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
+        try assertFileVisible(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
 
         let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
@@ -3385,7 +3674,7 @@ public actor ManifoldBridge {
         guard let (mount, relPath) = resolveMountAndPath(cleaned, in: mounts) else {
             throw ManifoldMCPError.fileNotFound(archivePath)
         }
-        try assertStandingVisibility(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
+        try assertFileVisible(relativePath: relPath, mount: mount, access: access, originalPath: cleaned)
 
         let archiveURL = try validatePath(relPath, rootPath: mount.mountPath)
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
@@ -3442,7 +3731,7 @@ public actor ManifoldBridge {
         } else {
             resolved = try resolveBarePath(cleaned, in: mounts)
         }
-        try assertStandingVisibility(relativePath: resolved.relativePath, mount: resolved.mount, access: access, originalPath: cleaned)
+        try assertFileVisible(relativePath: resolved.relativePath, mount: resolved.mount, access: access, originalPath: cleaned)
 
         let fileURL = try validatePath(resolved.relativePath, rootPath: resolved.mount.mountPath)
         let read = try ContextEngine.read(
@@ -3492,7 +3781,7 @@ public actor ManifoldBridge {
         } else {
             resolved = try resolveBarePath(cleaned, in: mounts)
         }
-        try assertStandingVisibility(relativePath: resolved.relativePath, mount: resolved.mount, access: access, originalPath: cleaned)
+        try assertFileVisible(relativePath: resolved.relativePath, mount: resolved.mount, access: access, originalPath: cleaned)
 
         let canonicalPath = "\(resolved.mount.mountName)/\(resolved.relativePath)"
         let fileURL = try validatePath(resolved.relativePath, rootPath: resolved.mount.mountPath)
@@ -3566,7 +3855,7 @@ public actor ManifoldBridge {
         }
         let grantID = access.grantID ?? "standing"
 
-        if access.isStanding {
+        if access.usesOriginalSources {
             let payload = try await standingStructuredSearchPayload(
                 query: query,
                 limit: limit,
@@ -3645,7 +3934,8 @@ public actor ManifoldBridge {
             query: query,
             mounts: access.mounts,
             policy: access.standingPolicy,
-            resolver: access.standingResolver
+            resolver: access.standingResolver,
+            fileScopes: access.fileScopes
         )
         for result in fileResults where payload.count < normalizedLimit {
             var deliveredPreview: [String] = []
@@ -3689,10 +3979,16 @@ public actor ManifoldBridge {
             ])
         }
 
-        if payload.count < normalizedLimit, let policy = access.standingPolicy {
+        if payload.count < normalizedLimit, access.standingPolicy != nil || access.grant != nil {
             let emailResults = try emailStore.searchEmailMessages(freeText: query, limit: normalizedLimit)
             for email in emailResults where payload.count < normalizedLimit {
-                guard try await isEmailAccessible(email: email, policy: policy) else { continue }
+                if let grant = access.grant {
+                    guard try await isEmailAccessible(email: email, grant: grant) else { continue }
+                } else if let policy = access.standingPolicy {
+                    guard try await isEmailAccessible(email: email, policy: policy) else { continue }
+                } else {
+                    continue
+                }
                 let preview = [email.sender, email.subject, email.preview ?? ""]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n")

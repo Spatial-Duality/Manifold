@@ -25,6 +25,7 @@ struct StandingAccessTests {
         let fileVisibilityOverrideStore: FileVisibilityOverrideStore
         let approvalQueue: ApprovalQueue
         let standingWriteApprovalStore: StandingWriteApprovalStore
+        let runtimeSettingsStore: RuntimeSettingsStore
         let exposureStore: ExposureStore
         let capabilityHandleStore: CapabilityHandleStore
         let ruleStore: RuleStore
@@ -53,6 +54,7 @@ struct StandingAccessTests {
         let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
+        let runtimeSettingsStore = RuntimeSettingsStore(db: db)
         let exposureStore = ExposureStore(db: db)
         let capabilityHandleStore = try CapabilityHandleStore(db: db)
         let ruleStore = RuleStore(db: db)
@@ -67,6 +69,7 @@ struct StandingAccessTests {
             snapshotStore: snapshotStore,
             artifactIndex: artifactIndex,
             policyStore: policyStore,
+            runtimeSettingsStore: runtimeSettingsStore,
             emailRuleStore: emailRuleStore,
             workBlockStore: workBlockStore,
             fileVisibilityOverrideStore: fileVisibilityOverrideStore,
@@ -86,6 +89,7 @@ struct StandingAccessTests {
             workBlockStore: workBlockStore, fileVisibilityOverrideStore: fileVisibilityOverrideStore,
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
+            runtimeSettingsStore: runtimeSettingsStore,
             exposureStore: exposureStore, capabilityHandleStore: capabilityHandleStore,
             ruleStore: ruleStore,
             bridge: bridge, tempDir: tempDir,
@@ -306,6 +310,27 @@ struct StandingAccessTests {
 
         let status = await h.bridge.getStatus()
         #expect(status.active)
+    }
+
+    @Test("Manual session mode denies standing access without active gateway")
+    func manualSessionModeRequiresActiveGateway() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        try await h.runtimeSettingsStore.setSessionAccessMode(.manualRequiresSession)
+
+        do {
+            _ = try await h.bridge.listFiles()
+            Issue.record("Expected manual session mode to deny standing file access")
+        } catch let error as ManifoldMCPError {
+            if case .noAccessConfigured = error {
+                // Expected
+            } else {
+                Issue.record("Expected noAccessConfigured, got \(error)")
+            }
+        }
     }
 
     @Test("Standing access writes shared files directly with reversible snapshots")
@@ -1143,8 +1168,103 @@ struct StandingAccessTests {
         try await h.policyStore.removeSource(unsharedSourceID, from: .cowork)
 
         let files = try await h.bridge.listFiles()
-        #expect(files.contains { $0.path == "README.md" && $0.sourceName == "shared" })
+        #expect(files.contains { $0.path == "shared/README.md" && $0.sourceName == "shared" })
         #expect(files.contains { $0.sourceName == "unshared" } == false)
+    }
+
+    @Test("Active default work block respects current file visibility overrides")
+    func activeWorkBlockRespectsFileVisibilityOverrides() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: h.tempDir.appendingPathComponent("default-grant").path,
+            explicitSelection: false
+        )
+        _ = try await h.workBlockStore.startBlock(
+            agent: .cowork,
+            grantID: grant.grantID,
+            sourceIDs: [sourceID]
+        )
+        try await h.fileVisibilityOverrideStore.setOverride(
+            agent: .cowork,
+            sourceID: sourceID,
+            relativePath: "README.md",
+            isDirectory: false,
+            decision: .deny
+        )
+
+        let files = try await h.bridge.listFiles()
+        #expect(files.contains { $0.path == "myapp/src/main.swift" })
+        #expect(files.contains { $0.path == "myapp/README.md" } == false)
+
+        do {
+            _ = try await h.bridge.readFile(path: "myapp/README.md")
+            Issue.record("Expected active session read to honor the current file deny")
+        } catch let error as ManifoldMCPError {
+            guard case .fileNotFound = error else {
+                Issue.record("Expected fileNotFound for hidden session file, got \(error)")
+                return
+            }
+        }
+
+        do {
+            _ = try await h.bridge.writeFile(
+                path: "myapp/README.md",
+                content: "blocked",
+                intent: AccessIntent(summary: "try writing hidden file", details: nil)
+            )
+            Issue.record("Expected active session write to honor the current file deny")
+        } catch let error as ManifoldMCPError {
+            guard case .fileNotFound = error else {
+                Issue.record("Expected fileNotFound for hidden session write, got \(error)")
+                return
+            }
+        }
+    }
+
+    @Test("Session gateway writes land in original source and are visible to later access")
+    func sessionGatewayWritesOriginalSource() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        let source = try #require(try await h.grantStore.source(id: sourceID))
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: h.tempDir.appendingPathComponent("session-gateway").path,
+            explicitSelection: true
+        )
+        try await h.grantStore.replaceGrantFileScopes(
+            grantID: grant.grantID,
+            scopes: [FileSelectionScope(sourceID: sourceID, relativePath: "", isDirectory: true)]
+        )
+        let block = try await h.workBlockStore.startBlock(agent: .cowork, grantID: grant.grantID, sourceIDs: [sourceID])
+
+        let result = try await h.bridge.writeFile(
+            path: "myapp/session-note.txt",
+            content: "created in session one",
+            intent: AccessIntent(summary: "test session gateway write", details: nil)
+        )
+        #expect(result.path == "myapp/session-note.txt")
+
+        let originalURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent("session-note.txt")
+        #expect((try? String(contentsOf: originalURL, encoding: .utf8)) == "created in session one")
+        #expect(try await h.snapshotStore.latestHash(runID: grant.grantID, filePath: "myapp/session-note.txt") != nil)
+
+        try await h.workBlockStore.endBlock(id: block.id, status: .discarded)
+        try await h.grantStore.endGrant(grantID: grant.grantID)
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+
+        let files = try await h.bridge.listFiles()
+        #expect(files.contains { $0.path == "myapp/session-note.txt" })
     }
 
     @Test("Session context redacts emails hidden by current policy")

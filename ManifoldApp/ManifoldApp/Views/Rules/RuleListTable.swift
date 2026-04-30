@@ -253,9 +253,10 @@ private struct RulesEmptyState: View {
 extension RuleScope {
     var systemImage: String {
         switch self {
-        case .file:  return "folder"
-        case .email: return "envelope"
-        case .agent: return "sparkles"
+        case .file:    return "folder"
+        case .email:   return "envelope"
+        case .content: return "doc.on.doc"
+        case .agent:   return "sparkles"
         }
     }
 }
