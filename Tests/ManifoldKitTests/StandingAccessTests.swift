@@ -1654,6 +1654,58 @@ struct StandingAccessTests {
         #expect(emails.contains { $0.id == "email-shared" })
     }
 
+    @Test("Explicit email work block also exposes later shared emails")
+    func explicitEmailWorkBlockKeepsCurrentSharedEmailAccess() async throws {
+        let h = try makeHarness(targetApp: .codex)
+        defer { cleanup(h.tempDir) }
+
+        try createEmail(
+            harness: h,
+            id: "email-selected",
+            sender: "Session Notes <session@example.com>",
+            senderEmail: "session@example.com",
+            senderDomain: "example.com",
+            subject: "Selected in session",
+            body: "Email selected when the session started."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-shared-later",
+            sender: "Mail UI <share@example.com>",
+            senderEmail: "share@example.com",
+            senderDomain: "example.com",
+            subject: "Shared after session",
+            body: "Email explicitly shared with Codex after the session started."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-unshared",
+            sender: "Private Mail <private@example.com>",
+            senderEmail: "private@example.com",
+            senderDomain: "example.com",
+            subject: "Not shared",
+            body: "This email was neither selected nor shared."
+        )
+        try h.emailStore.shareEmails(emailIDs: ["email-shared-later"], for: .codex)
+
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "default",
+            sourceIDs: [],
+            materializationRoot: h.tempDir.appendingPathComponent("explicit-email-grant").path,
+            emailSensitivity: EmailSensitivityLevel.strict.rawValue,
+            explicitSelection: true
+        )
+        try h.emailStore.replaceGrantEmails(grantID: grant.grantID, emailIDs: ["email-selected"])
+        _ = try await h.workBlockStore.startBlock(agent: .codex, grantID: grant.grantID, sourceIDs: [])
+
+        let emails = try await h.bridge.listEmails()
+        let ids = Set(emails.map(\.id))
+        #expect(ids.contains("email-selected"))
+        #expect(ids.contains("email-shared-later"))
+        #expect(!ids.contains("email-unshared"))
+    }
+
     @Test("Active default work block drops sources removed from the current agent policy")
     func activeWorkBlockDropsUnsharedSources() async throws {
         let h = try makeHarness()

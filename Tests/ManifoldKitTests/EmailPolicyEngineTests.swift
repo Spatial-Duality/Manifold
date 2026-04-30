@@ -85,6 +85,70 @@ struct EmailPolicyEngineTests {
         #expect(decision.kind == .sharedEmail)
     }
 
+    @Test("Explicit session selection still includes current shared emails")
+    func explicitSelectionStillIncludesSharedEmails() {
+        let selected = makeEmail(id: "selected")
+        let shared = makeEmail(id: "shared")
+        let unshared = makeEmail(id: "unshared")
+        let context = makeContext(
+            sharedEmailIDs: [shared.emailID],
+            explicitGrantEmailIDs: [selected.emailID]
+        )
+
+        let selectedDecision = EmailPolicyEngine.decision(for: selected, context: context)
+        #expect(selectedDecision.allowed)
+        #expect(selectedDecision.kind == .explicitGrantSelection)
+
+        let sharedDecision = EmailPolicyEngine.decision(for: shared, context: context)
+        #expect(sharedDecision.allowed)
+        #expect(sharedDecision.kind == .sharedEmail)
+
+        let unsharedDecision = EmailPolicyEngine.decision(for: unshared, context: context)
+        #expect(unsharedDecision.allowed == false)
+        #expect(unsharedDecision.kind == .explicitGrantSelection)
+    }
+
+    @Test("Explicit session does not let allow rules widen unselected mail")
+    func explicitSelectionDoesNotUseAllowRulesForUnselectedMail() {
+        let selected = makeEmail(id: "selected")
+        let allowedDomain = makeEmail(id: "allowed-domain")
+        let ruleSet = EmailRuleSet(
+            agent: .codex,
+            domainRules: [EmailDomainRule(agent: .codex, domain: "example.com", action: .allow)]
+        )
+        let decision = EmailPolicyEngine.decision(
+            for: allowedDomain,
+            context: makeContext(
+                ruleSet: ruleSet,
+                explicitGrantEmailIDs: [selected.emailID]
+            )
+        )
+
+        #expect(decision.allowed == false)
+        #expect(decision.kind == .explicitGrantSelection)
+    }
+
+    @Test("Explicit session block rules still beat shared emails")
+    func explicitSelectionBlockRulesBeatSharedEmails() {
+        let selected = makeEmail(id: "selected")
+        let blockedShared = makeEmail(id: "blocked-shared")
+        let ruleSet = EmailRuleSet(
+            agent: .codex,
+            domainRules: [EmailDomainRule(agent: .codex, domain: "example.com", action: .block)]
+        )
+        let decision = EmailPolicyEngine.decision(
+            for: blockedShared,
+            context: makeContext(
+                ruleSet: ruleSet,
+                sharedEmailIDs: [blockedShared.emailID],
+                explicitGrantEmailIDs: [selected.emailID]
+            )
+        )
+
+        #expect(decision.allowed == false)
+        #expect(decision.kind == .domain)
+    }
+
     @Test("Domain blocks beat shared email grants")
     func domainBlockBeatsSharedEmail() {
         let email = makeEmail(subject: "statement ready", preview: "transaction alert", body: "statement ready")

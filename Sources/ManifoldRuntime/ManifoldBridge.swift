@@ -1300,6 +1300,7 @@ public actor ManifoldBridge {
         let emails = try emailCandidates(
             policy: policy,
             explicitGrantEmailIDs: explicitEmailIDs,
+            temporaryRevealIDs: context.temporaryRevealIDs,
             limit: limit
         )
         return emails.filter { email in
@@ -1318,9 +1319,30 @@ public actor ManifoldBridge {
     private func emailCandidates(
         policy: AgentAccessPolicy,
         explicitGrantEmailIDs: Set<String>?,
+        temporaryRevealIDs: Set<String> = [],
         limit: Int
     ) throws -> [EmailMessageRecord] {
         var byID: [String: EmailMessageRecord] = [:]
+
+        if let explicitGrantEmailIDs {
+            for email in try emailStore.sharedEmails(agent: policy.agent, limit: limit) {
+                byID[email.emailID] = email
+            }
+
+            let selectedIDs = explicitGrantEmailIDs.union(temporaryRevealIDs)
+            if !selectedIDs.isEmpty {
+                for email in try emailStore.emailMessages(ids: Array(selectedIDs)) {
+                    byID[email.emailID] = email
+                }
+            }
+
+            return byID.values.sorted { lhs, rhs in
+                if lhs.receivedAt == rhs.receivedAt {
+                    return lhs.emailID < rhs.emailID
+                }
+                return lhs.receivedAt > rhs.receivedAt
+            }
+        }
 
         for email in try emailStore.allEmailMessages(limit: limit) {
             byID[email.emailID] = email
@@ -1328,12 +1350,6 @@ public actor ManifoldBridge {
 
         for email in try emailStore.sharedEmails(agent: policy.agent, limit: limit) {
             byID[email.emailID] = email
-        }
-
-        if let explicitGrantEmailIDs, !explicitGrantEmailIDs.isEmpty {
-            for email in try emailStore.emailMessages(ids: Array(explicitGrantEmailIDs)) {
-                byID[email.emailID] = email
-            }
         }
 
         return byID.values.sorted { lhs, rhs in

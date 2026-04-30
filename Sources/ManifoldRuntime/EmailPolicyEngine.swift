@@ -37,6 +37,33 @@ enum EmailPolicyEngine {
                     message: "Email is in the explicit tracked-work selection."
                 )
             }
+
+            if context.temporaryRevealIDs.contains(email.emailID) {
+                return EmailRuleDecision(
+                    agent: context.agent,
+                    emailID: email.emailID,
+                    allowed: true,
+                    kind: .temporaryReveal,
+                    matchedValue: email.emailID,
+                    message: "Email is visible because the user temporarily revealed it."
+                )
+            }
+
+            if let blockingDecision = blockingRuleDecision(for: email, context: context) {
+                return blockingDecision
+            }
+
+            if context.sharedEmailIDs.contains(email.emailID) {
+                return EmailRuleDecision(
+                    agent: context.agent,
+                    emailID: email.emailID,
+                    allowed: true,
+                    kind: .sharedEmail,
+                    matchedValue: email.emailID,
+                    message: "Email is visible because the user explicitly shared it with this agent."
+                )
+            }
+
             return EmailRuleDecision(
                 agent: context.agent,
                 emailID: email.emailID,
@@ -195,6 +222,20 @@ enum EmailPolicyEngine {
         guard let senderEmail = email.senderEmail?.lowercased() else { return nil }
         let matches = matchedContactRules(for: email, in: context.ruleSet)
         return decision(for: matches, kind: .contact, email: email, context: context, matchedValue: senderEmail)
+    }
+
+    private static func blockingRuleDecision(for email: EmailMessageRecord, context: Context) -> EmailRuleDecision? {
+        for decision in [
+            contactDecision(for: email, context: context),
+            keywordDecision(for: email, context: context),
+            domainDecision(for: email, context: context),
+            shieldDecision(for: email, context: context),
+        ] {
+            if let decision, !decision.allowed {
+                return decision
+            }
+        }
+        return nil
     }
 
     private static func keywordDecision(for email: EmailMessageRecord, context: Context) -> EmailRuleDecision? {
