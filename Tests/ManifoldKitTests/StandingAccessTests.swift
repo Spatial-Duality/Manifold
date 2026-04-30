@@ -26,6 +26,8 @@ struct StandingAccessTests {
         let approvalQueue: ApprovalQueue
         let standingWriteApprovalStore: StandingWriteApprovalStore
         let runtimeSettingsStore: RuntimeSettingsStore
+        let privacyStore: PrivacyStore
+        let privacyCoordinator: PrivacyPreflightCoordinator
         let filterModeStore: FilterModeStore
         let exposureStore: ExposureStore
         let memoryStore: MemoryStore
@@ -57,6 +59,11 @@ struct StandingAccessTests {
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let runtimeSettingsStore = RuntimeSettingsStore(db: db)
+        let privacyStore = PrivacyStore(db: db)
+        let privacyCoordinator = PrivacyPreflightCoordinator(
+            store: privacyStore,
+            defaultStorageURL: tempDir.appendingPathComponent("privacy-models", isDirectory: true)
+        )
         let filterModeStore = FilterModeStore(db: db)
         let exposureStore = ExposureStore(db: db)
         let memoryStore = try MemoryStore(db: db)
@@ -83,6 +90,7 @@ struct StandingAccessTests {
             memoryStore: memoryStore,
             capabilityHandleStore: capabilityHandleStore,
             ruleStore: ruleStore,
+            privacyCoordinator: privacyCoordinator,
             filterModeStore: filterModeStore,
             filterModeFindingsProvider: RegexFilterFindingsProvider(),
             targetApp: targetApp,
@@ -97,6 +105,8 @@ struct StandingAccessTests {
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
             runtimeSettingsStore: runtimeSettingsStore,
+            privacyStore: privacyStore,
+            privacyCoordinator: privacyCoordinator,
             filterModeStore: filterModeStore,
             exposureStore: exposureStore, memoryStore: memoryStore,
             capabilityHandleStore: capabilityHandleStore,
@@ -647,6 +657,540 @@ struct StandingAccessTests {
             Issue.record("\(report.render())")
         }
         #expect(report.failures.isEmpty)
+    }
+
+    @Test("OpenAI privacy filter synthetic harness protects mail, files, folders, PDFs, and writes")
+    func openAIPrivacyFilterSyntheticMCPHarness() async throws {
+        let h = try makeHarness(targetApp: .codex)
+        defer { cleanup(h.tempDir) }
+
+        func writeFixture(_ relativePath: String, _ content: String) throws -> URL {
+            let url = h.tempDir.appendingPathComponent("sources/OpenAI Privacy Lab/\(relativePath)")
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        }
+
+        func expectRuleDenied(
+            _ expectedRuleName: String,
+            operation: () async throws -> Void
+        ) async {
+            do {
+                try await operation()
+                Issue.record("Expected ruleDenied from \(expectedRuleName)")
+            } catch let error as ManifoldMCPError {
+                if case .ruleDenied(let ruleName, _) = error {
+                    #expect(ruleName == expectedRuleName)
+                } else {
+                    Issue.record("Expected ruleDenied from \(expectedRuleName), got \(error)")
+                }
+            } catch {
+                Issue.record("Expected ruleDenied from \(expectedRuleName), got \(error)")
+            }
+        }
+
+        try await h.privacyCoordinator.updateSettings(PrivacyPreflightSettings(
+            isEnabled: true,
+            selectedBackend: .mlx,
+            installState: .downloadRequired,
+            storagePath: h.tempDir.appendingPathComponent("privacy-models", isDirectory: true).path
+        ))
+        try await h.privacyCoordinator.updatePolicy(AgentPrivacyPolicy(
+            agent: .codex,
+            textHandling: .warn,
+            codeHandling: .ask,
+            secretHandling: .warn,
+            enabledCategories: Set(PrivacyCategory.allCases)
+        ))
+        let status = try await h.privacyCoordinator.runtimeStatus()
+        #expect(status.selectedBackend == .mlx)
+        #expect(status.effectiveBackend == .rulesOnly)
+
+        try await h.emailRuleStore.updateRuleSet(EmailRuleSet(
+            agent: .codex,
+            domainRules: [
+                EmailDomainRule(agent: .codex, domain: "openai.test", action: .allow),
+                EmailDomainRule(agent: .codex, domain: "anthropic.test", action: .allow),
+            ],
+            defaultPolicy: .blockUnlessAllowed,
+            emailSensitivity: .strict
+        ))
+
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-email-secret-deny",
+            name: "Deny synthetic secrets in mail",
+            explanation: "Synthetic OpenAI privacy-filter test blocks mail containing detected secrets.",
+            scope: .email,
+            matcher: .privacyContainsCategory(.secret),
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 0
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-email-high-redact",
+            name: "Redact high-risk synthetic mail",
+            explanation: "Synthetic OpenAI privacy-filter test redacts high-risk PII/PPI mail.",
+            scope: .email,
+            matcher: .privacySeverityAtLeast(.high),
+            action: .redact,
+            agents: [.codex],
+            orderIndex: 1
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-email-keyword-deny",
+            name: "Block synthetic privacy bypass mail",
+            explanation: "Classic email rule blocks a bypass marker before body delivery.",
+            scope: .email,
+            matcher: .emailKeyword(.anywhere, "DO_NOT_DELIVER_RAW_SYNTHETIC_PRIVACY", regex: false),
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 2
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-email-clean-log",
+            name: "Log clean synthetic Anthropic mail",
+            explanation: "Clean Anthropic Easter egg mail is allowed but logged for the harness.",
+            scope: .email,
+            matcher: .emailSubjectKeyword("Constitutional karaoke", regex: false),
+            action: .log,
+            agents: [.codex],
+            orderIndex: 3
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-file-secret-deny",
+            name: "Deny synthetic secrets in files",
+            explanation: "Synthetic OpenAI privacy-filter test blocks file payloads containing detected secrets.",
+            scope: .file,
+            matcher: .privacyContainsCategory(.secret),
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 0
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-file-high-redact",
+            name: "Redact high-risk synthetic files",
+            explanation: "Synthetic OpenAI privacy-filter test redacts high-risk file PII/PPI.",
+            scope: .file,
+            matcher: .privacySeverityAtLeast(.high),
+            action: .redact,
+            agents: [.codex],
+            orderIndex: 1
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-file-url-summarize",
+            name: "Summarize synthetic research links",
+            explanation: "URL-only research links should be summarized, not delivered raw.",
+            scope: .file,
+            matcher: .all([
+                .pathGlob("openai-privacy-lab/Folder/ResearchLinks.md"),
+                .privacyContainsCategory(.url),
+            ]),
+            action: .summarize,
+            agents: [.codex],
+            orderIndex: 2
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-file-date-downgrade",
+            name: "Downgrade synthetic schedule dates",
+            explanation: "Date-only schedules should expose metadata only.",
+            scope: .file,
+            matcher: .all([
+                .pathGlob("openai-privacy-lab/Folder/Schedule.txt"),
+                .privacyContainsCategory(.date),
+            ]),
+            action: .downgrade,
+            agents: [.codex],
+            orderIndex: 3
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-folder-deny",
+            name: "Block synthetic private folder",
+            explanation: "The Blocked folder is never shared with AI.",
+            scope: .file,
+            matcher: .pathGlob("openai-privacy-lab/Blocked/**"),
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 4
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-hidden-deny",
+            name: "Block hidden synthetic files",
+            explanation: "Hidden files are not exposed in the synthetic privacy harness.",
+            scope: .file,
+            matcher: .fileHidden,
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 5
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-write-secret-deny",
+            name: "Block synthetic secret writes",
+            explanation: "Writes containing obvious secret material are blocked.",
+            scope: .file,
+            matcher: .fileSecretDetected,
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 6
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-write-large-deny",
+            name: "Block oversized synthetic write",
+            explanation: "Large writes to this sentinel path require a separate review.",
+            scope: .file,
+            matcher: .all([
+                .pathGlob("openai-privacy-lab/Folder/LargeWrite.md"),
+                .fileSizeOver(128),
+            ]),
+            action: .deny,
+            agents: [.codex],
+            orderIndex: 7
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-pdf-warn",
+            name: "Warn on synthetic PDF writes",
+            explanation: "PDF writes are allowed but auditable in the synthetic harness.",
+            scope: .file,
+            matcher: .all([
+                .pathGlob("openai-privacy-lab/Folder/*.pdf"),
+                .fileExtension("pdf"),
+            ]),
+            action: .warn,
+            agents: [.codex],
+            orderIndex: 8
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            id: "openai-privacy-file-clean-log",
+            name: "Log synthetic clean file",
+            explanation: "Clean synthetic files are allowed but logged for audit coverage.",
+            scope: .file,
+            matcher: .pathGlob("openai-privacy-lab/Folder/CleanNote.md"),
+            action: .log,
+            agents: [.codex],
+            orderIndex: 9
+        ))
+
+        let piiBody = """
+        OPENAI_PRIVACY_FILTER_EASTER_EGG_PII eval cupcake picnic.
+        Name: Ada Lovelace
+        Email: ada.lovelace@openai.test
+        Phone: +1 (415) 555-0199
+        Address: 123 Eval Cupcake Street
+        URL: https://privacy.openai.test/model-garden?ticket=42
+        Date: 04/30/2026
+        Account number: OPENAI-4242-0001
+        Routing: 021000021
+        Anthropic brought a tiny constitution printed on a napkin.
+        """
+        let secretBody = """
+        OPENAI_PRIVACY_FILTER_EASTER_EGG_SECRET
+        The eval cupcake safe contains OPENAI_API_KEY=sk-openaiAnthropicCupcake1234567890.
+        GitHub token ghp_openAIEasterEggPrivacyToken123456 should never pass.
+        """
+        let cleanBody = """
+        OPENAI_PRIVACY_FILTER_EASTER_EGG_CLEAN
+        Model garden agenda: compare harmless test fixtures and celebrate deterministic assertions.
+        """
+        let blockedMarkerBody = """
+        DO_NOT_DELIVER_RAW_SYNTHETIC_PRIVACY
+        This mail should be blocked by a classic email keyword rule before any body is delivered.
+        """
+
+        try createEmail(
+            harness: h,
+            id: "openai-privacy-pii-mail",
+            sender: "Model Garden Privacy <privacy@openai.test>",
+            senderEmail: "privacy@openai.test",
+            senderDomain: "openai.test",
+            subject: "OpenAI privacy filter eval cupcake picnic",
+            body: piiBody
+        )
+        try createEmail(
+            harness: h,
+            id: "openai-privacy-secret-mail",
+            sender: "Token Librarian <tokens@openai.test>",
+            senderEmail: "tokens@openai.test",
+            senderDomain: "openai.test",
+            subject: "OpenAI privacy filter secret cupcake",
+            body: secretBody
+        )
+        try createEmail(
+            harness: h,
+            id: "anthropic-privacy-clean-mail",
+            sender: "Constitutional Karaoke <karaoke@anthropic.test>",
+            senderEmail: "karaoke@anthropic.test",
+            senderDomain: "anthropic.test",
+            subject: "Constitutional karaoke agenda",
+            body: cleanBody
+        )
+        try createEmail(
+            harness: h,
+            id: "openai-privacy-keyword-blocked-mail",
+            sender: "Bypass Tester <bypass@openai.test>",
+            senderEmail: "bypass@openai.test",
+            senderDomain: "openai.test",
+            subject: "Synthetic privacy bypass marker",
+            body: blockedMarkerBody
+        )
+        let extraMailFixtures: [(id: String, sender: String, senderEmail: String, senderDomain: String, subject: String, body: String)] = [
+            (
+                "openai-privacy-batch-clean-01",
+                "OpenAI Eval Bakery <bakery@openai.test>",
+                "bakery@openai.test",
+                "openai.test",
+                "Eval cupcake scorecard",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Clean scorecard: tiny tests, big invariants, zero secrets."
+            ),
+            (
+                "openai-privacy-batch-phone-02",
+                "OpenAI Phonebook <phonebook@openai.test>",
+                "phonebook@openai.test",
+                "openai.test",
+                "Phonebook entry for deterministic evals",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Call Sam Altman at +1 (415) 555-0102 about account OPENAI-BATCH-0002."
+            ),
+            (
+                "openai-privacy-batch-address-03",
+                "OpenAI Map Room <maps@openai.test>",
+                "maps@openai.test",
+                "openai.test",
+                "Map room coordinates",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Ada Lovelace waits at 77 Transformer Terrace with routing 021000021."
+            ),
+            (
+                "anthropic-privacy-batch-constitution-04",
+                "Anthropic Pocket Constitution <rules@anthropic.test>",
+                "rules@anthropic.test",
+                "anthropic.test",
+                "Pocket constitution found near the cupcakes",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Claude left a polite note for Grace Hopper at grace@anthropic.test."
+            ),
+            (
+                "openai-privacy-batch-url-05",
+                "OpenAI Link Garden <links@openai.test>",
+                "links@openai.test",
+                "openai.test",
+                "Link garden ticket",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Review https://privacy.openai.test/garden and account OPENAI-BATCH-0005."
+            ),
+            (
+                "anthropic-privacy-batch-date-06",
+                "Anthropic Calendar <calendar@anthropic.test>",
+                "calendar@anthropic.test",
+                "anthropic.test",
+                "Constitutional karaoke calendar",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Meet Dario Amodei on May 2, 2026 with ledger ANTHROPIC-BATCH-0006."
+            ),
+            (
+                "openai-privacy-batch-account-07",
+                "OpenAI Ledger <ledger@openai.test>",
+                "ledger@openai.test",
+                "openai.test",
+                "Ledger entry with account marker",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Account: OPENAI-BATCH-0007 belongs in redacted output only."
+            ),
+            (
+                "anthropic-privacy-batch-clean-08",
+                "Anthropic Neat Relations <neat@anthropic.test>",
+                "neat@anthropic.test",
+                "anthropic.test",
+                "Neat relation: models compare notes",
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Clean mail: OpenAI brought eval cupcakes; Anthropic brought napkins."
+            ),
+        ]
+        for fixture in extraMailFixtures {
+            try createEmail(
+                harness: h,
+                id: fixture.id,
+                sender: fixture.sender,
+                senderEmail: fixture.senderEmail,
+                senderDomain: fixture.senderDomain,
+                subject: fixture.subject,
+                body: fixture.body
+            )
+        }
+
+        let sourceRoot = h.tempDir.appendingPathComponent("sources/OpenAI Privacy Lab")
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        _ = try writeFixture("Folder/FieldTrip.md", piiBody.replacingOccurrences(of: "OPENAI_PRIVACY_FILTER_EASTER_EGG_PII", with: "OPENAI_PRIVACY_FILTER_FILE_EASTER_EGG"))
+        _ = try writeFixture("Folder/CleanNote.md", "OPENAI_PRIVACY_FILTER_CLEAN_FILE OpenAI brought eval cupcakes; Anthropic brought napkins.")
+        _ = try writeFixture("Folder/ResearchLinks.md", "OPENAI_PRIVACY_FILTER_LINK_ONLY https://privacy.openai.test/research/eval-cupcakes")
+        _ = try writeFixture("Folder/Schedule.txt", "OPENAI_PRIVACY_FILTER_DATE_ONLY May 1, 2026")
+        _ = try writeFixture("Secrets/OpenAIKey.env", "OPENAI_SECRET_FILE OPENAI_API_KEY=sk-openaiFileSecretCupcake1234567890")
+        _ = try writeFixture("Blocked/DoNotRead.txt", "OPENAI_BLOCKED_FOLDER_MARKER should never reach MCP.")
+        _ = try writeFixture("Folder/.HiddenPrompt.txt", "OPENAI_HIDDEN_FILE_MARKER should never reach MCP.")
+        _ = try writeFixture("Folder/OpenAIPrivacyMenu.pdf", "FAKE-PDF OpenAI privacy menu\nName: Ada Lovelace\nAccount number: PDF-4242\n")
+
+        let sourceID = try await h.grantStore.addSource(displayName: "OpenAI Privacy Lab", rootPath: sourceRoot.path)
+        try await h.policyStore.addSource(sourceID, to: .codex)
+
+        let emailSummaries = try await h.bridge.listEmails()
+        let emailIDs = Set(emailSummaries.map(\.id))
+        let expectedEmailIDs = Set([
+            "openai-privacy-pii-mail",
+            "openai-privacy-secret-mail",
+            "anthropic-privacy-clean-mail",
+            "openai-privacy-keyword-blocked-mail",
+        ] + extraMailFixtures.map(\.id))
+        #expect(emailIDs.isSuperset(of: expectedEmailIDs))
+        #expect(emailIDs.intersection(expectedEmailIDs).count == 12)
+
+        let redactedMail = try await h.bridge.readEmail(id: "openai-privacy-pii-mail")
+        #expect(redactedMail.contains("[PERSON REDACTED]"))
+        #expect(redactedMail.contains("[EMAIL REDACTED]"))
+        #expect(redactedMail.contains("[PHONE REDACTED]"))
+        #expect(redactedMail.contains("[ADDRESS REDACTED]"))
+        #expect(redactedMail.contains("[URL REDACTED]"))
+        #expect(redactedMail.contains("[DATE REDACTED]"))
+        #expect(redactedMail.contains("[ACCOUNT REDACTED]"))
+        #expect(!redactedMail.contains("Ada Lovelace"))
+        #expect(!redactedMail.contains("ada.lovelace@openai.test"))
+        #expect(!redactedMail.contains("OPENAI-4242-0001"))
+        #expect(redactedMail.contains("eval cupcake picnic"))
+
+        let cleanMail = try await h.bridge.readEmail(id: "anthropic-privacy-clean-mail")
+        #expect(cleanMail.contains("Constitutional karaoke"))
+        #expect(cleanMail.contains("deterministic assertions"))
+        let cleanBatchMail = try await h.bridge.readEmail(id: "openai-privacy-batch-clean-01")
+        #expect(cleanBatchMail.contains("tiny tests, big invariants"))
+        let redactedBatchMail = try await h.bridge.readEmail(id: "openai-privacy-batch-account-07")
+        #expect(redactedBatchMail.contains("[ACCOUNT REDACTED]"))
+        #expect(!redactedBatchMail.contains("OPENAI-BATCH-0007"))
+
+        await expectRuleDenied("Deny synthetic secrets in mail") {
+            _ = try await h.bridge.readEmail(id: "openai-privacy-secret-mail")
+        }
+        await expectRuleDenied("Block synthetic privacy bypass mail") {
+            _ = try await h.bridge.readEmail(id: "openai-privacy-keyword-blocked-mail")
+        }
+
+        let searchResults = try await h.bridge.searchEmails(query: "OPENAI_PRIVACY_FILTER_EASTER_EGG_PII")
+        let piiSearch = try #require(searchResults.first { $0.emailID == "openai-privacy-pii-mail" })
+        #expect(piiSearch.preview?.contains("[ACCOUNT REDACTED]") == true)
+        #expect(piiSearch.preview?.contains("OPENAI-4242-0001") == false)
+        #expect(!searchResults.contains { $0.emailID == "openai-privacy-secret-mail" })
+        let batchSearchResults = try await h.bridge.searchEmails(query: "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH")
+        let batchSearchIDs = Set(batchSearchResults.map(\.emailID))
+        #expect(batchSearchIDs.isSuperset(of: Set(extraMailFixtures.map(\.id))))
+        #expect(batchSearchResults.contains { $0.preview?.contains("[ACCOUNT REDACTED]") == true })
+        #expect(!batchSearchResults.contains { $0.preview?.contains("OPENAI-BATCH-0007") == true })
+
+        let files = try await h.bridge.listFiles()
+        let filePaths = Set(files.map(\.path))
+        #expect(filePaths.contains("openai-privacy-lab/Folder/FieldTrip.md"))
+        #expect(filePaths.contains("openai-privacy-lab/Folder/CleanNote.md"))
+        #expect(filePaths.contains("openai-privacy-lab/Folder/OpenAIPrivacyMenu.pdf"))
+        #expect(filePaths.contains("openai-privacy-lab/Blocked/DoNotRead.txt"))
+
+        let redactedFile = try await h.bridge.readFile(path: "openai-privacy-lab/Folder/FieldTrip.md")
+        #expect(redactedFile.contains("[PERSON REDACTED]"))
+        #expect(redactedFile.contains("[ACCOUNT REDACTED]"))
+        #expect(!redactedFile.contains("Ada Lovelace"))
+        #expect(!redactedFile.contains("OPENAI-4242-0001"))
+
+        let summarizedLinks = try await h.bridge.readFile(path: "openai-privacy-lab/Folder/ResearchLinks.md")
+        #expect(summarizedLinks.hasPrefix("Privacy summary:"))
+        #expect(!summarizedLinks.contains("https://privacy.openai.test"))
+
+        let downgradedSchedule = try await h.bridge.readFile(path: "openai-privacy-lab/Folder/Schedule.txt")
+        #expect(downgradedSchedule == "Privacy metadata only: Dates")
+        let cleanFile = try await h.bridge.readFile(path: "openai-privacy-lab/Folder/CleanNote.md")
+        #expect(cleanFile.contains("eval cupcakes"))
+
+        await expectRuleDenied("Deny synthetic secrets in files") {
+            _ = try await h.bridge.readFile(path: "openai-privacy-lab/Secrets/OpenAIKey.env")
+        }
+        await expectRuleDenied("Block synthetic private folder") {
+            _ = try await h.bridge.readFile(path: "openai-privacy-lab/Blocked/DoNotRead.txt")
+        }
+        await expectRuleDenied("Block hidden synthetic files") {
+            _ = try await h.bridge.readFile(path: "openai-privacy-lab/Folder/.HiddenPrompt.txt")
+        }
+
+        let fileSearch = try await h.bridge.searchFiles(query: "Account")
+        let fieldTripSearch = try #require(fileSearch.first { $0.path == "openai-privacy-lab/Folder/FieldTrip.md" })
+        let fieldTripSearchText = fieldTripSearch.matches.joined(separator: "\n")
+        #expect(fieldTripSearchText.contains("[ACCOUNT REDACTED]"))
+        #expect(!fieldTripSearchText.contains("OPENAI-4242-0001"))
+
+        await expectRuleDenied("Block synthetic secret writes") {
+            _ = try await h.bridge.writeFile(
+                path: "openai-privacy-lab/Folder/GeneratedSecret.md",
+                content: "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF"
+            )
+        }
+        await expectRuleDenied("Block oversized synthetic write") {
+            _ = try await h.bridge.writeFile(
+                path: "openai-privacy-lab/Folder/LargeWrite.md",
+                content: String(repeating: "large-write-eval-cupcake ", count: 8)
+            )
+        }
+
+        do {
+            _ = try await h.bridge.writeFile(path: "openai-privacy-lab/Folder/OpenAIPrivacyMenu.pdf", content: "%PDF-1.4")
+            Issue.record("write_file should reject text writes to PDF paths")
+        } catch let error as ManifoldMCPError {
+            if case .invalidPath(let message) = error {
+                #expect(message.contains("write_file is UTF-8 text only"))
+                #expect(message.contains("write_binary_file"))
+            } else {
+                Issue.record("Expected invalidPath for text PDF write, got \(error)")
+            }
+        }
+
+        let writtenPDF = Data("%PDF-1.4\n% OPENAI_PRIVACY_FILTER_WRITTEN_PDF\n%%EOF\n".utf8)
+        let binaryWrite = try await h.bridge.writeBinaryFile(
+            path: "openai-privacy-lab/Folder/GeneratedReport.pdf",
+            contentBase64: writtenPDF.base64EncodedString(),
+            mimeType: "application/pdf"
+        )
+        if case .written(_, let path) = binaryWrite {
+            #expect(path == "openai-privacy-lab/Folder/GeneratedReport.pdf")
+        } else {
+            Issue.record("Expected write_binary_file to write the synthetic PDF")
+        }
+        let generatedPDFURL = sourceRoot.appendingPathComponent("Folder/GeneratedReport.pdf")
+        #expect(try Data(contentsOf: generatedPDFURL) == writtenPDF)
+
+        do {
+            _ = try await h.bridge.annotatePDF(path: "openai-privacy-lab/Folder/OpenAIPrivacyMenu.pdf", mark: "OpenAI privacy filter checked")
+            Issue.record("annotate_pdf should reject the fake unreadable PDF")
+        } catch let error as ManifoldMCPError {
+            if case .invalidPath(let message) = error {
+                #expect(message.contains("annotate_pdf"))
+            } else {
+                Issue.record("Expected invalidPath for fake PDF annotation, got \(error)")
+            }
+        }
+
+        let changes = try await h.bridge.listChanges()
+        #expect(changes.contains { $0.path == "openai-privacy-lab/Folder/GeneratedReport.pdf" })
+
+        let eventRows = try h.db.queryAll("""
+            SELECT tool_name, outcome, matched_categories_json
+            FROM privacy_scan_events
+            WHERE agent = ?
+            ORDER BY created_at ASC
+        """, params: [TargetApp.codex.rawValue])
+        let eventText = eventRows.map { row in
+            [row["tool_name"], row["outcome"], row["matched_categories_json"]]
+                .compactMap { $0 }
+                .joined(separator: " ")
+        }.joined(separator: "\n")
+        for category in PrivacyCategory.allCases {
+            #expect(eventText.contains(category.rawValue))
+        }
+        #expect(eventText.contains("warning"))
+
+        let auditRows = try h.db.queryAll("""
+            SELECT metadata
+            FROM audit_log
+            WHERE agent = ? AND metadata LIKE '%rule_decision%'
+            ORDER BY id ASC
+        """, params: [TargetApp.codex.rawValue])
+        let auditText = auditRows.compactMap { $0["metadata"] }.joined(separator: "\n")
+        for decision in ["redact", "deny", "summarize", "downgrade", "warn", "log"] {
+            #expect(auditText.contains(#""rule_decision":"\#(decision)""#))
+        }
     }
 
     static func syntheticReportURL() throws -> URL {
