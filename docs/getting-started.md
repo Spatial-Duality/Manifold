@@ -23,7 +23,7 @@ flowchart LR
     E --> F["Run a governed read"]
     F --> G["Start a session"]
     G --> H["Run a governed edit"]
-    H --> I["Review Activity, Access, and Requests"]
+    H --> I["Review Work, Access, Mail, and Rules"]
 ```
 
 ## 1. Build And Run The App
@@ -87,19 +87,17 @@ The main window is the ledger. It is not the old `Overview / Files / Emails` she
 
 ```mermaid
 flowchart TD
-    A["LedgerView"] --> B["Activity"]
+    A["LedgerView"] --> B["Work"]
     A --> C["Access"]
     A --> D["Mail"]
-    A --> E["Requests"]
-    A --> F["Rules"]
+    A --> E["Rules"]
 ```
 
 What each destination is for:
 
-- `Activity`: what happened across sessions and events
-- `Access`: what files are shared right now, plus file/session activity
-- `Mail`: governed mailboxes and mail-session evidence
-- `Requests`: pending approvals, especially standing-write prompts for governed files
+- `Work`: sessions, approvals, runtime state, activity evidence, and tracked writes
+- `Access`: what files are shared right now, plus file/session history
+- `Mail`: governed mail review and per-agent message sharing
 - `Rules`: live file, email, and agent-behavior rules. Seeded denies (secrets, SSH keys, private keys, 2FA codes in mail) run on first launch and every rule edit here changes real runtime decisions.
 
 Supporting surfaces:
@@ -169,14 +167,14 @@ List the files I can access and read the marker files that are available.
 What should happen:
 
 - the agent only sees the folders shared with it through Manifold
-- the read is recorded in `Activity`
-- if the agent asks for something outside scope, the request lands in `Requests`
+- the read is recorded in `Work`
+- if the agent asks for something outside scope, the approval lands in `Work`
 
 What to check in the app:
 
-1. `Activity` for the read events
+1. `Work` for the read events and approvals
 2. `Access` for the current governed scope
-3. `Requests` if anything needed approval
+3. `Rules` if the result depends on a rule
 
 ## 7. Start A Session And Run One Governed Edit
 
@@ -207,9 +205,9 @@ The important point is that governed work should be visible and reviewable, not 
 
 The normal review path in the rebuilt app is:
 
-1. `Activity` to see the event trail
+1. `Work` to see the event trail
 2. `Access` to inspect current sharing and session/file activity
-3. `Requests` to answer anything the agent asked for
+3. `Mail` to inspect governed message sharing when mail was involved
 4. `Rules` to inspect or tighten the runtime rule set. Seeded denies ship on by default. You can add user rules, override shadows, and see live match previews for what a rule would block right now.
 
 The status bar and menu bar panel should also tell you whether the runtime is healthy and whether a session is active.

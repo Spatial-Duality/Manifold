@@ -36,11 +36,13 @@ struct SessionPreloadDraft: Identifiable, Hashable, Sendable {
     var includedSourceIDs: Set<String>
     var excludedSourceIDs: Set<String>
     var selectedEmailIDs: Set<String>
-    /// Optional per-session request-detail override. When set, the
-    /// store applies this access-recording level on activation and
-    /// restores the agent's prior level when the session ends. nil
+    /// Optional per-session request-detail override. When set, this is
+    /// stored on the active grant and resolved at the MCP boundary. nil
     /// means "use the agent's default" — no override.
     var requestDetailOverride: AccessRecordingLevel?
+    /// Lets the session's agent query prior file memory for the selected
+    /// source scope. Memory is always saved; this controls read access.
+    var allowFileMemory: Bool
 
     init(
         id: UUID = UUID(),
@@ -51,7 +53,8 @@ struct SessionPreloadDraft: Identifiable, Hashable, Sendable {
         includedSourceIDs: Set<String> = [],
         excludedSourceIDs: Set<String> = [],
         selectedEmailIDs: Set<String> = [],
-        requestDetailOverride: AccessRecordingLevel? = nil
+        requestDetailOverride: AccessRecordingLevel? = nil,
+        allowFileMemory: Bool = false
     ) {
         self.id = id
         self.presetID = presetID
@@ -62,6 +65,7 @@ struct SessionPreloadDraft: Identifiable, Hashable, Sendable {
         self.excludedSourceIDs = excludedSourceIDs
         self.selectedEmailIDs = selectedEmailIDs
         self.requestDetailOverride = requestDetailOverride
+        self.allowFileMemory = allowFileMemory
     }
 
     func effectiveSourceIDs(defaultSourceIDs: Set<String>) -> Set<String> {
@@ -196,6 +200,32 @@ final class SessionWorkbenchModel {
             }
             draft.excludedSourceIDs.remove(sourceID)
         }
+        preload = draft
+    }
+
+    func setEmail(_ emailID: String, included: Bool) {
+        guard var draft = preload else { return }
+        if included {
+            draft.selectedEmailIDs.insert(emailID)
+        } else {
+            draft.selectedEmailIDs.remove(emailID)
+        }
+        preload = draft
+    }
+
+    func setEmails(_ emailIDs: Set<String>, included: Bool) {
+        guard var draft = preload else { return }
+        if included {
+            draft.selectedEmailIDs.formUnion(emailIDs)
+        } else {
+            draft.selectedEmailIDs.subtract(emailIDs)
+        }
+        preload = draft
+    }
+
+    func clearEmails() {
+        guard var draft = preload else { return }
+        draft.selectedEmailIDs.removeAll()
         preload = draft
     }
 

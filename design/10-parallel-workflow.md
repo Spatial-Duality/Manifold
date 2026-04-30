@@ -1,5 +1,11 @@
 # Manifold UI — Stage 10: Parallel Claude Code Workflow
 
+> **Historical note (2026-04-30):** This workflow predates the current
+> four-space app model: Work, Access, Mail, and Rules. It is retained as
+> historical migration material only; legacy worktree names and route
+> examples such as Activity and Requests are not current implementation
+> guidance.
+
 A concrete, copy-paste plan for running the Stage-9 migration as four
 parallel Claude Code sessions. One sequential setup session, four
 parallel UI sessions, one sequential integration session. Total six

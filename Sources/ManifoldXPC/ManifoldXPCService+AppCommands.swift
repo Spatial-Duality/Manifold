@@ -50,6 +50,10 @@ extension ManifoldXPCService {
 
         case "startGatewaySession":
             return try await startGatewaySessionCommand(payload: payload)
+        case "updateGrantRequestDetailLevel":
+            return try await updateGrantRequestDetailLevelCommand(payload: payload)
+        case "updateGrantMemoryAccess":
+            return try await updateGrantMemoryAccessCommand(payload: payload)
 
         case "sessionAccessMode":
             return ["mode": try await runtime.runtimeSettingsStore.sessionAccessMode().rawValue]
@@ -942,6 +946,7 @@ extension ManifoldXPCService {
             "activeGrant": try state.grant.map { try XPCJSON.object(from: $0) } ?? NSNull(),
             "activeGrantSources": try XPCJSON.object(from: state.sources),
             "targetApp": state.targetApp?.rawValue as Any,
+            "selectedEmailCount": try state.grant.map { try activeEmailCount(for: $0) } ?? 0,
         ]
     }
 
@@ -974,6 +979,8 @@ extension ManifoldXPCService {
         let selectedEmailIDs = Set(payload["selectedEmailIDs"] as? [String] ?? [])
         let summaryFraming = payload["summaryFraming"] as? String
         let noteCaptureMode = (payload["noteCaptureMode"] as? String).flatMap(SessionNoteCaptureMode.init(rawValue:)) ?? .off
+        let requestDetailLevel = (payload["requestDetailLevel"] as? String).flatMap(AccessRecordingLevel.init(rawValue:))
+        let memoryAccessEnabled = payload["memoryAccessEnabled"] as? Bool ?? false
         let sensitivity = (payload["emailSensitivity"] as? String).flatMap(EmailSensitivityFilter.Level.init(rawValue:))
         let state = try await startGatewaySession(
             targetApp: targetApp,
@@ -981,12 +988,39 @@ extension ManifoldXPCService {
             selectedEmailIDs: selectedEmailIDs,
             summaryFraming: summaryFraming,
             noteCaptureMode: noteCaptureMode,
+            requestDetailLevel: requestDetailLevel,
+            memoryAccessEnabled: memoryAccessEnabled,
             sensitivityOverride: sensitivity
         )
         return [
             "activeGrant": try XPCJSON.object(from: state.grant),
             "activeGrantSources": try XPCJSON.object(from: state.sources),
+            "selectedEmailCount": try activeEmailCount(for: state.grant),
         ]
+    }
+
+    private func updateGrantRequestDetailLevelCommand(payload: [String: Any]) async throws -> [String: Any] {
+        guard let grantID = payload["grantID"] as? String else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        let level = (payload["requestDetailLevel"] as? String).flatMap(AccessRecordingLevel.init(rawValue:))
+        try await runtime.grantStore.updateRequestDetailLevel(grantID: grantID, level: level)
+        guard let grant = try await runtime.grantStore.grant(id: grantID) else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        return ["activeGrant": try XPCJSON.object(from: grant)]
+    }
+
+    private func updateGrantMemoryAccessCommand(payload: [String: Any]) async throws -> [String: Any] {
+        guard let grantID = payload["grantID"] as? String,
+              let enabled = payload["enabled"] as? Bool else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        try await runtime.grantStore.updateMemoryAccess(grantID: grantID, enabled: enabled)
+        guard let grant = try await runtime.grantStore.grant(id: grantID) else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        return ["activeGrant": try XPCJSON.object(from: grant)]
     }
 
     /// Start a gateway session from a saved access template.
@@ -1099,6 +1133,8 @@ extension ManifoldXPCService {
             selectedEmailIDs: survivingEmailIDs,
             summaryFraming: summaryFraming,
             noteCaptureMode: noteCaptureMode,
+            requestDetailLevel: nil,
+            memoryAccessEnabled: false,
             sensitivityOverride: sensitivity
         )
 
@@ -1109,6 +1145,7 @@ extension ManifoldXPCService {
             "templateName": snapshot.preset.name,
             "skippedSources": skippedSources,
             "missingEmailIDs": missingEmailIDs,
+            "selectedEmailCount": try activeEmailCount(for: state.grant),
         ]
     }
 
@@ -1219,6 +1256,8 @@ extension ManifoldXPCService {
         selectedEmailIDs: Set<String>,
         summaryFraming: String?,
         noteCaptureMode: SessionNoteCaptureMode,
+        requestDetailLevel: AccessRecordingLevel?,
+        memoryAccessEnabled: Bool,
         sensitivityOverride: EmailSensitivityFilter.Level?
     ) async throws -> (grant: GrantRecord, sources: [GrantSourceRecord]) {
         let activeSources = try await runtime.grantStore.activeSources()
@@ -1239,7 +1278,9 @@ extension ManifoldXPCService {
             emailSensitivity: emailSensitivity,
             summaryFraming: summaryFraming,
             explicitSelection: usingExplicitSelection,
-            noteCaptureMode: noteCaptureMode
+            noteCaptureMode: noteCaptureMode,
+            requestDetailLevel: requestDetailLevel,
+            memoryAccessEnabled: memoryAccessEnabled
         )
 
         let grantSources = try await runtime.grantStore.grantSources(grantID: grant.grantID)
@@ -1262,11 +1303,31 @@ extension ManifoldXPCService {
             metadata: [
                 "grant_id": grant.grantID,
                 "note_capture_mode": noteCaptureMode.rawValue,
+                "request_detail_level": requestDetailLevel?.rawValue ?? "",
+                "memory_access_enabled": memoryAccessEnabled ? "1" : "0",
             ],
             grantID: grant.grantID
         )
 
         return (grant, grantSources)
+    }
+
+    private func activeEmailCount(for grant: GrantRecord) throws -> Int {
+        if grant.explicitSelection {
+            let selected = try runtime.emailStore.grantEmailIDs(grantID: grant.grantID).count
+            if selected > 0 {
+                return selected
+            }
+        }
+        let agent = TargetApp(rawValue: grant.targetApp) ?? .cowork
+        let filter = EmailSensitivityFilter(rawValue: grant.emailSensitivity)
+        if filter.level == .strict {
+            return try runtime.emailStore.sharedEmailCount(agent: agent)
+        }
+        return try runtime.emailStore
+            .allEmailMessages(limit: 5_000)
+            .filter { filter.isVisible(email: $0) }
+            .count
     }
 
     private func endSessionGateway(grantID: String) async throws -> Bool {

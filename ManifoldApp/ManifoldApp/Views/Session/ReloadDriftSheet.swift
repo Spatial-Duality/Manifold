@@ -3,7 +3,7 @@
 
 import SwiftUI
 
-/// Drift review before reopening a historical session in Activity.
+/// Drift review before reopening a historical session in Work.
 struct ReloadDriftSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ManifoldStore.self) private var store
@@ -57,7 +57,7 @@ struct ReloadDriftSheet: View {
 
             HStack {
                 Spacer()
-                Button("Open in Activity") {
+                Button("Open in Work") {
                     Task {
                         isOpening = true
                         errorMessage = nil

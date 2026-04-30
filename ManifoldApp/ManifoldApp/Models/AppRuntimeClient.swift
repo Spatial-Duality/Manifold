@@ -6,7 +6,7 @@ import Foundation
 import ManifoldKit
 import ManifoldXPC
 
-struct DashboardState: Codable, Sendable {
+struct RuntimeStatusSnapshot: Codable, Sendable {
     let runtimeConnected: Bool
     let activeBridgeCount: Int
     let connectedAgents: [String]
@@ -125,6 +125,7 @@ struct ActiveGrantState: Codable, Sendable {
     let activeGrant: GrantRecord?
     let activeGrantSources: [GrantSourceRecord]
     let targetApp: String?
+    let selectedEmailCount: Int?
 }
 
 struct StorageStatsSnapshot: Codable, Sendable {
@@ -179,14 +180,14 @@ enum RuntimeClientStubError: Error, LocalizedError {
 
 protocol RuntimeClientProtocol: Sendable {
     func ping() async -> RuntimePingResult
-    func dashboardState() async throws -> DashboardState
+    func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot
     func dataControlSummary() async throws -> DataControlSummary
     func listSources() async throws -> [SourceRecord]
     func addSource(path: String, displayName: String) async throws -> SourceRecord
     func removeSource(sourceID: String) async throws
     func pauseSource(sourceID: String) async throws
     func resumeSource(sourceID: String) async throws
-    func policies() async throws -> DashboardState
+    func policies() async throws -> RuntimeStatusSnapshot
     func pauseAgent(_ agent: TargetApp) async throws
     func resumeAgent(_ agent: TargetApp) async throws
     func addSource(_ sourceID: String, to agent: TargetApp) async throws
@@ -229,8 +230,12 @@ protocol RuntimeClientProtocol: Sendable {
         selectedEmailIDs: Set<String>,
         summaryFraming: String?,
         noteCaptureMode: SessionNoteCaptureMode,
+        requestDetailLevel: AccessRecordingLevel?,
+        memoryAccessEnabled: Bool,
         emailSensitivity: String?
     ) async throws -> ActiveGrantState
+    func updateGrantRequestDetailLevel(grantID: String, level: AccessRecordingLevel?) async throws -> GrantRecord
+    func updateGrantMemoryAccess(grantID: String, enabled: Bool) async throws -> GrantRecord
     func endSession(grantID: String) async throws
     func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult
     func markWorkBlockReviewing(id: String) async throws
@@ -509,14 +514,14 @@ public struct PendingApprovalRecord: Codable, Sendable, Identifiable, Hashable {
 
 extension RuntimeClientProtocol {
     func ping() async -> RuntimePingResult { RuntimePingResult(ok: false, agentVersion: nil) }
-    func dashboardState() async throws -> DashboardState { throw RuntimeClientStubError.unimplemented("dashboardState") }
+    func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot { throw RuntimeClientStubError.unimplemented("runtimeStatusSnapshot") }
     func dataControlSummary() async throws -> DataControlSummary { throw RuntimeClientStubError.unimplemented("dataControlSummary") }
     func listSources() async throws -> [SourceRecord] { throw RuntimeClientStubError.unimplemented("listSources") }
     func addSource(path: String, displayName: String) async throws -> SourceRecord { throw RuntimeClientStubError.unimplemented("addSource") }
     func removeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("removeSource") }
     func pauseSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("pauseSource") }
     func resumeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("resumeSource") }
-    func policies() async throws -> DashboardState { try await dashboardState() }
+    func policies() async throws -> RuntimeStatusSnapshot { try await runtimeStatusSnapshot() }
     func pauseAgent(_ agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("pauseAgent") }
     func resumeAgent(_ agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("resumeAgent") }
     func addSource(_ sourceID: String, to agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("addSource(_:to:)") }
@@ -557,7 +562,9 @@ extension RuntimeClientProtocol {
     func getEmailRuleActivitySummary(agent: TargetApp) async throws -> EmailRuleActivitySummary { throw RuntimeClientStubError.unimplemented("getEmailRuleActivitySummary") }
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("activeGrantState") }
     func sessionPreview(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, emailSensitivity: String?) async throws -> SessionPreview { throw RuntimeClientStubError.unimplemented("sessionPreview") }
-    func startGatewaySession(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("startGatewaySession") }
+    func startGatewaySession(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, requestDetailLevel: AccessRecordingLevel?, memoryAccessEnabled: Bool, emailSensitivity: String?) async throws -> ActiveGrantState { throw RuntimeClientStubError.unimplemented("startGatewaySession") }
+    func updateGrantRequestDetailLevel(grantID: String, level: AccessRecordingLevel?) async throws -> GrantRecord { throw RuntimeClientStubError.unimplemented("updateGrantRequestDetailLevel") }
+    func updateGrantMemoryAccess(grantID: String, enabled: Bool) async throws -> GrantRecord { throw RuntimeClientStubError.unimplemented("updateGrantMemoryAccess") }
     func endSession(grantID: String) async throws { throw RuntimeClientStubError.unimplemented("endSession") }
     func restoreSnapshot(snapshotID: Int, filePath: String) async throws -> RestoreSnapshotResult { throw RuntimeClientStubError.unimplemented("restoreSnapshot") }
     func markWorkBlockReviewing(id: String) async throws { throw RuntimeClientStubError.unimplemented("markWorkBlockReviewing") }
@@ -652,16 +659,15 @@ extension RuntimeClientProtocol {
 
 enum AppFixtureProfile: String, Sendable {
     case onboarding
-    case dashboard
+    case baseline
     case emailRules = "email-rules"
     case trackedWork = "tracked-work"
-    case activity
     case privacy
-    case runtimePrivacy = "runtime-privacy"
+    case syntheticMCPUI = "synthetic-mcp-ui"
 }
 
 enum AppRuntimeScenario: String, Sendable {
-    case privacyE2E = "privacy-e2e"
+    case syntheticMCPUI = "synthetic-mcp-ui"
 }
 
 enum AppTestEnvironment {
@@ -692,7 +698,7 @@ enum AppTestEnvironment {
     }
 }
 
-enum LocalRuntimeTestBootstrap {
+enum SyntheticMCPUITestBootstrap {
     private final class ContextBox: @unchecked Sendable {
         let scenario: AppRuntimeScenario
         let testHome: URL
@@ -789,11 +795,11 @@ enum LocalRuntimeTestBootstrap {
         )
 
         switch scenario {
-        case .privacyE2E:
+        case .syntheticMCPUI:
             let result = ResultBox()
             Task.detached { [context, result] in
                 do {
-                    try await seedPrivacyE2E(
+                    try await seedSyntheticMCPUI(
                         testHome: context.testHome,
                         runtimeStoreURL: context.runtimeStoreURL,
                         grantStore: context.grantStore,
@@ -816,7 +822,7 @@ enum LocalRuntimeTestBootstrap {
         }
     }
 
-    private static func seedPrivacyE2E(
+    private static func seedSyntheticMCPUI(
         testHome: URL,
         runtimeStoreURL: URL,
         grantStore: GrantStore,
@@ -829,7 +835,7 @@ enum LocalRuntimeTestBootstrap {
     ) async throws {
         let fileManager = FileManager.default
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        let sourceRoot = testHome.appendingPathComponent("sources/Privacy E2E", isDirectory: true)
+        let sourceRoot = testHome.appendingPathComponent("sources/Synthetic MCP UI", isDirectory: true)
         let materializationRoot = testHome.appendingPathComponent("materialized/codex", isDirectory: true)
         let privacyStorage = runtimeStoreURL.appendingPathComponent("privacy", isDirectory: true)
         try fileManager.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
@@ -850,21 +856,42 @@ enum LocalRuntimeTestBootstrap {
         - Vendor review is scheduled for Friday.
         - No personal identifiers are stored in this file.
         """
+        let teaPartyText = """
+        MANIFOLD_OPENAI_ANTHROPIC_TEA_PARTY
+        OpenAI brought eval cupcakes. Anthropic brought a tiny constitution printed on a napkin.
+        The deterministic UI loop brought the checklist.
+        """
+        let contextRequestText = """
+        CONTEXT_REQUEST_BRIEF
+        User asks Codex to explain whether the model garden tea party can be shared safely.
+        Backend should preserve the request intent without exposing blocked records.
+        """
+        let filterText = """
+        FILTER_MODE_SECRET_MARKER
+        There once was a test with a key: sk-OpenAIAnthropic1234567890ABCDE
+        It stayed inside Manifold's policy tree.
+        """
         let sensitiveURL = sourceDocs.appendingPathComponent("CustomerDraft.txt")
         let safeURL = sourceDocs.appendingPathComponent("ReleaseNotes.md")
+        let teaPartyURL = sourceDocs.appendingPathComponent("ModelGardenTeaParty.md")
+        let contextRequestURL = sourceDocs.appendingPathComponent("ContextRequest.md")
+        let filterURL = sourceDocs.appendingPathComponent("KeyLimerick.txt")
         let unsupportedURL = sourceDocs.appendingPathComponent("Archive.bin")
         try sensitiveText.write(to: sensitiveURL, atomically: true, encoding: .utf8)
         try safeText.write(to: safeURL, atomically: true, encoding: .utf8)
+        try teaPartyText.write(to: teaPartyURL, atomically: true, encoding: .utf8)
+        try contextRequestText.write(to: contextRequestURL, atomically: true, encoding: .utf8)
+        try filterText.write(to: filterURL, atomically: true, encoding: .utf8)
         try Data([0, 1, 2, 3, 255, 0, 42]).write(to: unsupportedURL)
 
-        let sourceID = try await grantStore.addSource(displayName: "Privacy E2E", rootPath: sourceRoot.path)
+        let sourceID = try await grantStore.addSource(displayName: "Synthetic MCP UI", rootPath: sourceRoot.path)
         let grant = try await grantStore.startGrant(
             targetApp: .codex,
             profileID: "ui-test-profile",
             sourceIDs: [sourceID],
             materializationRoot: materializationRoot.path,
             emailSensitivity: EmailSensitivityLevel.strict.rawValue,
-            summaryFraming: "UI test runtime scenario",
+            summaryFraming: "Synthetic MCP/UI scenario",
             explicitSelection: true,
             noteCaptureMode: .basic
         )
@@ -947,7 +974,102 @@ enum LocalRuntimeTestBootstrap {
             imapUID: 1,
             emailID: "runtime-email-1"
         )
+
+        func upsertSyntheticThread(
+            id: String,
+            imapUID: UInt32,
+            sender: String,
+            senderEmail: String,
+            senderDomain: String,
+            subject: String,
+            body: String,
+            isFlagged: Bool = false
+        ) throws {
+            let emlURL = testHome.appendingPathComponent("mail/\(id).eml", isDirectory: false)
+            try fileManager.createDirectory(at: emlURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let eml = """
+            From: \(sender)
+            To: runtime@manifold.test
+            Subject: \(subject)
+            MIME-Version: 1.0
+            Content-Type: text/plain; charset="utf-8"
+
+            \(body)
+            """
+            try eml.write(to: emlURL, atomically: true, encoding: .utf8)
+            try emailStore.upsertEmailMessage(
+                emailID: id,
+                accountID: account.accountID,
+                mailbox: "INBOX",
+                sender: sender,
+                senderEmail: senderEmail,
+                senderDomain: senderDomain,
+                recipients: "runtime@manifold.test",
+                subject: subject,
+                receivedAt: now,
+                emlPath: emlURL.path,
+                sizeBytes: (try Data(contentsOf: emlURL)).count,
+                preview: body,
+                contentType: "text/plain",
+                isRead: false,
+                isFlagged: isFlagged,
+                messageIDHeader: "<\(id)@runtime.test>",
+                attachmentCount: 0
+            )
+            try emailStore.updateBodyText(emailID: id, bodyText: body)
+            try emailStore.upsertMailboxMembership(
+                accountID: account.accountID,
+                mailbox: "INBOX",
+                imapUID: imapUID,
+                emailID: id
+            )
+        }
+
+        try upsertSyntheticThread(
+            id: "runtime-email-tea-party",
+            imapUID: 2,
+            sender: "Model Garden <garden@openai.test>",
+            senderEmail: "garden@openai.test",
+            senderDomain: "openai.test",
+            subject: "Model garden tea party",
+            body: "EASTER_EGG_TEA_PARTY_ALLOWED OpenAI set the table with eval cupcakes.",
+            isFlagged: true
+        )
+        try upsertSyntheticThread(
+            id: "runtime-email-codex-semicolon",
+            imapUID: 3,
+            sender: "Codex Desk <codex@openai.test>",
+            senderEmail: "codex@openai.test",
+            senderDomain: "openai.test",
+            subject: "Codex found the missing semicolon",
+            body: "EASTER_EGG_SEMICOLON_ALLOWED The semicolon was under the test fixture."
+        )
+        try upsertSyntheticThread(
+            id: "runtime-email-anthropic-karaoke",
+            imapUID: 4,
+            sender: "Claude Notes <claude@anthropic.test>",
+            senderEmail: "claude@anthropic.test",
+            senderDomain: "anthropic.test",
+            subject: "Constitutional karaoke for deterministic tests",
+            body: "EASTER_EGG_KARAOKE_ALLOWED Anthropic harmonized with the acceptance criteria."
+        )
+        try upsertSyntheticThread(
+            id: "runtime-email-shared-lighthouse",
+            imapUID: 5,
+            sender: "Shared Inbox <shared@synthetic.test>",
+            senderEmail: "shared@synthetic.test",
+            senderDomain: "synthetic.test",
+            subject: "Shared-only lighthouse",
+            body: "EASTER_EGG_SHARED_ONLY_ALLOWED shared email should pass without a domain allow."
+        )
         try emailStore.shareEmails(emailIDs: ["runtime-email-1"])
+        try emailStore.shareEmails(emailIDs: [
+            "runtime-email-1",
+            "runtime-email-tea-party",
+            "runtime-email-codex-semicolon",
+            "runtime-email-anthropic-karaoke",
+            "runtime-email-shared-lighthouse"
+        ], for: .codex)
 
         let hasSecretRules = SmartMailboxRules(
             match: .all,
@@ -1132,7 +1254,7 @@ enum LocalRuntimeTestBootstrap {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL)
             """,
             params: [
-                "approval-runtime-privacy",
+                "approval-synthetic-mcp-ui",
                 "conn-runtime-ui",
                 TargetApp.codex.rawValue,
                 "runtime-email-1",
@@ -1211,10 +1333,10 @@ enum AppTestMode: Sendable {
         if env[AppTestEnvironment.runtimeModeKey] == "local" {
             let scenario = AppRuntimeScenario(
                 rawValue: env[ManifoldRuntimeEnvironment.testScenarioKey] ?? ""
-            ) ?? .privacyE2E
+            ) ?? .syntheticMCPUI
             return .localRuntime(scenario)
         }
-        let profile = AppFixtureProfile(rawValue: env["MANIFOLD_FIXTURE_PROFILE"] ?? "") ?? .dashboard
+        let profile = AppFixtureProfile(rawValue: env["MANIFOLD_FIXTURE_PROFILE"] ?? "") ?? .baseline
         return .fixture(profile)
     }
 }
@@ -1256,6 +1378,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var fabricationFindings: [FabricationFinding]
         var activeGrant: GrantRecord?
         var activeGrantSources: [GrantSourceRecord]
+        var activeGrantEmailIDs: Set<String>
         var pendingApprovals: [PendingApprovalRecord]
         var emailRuleSets: [TargetApp: EmailRuleSet]
         var emailRuleSummaries: [TargetApp: EmailRuleActivitySummary]
@@ -1282,8 +1405,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         RuntimePingResult(ok: true, agentVersion: state.version)
     }
 
-    func dashboardState() async throws -> DashboardState {
-        DashboardState(
+    func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot {
+        RuntimeStatusSnapshot(
             runtimeConnected: true,
             activeBridgeCount: state.connectedAgents.count,
             connectedAgents: state.connectedAgents,
@@ -1643,7 +1766,12 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     }
 
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState {
-        ActiveGrantState(activeGrant: state.activeGrant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
+        ActiveGrantState(
+            activeGrant: state.activeGrant,
+            activeGrantSources: state.activeGrantSources,
+            targetApp: targetApp.rawValue,
+            selectedEmailCount: state.activeGrant?.explicitSelection == true ? state.activeGrantEmailIDs.count : state.sharedEmailIDsByAgent[targetApp, default: []].count
+        )
     }
 
     func sessionAccessMode() async throws -> SessionAccessMode {
@@ -1675,7 +1803,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         )
     }
 
-    func startGatewaySession(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, emailSensitivity: String?) async throws -> ActiveGrantState {
+    func startGatewaySession(targetApp: TargetApp, fileScopes: [FileSelectionScope], selectedEmailIDs: Set<String>, summaryFraming: String?, noteCaptureMode: SessionNoteCaptureMode, requestDetailLevel: AccessRecordingLevel?, memoryAccessEnabled: Bool, emailSensitivity: String?) async throws -> ActiveGrantState {
         let explicitSourceIDs = Set(fileScopes.map(\.sourceID))
         let grant = GrantRecord(
             grantID: "grant-\(UUID().uuidString.prefix(8).lowercased())",
@@ -1688,9 +1816,12 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             emailSensitivity: (EmailSensitivityLevel(rawValue: emailSensitivity ?? "") ?? governance(for: targetApp).emailSensitivity).rawValue,
             summaryFraming: summaryFraming,
             explicitSelection: !explicitSourceIDs.isEmpty || !selectedEmailIDs.isEmpty,
-            noteCaptureMode: noteCaptureMode.rawValue
+            noteCaptureMode: noteCaptureMode.rawValue,
+            requestDetailLevel: requestDetailLevel?.rawValue,
+            memoryAccessEnabled: memoryAccessEnabled
         )
         state.activeGrant = grant
+        state.activeGrantEmailIDs = selectedEmailIDs
         state.activeGrantSources = state.sources.filter { source in
             explicitSourceIDs.isEmpty
                 ? governance(for: targetApp).allowedSourceIDs.contains(source.sourceID)
@@ -1704,7 +1835,62 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 ? AgentCoverageSnapshot(agent: snapshot.agent, coverageState: .manifoldRouted, verificationStatus: snapshot.verificationStatus, hostBundleIdentifier: snapshot.hostBundleIdentifier, reason: snapshot.reason)
                 : snapshot
         }
-        return ActiveGrantState(activeGrant: grant, activeGrantSources: state.activeGrantSources, targetApp: targetApp.rawValue)
+        return ActiveGrantState(
+            activeGrant: grant,
+            activeGrantSources: state.activeGrantSources,
+            targetApp: targetApp.rawValue,
+            selectedEmailCount: selectedEmailIDs.isEmpty ? state.sharedEmailIDsByAgent[targetApp, default: []].count : selectedEmailIDs.count
+        )
+    }
+
+    func updateGrantRequestDetailLevel(grantID: String, level: AccessRecordingLevel?) async throws -> GrantRecord {
+        guard let grant = state.activeGrant, grant.grantID == grantID else {
+            throw RuntimeClientStubError.unimplemented("updateGrantRequestDetailLevel")
+        }
+        let updated = GrantRecord(
+            grantID: grant.grantID,
+            targetApp: grant.targetApp,
+            profileID: grant.profileID,
+            status: grant.status,
+            startedAt: grant.startedAt,
+            endedAt: grant.endedAt,
+            materializationRoot: grant.materializationRoot,
+            inactivityDeadline: grant.inactivityDeadline,
+            refreshOfGrantID: grant.refreshOfGrantID,
+            emailSensitivity: grant.emailSensitivity,
+            summaryFraming: grant.summaryFraming,
+            explicitSelection: grant.explicitSelection,
+            noteCaptureMode: grant.noteCaptureMode,
+            requestDetailLevel: level?.rawValue,
+            memoryAccessEnabled: grant.memoryAccessEnabled
+        )
+        state.activeGrant = updated
+        return updated
+    }
+
+    func updateGrantMemoryAccess(grantID: String, enabled: Bool) async throws -> GrantRecord {
+        guard let grant = state.activeGrant, grant.grantID == grantID else {
+            throw RuntimeClientStubError.unimplemented("updateGrantMemoryAccess")
+        }
+        let updated = GrantRecord(
+            grantID: grant.grantID,
+            targetApp: grant.targetApp,
+            profileID: grant.profileID,
+            status: grant.status,
+            startedAt: grant.startedAt,
+            endedAt: grant.endedAt,
+            materializationRoot: grant.materializationRoot,
+            inactivityDeadline: grant.inactivityDeadline,
+            refreshOfGrantID: grant.refreshOfGrantID,
+            emailSensitivity: grant.emailSensitivity,
+            summaryFraming: grant.summaryFraming,
+            explicitSelection: grant.explicitSelection,
+            noteCaptureMode: grant.noteCaptureMode,
+            requestDetailLevel: grant.requestDetailLevel,
+            memoryAccessEnabled: enabled
+        )
+        state.activeGrant = updated
+        return updated
     }
 
     func endSession(grantID: String) async throws {
@@ -2188,15 +2374,15 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
 
     private static func makeState(profile: AppFixtureProfile) -> FixtureState {
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        let isRuntimePrivacy = profile == .runtimePrivacy
-        let isPrivacyProfile = profile == .privacy || isRuntimePrivacy
+        let isSyntheticMCPUI = profile == .syntheticMCPUI
+        let isPrivacyProfile = profile == .privacy || isSyntheticMCPUI
         let isTrackedProfile = profile == .trackedWork || isPrivacyProfile
-        let privacyEmailID = isRuntimePrivacy ? "runtime-email-1" : "email-4"
-        let privacyEmailSubject = isRuntimePrivacy ? "Privacy review needed" : "Operator smoke test"
-        let privacyEmailPreview = isRuntimePrivacy
+        let privacyEmailID = isSyntheticMCPUI ? "runtime-email-1" : "email-4"
+        let privacyEmailSubject = isSyntheticMCPUI ? "Privacy review needed" : "Operator smoke test"
+        let privacyEmailPreview = isSyntheticMCPUI
             ? "Please review the attached customer packet before sharing."
             : "Quick operator-style tooling smoke test for fixture mode."
-        let privacyEmailBody = isRuntimePrivacy
+        let privacyEmailBody = isSyntheticMCPUI
             ? "Hi Ada Example,\nPlease review the attached customer packet for ada@example.com before sharing it with Codex."
             : "Quick operator-style tooling smoke test for fixture mode."
         let roots = fixtureSourceRoots()
@@ -2245,7 +2431,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         let activity = [
             AuditEntry(id: 1, timestamp: now, agent: TargetApp.cowork.rawValue, action: AuditAction.fileRead.rawValue, filePath: "claude-only/marker.txt", metadata: "{}", sessionID: "session-1", grantID: nil),
             AuditEntry(id: 2, timestamp: now, agent: TargetApp.codex.rawValue, action: AuditAction.contentDrift.rawValue, filePath: "shared/worklog.md", metadata: "{\"coverage_state\":\"outside_coverage\"}", sessionID: "session-2", grantID: "grant-fixture"),
-        ] + ((profile == .activity || isTrackedProfile) ? [privacyActivityEntry] : [])
+        ] + (isTrackedProfile ? [privacyActivityEntry] : [])
         let sessions = [
             Session(id: "session-1", agent: TargetApp.cowork.rawValue, startTime: now, endTime: now, actionCount: 4, readCount: 3, writeCount: 0, searchCount: 1),
         ]
@@ -2270,7 +2456,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             )
         ] + (isPrivacyProfile ? [
             PendingApprovalRecord(
-                id: isRuntimePrivacy ? "approval-runtime-privacy" : "approval-privacy-1",
+                id: isSyntheticMCPUI ? "approval-synthetic-mcp-ui" : "approval-privacy-1",
                 connectionID: "conn-fixture",
                 agent: TargetApp.codex.rawValue,
                 path: privacyEmailID,
@@ -2284,8 +2470,79 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         let boardRootDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-21_600))
         let boardReplyDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-7_200))
         let boardLatestDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-1_200))
+        let teaPartyDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-1_000))
+        let semicolonDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-900))
+        let karaokeDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-800))
+        let lighthouseDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-700))
         let digestDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-86_400))
         let archiveDate = ISO8601DateFormatter.shared.string(from: Date().addingTimeInterval(-172_800))
+        let syntheticEasterEggEmails = isSyntheticMCPUI ? [
+            EmailMessageRecord(
+                emailID: "runtime-email-tea-party",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Model Garden <garden@openai.test>",
+                senderEmail: "garden@openai.test",
+                senderDomain: "openai.test",
+                recipients: "policy@manifold.test",
+                subject: "Model garden tea party",
+                receivedAt: teaPartyDate,
+                sizeBytes: 1_420,
+                preview: "EASTER_EGG_TEA_PARTY_ALLOWED OpenAI set the table with eval cupcakes.",
+                isRead: false,
+                isFlagged: true,
+                messageIDHeader: "<runtime-email-tea-party@runtime.test>",
+                bodyText: "EASTER_EGG_TEA_PARTY_ALLOWED OpenAI set the table with eval cupcakes."
+            ),
+            EmailMessageRecord(
+                emailID: "runtime-email-codex-semicolon",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Codex Desk <codex@openai.test>",
+                senderEmail: "codex@openai.test",
+                senderDomain: "openai.test",
+                recipients: "policy@manifold.test",
+                subject: "Codex found the missing semicolon",
+                receivedAt: semicolonDate,
+                sizeBytes: 1_260,
+                preview: "EASTER_EGG_SEMICOLON_ALLOWED The semicolon was under the test fixture.",
+                isRead: false,
+                messageIDHeader: "<runtime-email-codex-semicolon@runtime.test>",
+                bodyText: "EASTER_EGG_SEMICOLON_ALLOWED The semicolon was under the test fixture."
+            ),
+            EmailMessageRecord(
+                emailID: "runtime-email-anthropic-karaoke",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Claude Notes <claude@anthropic.test>",
+                senderEmail: "claude@anthropic.test",
+                senderDomain: "anthropic.test",
+                recipients: "policy@manifold.test",
+                subject: "Constitutional karaoke for deterministic tests",
+                receivedAt: karaokeDate,
+                sizeBytes: 1_330,
+                preview: "EASTER_EGG_KARAOKE_ALLOWED Anthropic harmonized with the acceptance criteria.",
+                isRead: false,
+                messageIDHeader: "<runtime-email-anthropic-karaoke@runtime.test>",
+                bodyText: "EASTER_EGG_KARAOKE_ALLOWED Anthropic harmonized with the acceptance criteria."
+            ),
+            EmailMessageRecord(
+                emailID: "runtime-email-shared-lighthouse",
+                accountID: "account-1",
+                mailbox: "INBOX",
+                sender: "Shared Inbox <shared@synthetic.test>",
+                senderEmail: "shared@synthetic.test",
+                senderDomain: "synthetic.test",
+                recipients: "policy@manifold.test",
+                subject: "Shared-only lighthouse",
+                receivedAt: lighthouseDate,
+                sizeBytes: 1_180,
+                preview: "EASTER_EGG_SHARED_ONLY_ALLOWED shared email should pass without a domain allow.",
+                isRead: false,
+                messageIDHeader: "<runtime-email-shared-lighthouse@runtime.test>",
+                bodyText: "EASTER_EGG_SHARED_ONLY_ALLOWED shared email should pass without a domain allow."
+            ),
+        ] : []
         let emails = [
             EmailMessageRecord(
                 emailID: "email-1",
@@ -2375,7 +2632,17 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 messageIDHeader: "<governance-review@openai.test>",
                 bodyText: "Archived governance review summary with the approved checklist."
             ),
-        ]
+        ] + syntheticEasterEggEmails
+        let codexSharedEmailIDs: Set<String> = isSyntheticMCPUI
+            ? [
+                privacyEmailID,
+                "runtime-email-tea-party",
+                "runtime-email-codex-semicolon",
+                "runtime-email-anthropic-karaoke",
+                "runtime-email-shared-lighthouse",
+            ]
+            : [privacyEmailID]
+        let inboxMessageCount = emails.filter { $0.mailbox == "INBOX" }.count
         let account = EmailAccountRecord(accountID: "account-1", displayName: "Fixture Inbox", providerType: "gmail", syncEnabled: true, createdAt: now, updatedAt: now)
         let imapMailboxes = [
             "account-1": [
@@ -2476,7 +2743,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         ]
         let privacyIdentitySuggestions = [
             PrivacyIdentitySuggestion(
-                id: isRuntimePrivacy ? "privacy-suggestion-runtime-name" : "suggestion-primary-name",
+                id: isSyntheticMCPUI ? "privacy-suggestion-runtime-name" : "suggestion-primary-name",
                 kind: .personName,
                 displayName: "Ada Example",
                 value: "Ada Example",
@@ -2512,10 +2779,10 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 matchedCategories: [.privatePerson, .email, .secret],
                 matchedIdentityIDs: ["identity-primary-email"],
                 matchedAllowIDs: ["allow-openai-test"],
-                redactedPreview: isRuntimePrivacy
+                redactedPreview: isSyntheticMCPUI
                     ? "Please review the attached customer packet for [EMAIL REDACTED] before sharing it with Codex."
                     : "Quick operator-style tooling smoke test for [EMAIL REDACTED]. Secret: [SECRET REDACTED].",
-                findingsSummary: isRuntimePrivacy
+                findingsSummary: isSyntheticMCPUI
                     ? "Email body contains your name and email address."
                     : "Contains your email plus a secret token.",
                 spanCount: 3,
@@ -2819,7 +3086,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             privacyOrgAllowEntries: profile == .onboarding ? [] : privacyOrgAllowEntries,
             privacyIndexRecords: profile == .onboarding ? [] : privacyIndexRecords,
             coverages: coverages,
-            coverageEvents: (profile == .activity || isTrackedProfile) ? coverageEvents : [],
+            coverageEvents: isTrackedProfile ? coverageEvents : [],
             activeWorkBlock: activeWorkBlock,
             sessionAccessMode: .defaultSession,
             connectedAgents: profile == .onboarding ? [] : [TargetApp.cowork.rawValue, TargetApp.codex.rawValue],
@@ -2838,6 +3105,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             fabricationFindings: fabricationFindings,
             activeGrant: activeGrant,
             activeGrantSources: activeGrantSources,
+            activeGrantEmailIDs: [],
             pendingApprovals: pendingApprovals,
             emailRuleSets: [.cowork: claudeRules, .codex: codexRules],
             emailRuleSummaries: [
@@ -2848,12 +3116,12 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             trackedFiles: ["shared/worklog.md"],
             storageUsed: 24_576,
             mailAccounts: profile == .onboarding ? [] : [account],
-            syncStates: ["account-1": [SyncStateRecord(accountID: "account-1", mailboxName: "INBOX", lastSyncAt: now, messageCount: 42, syncStatus: .idle)]],
+            syncStates: ["account-1": [SyncStateRecord(accountID: "account-1", mailboxName: "INBOX", lastSyncAt: now, messageCount: profile == .onboarding ? 0 : inboxMessageCount, syncStatus: .idle)]],
             emails: profile == .onboarding ? [] : emails,
             imapMailboxes: profile == .onboarding ? [:] : imapMailboxes,
             sharedEmailIDsByAgent: profile == .onboarding ? [:] : [
                 .cowork: ["email-1"],
-                .codex: [privacyEmailID],
+                .codex: codexSharedEmailIDs,
             ],
             fileVisibilityOverrides: [:],
             rules: rules,
@@ -2899,8 +3167,8 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         }
     }
 
-    func dashboardState() async throws -> DashboardState {
-        try await command(name: "getStatus", as: DashboardState.self)
+    func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot {
+        try await command(name: "getStatus", as: RuntimeStatusSnapshot.self)
     }
 
     func dataControlSummary() async throws -> DataControlSummary {
@@ -2932,8 +3200,8 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         _ = try await xpc.command(name: "resumeSource", payload: ["sourceID": sourceID])
     }
 
-    func policies() async throws -> DashboardState {
-        try await dashboardState()
+    func policies() async throws -> RuntimeStatusSnapshot {
+        try await runtimeStatusSnapshot()
     }
 
     func pauseAgent(_ agent: TargetApp) async throws {
@@ -3137,6 +3405,8 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         selectedEmailIDs: Set<String>,
         summaryFraming: String?,
         noteCaptureMode: SessionNoteCaptureMode,
+        requestDetailLevel: AccessRecordingLevel?,
+        memoryAccessEnabled: Bool,
         emailSensitivity: String?
     ) async throws -> ActiveGrantState {
         var payload: [String: Any] = [
@@ -3144,14 +3414,35 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
             "fileScopes": try XPCJSON.object(from: fileScopes),
             "selectedEmailIDs": Array(selectedEmailIDs),
             "noteCaptureMode": noteCaptureMode.rawValue,
+            "memoryAccessEnabled": memoryAccessEnabled,
         ]
         if let summaryFraming {
             payload["summaryFraming"] = summaryFraming
+        }
+        if let requestDetailLevel {
+            payload["requestDetailLevel"] = requestDetailLevel.rawValue
         }
         if let emailSensitivity {
             payload["emailSensitivity"] = emailSensitivity
         }
         return try await command(name: "startGatewaySession", payload: payload, as: ActiveGrantState.self)
+    }
+
+    func updateGrantRequestDetailLevel(grantID: String, level: AccessRecordingLevel?) async throws -> GrantRecord {
+        var payload: [String: Any] = ["grantID": grantID]
+        if let level {
+            payload["requestDetailLevel"] = level.rawValue
+        }
+        return try await command(name: "updateGrantRequestDetailLevel", payload: payload, field: "activeGrant", as: GrantRecord.self)
+    }
+
+    func updateGrantMemoryAccess(grantID: String, enabled: Bool) async throws -> GrantRecord {
+        try await command(
+            name: "updateGrantMemoryAccess",
+            payload: ["grantID": grantID, "enabled": enabled],
+            field: "activeGrant",
+            as: GrantRecord.self
+        )
     }
 
     func endSession(grantID: String) async throws {

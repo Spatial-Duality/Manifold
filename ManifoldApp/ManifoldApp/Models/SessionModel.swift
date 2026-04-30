@@ -35,6 +35,7 @@ struct SessionPreview: Codable, Sendable {
 final class SessionModel {
     var activeGrant: GrantRecord?
     var activeGrantSources: [GrantSourceRecord] = []
+    var activeGrantEmailCount: Int = 0
     var activeTargetApp: TargetApp = .cowork
     var lastCompletedSession: Session?
     var selectedPreset: DomainPreset?
@@ -86,6 +87,8 @@ final class SessionModel {
         selectedEmailIDs: Set<String> = [],
         summaryFraming: String? = nil,
         noteCaptureMode: SessionNoteCaptureMode? = nil,
+        requestDetailOverride: AccessRecordingLevel? = nil,
+        allowFileMemory: Bool = false,
         onError: (String) -> Void
     ) async {
         guard let client else { return }
@@ -96,11 +99,14 @@ final class SessionModel {
                 selectedEmailIDs: selectedEmailIDs,
                 summaryFraming: summaryFraming ?? selectedPreset?.summaryFraming,
                 noteCaptureMode: noteCaptureMode ?? Self.defaultSessionNoteCaptureMode(),
+                requestDetailLevel: requestDetailOverride,
+                memoryAccessEnabled: allowFileMemory,
                 emailSensitivity: selectedPreset?.emailSensitivity.rawValue
             )
             activeTargetApp = targetApp
             activeGrant = state.activeGrant
             activeGrantSources = state.activeGrantSources
+            activeGrantEmailCount = state.selectedEmailCount ?? selectedEmailIDs.count
             preview = nil
             previewError = nil
         } catch {
@@ -115,6 +121,7 @@ final class SessionModel {
             try await client.endSession(grantID: grant.grantID)
             activeGrant = nil
             activeGrantSources = []
+            activeGrantEmailCount = 0
         } catch {
             logger.error("Failed to end session: \(error.localizedDescription)")
             onError("Failed to end session: \(error.localizedDescription)")
@@ -127,6 +134,7 @@ final class SessionModel {
             let state = try await client.activeGrantState(targetApp: targetApp ?? activeTargetApp)
             activeGrant = state.activeGrant
             activeGrantSources = state.activeGrantSources
+            activeGrantEmailCount = state.selectedEmailCount ?? 0
             if let raw = state.targetApp, let target = TargetApp(rawValue: raw) {
                 activeTargetApp = target
             }
@@ -134,6 +142,7 @@ final class SessionModel {
             logger.error("Failed to refresh grant state: \(error.localizedDescription)")
             activeGrant = nil
             activeGrantSources = []
+            activeGrantEmailCount = 0
         }
     }
 

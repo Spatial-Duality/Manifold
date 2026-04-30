@@ -20,25 +20,13 @@ import ManifoldKit
 
 struct WorkView: View {
     @Environment(ManifoldStore.self) private var store
-    @State private var work = WorkModel()
+    @Bindable var work: WorkModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            WorkSessionListColumn(work: work)
-                .frame(width: 260)
-                .background(ManifoldPalette.surface2)
-
-            Divider()
-
-            WorkMainPane(work: work)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(ManifoldPalette.surface)
-
-            Divider()
-
+        WorkMainPane(work: work)
+        .inspector(isPresented: .constant(true)) {
             WorkInspector(work: work)
-                .frame(width: 340)
-                .background(ManifoldPalette.surface2)
+                .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
         }
         .task {
             await store.activity.loadActivity()
@@ -50,285 +38,6 @@ struct WorkView: View {
     }
 }
 
-// MARK: - Session list (left column)
-
-private struct WorkSessionListColumn: View {
-    @Environment(ManifoldStore.self) private var store
-    @Bindable var work: WorkModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Spacing.s2) {
-                    activeSection
-                    preparedSection
-                    recentSection
-                }
-                .padding(.horizontal, Spacing.s2)
-                .padding(.vertical, Spacing.s2)
-            }
-        }
-        .accessibilityIdentifier("work.sessions")
-    }
-
-    private var header: some View {
-        HStack(spacing: Spacing.s2) {
-            Label("Sessions", systemImage: "rectangle.stack.badge.play")
-                .font(ManifoldType.bodyMedium)
-            Spacer()
-            Menu {
-                Button {
-                    store.beginSessionPreload(
-                        agent: store.defaultSessionAgent,
-                        baseMode: .buildOnDefault
-                    )
-                    work.sessionSelection = .prepared
-                } label: {
-                    Label("Build on Default", systemImage: "plus.rectangle.on.rectangle")
-                }
-                Button {
-                    store.beginSessionPreload(
-                        agent: store.defaultSessionAgent,
-                        baseMode: .blank
-                    )
-                    work.sessionSelection = .prepared
-                } label: {
-                    Label("Start Blank", systemImage: "plus.rectangle")
-                }
-            } label: {
-                Label("New", systemImage: "plus")
-                    .labelStyle(.iconOnly)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("New session")
-            .accessibilityIdentifier("work.sessions.new")
-        }
-        .padding(.horizontal, Spacing.s3)
-        .padding(.vertical, Spacing.s2)
-    }
-
-    @ViewBuilder
-    private var activeSection: some View {
-        WorkSessionSectionHeader(title: "Active")
-        if let active = store.activeSession {
-            WorkSessionRow(
-                title: sessionDisplayName(active),
-                subtitle: activeSubtitle(active),
-                agent: active.agents.first ?? store.defaultSessionAgent,
-                statusLabel: "Active",
-                statusVariant: .session,
-                folderCount: store.session.activeGrantSources.count,
-                mailboxCount: activeMailboxCount(for: store),
-                pendingCount: store.pendingRequests.count,
-                lastActivity: nil,
-                isSelected: work.sessionSelection == .active,
-                onSelect: { selectActive() }
-            )
-            .accessibilityIdentifier("work.session.active")
-        } else if store.sessionStartupMode == .defaultSession {
-            WorkSessionRow(
-                title: "Default session",
-                subtitle: "Default gateway will start when the runtime is connected.",
-                agent: store.defaultSessionAgent,
-                statusLabel: "Standby",
-                statusVariant: .neutral,
-                folderCount: store.defaultSourceIDs(for: store.defaultSessionAgent).count,
-                mailboxCount: 0,
-                pendingCount: 0,
-                lastActivity: nil,
-                isSelected: work.sessionSelection == .defaultSession,
-                onSelect: { work.sessionSelection = .defaultSession; work.inspectorSelection = .session(.defaultSession) }
-            )
-            .accessibilityIdentifier("work.session.default")
-        } else {
-            emptyActiveCard
-        }
-    }
-
-    private var emptyActiveCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("No session active")
-                .font(ManifoldType.captionMedium)
-                .foregroundStyle(.secondary)
-            Text("Activate a prepared session, or use “New” to start one.")
-                .font(ManifoldType.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(Spacing.s3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .fill(ManifoldPalette.surface.opacity(0.5))
-        )
-    }
-
-    @ViewBuilder
-    private var preparedSection: some View {
-        if let preload = store.sessionWorkbench.preload {
-            WorkSessionSectionHeader(title: "Prepared")
-            let defaultIDs = store.defaultSourceIDs(for: preload.agent)
-            let effective = preload.effectiveSourceIDs(defaultSourceIDs: defaultIDs)
-            WorkSessionRow(
-                title: preload.name.isEmpty ? "New session" : preload.name,
-                subtitle: preload.baseMode.label,
-                agent: preload.agent,
-                statusLabel: "Prepared",
-                statusVariant: .preview,
-                folderCount: effective.count,
-                mailboxCount: preload.selectedEmailIDs.count,
-                pendingCount: 0,
-                lastActivity: nil,
-                isSelected: work.sessionSelection == .prepared,
-                onSelect: { work.sessionSelection = .prepared; work.inspectorSelection = .session(.prepared) }
-            )
-            .accessibilityIdentifier("work.session.prepared")
-        }
-    }
-
-    @ViewBuilder
-    private var recentSection: some View {
-        if !store.activity.sessions.isEmpty {
-            WorkSessionSectionHeader(title: "Recent")
-            ForEach(store.activity.sessions.prefix(20)) { session in
-                let agent = TargetApp(rawValue: session.agent) ?? .cowork
-                WorkSessionRow(
-                    title: "\(AgentMeta.label(agent)) session",
-                    subtitle: relativeTime(session.endTime),
-                    agent: agent,
-                    statusLabel: "Ended",
-                    statusVariant: .neutral,
-                    folderCount: 0,
-                    mailboxCount: 0,
-                    pendingCount: 0,
-                    lastActivity: nil,
-                    isSelected: work.sessionSelection == .recent(sessionID: session.id),
-                    onSelect: {
-                        work.sessionSelection = .recent(sessionID: session.id)
-                        work.inspectorSelection = .session(.recent(sessionID: session.id))
-                        Task { await store.activity.selectSession(session) }
-                    }
-                )
-                .accessibilityIdentifier("work.session.recent.\(session.id)")
-            }
-        }
-    }
-
-    private func selectActive() {
-        work.sessionSelection = .active
-        work.inspectorSelection = .session(.active)
-    }
-
-    private func sessionDisplayName(_ session: SessionRecord) -> String {
-        if let name = store.session.activeGrant?.summaryFraming, !name.isEmpty {
-            return name
-        }
-        return session.name
-    }
-
-    private func activeSubtitle(_ session: SessionRecord) -> String {
-        let agent = session.agents.first.map { store.displayName(for: $0) } ?? "Agent"
-        let folders = store.session.activeGrantSources.count
-        return "\(agent) · \(folders) folder\(folders == 1 ? "" : "s")"
-    }
-
-    private func relativeTime(_ iso: String) -> String {
-        guard let date = ISO8601DateFormatter.shared.date(from: iso) else { return "" }
-        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
-    }
-}
-
-private struct WorkSessionSectionHeader: View {
-    let title: String
-
-    var body: some View {
-        HStack {
-            Text(title.uppercased())
-                .font(ManifoldType.tiny.weight(.semibold))
-                .tracking(0.6)
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .padding(.horizontal, Spacing.s1)
-        .padding(.top, Spacing.s2)
-        .padding(.bottom, 2)
-    }
-}
-
-private struct WorkSessionRow: View {
-    let title: String
-    let subtitle: String
-    let agent: TargetApp
-    let statusLabel: String
-    let statusVariant: Pill.Variant
-    let folderCount: Int
-    let mailboxCount: Int
-    let pendingCount: Int
-    let lastActivity: Date?
-    let isSelected: Bool
-    let onSelect: () -> Void
-
-    var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.s1) {
-                    Text(title)
-                        .font(ManifoldType.bodyMedium)
-                        .lineLimit(1)
-                        .foregroundStyle(.primary)
-                    Spacer(minLength: 4)
-                    Pill(text: statusLabel, variant: statusVariant)
-                }
-                Text(subtitle)
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                HStack(spacing: Spacing.s2) {
-                    if folderCount > 0 {
-                        sessionMeta(systemImage: "folder", text: "\(folderCount)")
-                    }
-                    if mailboxCount > 0 {
-                        sessionMeta(systemImage: "envelope", text: "\(mailboxCount)")
-                    }
-                    if pendingCount > 0 {
-                        sessionMeta(systemImage: "hand.raised", text: "\(pendingCount)", tint: ManifoldPalette.attention)
-                    }
-                    Spacer()
-                    Text(AgentMeta.label(agent))
-                        .font(ManifoldType.tiny)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, Spacing.s2)
-            .padding(.vertical, Spacing.s2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .fill(isSelected ? ManifoldPalette.selectionSoft : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .strokeBorder(isSelected ? ManifoldPalette.selection.opacity(0.4) : Color.clear, lineWidth: 0.5)
-        )
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-
-    private func sessionMeta(systemImage: String, text: String, tint: Color = .secondary) -> some View {
-        HStack(spacing: 2) {
-            Image(systemName: systemImage)
-                .font(ManifoldType.tiny)
-            Text(text)
-                .font(ManifoldType.tiny)
-        }
-        .foregroundStyle(tint)
-    }
-}
-
 // MARK: - Main pane (center column)
 
 private struct WorkMainPane: View {
@@ -337,7 +46,7 @@ private struct WorkMainPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            WorkCommandStrip()
+            WorkCommandStrip(work: work)
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.s4) {
@@ -358,6 +67,7 @@ private struct WorkMainPane: View {
 
 private struct WorkCommandStrip: View {
     @Environment(ManifoldStore.self) private var store
+    @Bindable var work: WorkModel
 
     var body: some View {
         HStack(spacing: Spacing.s2) {
@@ -367,6 +77,8 @@ private struct WorkCommandStrip: View {
                         agent: store.defaultSessionAgent,
                         baseMode: .buildOnDefault
                     )
+                    work.sessionSelection = .prepared
+                    work.inspectorSelection = .session(.prepared)
                 } label: {
                     Label("Build on Default", systemImage: "plus.rectangle.on.rectangle")
                 }
@@ -375,6 +87,8 @@ private struct WorkCommandStrip: View {
                         agent: store.defaultSessionAgent,
                         baseMode: .blank
                     )
+                    work.sessionSelection = .prepared
+                    work.inspectorSelection = .session(.prepared)
                 } label: {
                     Label("Start Blank", systemImage: "plus.rectangle")
                 }
@@ -458,6 +172,7 @@ private struct WorkCurrentSessionSummary: View {
                     metric(systemImage: "envelope", title: "Mailboxes", value: "\(summary.mailboxes)")
                     metric(systemImage: "hand.raised", title: "Pending", value: "\(store.pendingRequests.count)", tint: store.pendingRequests.isEmpty ? nil : ManifoldPalette.attention)
                     metric(systemImage: "doc.text.magnifyingglass", title: "Detail", value: detailLabel(for: summary.agent))
+                    metric(systemImage: "clock.arrow.circlepath", title: "File Memory", value: memoryLabel(for: summary.agent))
                 }
             }
 
@@ -477,6 +192,7 @@ private struct WorkCurrentSessionSummary: View {
             }
 
             sessionRequestDetailControl
+            fileMemoryAccessControl
         }
         .padding(Spacing.s4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -531,7 +247,7 @@ private struct WorkCurrentSessionSummary: View {
     private var subtext: String {
         if store.activeSession != nil {
             let agent = store.activeSession?.agents.first.map { store.displayName(for: $0) } ?? "Agent"
-            return "\(agent) is active. Read and write requests appear below."
+            return "\(agent) is active. Read and write approvals appear below."
         }
         if store.sessionStartupMode == .defaultSession {
             return "Manifold will start the default gateway when the runtime is connected."
@@ -605,6 +321,11 @@ private struct WorkCurrentSessionSummary: View {
                 Spacer()
                 if isSessionScoped {
                     Pill(text: "Session", variant: .session)
+                    Button("Use Default") {
+                        Task { await store.clearRequestDetailOverride(for: agent) }
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
             }
             Picker("Request detail", selection: Binding(
@@ -613,7 +334,7 @@ private struct WorkCurrentSessionSummary: View {
                     Task {
                         if store.activeSession != nil {
                             // Active session: apply as a session-scoped
-                            // override that reverts on session end.
+                            // override stored on the active grant.
                             await store.applyRequestDetailOverride(newValue.backingLevel, for: agent)
                         } else {
                             // No active session: this is a direct edit
@@ -637,9 +358,40 @@ private struct WorkCurrentSessionSummary: View {
         .padding(.top, 4)
     }
 
+    private var fileMemoryAccessControl: some View {
+        let agent = store.activeSession?.agents.first ?? store.defaultSessionAgent
+        let isActive = store.activeSession != nil && store.session.activeGrant != nil
+        return VStack(alignment: .leading, spacing: Spacing.s2) {
+            Toggle(isOn: Binding(
+                get: { store.hasActiveFileMemoryAccess(for: agent) },
+                set: { newValue in
+                    Task { await store.applyFileMemoryAccess(newValue, for: agent) }
+                }
+            )) {
+                Label("Allow file memory", systemImage: "clock.arrow.circlepath")
+                    .font(ManifoldType.captionMedium)
+            }
+            .toggleStyle(.switch)
+            .disabled(!isActive)
+            .accessibilityIdentifier("work.summary.fileMemory")
+
+            Text(isActive
+                 ? "Memory is always saved. This lets \(store.displayName(for: agent)) query prior reads, writes, and notes for this session's file scope."
+                 : "Memory is always saved. Activate a session to let an agent query prior file memory.")
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 2)
+    }
+
     private func detailLabel(for agent: TargetApp) -> String {
-        let detail = SessionRequestDetail(level: store.governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight)
+        let detail = SessionRequestDetail(level: store.effectiveRequestDetail(for: agent))
         return detail.label
+    }
+
+    private func memoryLabel(for agent: TargetApp) -> String {
+        store.hasActiveFileMemoryAccess(for: agent) ? "On" : "Off"
     }
 }
 
@@ -670,7 +422,6 @@ private struct WorkPendingApprovalsSection: View {
                 LazyVStack(alignment: .leading, spacing: Spacing.s2) {
                     ForEach(store.pendingRequests) { request in
                         WorkApprovalRow(request: request, work: work)
-                            .accessibilityIdentifier("work.approval.\(request.id)")
                     }
                 }
             }
@@ -695,41 +446,50 @@ private struct WorkApprovalRow: View {
     @Environment(ManifoldStore.self) private var store
 
     var body: some View {
-        Button {
-            work.inspectorSelection = .request(approvalID: request.id)
-        } label: {
-            HStack(alignment: .top, spacing: Spacing.s3) {
-                Image(systemName: agentSymbol)
-                    .frame(width: 22, height: 22)
-                    .foregroundStyle(agentTint)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(agentTint.opacity(0.14))
-                    )
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: Spacing.s1) {
-                        Text(request.headline)
-                            .font(ManifoldType.bodyMedium)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(request.createdAt.formatted(.relative(presentation: .named)))
-                            .font(ManifoldType.tiny)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(request.target)
-                        .font(ManifoldType.mono)
-                        .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: Spacing.s3) {
+            Image(systemName: agentSymbol)
+                .frame(width: 22, height: 22)
+                .foregroundStyle(agentTint)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(agentTint.opacity(0.14))
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: Spacing.s1) {
+                    Text(request.headline)
+                        .font(ManifoldType.bodyMedium)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(request.createdAt.formatted(.relative(presentation: .named)))
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
-                approvalActionButtons
+                Text(request.target)
+                    .font(ManifoldType.mono)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .padding(Spacing.s3)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .onTapGesture {
+                work.inspectorSelection = .request(approvalID: request.id)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(request.headline), \(request.target)")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("work.approval.\(request.id)")
+            Spacer(minLength: 0)
+            approvalActionButtons
         }
-        .buttonStyle(.plain)
+        .padding(Spacing.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            work.inspectorSelection = .request(approvalID: request.id)
+        }
+        .accessibilityAction {
+            work.inspectorSelection = .request(approvalID: request.id)
+        }
         .background(
             RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
                 .fill(isSelected ? ManifoldPalette.selectionSoft : ManifoldPalette.surface2.opacity(0.5))
@@ -850,7 +610,7 @@ private struct WorkTimelineSection: View {
                 LazyVStack(alignment: .leading, spacing: Spacing.s2) {
                     ForEach(filteredEntries) { entry in
                         WorkTimelineCard(entry: entry, work: work)
-                            .accessibilityIdentifier("work.timeline.entry.\(entry.id)")
+                            .accessibilityIdentifier(timelineAccessibilityIdentifier(for: entry))
                     }
                 }
             }
@@ -866,6 +626,14 @@ private struct WorkTimelineSection: View {
                 .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
         )
         .accessibilityIdentifier("work.timeline")
+    }
+
+    private func timelineAccessibilityIdentifier(for entry: AuditEntry) -> String {
+        if entry.action == AuditAction.sensitivityWarning.rawValue,
+           let filePath = entry.filePath?.workAccessibilityIdentifierFragment {
+            return "work.timeline.privacy.\(filePath)"
+        }
+        return "work.timeline.entry.\(entry.id)"
     }
 
     private var emptyState: some View {
@@ -981,6 +749,7 @@ private struct WorkTimelineCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+                .accessibilityIdentifier(contentAccessibilityIdentifier)
                 Spacer(minLength: 0)
                 Pill(text: presentation.outcomeLabel, variant: presentation.outcomeVariant)
             }
@@ -1001,6 +770,21 @@ private struct WorkTimelineCard: View {
 
     private var presentation: ActivityEventPresentation {
         ActivityEventPresentation(entry)
+    }
+
+    private var contentAccessibilityIdentifier: String {
+        if let filePath = entry.filePath?.workAccessibilityIdentifierFragment {
+            if entry.action == AuditAction.sensitivityWarning.rawValue {
+                return "work.timeline.privacy.\(filePath).content"
+            }
+            if isWriteEvent {
+                return "work.timeline.write.\(filePath).content"
+            }
+            if entry.action.contains("read") {
+                return "work.timeline.read.\(filePath).content"
+            }
+        }
+        return "work.timeline.entry.\(entry.id).content"
     }
 
     private var isWriteEvent: Bool {
@@ -1173,7 +957,7 @@ private struct WorkInspector: View {
             if let request = store.pendingRequests.first(where: { $0.id == id }) {
                 WorkRequestInspector(request: request)
             } else {
-                Text("Request was answered.")
+                Text("Approval was answered.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1404,6 +1188,14 @@ private struct WorkActivityInspector: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .accessibilityIdentifier(inspectorAccessibilityIdentifier)
+    }
+
+    private var inspectorAccessibilityIdentifier: String {
+        guard let filePath = entry.filePath?.workAccessibilityIdentifierFragment else {
+            return "work.inspector.event.\(entry.id)"
+        }
+        return "work.inspector.event.\(filePath)"
     }
 
     private func inspectorRow(label: String, value: String) -> some View {
@@ -1412,6 +1204,14 @@ private struct WorkActivityInspector: View {
             Text(value).foregroundStyle(.primary)
         }
         .font(ManifoldType.caption)
+    }
+}
+
+private extension String {
+    var workAccessibilityIdentifierFragment: String {
+        replacingOccurrences(of: "/", with: ".")
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
     }
 }
 
@@ -1649,6 +1449,9 @@ private struct WorkSessionInspector: View {
 /// are durable across navigation.
 private struct WorkPreloadEditor: View {
     @Environment(ManifoldStore.self) private var store
+    @State private var availableEmails: [EmailMessageRecord] = []
+    @State private var isLoadingEmails = false
+    @State private var emailLoadError: String?
 
     private var availableSources: [SourceRecord] {
         store.sources
@@ -1691,6 +1494,7 @@ private struct WorkPreloadEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 requestDetailPicker(preload: preload)
+                fileMemoryToggle(preload: preload)
 
                 folderList(preload: preload, defaultIDs: defaultIDs, effective: effective)
 
@@ -1702,6 +1506,8 @@ private struct WorkPreloadEditor: View {
                         .font(ManifoldType.tiny)
                         .foregroundStyle(.tertiary)
                 }
+
+                emailList(preload: preload)
 
                 actionRow(preload: preload)
 
@@ -1715,6 +1521,9 @@ private struct WorkPreloadEditor: View {
                         .font(ManifoldType.tiny)
                         .foregroundStyle(.red)
                 }
+            }
+            .task(id: preload.agent) {
+                await loadEmails(for: preload.agent)
             }
         }
     }
@@ -1755,6 +1564,29 @@ private struct WorkPreloadEditor: View {
             Text(preload.requestDetailOverride == nil
                  ? "Will use \(store.displayName(for: preload.agent))'s default request detail."
                  : "Overrides the agent default for this session only. Reverts when the session ends.")
+                .font(ManifoldType.tiny)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func fileMemoryToggle(preload: SessionPreloadDraft) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(
+                get: { preload.allowFileMemory },
+                set: { newValue in
+                    guard var draft = store.sessionWorkbench.preload else { return }
+                    draft.allowFileMemory = newValue
+                    store.sessionWorkbench.preload = draft
+                }
+            )) {
+                Label("Allow file memory", systemImage: "clock.arrow.circlepath")
+                    .font(ManifoldType.captionMedium)
+            }
+            .toggleStyle(.switch)
+            .accessibilityIdentifier("work.preload.fileMemory")
+
+            Text("Memory is still saved either way. Turn this on when the agent should query what happened with these files in earlier sessions.")
                 .font(ManifoldType.tiny)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1830,6 +1662,156 @@ private struct WorkPreloadEditor: View {
         if !inDefault && selected { return "added" }
         if inDefault { return "default" }
         return nil
+    }
+
+    @ViewBuilder
+    private func emailList(preload: SessionPreloadDraft) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            HStack(spacing: Spacing.s2) {
+                Label("Email scope", systemImage: "envelope")
+                    .font(ManifoldType.captionMedium)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(preload.selectedEmailIDs.count) selected")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                if !preload.selectedEmailIDs.isEmpty {
+                    Button("Clear") {
+                        store.clearPreloadEmails()
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
+            }
+
+            if isLoadingEmails {
+                HStack(spacing: Spacing.s2) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading mail...")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let emailLoadError {
+                Text(emailLoadError)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.red)
+            } else if availableEmails.isEmpty {
+                Text("No synced emails available. Add mail in Mail first.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(mailboxGroups) { group in
+                        mailboxRow(group, preload: preload)
+                        Divider()
+                    }
+                    ForEach(availableEmails.prefix(20)) { email in
+                        emailRow(email, preload: preload)
+                        if email.id != availableEmails.prefix(20).last?.id {
+                            Divider()
+                        }
+                    }
+                }
+                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                        .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+                )
+                Text("Mailbox toggles apply to the recent messages shown here. Use Mail for deeper search and sharing.")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private struct MailboxGroup: Identifiable {
+        let id: String
+        let label: String
+        let emailIDs: Set<String>
+    }
+
+    private var mailboxGroups: [MailboxGroup] {
+        let grouped = Dictionary(grouping: availableEmails) { email in
+            "\(email.accountID)::\(email.mailbox)"
+        }
+        return grouped.map { key, emails in
+            let sample = emails[0]
+            return MailboxGroup(
+                id: key,
+                label: "\(sample.mailbox) (\(emails.count))",
+                emailIDs: Set(emails.map(\.emailID))
+            )
+        }
+        .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+        .prefix(6)
+        .map { $0 }
+    }
+
+    private func mailboxRow(_ group: MailboxGroup, preload: SessionPreloadDraft) -> some View {
+        let selected = !group.emailIDs.isDisjoint(with: preload.selectedEmailIDs)
+        let allSelected = group.emailIDs.isSubset(of: preload.selectedEmailIDs)
+        return Toggle(isOn: Binding(
+            get: { allSelected },
+            set: { store.setPreloadEmails(emailIDs: group.emailIDs, included: $0) }
+        )) {
+            HStack(spacing: Spacing.s2) {
+                Image(systemName: selected ? "tray.full.fill" : "tray")
+                    .foregroundStyle(selected ? ManifoldPalette.selection : .secondary)
+                    .frame(width: 16)
+                Text(group.label)
+                    .font(ManifoldType.body)
+                    .lineLimit(1)
+                if selected && !allSelected {
+                    Text("partial")
+                        .font(ManifoldType.tiny)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.tertiary.opacity(0.15), in: Capsule())
+                }
+                Spacer()
+            }
+        }
+        .toggleStyle(.checkbox)
+        .padding(.horizontal, Spacing.s2)
+        .padding(.vertical, Spacing.s1)
+        .accessibilityIdentifier("work.preload.mailbox.\(group.id)")
+    }
+
+    private func emailRow(_ email: EmailMessageRecord, preload: SessionPreloadDraft) -> some View {
+        Toggle(isOn: Binding(
+            get: { preload.selectedEmailIDs.contains(email.emailID) },
+            set: { store.setPreloadEmail(emailID: email.emailID, included: $0) }
+        )) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(email.subject.isEmpty ? "(No subject)" : email.subject)
+                    .font(ManifoldType.body)
+                    .lineLimit(1)
+                Text("\(email.sender) · \(email.mailbox)")
+                    .font(ManifoldType.tiny)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .padding(.horizontal, Spacing.s2)
+        .padding(.vertical, Spacing.s1)
+        .accessibilityIdentifier("work.preload.email.\(email.emailID)")
+    }
+
+    @MainActor
+    private func loadEmails(for agent: TargetApp) async {
+        isLoadingEmails = true
+        emailLoadError = nil
+        let shared = await store.mailAccounts.sharedEmails(agent: agent, limit: 200)
+        let all = await store.mailAccounts.allMessages(limit: 200)
+        let selectedIDs = store.sessionWorkbench.preload?.selectedEmailIDs ?? []
+        let selected = selectedIDs.isEmpty ? [] : await store.mailAccounts.messages(ids: Array(selectedIDs))
+        var seen: Set<String> = []
+        availableEmails = (shared + selected + all).filter { seen.insert($0.emailID).inserted }
+        emailLoadError = store.mailAccounts.lastQueryError
+        isLoadingEmails = false
     }
 
     private func actionRow(preload: SessionPreloadDraft) -> some View {
@@ -2011,21 +1993,4 @@ private struct WorkRuntimeIssueInspector: View {
         let joined = parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
         return joined.isEmpty ? "No additional diagnostics available." : joined
     }
-}
-
-// MARK: - Helpers
-
-/// Reads the active session's mailbox/email count from the data
-/// control summary the runtime publishes. Falls back to 0 if no
-/// snapshot is available yet — but unlike the previous hardcoded 0,
-/// this value updates when the runtime reports new email sharing
-/// state.
-@MainActor
-private func activeMailboxCount(for store: ManifoldStore) -> Int {
-    guard let active = store.activeSession else { return 0 }
-    let agent = active.agents.first ?? store.defaultSessionAgent
-    if let snapshot = store.dataControlSummary?.agents.first(where: { $0.agent == agent }) {
-        return snapshot.sharedEmailCount
-    }
-    return 0
 }

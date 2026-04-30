@@ -667,7 +667,12 @@ public actor ManifoldBridge {
     }
 
     private func validatedAccessIntent(for toolName: String, provided intent: AccessIntent?) async throws -> AccessIntent? {
-        let level = (try? await policyStore?.policy(for: targetApp))?.accessRecordingLevel ?? .lightweight
+        let activeGrantLevel = (try? await grantStore.activeGrant(targetApp: targetApp, profileID: profileID))?
+            .sessionRequestDetailLevel
+        let policyLevel = (try? await policyStore?.policy(for: targetApp))?.accessRecordingLevel
+        let level = activeGrantLevel
+            ?? policyLevel
+            ?? .lightweight
         let sanitized = AccessIntent(
             summary: intent?.summary.map { String($0.prefix(240)) },
             details: intent?.details.map { String($0.prefix(1000)) }
@@ -1613,7 +1618,8 @@ public actor ManifoldBridge {
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
                 let blockStatus = block.isPaused ? " (paused)" : ""
                 let mode = Self.isDraftWorkspaceGrant(grant) ? "draft workspace" : "session gateway"
-                let message = "Manifold \(mode) active\(blockStatus) (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails."
+                let fileMemory = grant.memoryAccessEnabled ? "File memory query: on." : "File memory query: off."
+                let message = "Manifold \(mode) active\(blockStatus) (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails. \(fileMemory)"
                 let status = StatusResult(
                     active: true,
                     grantID: grant.grantID,
@@ -1636,7 +1642,8 @@ public actor ManifoldBridge {
                 let summaries = (try? await grantStore.summaries(grantID: grant.grantID)) ?? []
                 let noteGuidance = noteGuidance(for: grant, summaries: summaries)
                 let sourceNames = mounts.map(\.mountName).joined(separator: ", ")
-                let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up."
+                let fileMemory = grant.memoryAccessEnabled ? "File memory query: on." : "File memory query: off."
+                let message = "Manifold active (grant \(grant.grantID.prefix(12))...). \(mounts.count) source(s): \(sourceNames). \(totalFiles) files, \(emailCount) emails backed up. \(fileMemory)"
                 let status = StatusResult(
                     active: true,
                     grantID: grant.grantID,

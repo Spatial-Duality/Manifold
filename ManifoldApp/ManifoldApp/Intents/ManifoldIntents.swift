@@ -32,27 +32,13 @@ struct OpenManifoldIntent: AppIntent {
 // MARK: - Start Session
 
 struct StartSessionIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open Sessions"
+    static let title: LocalizedStringResource = "Prepare Work Session"
     static let description: IntentDescription = "Opens Manifold to prepare or activate a named AI access session."
     static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
         NotificationCenter.default.post(name: .manifoldStartSessionFromIntent, object: nil)
-        return .result()
-    }
-}
-
-// MARK: - Open Activity
-
-struct OpenActivityIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open AI Activity"
-    static let description: IntentDescription = "Opens Manifold's activity drawer showing recent AI actions."
-    static let openAppWhenRun = true
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        NotificationCenter.default.post(name: .manifoldOpenActivityFromIntent, object: nil)
         return .result()
     }
 }
@@ -74,19 +60,10 @@ struct ManifoldShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartSessionIntent(),
             phrases: [
-                "Open sessions in \(.applicationName)"
+                "Prepare a work session in \(.applicationName)"
             ],
-            shortTitle: "Sessions",
+            shortTitle: "Work Session",
             systemImageName: "rectangle.stack.badge.play"
-        )
-
-        AppShortcut(
-            intent: OpenActivityIntent(),
-            phrases: [
-                "Show AI activity in \(.applicationName)"
-            ],
-            shortTitle: "AI Activity",
-            systemImageName: "clock.arrow.circlepath"
         )
     }
 }

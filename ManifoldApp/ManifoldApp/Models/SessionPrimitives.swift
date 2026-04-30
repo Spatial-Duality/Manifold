@@ -115,6 +115,8 @@ struct SessionDraft: Hashable, Sendable {
     var usesExplicitFileSelection: Bool = false
     var selectedSourceIDs: Set<String> = []
     var selectedEmailIDs: Set<String> = []
+    var requestDetailOverride: AccessRecordingLevel?
+    var allowFileMemory: Bool = false
 }
 
 // MARK: - Approval queue
@@ -186,7 +188,7 @@ enum ApprovalAnswer: Hashable, Sendable {
 }
 
 /// A recorded denial — feeds blast-radius charts and the pattern-detection
-/// inspector on the Requests surface.
+/// inspector in the Work approvals surface.
 struct DenialEvent: Identifiable, Hashable, Sendable {
     let id: String
     let agent: TargetApp
@@ -258,7 +260,7 @@ struct ScopeEntry: Identifiable, Hashable, Sendable {
 
 // MARK: - Revert
 
-/// Outcome of a user-initiated revert (from Activity evidence inspector
+/// Outcome of a user-initiated revert (from Work evidence inspector
 /// or from the Files version timeline).
 enum RevertOutcome: Hashable, Sendable {
     case reverted(filePath: String, toVersion: String)

@@ -1,5 +1,10 @@
 # Manifold UI — Stage 11: Single-session sequential plan
 
+> **Historical note (2026-04-30):** This sequential migration plan has
+> been superseded by the current four-space app model: Work, Access,
+> Mail, and Rules. Its legacy Activity/Requests route references are
+> historical context, not current app structure.
+
 The whole migration, executed by one Claude Code session, top to bottom,
 no parallelism, no feature flags. Replaces Stages 9 and 10 for actual
 execution. Those earlier docs remain as reference for surface decisions

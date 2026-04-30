@@ -135,7 +135,7 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertNotEqual(a, c)
     }
 
-    func testPendingRequestsMapStandingWriteIntoSessionPrimitives() throws {
+    func testPendingApprovalsMapStandingWriteIntoSessionPrimitives() throws {
         let model = GovernanceModel()
         model.pendingApprovals = [
             PendingApprovalRecord(
@@ -163,7 +163,7 @@ final class SessionPrimitivesTests: XCTestCase {
         )
     }
 
-    func testPendingRequestsMapFolderReadsIntoGenericSessionCopy() throws {
+    func testPendingApprovalsMapFolderReadsIntoGenericSessionCopy() throws {
         let model = GovernanceModel()
         model.pendingApprovals = [
             PendingApprovalRecord(
@@ -185,7 +185,7 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertEqual(request.context, "Requested outside this Codex session's scope. Answer or ignore.")
     }
 
-    func testPendingRequestsMapPrivacyExposureIntoPrivacyRequest() throws {
+    func testPendingApprovalsMapPrivacyExposureIntoPrivacyRequest() throws {
         let model = GovernanceModel()
         model.pendingApprovals = [
             PendingApprovalRecord(
@@ -212,7 +212,7 @@ final class SessionPrimitivesTests: XCTestCase {
         XCTAssertTrue(request.context.contains("Contains your email plus a secret token."))
     }
 
-    func testPendingRequestsIgnoreUnknownAgents() {
+    func testPendingApprovalsIgnoreUnknownAgents() {
         let model = GovernanceModel()
         model.pendingApprovals = [
             PendingApprovalRecord(
@@ -232,8 +232,8 @@ final class SessionPrimitivesTests: XCTestCase {
     // MARK: - ManifoldCommands protocol conformance
 
     func testStoreConformsToManifoldCommands() {
-        let runtime = FixtureRuntimeClient(profile: .dashboard)
-        let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard))
+        let runtime = FixtureRuntimeClient(profile: .baseline)
+        let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline))
         let store = ManifoldStore(runtime: runtime, integrationHealth: health, startServices: false)
         let commands: any ManifoldCommands = store
         XCTAssertNotNil(commands)

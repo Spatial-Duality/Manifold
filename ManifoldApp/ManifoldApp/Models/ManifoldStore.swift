@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import Darwin
 import Security
 import SwiftUI
 import UserNotifications
@@ -40,7 +41,6 @@ final class ManifoldStore {
     let governance: GovernanceModel
     let rules: RulesModel
     let sessionWorkbench: SessionWorkbenchModel
-    let personalDataOS: PersonalDataOSModel
     let integrationHealth: IntegrationHealthModel
     let diagnostics: DiagnosticsModel
     let updater: UpdaterModel?
@@ -50,13 +50,6 @@ final class ManifoldStore {
     private var didAttemptAgentRestart = false
     private var didAttemptDefaultSessionStart = false
     private var suppressDefaultSessionUntilNextLaunch = false
-
-    /// Per-agent snapshot of the access-recording level taken when a
-    /// session-scoped request-detail override is applied, so we can
-    /// restore the prior level when the session ends. The dictionary
-    /// is keyed by agent and only populated while an override is in
-    /// effect for that agent.
-    private var requestDetailRestoreLevels: [TargetApp: AccessRecordingLevel] = [:]
 
     var menuBarIcon: String {
         guard isRuntimeConnected else { return "shield.slash" }
@@ -88,7 +81,6 @@ final class ManifoldStore {
         governance = GovernanceModel()
         rules = RulesModel()
         sessionWorkbench = SessionWorkbenchModel()
-        personalDataOS = PersonalDataOSModel()
         diagnostics = DiagnosticsModel()
         // Sparkle is only meaningful when the bundle has a feed URL and a
         // public EdDSA key — i.e. an official build. In source builds where
@@ -112,7 +104,6 @@ final class ManifoldStore {
         mailReview.configure(mailAccounts: mailAccounts)
         governance.configure(client: runtime)
         rules.configure(client: runtime)
-        personalDataOS.configure(client: runtime)
 
         integrationHealth.store = self
 
@@ -208,23 +199,23 @@ final class ManifoldStore {
         }
 
         do {
-            let dashboard = try await runtime.dashboardState()
-            sources = Self.visibleSources(from: dashboard.sources)
-            governance.claudePolicy = dashboard.claudePolicy
-            governance.codexPolicy = dashboard.codexPolicy
-            governance.claudeEmailGovernance = dashboard.claudeEmailGovernance
-            governance.codexEmailGovernance = dashboard.codexEmailGovernance
-            governance.activeSessionRecord = dashboard.activeSession
-            governance.claudeCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
-            governance.codexCoverage = dashboard.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
-            governance.coverageEvents = dashboard.coverageEvents
-            connectedAgents = dashboard.connectedAgents
+            let snapshot = try await runtime.runtimeStatusSnapshot()
+            sources = Self.visibleSources(from: snapshot.sources)
+            governance.claudePolicy = snapshot.claudePolicy
+            governance.codexPolicy = snapshot.codexPolicy
+            governance.claudeEmailGovernance = snapshot.claudeEmailGovernance
+            governance.codexEmailGovernance = snapshot.codexEmailGovernance
+            governance.activeSessionRecord = snapshot.activeSession
+            governance.claudeCoverage = snapshot.agentCoverages.first { $0.agent == TargetApp.cowork.rawValue }
+            governance.codexCoverage = snapshot.agentCoverages.first { $0.agent == TargetApp.codex.rawValue }
+            governance.coverageEvents = snapshot.coverageEvents
+            connectedAgents = snapshot.connectedAgents
             // Derive connectedAgent from actual runtime data, not heuristics
-            connectedAgent = dashboard.connectedAgents.first
+            connectedAgent = snapshot.connectedAgents.first
             lastError = nil
         } catch {
             lastError = error.localizedDescription
-            logger.error("Failed to refresh dashboard: \(error.localizedDescription)")
+            logger.error("Failed to refresh runtime status: \(error.localizedDescription)")
         }
 
         do {
@@ -250,7 +241,6 @@ final class ManifoldStore {
         await session.refreshGrantState()
         await storage.loadStorageStats()
         await storage.loadTrackedFiles()
-        await personalDataOS.loadOverview()
         await mailAccounts.loadAccounts()
         await rules.load()
     }
@@ -852,18 +842,10 @@ final class ManifoldStore {
     func endSession() async {
         let endingGrantID = session.activeGrant?.grantID
         let endingWasDefault = session.activeGrant?.summaryFraming == "Default"
-        let endingAgent = session.activeGrant.flatMap { TargetApp(rawValue: $0.targetApp) }
         await session.endSession(
             onError: { [weak self] message in self?.lastError = message },
             onConflict: { [weak self] count in self?.lastError = "\(count) conflict(s) while ending the session. Check activity for details." }
         )
-        // Restore the agent's prior request-detail level if a
-        // session-scoped override was applied at activation. Doing
-        // this BEFORE refreshAll ensures the dashboard reflects the
-        // restored level on the next pass.
-        if let endingAgent {
-            await restoreRequestDetailIfNeeded(for: endingAgent)
-        }
         await refreshAll()
         if let endingGrantID {
             session.lastCompletedSession = activity.sessions.first(where: { $0.id == endingGrantID })
@@ -918,6 +900,18 @@ final class ManifoldStore {
             included: included,
             defaultSourceIDs: defaultSourceIDs(for: preload.agent)
         )
+    }
+
+    func setPreloadEmail(emailID: String, included: Bool) {
+        sessionWorkbench.setEmail(emailID, included: included)
+    }
+
+    func setPreloadEmails(emailIDs: Set<String>, included: Bool) {
+        sessionWorkbench.setEmails(emailIDs, included: included)
+    }
+
+    func clearPreloadEmails() {
+        sessionWorkbench.clearEmails()
     }
 
     func loadSessionTemplates() async {
@@ -994,17 +988,13 @@ final class ManifoldStore {
         draft.usesExplicitFileSelection = true
         draft.selectedSourceIDs = sourceIDs
         draft.selectedEmailIDs = preload.selectedEmailIDs
+        draft.requestDetailOverride = preload.requestDetailOverride
+        draft.allowFileMemory = preload.allowFileMemory
         sessionWorkbench.isActivating = true
         defer { sessionWorkbench.isActivating = false }
         do {
             try await startGatewaySession(draft: draft)
             suppressDefaultSessionUntilNextLaunch = false
-            // Apply the per-session request-detail override after the
-            // gateway is live. Snapshot the agent's prior level first
-            // so endSession can restore it.
-            if let override = preload.requestDetailOverride {
-                await applyRequestDetailOverride(override, for: preload.agent)
-            }
             sessionWorkbench.lastMessage = "Activated \(draft.name)."
             sessionWorkbench.lastError = nil
         } catch {
@@ -1012,39 +1002,83 @@ final class ManifoldStore {
         }
     }
 
-    /// Apply a session-scoped request-detail override. Snapshots the
-    /// agent's current level so endSession can restore it. If the
-    /// override matches the current level, no snapshot is taken.
+    /// Apply a session-scoped request-detail override to the active
+    /// grant. This deliberately does not rewrite the agent's persistent
+    /// policy; MCP reads the active grant first when validating intent.
     func applyRequestDetailOverride(_ level: AccessRecordingLevel, for agent: TargetApp) async {
-        let current = governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight
-        guard current != level else { return }
-        // Only snapshot once per session — don't clobber an existing
-        // restore level if the user updates the override mid-session.
-        if requestDetailRestoreLevels[agent] == nil {
-            requestDetailRestoreLevels[agent] = current
+        guard let grant = session.activeGrant,
+              TargetApp(rawValue: grant.targetApp) == agent else {
+            return
         }
-        await governance.updateAccessRecordingLevel(level, for: agent)
+        do {
+            let updated = try await runtime.updateGrantRequestDetailLevel(grantID: grant.grantID, level: level)
+            session.activeGrant = updated
+            await refreshAll()
+        } catch {
+            lastError = "Couldn't update session request detail: \(error.localizedDescription)"
+        }
     }
 
-    /// Clear the override and restore the snapshotted level (no-op if
-    /// no override was applied).
-    func restoreRequestDetailIfNeeded(for agent: TargetApp) async {
-        guard let restoreLevel = requestDetailRestoreLevels.removeValue(forKey: agent) else { return }
-        await governance.updateAccessRecordingLevel(restoreLevel, for: agent)
+    func clearRequestDetailOverride(for agent: TargetApp) async {
+        guard let grant = session.activeGrant,
+              TargetApp(rawValue: grant.targetApp) == agent else {
+            return
+        }
+        do {
+            let updated = try await runtime.updateGrantRequestDetailLevel(grantID: grant.grantID, level: nil)
+            session.activeGrant = updated
+            await refreshAll()
+        } catch {
+            lastError = "Couldn't clear session request detail: \(error.localizedDescription)"
+        }
     }
 
     /// True when the active session has a request-detail override in
     /// effect for the given agent. Used by the UI so it can label the
     /// picker as session-scoped vs agent-default.
     func hasActiveRequestDetailOverride(for agent: TargetApp) -> Bool {
-        requestDetailRestoreLevels[agent] != nil
+        guard let grant = session.activeGrant,
+              TargetApp(rawValue: grant.targetApp) == agent else {
+            return false
+        }
+        return grant.sessionRequestDetailLevel != nil
+    }
+
+    /// Apply the session-scoped file-memory query permission. Memory
+    /// capture remains automatic; this only controls whether the active
+    /// agent may query prior memory for the session's file scope.
+    func applyFileMemoryAccess(_ enabled: Bool, for agent: TargetApp) async {
+        guard let grant = session.activeGrant,
+              TargetApp(rawValue: grant.targetApp) == agent else {
+            return
+        }
+        do {
+            let updated = try await runtime.updateGrantMemoryAccess(grantID: grant.grantID, enabled: enabled)
+            session.activeGrant = updated
+            await refreshAll()
+        } catch {
+            lastError = "Couldn't update file memory access: \(error.localizedDescription)"
+        }
+    }
+
+    func hasActiveFileMemoryAccess(for agent: TargetApp) -> Bool {
+        guard let grant = session.activeGrant,
+              TargetApp(rawValue: grant.targetApp) == agent else {
+            return false
+        }
+        return grant.memoryAccessEnabled
     }
 
     /// Effective request-detail level for the given agent — the
     /// session-scoped override if one is in effect, otherwise the
     /// agent's persistent default.
     func effectiveRequestDetail(for agent: TargetApp) -> AccessRecordingLevel {
-        governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight
+        if let grant = session.activeGrant,
+           TargetApp(rawValue: grant.targetApp) == agent,
+           let level = grant.sessionRequestDetailLevel {
+            return level
+        }
+        return governance.policy(for: agent)?.accessRecordingLevel ?? .lightweight
     }
 
     func displayName(for agent: TargetApp) -> String {
@@ -1088,16 +1122,15 @@ final class ManifoldStore {
         await integrationHealth.checkAll(force: true)
     }
 
-    /// Find every running `manifold-mcp` process and send SIGTERM.
-    /// Only matches processes whose executable path resolves to the
-    /// same installed-helper location we ship — we don't kill arbitrary
-    /// processes whose name happens to contain "manifold-mcp".
+    /// Find every running installed `manifold-mcp` process and send
+    /// SIGTERM. The path comparison uses proc_pidpath so we don't kill
+    /// arbitrary development helpers whose basename happens to match.
     private nonisolated static func terminateStaleMCPHelpers() {
-        let installedPath = mcpBinaryPath
+        let installedPath = URL(fileURLWithPath: mcpBinaryPath).standardizedFileURL.path
         let process = Process()
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-axo", "pid=,comm="]
+        process.arguments = ["-axo", "pid="]
         process.standardOutput = output
         process.standardError = Pipe()
         do {
@@ -1111,15 +1144,9 @@ final class ManifoldStore {
         guard let listing = String(data: data, encoding: .utf8) else { return }
         var terminated = 0
         for rawLine in listing.split(whereSeparator: { $0.isNewline }) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard let firstSpace = line.firstIndex(where: { $0.isWhitespace }) else { continue }
-            let pidString = String(line[..<firstSpace])
+            let pidString = rawLine.trimmingCharacters(in: .whitespaces)
             guard let pid = pid_t(pidString), pid > 1 else { continue }
-            let command = String(line[line.index(after: firstSpace)...]).trimmingCharacters(in: .whitespaces)
-            // `comm` truncates after the executable basename; match
-            // either the bare basename or the full installed path.
-            guard command == installedPath
-                || (command as NSString).lastPathComponent == "manifold-mcp" else {
+            guard resolvedExecutablePath(for: pid) == installedPath else {
                 continue
             }
             if kill(pid, SIGTERM) == 0 {
@@ -1127,6 +1154,14 @@ final class ManifoldStore {
             }
         }
         logger.info("Reconnect agents: terminated \(terminated) helper process(es)")
+    }
+
+    private nonisolated static func resolvedExecutablePath(for pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4_096)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        let path = buffer.prefix { $0 != 0 }.map(UInt8.init(bitPattern:))
+        return URL(fileURLWithPath: String(decoding: path, as: UTF8.self)).standardizedFileURL.path
     }
 
     func restoreFile(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
@@ -1612,161 +1647,6 @@ final class ManifoldStore {
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("Manifold/bin/manifold-mcp")
             .path
-    }
-}
-
-@Observable
-@MainActor
-final class PersonalDataOSModel {
-    var ledgerEntries: [LedgerEntry] = []
-    var ledgerVerification: LedgerVerificationResult?
-    var toolCostReport: ToolCostReport?
-    var memorySettings = MemorySettings()
-    var memoryItems: [MemoryItem] = []
-    var memorySources: [MemorySourceSummary] = []
-    var skills: [SkillRecord] = []
-    var execRuns: [ExecRunRecord] = []
-    var capabilityHandles: [ValueHandle] = []
-    var graphNodes: [KnowledgeGraphNode] = []
-    var fabricationFindings: [FabricationFinding] = []
-    var isLoadingLedger = false
-    var isLoadingMemory = false
-    var isLoadingAgentOS = false
-    var lastError: String?
-
-    private var client: (any RuntimeClientProtocol)?
-
-    func configure(client: any RuntimeClientProtocol) {
-        self.client = client
-    }
-
-    func loadOverview() async {
-        await loadLedger()
-        await loadMemory()
-        await loadAgentOS()
-    }
-
-    func loadLedger() async {
-        guard let client else { return }
-        isLoadingLedger = true
-        defer { isLoadingLedger = false }
-        do {
-            async let entries = client.recentLedgerEntries(limit: 50)
-            async let verification = client.verifyLedger()
-            async let costReport = client.toolCostReport(limit: 200)
-            ledgerEntries = try await entries
-            ledgerVerification = try await verification
-            toolCostReport = try await costReport
-            lastError = nil
-        } catch {
-            ledgerEntries = []
-            ledgerVerification = nil
-            toolCostReport = nil
-            lastError = error.localizedDescription
-            logger.error("Failed to load personal data ledger: \(error.localizedDescription)")
-        }
-    }
-
-    func loadMemory() async {
-        guard let client else { return }
-        isLoadingMemory = true
-        defer { isLoadingMemory = false }
-        do {
-            async let settings = client.getMemorySettings()
-            async let items = client.listMemory(limit: 100, includeDeleted: false)
-            async let sources = client.listMemorySources()
-            memorySettings = try await settings
-            memoryItems = try await items
-            memorySources = try await sources
-            lastError = nil
-        } catch {
-            memorySettings = MemorySettings()
-            memoryItems = []
-            memorySources = []
-            lastError = error.localizedDescription
-            logger.error("Failed to load owned memory: \(error.localizedDescription)")
-        }
-    }
-
-    func updateMemorySettings(amnesiacMode: Bool? = nil, derivedRetentionDays: Int? = nil) async {
-        guard let client else { return }
-        var updated = memorySettings
-        if let amnesiacMode {
-            updated.amnesiacMode = amnesiacMode
-        }
-        if let derivedRetentionDays {
-            updated.derivedRetentionDays = derivedRetentionDays
-        }
-        do {
-            memorySettings = try await client.updateMemorySettings(updated)
-            await loadMemory()
-        } catch {
-            lastError = error.localizedDescription
-            logger.error("Failed to update memory settings: \(error.localizedDescription)")
-        }
-    }
-
-    func forgetMemory(_ item: MemoryItem) async {
-        guard let client else { return }
-        do {
-            try await client.forgetMemory(id: item.memoryID)
-            await loadMemory()
-            await loadLedger()
-        } catch {
-            lastError = error.localizedDescription
-            logger.error("Failed to forget memory \(item.memoryID): \(error.localizedDescription)")
-        }
-    }
-
-    func loadAgentOS() async {
-        guard let client else { return }
-        isLoadingAgentOS = true
-        defer { isLoadingAgentOS = false }
-        do {
-            async let loadedSkills = client.listSkills(limit: 50)
-            async let loadedRuns = client.recentExecRuns(limit: 50)
-            async let loadedHandles = client.listCapabilityHandles(limit: 50)
-            async let loadedNodes = client.queryGraphNodes(query: "", limit: 50)
-            async let loadedFindings = client.recentFabricationFindings(limit: 50)
-            skills = try await loadedSkills
-            execRuns = try await loadedRuns
-            capabilityHandles = try await loadedHandles
-            graphNodes = try await loadedNodes
-            fabricationFindings = try await loadedFindings
-            lastError = nil
-        } catch {
-            skills = []
-            execRuns = []
-            capabilityHandles = []
-            graphNodes = []
-            fabricationFindings = []
-            lastError = error.localizedDescription
-            logger.error("Failed to load Agent OS surfaces: \(error.localizedDescription)")
-        }
-    }
-
-    var activeMemoryCount: Int {
-        memoryItems.filter { $0.status == MemoryStatus.active.rawValue }.count
-    }
-
-    var hiddenMemoryCount: Int {
-        memoryItems.filter {
-            $0.status == MemoryStatus.hiddenByScope.rawValue
-                || $0.status == MemoryStatus.tombstonedByRevocation.rawValue
-                || $0.status == MemoryStatus.expiredByRetention.rawValue
-        }.count
-    }
-
-    var blockedExecRunCount: Int {
-        execRuns.filter {
-            $0.status == ExecRunStatus.refused.rawValue
-                || $0.status == ExecRunStatus.needsApproval.rawValue
-                || $0.status == ExecRunStatus.failed.rawValue
-        }.count
-    }
-
-    var supportedFindingCount: Int {
-        fabricationFindings.filter { $0.status == "supported" }.count
     }
 }
 

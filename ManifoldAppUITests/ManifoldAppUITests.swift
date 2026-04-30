@@ -23,7 +23,11 @@ class ManifoldUITestCase: XCTestCase {
     func launchFixture(profile: String) -> XCUIApplication {
         let app = XCUIApplication()
         let testHome = makeTestHome(prefix: "fixture-\(profile)")
-        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES",
+            "-rules.inspectorVisible", "YES",
+            "-access.inspector.visible", "YES"
+        ]
         app.launchEnvironment["MANIFOLD_UI_TEST_MODE"] = "1"
         app.launchEnvironment["MANIFOLD_DISABLE_REAL_RUNTIME"] = "1"
         app.launchEnvironment["MANIFOLD_TEST_RUNTIME_MODE"] = "fixture"
@@ -35,10 +39,14 @@ class ManifoldUITestCase: XCTestCase {
     }
 
     @discardableResult
-    func launchLocalRuntime(scenario: String = "privacy-e2e") -> XCUIApplication {
+    func launchSyntheticMCPUI(scenario: String = "synthetic-mcp-ui") -> XCUIApplication {
         let app = XCUIApplication()
-        let testHome = makeTestHome(prefix: "runtime-\(scenario)")
-        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        let testHome = makeTestHome(prefix: "synthetic-\(scenario)")
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES",
+            "-rules.inspectorVisible", "YES",
+            "-access.inspector.visible", "YES"
+        ]
         app.launchEnvironment["MANIFOLD_UI_TEST_MODE"] = "1"
         app.launchEnvironment["MANIFOLD_TEST_RUNTIME_MODE"] = "local"
         app.launchEnvironment["MANIFOLD_TEST_SCENARIO"] = scenario
@@ -53,17 +61,45 @@ class ManifoldUITestCase: XCTestCase {
         XCTAssertTrue(element(in: app, id: "settings.window").waitForExistence(timeout: 8))
     }
 
-    func openSidebarDestination(
-        _ destinationID: String,
+    func openLedgerSpace(
+        _ spaceID: String,
         expectedSurface surfaceID: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 8
     ) {
-        let button = element(in: app, id: destinationID)
-        XCTAssertTrue(button.waitForExistence(timeout: timeout))
+        let button = ledgerSpaceButton(spaceID, in: app, timeout: timeout)
         app.activate()
         button.click()
         XCTAssertTrue(element(in: app, id: surfaceID).waitForExistence(timeout: timeout))
+    }
+
+    func ledgerSpaceButton(_ spaceID: String, in app: XCUIApplication, timeout: TimeInterval = 8) -> XCUIElement {
+        let title = ledgerSpaceTitle(spaceID)
+        let button = app.buttons[title]
+        if button.waitForExistence(timeout: 1) {
+            return button
+        }
+
+        let identified = element(in: app, id: "ledger.space.\(spaceID)")
+        XCTAssertTrue(identified.waitForExistence(timeout: timeout), "Expected ledger space \(spaceID)")
+        return identified
+    }
+
+    func assertLedgerSpaceExists(_ spaceID: String, in app: XCUIApplication) {
+        if app.buttons[ledgerSpaceTitle(spaceID)].exists { return }
+        let identified = element(in: app, id: "ledger.space.\(spaceID)")
+        if identified.exists { return }
+        XCTAssertTrue(identified.exists, "Expected ledger space \(spaceID)")
+    }
+
+    private func ledgerSpaceTitle(_ spaceID: String) -> String {
+        switch spaceID {
+        case "work": return "Work"
+        case "access": return "Access"
+        case "mail": return "Mail"
+        case "rules": return "Rules"
+        default: return spaceID
+        }
     }
 
     func clearAndType(_ textField: XCUIElement, text: String) {
@@ -195,32 +231,32 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 
         app.buttons["Skip setup"].click()
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "ledger.sidebar.work").exists)
+        assertLedgerSpaceExists("work", in: app)
     }
 
-    func testSidebarNavigationShowsCurrentLedgerSurfaces() {
+    func testSpaceSwitcherNavigationShowsCurrentLedgerSurfaces() {
         let app = launchFixture(profile: "tracked-work")
 
         XCTAssertTrue(element(in: app, id: "ledger.sidebar").waitForExistence(timeout: 8))
         // Default destination is Work.
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
 
-        // The redesign collapses to four sidebar entries. Provenance and
-        // Agent OS are no longer reachable from normal UI.
-        openSidebarDestination("ledger.sidebar.access", expectedSurface: "ledger.surface.access", in: app)
-        openSidebarDestination("ledger.sidebar.mail", expectedSurface: "ledger.surface.mail", in: app)
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app)
+        openLedgerSpace("mail", expectedSurface: "ledger.surface.mail", in: app)
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 8))
-        openSidebarDestination("ledger.sidebar.rules", expectedSurface: "ledger.surface.rules", in: app)
-        openSidebarDestination("ledger.sidebar.work", expectedSurface: "ledger.surface.work", in: app)
+        openLedgerSpace("rules", expectedSurface: "ledger.surface.rules", in: app)
+        openLedgerSpace("work", expectedSurface: "ledger.surface.work", in: app)
 
-        XCTAssertFalse(element(in: app, id: "ledger.sidebar.provenance").exists)
-        XCTAssertFalse(element(in: app, id: "ledger.sidebar.agentOS").exists)
+        assertLedgerSpaceExists("work", in: app)
+        assertLedgerSpaceExists("access", in: app)
+        assertLedgerSpaceExists("mail", in: app)
+        assertLedgerSpaceExists("rules", in: app)
     }
 
     func testMailFixtureLoadsCurrentReviewSurfaceAndInspector() {
         let app = launchFixture(profile: "tracked-work")
 
-        openSidebarDestination("ledger.sidebar.mail", expectedSurface: "ledger.surface.mail", in: app)
+        openLedgerSpace("mail", expectedSurface: "ledger.surface.mail", in: app)
 
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 8))
         let subject = app.staticTexts["Operator smoke test"]
@@ -228,14 +264,14 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         subject.click()
 
         XCTAssertTrue(element(in: app, id: "mail.message.inspector.visibility.email-4").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: app, id: "mail.message.allow").exists)
-        XCTAssertTrue(element(in: app, id: "mail.message.hide").exists)
+        XCTAssertTrue(element(in: app, id: "mail.message.share.all").exists)
+        XCTAssertTrue(element(in: app, id: "mail.message.share.agent.codex").exists)
     }
 
-    func testAccessFoldersCanShareMixedScopeWithBothAgents() {
+    func testAccessFoldersCanClearMixedScopeForBothAgents() {
         let app = launchFixture(profile: "tracked-work")
 
-        openSidebarDestination("ledger.sidebar.access", expectedSurface: "ledger.surface.access", in: app)
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app)
 
         let bothControl = element(in: app, id: "access.folder.src-claude.all")
         XCTAssertTrue(bothControl.waitForExistence(timeout: 8))
@@ -243,52 +279,36 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 
         bothControl.click()
 
-        XCTAssertTrue(waitForValue("shared", in: bothControl, timeout: 5))
-        XCTAssertTrue(waitForValue("shared", in: element(in: app, id: "access.folder.src-claude.agent.cowork"), timeout: 5))
-        XCTAssertTrue(waitForValue("shared", in: element(in: app, id: "access.folder.src-claude.agent.codex"), timeout: 5))
+        XCTAssertTrue(waitForValue("not shared", in: bothControl, timeout: 5))
+        XCTAssertTrue(waitForValue("not shared", in: element(in: app, id: "access.folder.src-claude.agent.cowork"), timeout: 5))
+        XCTAssertTrue(waitForValue("not shared", in: element(in: app, id: "access.folder.src-claude.agent.codex"), timeout: 5))
     }
 
-    func testAccessFilesCanToggleSingleFileForBothAgents() {
+    func testAccessFilesCanToggleSingleFileForCodex() {
         let app = launchFixture(profile: "tracked-work")
 
-        openSidebarDestination("ledger.sidebar.access", expectedSurface: "ledger.surface.access", in: app)
-        clickElement(in: app, id: "access.tab.files", fallbackButtonTitle: "Files")
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app)
+        let filesSection = element(in: app, id: "access.sidebar.files")
+        XCTAssertTrue(filesSection.waitForExistence(timeout: 8))
+        filesSection.click()
 
-        let bothControl = element(in: app, id: "access.file.src-claude.marker-txt.all")
-        XCTAssertTrue(bothControl.waitForExistence(timeout: 8))
-        XCTAssertTrue(waitForValue("partially shared", in: bothControl, timeout: 5))
+        let markerFile = element(in: app, id: "access.file.src-claude.marker-txt.name")
+        XCTAssertTrue(markerFile.waitForExistence(timeout: 8))
+        markerFile.click()
 
-        bothControl.click()
+        let codexControl = element(in: app, id: "access.inspector.file.src-claude.marker-txt.agent.codex")
+        XCTAssertTrue(codexControl.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForValue("off", in: codexControl, timeout: 5))
 
-        XCTAssertTrue(waitForValue("shared", elementID: "access.file.src-claude.marker-txt.all", in: app, timeout: 5))
-        XCTAssertTrue(waitForValue("shared", in: element(in: app, id: "access.file.src-claude.marker-txt.agent.codex"), timeout: 5))
+        codexControl.click()
+
+        XCTAssertTrue(waitForValue("on", elementID: "access.inspector.file.src-claude.marker-txt.agent.codex", in: app, timeout: 5))
     }
 
-    func testAccessMemoryFixtureShowsOwnedMemoryAndLineage() {
+    func testApprovalsQueueCanResolveFixtureApproval() {
         let app = launchFixture(profile: "tracked-work")
 
-        openSidebarDestination("ledger.sidebar.access", expectedSurface: "ledger.surface.access", in: app)
-        clickElement(in: app, id: "access.tab.memory", fallbackButtonTitle: "Memory")
-
-        XCTAssertTrue(element(in: app, id: "access.memory.summary").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "access.memory.source.src-shared").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "access.memory.item.mem-fixture-review-routine").waitForExistence(timeout: 8))
-    }
-
-    /// Agent OS is no longer a user-visible destination after the
-    /// 2026-04-29 redesign. Its data is still recorded for developer
-    /// diagnostics, but the surface is not reachable from the sidebar.
-    func testAgentOSSurfaceIsNotReachableFromSidebar() {
-        let app = launchFixture(profile: "tracked-work")
-        XCTAssertTrue(element(in: app, id: "ledger.sidebar").waitForExistence(timeout: 8))
-        XCTAssertFalse(element(in: app, id: "ledger.sidebar.agentOS").exists)
-        XCTAssertFalse(element(in: app, id: "ledger.sidebar.provenance").exists)
-    }
-
-    func testRequestsQueueCanResolveFixtureApproval() {
-        let app = launchFixture(profile: "tracked-work")
-
-        openSidebarDestination("ledger.sidebar.work", expectedSurface: "ledger.surface.work", in: app)
+        openLedgerSpace("work", expectedSurface: "ledger.surface.work", in: app)
 
         let approvalRow = element(in: app, id: "work.approval.approval-1")
         XCTAssertTrue(approvalRow.waitForExistence(timeout: 8))
@@ -329,7 +349,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.failed").exists)
     }
 
-    func testPrivacyActivityEvidenceRendersCurrentInspector() {
+    func testPrivacyWorkEvidenceRendersCurrentInspector() {
         let app = launchFixture(profile: "privacy")
 
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
@@ -347,11 +367,10 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
     func testRulesFixtureSupportsSearchInspectorAndEmptySuggestedState() {
         let app = launchFixture(profile: "privacy")
 
-        openSidebarDestination("ledger.sidebar.rules", expectedSurface: "ledger.surface.rules", in: app)
+        openLedgerSpace("rules", expectedSurface: "ledger.surface.rules", in: app)
 
         let searchField = elementOrTextField(in: app, id: "rules.toolbar.search", fallbackPlaceholder: "Search rules")
         clearAndType(searchField, text: "OpenAI")
-        XCTAssertTrue(app.staticTexts["Allow OpenAI mail"].waitForExistence(timeout: 5))
         let openAIRule = element(in: app, id: "rules.rowTitle.rule-email-openai")
         XCTAssertTrue(openAIRule.waitForExistence(timeout: 5))
         openAIRule.click()
@@ -366,7 +385,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
     func testRulesSidebarFiltersDriveTheVisibleRuleSet() {
         let app = launchFixture(profile: "privacy")
 
-        openSidebarDestination("ledger.sidebar.rules", expectedSurface: "ledger.surface.rules", in: app)
+        openLedgerSpace("rules", expectedSurface: "ledger.surface.rules", in: app)
 
         element(in: app, id: "rules.sidebar.scope-file").click()
         XCTAssertTrue(app.staticTexts["Protect Secrets"].waitForExistence(timeout: 5))
@@ -388,13 +407,13 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 }
 
 @MainActor
-final class ManifoldRuntimeE2ETests: ManifoldUITestCase {
-    func testLocalRuntimeScenarioBootsAndShowsPrivacyRequest() {
-        let app = launchLocalRuntime()
+final class ManifoldSyntheticMCPUITests: ManifoldUITestCase {
+    func testSyntheticScenarioBootsAndShowsPrivacyApproval() {
+        let app = launchSyntheticMCPUI()
 
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 15))
 
-        let approvalRow = element(in: app, id: "work.approval.approval-runtime-privacy")
+        let approvalRow = element(in: app, id: "work.approval.approval-synthetic-mcp-ui")
         XCTAssertTrue(approvalRow.waitForExistence(timeout: 15))
         // Drill into the inspector for redacted/original actions.
         approvalRow.click()
@@ -402,31 +421,47 @@ final class ManifoldRuntimeE2ETests: ManifoldUITestCase {
         XCTAssertTrue(waitForNonExistence(approvalRow, timeout: 15))
     }
 
-    func testLocalRuntimeMailAndActivityReflectSeededRuntimeData() {
-        let app = launchLocalRuntime()
+    func testSyntheticMailAndWorkTimelineReflectSeededData() {
+        let app = launchSyntheticMCPUI()
 
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 15))
-        openSidebarDestination("ledger.sidebar.mail", expectedSurface: "ledger.surface.mail", in: app, timeout: 15)
+        openLedgerSpace("mail", expectedSurface: "ledger.surface.mail", in: app, timeout: 15)
 
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 15))
         let subject = app.staticTexts["Privacy review needed"]
         XCTAssertTrue(subject.waitForExistence(timeout: 15))
+
+        let searchField = elementOrTextField(
+            in: app,
+            id: "mail.searchField",
+            fallbackPlaceholder: "Search sender, subject, or preview",
+            timeout: 8
+        )
+        clearAndType(searchField, text: "tea party")
+        XCTAssertTrue(app.staticTexts["Model garden tea party"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Codex found the missing semicolon"].exists)
+        clearAndType(searchField, text: "semicolon")
+        XCTAssertTrue(app.staticTexts["Codex found the missing semicolon"].waitForExistence(timeout: 5))
+        searchField.click()
+        searchField.typeKey("a", modifierFlags: .command)
+        searchField.typeKey(.delete, modifierFlags: [])
+
         subject.click()
 
         XCTAssertTrue(element(in: app, id: "mail.message.inspector.visibility.runtime-email-1").waitForExistence(timeout: 8))
 
-        openSidebarDestination("ledger.sidebar.work", expectedSurface: "ledger.surface.work", in: app, timeout: 15)
-        element(in: app, id: "work.timeline.filter.approvals").click()
+        openLedgerSpace("work", expectedSurface: "ledger.surface.work", in: app, timeout: 15)
+        clickElement(in: app, id: "work.timeline.filter.approvals", fallbackButtonTitle: "Approvals")
 
-        let target = element(in: app, id: "work.timeline.entry.3")
+        let target = element(in: app, id: "work.timeline.privacy.runtime-email-1")
         XCTAssertTrue(target.waitForExistence(timeout: 15))
         target.click()
 
-        XCTAssertTrue(element(in: app, id: "work.inspector").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "work.inspector.event.runtime-email-1").waitForExistence(timeout: 8))
     }
 
-    func testLocalRuntimeSettingsPrivacyPaneShowsDiscoveryData() {
-        let app = launchLocalRuntime()
+    func testSyntheticSettingsPrivacyPaneShowsDiscoveryData() {
+        let app = launchSyntheticMCPUI()
 
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 15))
         openSettings(in: app)

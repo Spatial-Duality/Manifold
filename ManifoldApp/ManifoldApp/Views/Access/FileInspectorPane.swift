@@ -43,6 +43,7 @@ struct FileInspectorPane: View {
                 empty
             }
         }
+        .accessibilityIdentifier("access.inspector")
     }
 
     private func loadExposures(for file: SourceFile) async {
@@ -150,13 +151,11 @@ struct FileInspectorPane: View {
                 connectedAgents: connectedAgents,
                 visibleAgents: visible,
                 explicitAgents: explicitAgents,
+                accessibilityIDPrefix: "access.inspector.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent)",
                 onToggleAgent: { agent, wasVisible in
                     onToggleAgent(agent, wasVisible)
                 },
                 onSetAllAgents: onSetAllAgents
-            )
-            .accessibilityIdentifier(
-                "access.inspector.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent).selector"
             )
 
             Button("Reset to inherited", action: onReset)

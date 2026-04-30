@@ -12,14 +12,12 @@ import SwiftUI
 import ManifoldKit
 
 extension Notification.Name {
-    static let manifoldShowSessions = Notification.Name("manifold.showSessions")
-    static let manifoldShowActivityLedger = Notification.Name("manifold.showActivityLedger")
+    static let manifoldShowWork = Notification.Name("manifold.showWork")
     static let manifoldShowLedgerDestination = Notification.Name("manifold.showLedgerDestination")
     static let manifoldFocusCurrentSearch = Notification.Name("manifold.focusCurrentSearch")
     static let manifoldCycleCurrentSubtab = Notification.Name("manifold.cycleCurrentSubtab")
     static let manifoldPauseAllFromIntent = Notification.Name("manifoldPauseAllFromIntent")
     static let manifoldStartSessionFromIntent = Notification.Name("manifoldStartSessionFromIntent")
-    static let manifoldOpenActivityFromIntent = Notification.Name("manifoldOpenActivityFromIntent")
     static let manifoldOpenSettingsDiagnostics = Notification.Name("manifold.openSettingsDiagnostics")
 }
 
@@ -46,7 +44,7 @@ struct AppRootView: View {
         )) {
             CommandPaletteView()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .manifoldShowSessions)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .manifoldShowWork)) { _ in
             presentMainLedger(destination: .work)
         }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldStartSessionFromIntent)) { _ in
@@ -57,9 +55,6 @@ struct AppRootView: View {
                     baseMode: .buildOnDefault
                 )
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .manifoldOpenActivityFromIntent)) { _ in
-            presentMainLedger(destination: .work)
         }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldPauseAllFromIntent)) { _ in
             Task { await store.governance.pauseAllAgents() }

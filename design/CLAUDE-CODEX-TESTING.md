@@ -183,16 +183,16 @@ Expected result:
 
 ## What to watch in the app
 
-- `Overview`: connected agent state, coverage, and access summary
-- `Files`: whether the shared and private boundaries are correct
-- `Emails > Email Rules`: whether allow and block behavior matches policy
-- `Activity`: reads, searches, and denied attempts
-- `Tracked Work Block` review flow: promote, discard, restore
-- `Versions`: whether governed edits become inspectable history
+- `Work`: active session state, approvals, timeline evidence, and tracked write review
+- `Access`: whether shared, private, and per-agent file boundaries are correct
+- `Mail`: whether synthetic allowed/blocked message visibility matches policy
+- `Rules`: whether allow, deny, and privacy behavior matches the active rule set
+- `Settings > Privacy`: scanner state, discovered identities, allowlist, and index status
+- Synthetic loop report: `script/run_self_improvement_loop.sh` writes the command transcript to `.build/self-improvement/manifold-self-improvement-report.txt`
 
 ## Current Known Testing Risks
 
 - Claude and Codex both have native capabilities outside Manifold, so prompts must explicitly say `use the Manifold MCP server only` when validating governed behavior
 - Claude Desktop/Cowork and Codex do not expose local capability in the same way, so a native success does not necessarily prove Manifold coverage
 - If the app and helper are built from different versions, startup and restart noise can make early tests confusing
-- The highest-value test is not "can the agent read a file"; it is "did the read show up in Activity and did the edit become tracked work"
+- The highest-value test is not "can the agent read a file"; it is "did the MCP read/write stay inside synthetic scope and show up in Work, Access, Mail, and Rules as expected"

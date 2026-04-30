@@ -4,21 +4,17 @@
 // MailView — the mail surface.
 //
 // Active-Backup, not a Mail client. No reading pane, no compose, no reply.
-// One surface: the dense review browser (account/mailbox rail + sortable
-// message table + narrow metadata inspector with atomic allow / hide).
+// One surface: the dense review browser (sortable message table + narrow
+// metadata inspector with atomic allow / hide). Account, mailbox, and quick
+// filter navigation lives in the unified app sidebar.
 //
 // History: prior versions split this into Review / Session / History tabs.
 // The Session and History tabs were stubs that pointed at functionality
-// living elsewhere (Activity tab handles cross-cutting history). Removing
+// living elsewhere (Work handles cross-cutting history). Removing
 // them per the redesign plan ships the Synology-style read-only archive
 // view as the only surface and drops the dead tab bar that competed with
 // the main app sidebar.
 //
-// MailSessionView.swift and MailHistoryView.swift remain in the tree as
-// unreachable placeholders — the redesign plan's named-session lifecycle
-// (Lane B-rest) will replace them with grant-scoped overlays that compose
-// on top of this Review surface, not a separate tab.
-
 import SwiftUI
 import ManifoldKit
 

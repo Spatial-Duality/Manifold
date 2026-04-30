@@ -18,6 +18,7 @@ import ManifoldKit
 struct AccessChipStack: View {
     let agents: [TargetApp]
     let visibleAgents: Set<TargetApp>
+    var accessibilityIDPrefix: String? = nil
     let onToggle: (TargetApp, Bool) -> Void
 
     var body: some View {
@@ -61,6 +62,8 @@ struct AccessChipStack: View {
         .buttonStyle(.plain)
         .help(visible ? "Unshare from \(label)" : "Share with \(label)")
         .accessibilityLabel(visible ? "Shared with \(label). Click to unshare." : "Not shared with \(label). Click to share.")
+        .accessibilityValue(visible ? "shared" : "not shared")
+        .accessibilityIdentifier(accessibilityIDPrefix.map { "\($0).agent.\(agent.rawValue)" } ?? "")
     }
 }
 

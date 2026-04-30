@@ -1,5 +1,10 @@
 # Manifold UI — Stage 9: Migration Plan
 
+> **Historical note (2026-04-30):** This plan predates the current
+> four-space app model: Work, Access, Mail, and Rules. It remains useful
+> as migration history only; do not treat its Activity, Requests, or
+> five-item sidebar references as current route guidance.
+
 Goal: replace the existing UI with the one designed across Stages 1–8 and
 rendered in `design/html/*.html`, while never leaving the codebase in a
 half-migrated state. By the end of this plan, every file listed under

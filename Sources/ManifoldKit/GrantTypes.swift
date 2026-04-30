@@ -138,10 +138,33 @@ public struct GrantRecord: Sendable, Identifiable, Codable {
     public let summaryFraming: String?
     public let explicitSelection: Bool
     public let noteCaptureMode: String
+    public let requestDetailLevel: String?
+    public let memoryAccessEnabled: Bool
 
     public var isActive: Bool { status == GrantStatus.active.rawValue }
     public var sessionNoteCaptureMode: SessionNoteCaptureMode {
         SessionNoteCaptureMode(rawValue: noteCaptureMode) ?? .off
+    }
+    public var sessionRequestDetailLevel: AccessRecordingLevel? {
+        requestDetailLevel.flatMap(AccessRecordingLevel.init(rawValue:))
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case grantID
+        case targetApp
+        case profileID
+        case status
+        case startedAt
+        case endedAt
+        case materializationRoot
+        case inactivityDeadline
+        case refreshOfGrantID
+        case emailSensitivity
+        case summaryFraming
+        case explicitSelection
+        case noteCaptureMode
+        case requestDetailLevel
+        case memoryAccessEnabled
     }
 
     public init(
@@ -157,7 +180,9 @@ public struct GrantRecord: Sendable, Identifiable, Codable {
         emailSensitivity: String = "moderate",
         summaryFraming: String? = nil,
         explicitSelection: Bool = false,
-        noteCaptureMode: String = SessionNoteCaptureMode.off.rawValue
+        noteCaptureMode: String = SessionNoteCaptureMode.off.rawValue,
+        requestDetailLevel: String? = nil,
+        memoryAccessEnabled: Bool = false
     ) {
         self.grantID = grantID
         self.targetApp = targetApp
@@ -172,6 +197,8 @@ public struct GrantRecord: Sendable, Identifiable, Codable {
         self.summaryFraming = summaryFraming
         self.explicitSelection = explicitSelection
         self.noteCaptureMode = noteCaptureMode
+        self.requestDetailLevel = requestDetailLevel
+        self.memoryAccessEnabled = memoryAccessEnabled
     }
 
     init?(row: [String: String]) {
@@ -197,6 +224,46 @@ public struct GrantRecord: Sendable, Identifiable, Codable {
         self.summaryFraming = row["summary_framing"]
         self.explicitSelection = row["explicit_selection"] == "1"
         self.noteCaptureMode = row["note_capture_mode"] ?? SessionNoteCaptureMode.off.rawValue
+        self.requestDetailLevel = row["request_detail_level"]
+        self.memoryAccessEnabled = row["memory_access_enabled"] == "1"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.grantID = try container.decode(String.self, forKey: .grantID)
+        self.targetApp = try container.decode(String.self, forKey: .targetApp)
+        self.profileID = try container.decode(String.self, forKey: .profileID)
+        self.status = try container.decode(String.self, forKey: .status)
+        self.startedAt = try container.decode(String.self, forKey: .startedAt)
+        self.endedAt = try container.decodeIfPresent(String.self, forKey: .endedAt)
+        self.materializationRoot = try container.decode(String.self, forKey: .materializationRoot)
+        self.inactivityDeadline = try container.decodeIfPresent(String.self, forKey: .inactivityDeadline)
+        self.refreshOfGrantID = try container.decodeIfPresent(String.self, forKey: .refreshOfGrantID)
+        self.emailSensitivity = try container.decodeIfPresent(String.self, forKey: .emailSensitivity) ?? "moderate"
+        self.summaryFraming = try container.decodeIfPresent(String.self, forKey: .summaryFraming)
+        self.explicitSelection = try container.decodeIfPresent(Bool.self, forKey: .explicitSelection) ?? false
+        self.noteCaptureMode = try container.decodeIfPresent(String.self, forKey: .noteCaptureMode) ?? SessionNoteCaptureMode.off.rawValue
+        self.requestDetailLevel = try container.decodeIfPresent(String.self, forKey: .requestDetailLevel)
+        self.memoryAccessEnabled = try container.decodeIfPresent(Bool.self, forKey: .memoryAccessEnabled) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(grantID, forKey: .grantID)
+        try container.encode(targetApp, forKey: .targetApp)
+        try container.encode(profileID, forKey: .profileID)
+        try container.encode(status, forKey: .status)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(endedAt, forKey: .endedAt)
+        try container.encode(materializationRoot, forKey: .materializationRoot)
+        try container.encodeIfPresent(inactivityDeadline, forKey: .inactivityDeadline)
+        try container.encodeIfPresent(refreshOfGrantID, forKey: .refreshOfGrantID)
+        try container.encode(emailSensitivity, forKey: .emailSensitivity)
+        try container.encodeIfPresent(summaryFraming, forKey: .summaryFraming)
+        try container.encode(explicitSelection, forKey: .explicitSelection)
+        try container.encode(noteCaptureMode, forKey: .noteCaptureMode)
+        try container.encodeIfPresent(requestDetailLevel, forKey: .requestDetailLevel)
+        try container.encode(memoryAccessEnabled, forKey: .memoryAccessEnabled)
     }
 }
 

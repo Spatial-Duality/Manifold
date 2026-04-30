@@ -85,7 +85,7 @@ struct SessionsSettingsPane: View {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         // Read the agent's current policy from the governance state the app
-        // already keeps in sync via DashboardState. This avoids a fresh XPC
+        // already keeps in sync via RuntimeStatusSnapshot. This avoids a fresh XPC
         // roundtrip and matches what every other UI surface uses.
         let allowedSourceIDs: Set<String> = store.governance.policy(for: agent)?.allowedSourceIDs ?? []
         guard !allowedSourceIDs.isEmpty else {

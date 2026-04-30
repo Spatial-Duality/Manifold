@@ -54,7 +54,7 @@ struct RuleListTable: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(rule.name)
                         .font(ManifoldType.body)
-                        .accessibilityIdentifier("rules.rowTitle.\(rule.id)")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if rule.isPrivacyFilterBacked {
                         Label("Privacy filter preflight", systemImage: "sparkles.rectangle.stack")
                             .font(ManifoldType.tiny.weight(.semibold))
@@ -65,6 +65,14 @@ struct RuleListTable: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.selectedRuleID = rule.id
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(rule.name)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("rules.rowTitle.\(rule.id)")
             }
 
             TableColumn("Gate") { rule in

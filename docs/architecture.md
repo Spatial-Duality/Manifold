@@ -34,11 +34,10 @@ flowchart TD
     A --> D["Command palette"]
     A --> E["Session start sheet"]
     A --> F["Reload drift sheet"]
-    C --> G["Activity"]
+    C --> G["Work"]
     C --> H["Access"]
     C --> I["Mail"]
-    C --> J["Requests"]
-    C --> K["Rules"]
+    C --> J["Rules"]
     A --> L["Menu bar panel"]
     A --> M["Settings"]
 ```
@@ -63,12 +62,11 @@ Relevant code:
 
 ### Ledger window
 
-`LedgerView` is the main window shell. It is a `NavigationSplitView` with five destinations:
+`LedgerView` is the main window shell. It is a `NavigationSplitView` with four destinations:
 
-- `Activity`: the evidence ledger for sessions and events
-- `Access`: governed folders, files, session deltas, and access activity
-- `Mail`: governed mailboxes, threads, and mail-session evidence
-- `Requests`: pending approvals plus recent answers, with the current queue focused on standing-write prompts
+- `Work`: sessions, pending approvals, activity evidence, and restore entry points
+- `Access`: governed folders, file scope, session deltas, and access activity
+- `Mail`: governed mailboxes, threads, and email scope
 - `Rules`: unified file, email, and agent-behavior rules that actually enforce at runtime. Seeded denies for secrets (`.env`, `.ssh/**`, private keys, API tokens) ship on by default. User rules, imported email rules, and suggestions all evaluate through the same engine.
 
 The main window also keeps two pieces of state visible all the time:
@@ -79,7 +77,7 @@ The main window also keeps two pieces of state visible all the time:
 Relevant code:
 
 - [../ManifoldApp/ManifoldApp/Views/LedgerWindowView.swift](../ManifoldApp/ManifoldApp/Views/LedgerWindowView.swift)
-- [../ManifoldApp/ManifoldApp/Views/Chrome/NavSidebar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/NavSidebar.swift)
+- [../ManifoldApp/ManifoldApp/Views/Chrome/UnifiedLedgerSidebar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/UnifiedLedgerSidebar.swift)
 - [../ManifoldApp/ManifoldApp/Views/Chrome/IntegratedToolbar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/IntegratedToolbar.swift)
 - [../ManifoldApp/ManifoldApp/Views/Chrome/StatusBar.swift](../ManifoldApp/ManifoldApp/Views/Chrome/StatusBar.swift)
 
@@ -90,7 +88,7 @@ The app uses a few focused supporting surfaces instead of deep nested flows:
 - `CommandPaletteView` for keyboard-first actions
 - `SessionStartSheet` for starting a new session
 - `ReloadDriftSheet` for turning a historical context back into a new session draft
-- `MenuBarPanelView` for ambient status, requests, and quick actions
+- `MenuBarPanelView` for ambient status, approvals, and quick actions
 - `SettingsView` for general setup, agent configuration, storage, mail, and advanced options
 
 ## The Three Flows That Matter
@@ -117,7 +115,7 @@ What this means in plain English:
 - if allowed, Manifold returns the content
 - Manifold records what was actually shown
 
-### 2. Requests and approvals
+### 2. Approvals
 
 When the agent wants something outside current scope, it does not silently widen access. It creates a request for the user.
 
@@ -126,12 +124,12 @@ flowchart LR
     C["Claude or Codex"] --> M["manifold-mcp"]
     M --> R["Runtime"]
     R --> Q["Pending approval"]
-    Q --> U["Requests destination"]
+    Q --> U["Work approvals"]
     U --> A["Deny / once / session / default"]
     A --> R
 ```
 
-This is why `Requests` exists as a first-class destination: approvals are part of normal use, not an exceptional hidden sheet.
+Approvals live in `Work` because they are part of normal use, not an exceptional hidden sheet.
 
 ### 3. Sessions, tracked work, and restore
 
@@ -142,14 +140,14 @@ flowchart LR
     R --> T["Session governance"]
     T --> W["Tracked workspace or governed original"]
     W --> H["Snapshots and activity"]
-    H --> U["Activity / Access / restore surfaces"]
+    H --> U["Work / Access / restore surfaces"]
 ```
 
 What this means in plain English:
 
 - sessions determine what the agent can do right now
 - tracked work can be snapshotted and reviewed
-- activity and restore are part of the same local evidence trail
+- Work activity and restore are part of the same local evidence trail
 
 ## The Runtime Behind The UI
 

@@ -18,6 +18,11 @@ extension ManifoldBridge {
             action: "history",
             resourcePath: path ?? query
         )
+        guard canQueryFileMemory(in: context) else {
+            let text = fileMemoryAccessDeniedText()
+            await recordExposure(toolName: "reuse_prior_context", resourcePath: path ?? query, text: text, exposureType: "memory_policy", decisionID: decisionID)
+            return text
+        }
         try await expireDerivedMemoryIfNeeded()
         let allowedSourceIDs = sourceIDs(in: context)
         let memories = (try? await memoryStore?.recall(query: query, allowedSourceIDs: allowedSourceIDs, limit: limit)) ?? []
@@ -48,6 +53,11 @@ extension ManifoldBridge {
         guard let memoryStore else {
             return "Memory store unavailable."
         }
+        guard canQueryFileMemory(in: context) else {
+            let text = fileMemoryAccessDeniedText()
+            await recordExposure(toolName: "recall_memory", resourcePath: query, text: text, exposureType: "memory_policy", decisionID: decisionID)
+            return text
+        }
         try await expireDerivedMemoryIfNeeded()
         let items = try await memoryStore.recall(query: query, allowedSourceIDs: sourceIDs(in: context), limit: limit)
         let text = items.isEmpty
@@ -62,22 +72,8 @@ extension ManifoldBridge {
         guard let memoryStore else {
             return "Memory store unavailable."
         }
-        let settings = try await memoryStore.settings()
-        if settings.amnesiacMode {
-            try await ledgerStore?.append(
-                entryType: .memoryChange,
-                subjectTable: "memory_settings",
-                subjectID: settings.settingsID,
-                payload: "amnesiac_mode:not_saved:\(title)",
-                metadata: ["status": "not_saved", "reason": "amnesiac_mode"]
-            )
-            let text = "Memory not saved because amnesiac mode is enabled."
-            await recordExposure(toolName: "save_memory_note", resourcePath: title, text: text, exposureType: "memory_policy", decisionID: decisionID)
-            return text
-        }
         let sourceIDs = Array(sourceIDs(in: context)).sorted()
         let grantID = grantID(in: context)
-        let expiresAt = Date().timeIntervalSince1970 + Double(settings.derivedRetentionDays) * 86_400
         let item = try await memoryStore.save(
             kind: kind,
             title: title,
@@ -86,7 +82,7 @@ extension ManifoldBridge {
             contributingSourceIDs: sourceIDs,
             contributingGrantIDs: grantID.map { [$0] } ?? [],
             createdSessionID: nil,
-            expiresAt: expiresAt
+            expiresAt: nil
         )
         try await ledgerStore?.append(
             entryType: .memoryItem,
@@ -105,6 +101,11 @@ extension ManifoldBridge {
         guard let memoryStore else {
             return "Memory store unavailable."
         }
+        guard canQueryFileMemory(in: context) else {
+            let text = fileMemoryAccessDeniedText()
+            await recordExposure(toolName: "list_memory_sources", resourcePath: nil, text: text, exposureType: "memory_policy", decisionID: decisionID)
+            return text
+        }
         try await expireDerivedMemoryIfNeeded()
         let allowed = sourceIDs(in: context)
         let summaries = try await memoryStore.sourceSummaries()
@@ -120,6 +121,11 @@ extension ManifoldBridge {
         let (context, decisionID) = try await resolveAccessForTool(toolName: "forget_memory", action: "memory_delete", resourcePath: memoryID)
         guard let memoryStore else {
             return "Memory store unavailable."
+        }
+        guard canQueryFileMemory(in: context) else {
+            let text = fileMemoryAccessDeniedText()
+            await recordExposure(toolName: "forget_memory", resourcePath: memoryID, text: text, exposureType: "memory_policy", decisionID: decisionID)
+            return text
         }
         guard let item = try await memoryStore.memory(id: memoryID),
               canAccessMemory(item, in: context) else {
@@ -138,5 +144,18 @@ extension ManifoldBridge {
         let text = "Memory \(memoryID) marked deleted by user."
         await recordExposure(toolName: "forget_memory", resourcePath: memoryID, text: text, exposureType: "memory", decisionID: decisionID)
         return text
+    }
+
+    private func canQueryFileMemory(in context: AccessContext) -> Bool {
+        switch context {
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            return grant.memoryAccessEnabled
+        case .standing:
+            return false
+        }
+    }
+
+    private func fileMemoryAccessDeniedText() -> String {
+        "File memory access is off for this session. Turn on Allow file memory in Manifold to let the agent query prior memory for these files."
     }
 }

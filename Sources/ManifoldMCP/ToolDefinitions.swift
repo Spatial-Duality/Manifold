@@ -200,7 +200,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "reuse_prior_context",
-                description: "Return scoped prior memories and exposure summaries from any agent that worked in the current source scope. Use this to answer \"what did Codex/Claude just do?\", surface another agent's recent reads, edits, and saved memory, and avoid rereading data the other agent already exposed.",
+                description: "Return scoped prior memories and exposure summaries from any agent that worked in the current source scope. Requires Allow file memory to be enabled for the current Manifold session. Use this to answer \"what did Codex/Claude just do?\", surface another agent's recent reads, edits, and saved memory, and avoid rereading data the other agent already exposed.",
                 inputSchema: objectSchema(properties: [
                     "query": ["type": "string", "description": "Optional memory query"],
                     "path": ["type": "string", "description": "Optional governed path"],
@@ -216,7 +216,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "recall_memory",
-                description: "Recall user-owned memory whose lineage is allowed by the current session scope. Includes memory saved by any agent (you or another agent like Codex/Claude) that worked in the same source scope, so use it to surface what was decided, summarized, or noted across recent sessions.",
+                description: "Recall user-owned memory whose lineage is allowed by the current session scope. Requires Allow file memory to be enabled for the current Manifold session. Includes memory saved by any agent (you or another agent like Codex/Claude) that worked in the same source scope, so use it to surface what was decided, summarized, or noted across recent sessions.",
                 inputSchema: objectSchema(properties: [
                     "query": ["type": "string", "description": "Optional memory query"],
                     "limit": ["type": "integer", "description": "Maximum memory rows (default 10)"],
@@ -224,7 +224,7 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "save_memory_note",
-                description: "Save a user-owned memory note with lineage to the current session scope.",
+                description: "Save a user-owned memory note with lineage to the current session scope. Manifold saves file memory automatically; session Allow file memory only controls later recall/query access.",
                 inputSchema: objectSchema(properties: [
                     "title": ["type": "string", "description": "Short memory title"],
                     "body": ["type": "string", "description": "Memory body"],
@@ -233,12 +233,12 @@ enum ToolDefinitions {
             ),
             MCPTool(
                 name: "list_memory_sources",
-                description: "List memory counts for sources available in the current session scope.",
+                description: "List memory counts for sources available in the current session scope. Requires Allow file memory to be enabled for the current Manifold session.",
                 inputSchema: emptySchema
             ),
             MCPTool(
                 name: "forget_memory",
-                description: "Mark a memory item deleted by user while preserving the immutable audit ledger.",
+                description: "Mark a memory item deleted by user while preserving the immutable audit ledger. Requires Allow file memory to be enabled for the current Manifold session.",
                 inputSchema: objectSchema(properties: [
                     "memory_id": ["type": "string", "description": "Memory ID returned by recall_memory"],
                 ], required: ["memory_id"])

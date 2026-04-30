@@ -26,6 +26,7 @@ struct InspectorSharingSelector: View {
     /// Agents whose state was set explicitly (not just inherited from a
     /// folder default). Used to render the override underline.
     let explicitAgents: Set<TargetApp>
+    var accessibilityIDPrefix: String?
     let onToggleAgent: (TargetApp, Bool) -> Void
     let onSetAllAgents: (Bool) -> Void
 
@@ -33,12 +34,14 @@ struct InspectorSharingSelector: View {
         connectedAgents: [TargetApp],
         visibleAgents: Set<TargetApp>,
         explicitAgents: Set<TargetApp> = [],
+        accessibilityIDPrefix: String? = nil,
         onToggleAgent: @escaping (TargetApp, Bool) -> Void,
         onSetAllAgents: @escaping (Bool) -> Void
     ) {
         self.connectedAgents = connectedAgents
         self.visibleAgents = visibleAgents
         self.explicitAgents = explicitAgents
+        self.accessibilityIDPrefix = accessibilityIDPrefix
         self.onToggleAgent = onToggleAgent
         self.onSetAllAgents = onSetAllAgents
     }
@@ -81,7 +84,8 @@ struct InspectorSharingSelector: View {
             triState: isOn ? .on : .off,
             label: displayName(for: agent),
             isExplicitOverride: explicitAgents.contains(agent),
-            tint: agentTint(for: agent)
+            tint: agentTint(for: agent),
+            accessibilityIdentifier: accessibilityIDPrefix.map { "\($0).agent.\(agent.rawValue)" }
         ) {
             onToggleAgent(agent, isOn)
         }
@@ -95,7 +99,8 @@ struct InspectorSharingSelector: View {
                 triState: allAIsTriState,
                 label: "All AIs",
                 isExplicitOverride: false,
-                tint: .accentColor
+                tint: .accentColor,
+                accessibilityIdentifier: accessibilityIDPrefix.map { "\($0).all" }
             ) {
                 // Cascade: if parent is on, turn everything off; otherwise turn on.
                 onSetAllAgents(allAIsTriState != .on)
@@ -119,7 +124,8 @@ struct InspectorSharingSelector: View {
                 triState: isOn ? .on : .off,
                 label: displayName(for: agent),
                 isExplicitOverride: explicitAgents.contains(agent),
-                tint: agentTint(for: agent)
+                tint: agentTint(for: agent),
+                accessibilityIdentifier: accessibilityIDPrefix.map { "\($0).agent.\(agent.rawValue)" }
             ) {
                 onToggleAgent(agent, isOn)
             }
@@ -213,6 +219,7 @@ private struct SelectorRow: View {
     let label: String
     let isExplicitOverride: Bool
     let tint: Color
+    var accessibilityIdentifier: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -237,6 +244,7 @@ private struct SelectorRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel(label)
         .accessibilityValue(accessibilityValue)
+        .accessibilityIdentifier(accessibilityIdentifier ?? "")
         .accessibilityAddTraits(.isButton)
     }
 

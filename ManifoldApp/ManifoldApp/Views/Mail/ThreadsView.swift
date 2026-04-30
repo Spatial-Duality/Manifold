@@ -76,12 +76,6 @@ struct MailReviewView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            MailScopeRail()
-                .frame(width: 248)
-                .background(ManifoldPalette.surface)
-
-            Divider()
-
             VStack(spacing: 0) {
                 ThreadToolbar(
                     selectedAccount: selectedAccount,
@@ -125,129 +119,6 @@ struct MailReviewView: View {
                 .opacity(0)
                 .accessibilityHidden(true)
         }
-    }
-}
-
-private struct MailScopeRail: View {
-    @Environment(MailAccountsModel.self) private var mailAccounts
-    @Environment(MailReviewModel.self) private var mailReview
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.s4) {
-                VStack(alignment: .leading, spacing: Spacing.s2) {
-                    Text("Accounts")
-                        .font(ManifoldType.tiny.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.4)
-
-                            ForEach(mailAccounts.accounts) { account in
-                                ScopeRailButton(
-                                    title: account.displayName,
-                                    subtitle: account.username ?? account.provider.displayName,
-                                    systemImage: account.provider.systemImage,
-                                    isSelected: mailReview.selectedAccountID == account.accountID,
-                                    accessibilityIdentifier: "mail.account.\(account.accountID)"
-                                ) {
-                                    Task { await mailReview.selectAccount(account.accountID) }
-                                }
-                            }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: Spacing.s2) {
-                    Text("Mailboxes")
-                        .font(ManifoldType.tiny.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.4)
-
-                    if let accountID = mailReview.selectedAccountID {
-                        let mailboxes = mailReview.mailboxes(for: accountID).filter(\.isSelectable)
-                        if mailboxes.isEmpty {
-                            Text("No synced mailboxes yet")
-                                .font(ManifoldType.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(mailboxes) { mailbox in
-                                ScopeRailButton(
-                                    title: mailbox.mailboxName,
-                                    subtitle: mailbox.folderType.rawValue.capitalized,
-                                    systemImage: mailbox.folderType.systemImage,
-                                    isSelected: mailReview.selectedMailboxName == mailbox.mailboxName,
-                                    accessibilityIdentifier: "mail.mailbox.\(accountID).\(mailbox.mailboxName.replacingOccurrences(of: " ", with: "-"))"
-                                ) {
-                                    Task { await mailReview.selectMailbox(mailbox.mailboxName) }
-                                }
-                            }
-                        }
-                    } else {
-                        Text("Pick an account first")
-                            .font(ManifoldType.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: Spacing.s2) {
-                    Text("Quick filters")
-                        .font(ManifoldType.tiny.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.4)
-
-                    ForEach(QuickFilter.defaultVisible) { filter in
-                        ScopeRailButton(
-                            title: filter.displayName,
-                            subtitle: "Filter the current mailbox",
-                            systemImage: filter.systemImage,
-                            isSelected: mailReview.activeQuickFilter == filter,
-                            accessibilityIdentifier: "mail.quickFilter.\(filter.rawValue)"
-                        ) {
-                            Task { await mailReview.setQuickFilter(filter) }
-                        }
-                    }
-                }
-            }
-            .padding(Spacing.s4)
-        }
-    }
-}
-
-private struct ScopeRailButton: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-    let isSelected: Bool
-    var accessibilityIdentifier: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: Spacing.s2) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(isSelected ? ManifoldPalette.selection : ManifoldPalette.text2)
-                    .frame(width: 18)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(ManifoldType.body)
-                    Text(subtitle)
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, Spacing.s3)
-            .padding(.vertical, Spacing.s2)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? ManifoldPalette.selectionSoft : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier ?? "mail.scope.\(title)")
     }
 }
 
@@ -409,6 +280,10 @@ private struct MailReviewTableArea: View {
                                 .truncationMode(.tail)
                         }
                         .contentShape(Rectangle())
+                        .onTapGesture {
+                            selection = row.emailID
+                            onOpenInspector()
+                        }
                         .simultaneousGesture(
                             TapGesture(count: 2).onEnded {
                                 selection = row.emailID
@@ -433,6 +308,10 @@ private struct MailReviewTableArea: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
+                        .onTapGesture {
+                            selection = row.emailID
+                            onOpenInspector()
+                        }
                         .simultaneousGesture(
                             TapGesture(count: 2).onEnded {
                                 selection = row.emailID

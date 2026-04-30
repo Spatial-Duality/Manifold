@@ -167,7 +167,7 @@ struct ManifoldApp: App {
             return store
         case .localRuntime(let scenario):
             let profile: AppFixtureProfile = switch scenario {
-            case .privacyE2E: .runtimePrivacy
+            case .syntheticMCPUI: .syntheticMCPUI
             }
             let runtime = FixtureRuntimeClient(profile: profile)
             let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: profile))

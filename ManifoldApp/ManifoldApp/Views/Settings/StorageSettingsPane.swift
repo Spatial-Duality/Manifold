@@ -31,15 +31,6 @@ struct StorageSettingsPane: View {
                 }
             }
 
-            Section("Memory Retention") {
-                Stepper(
-                    "Keep derived memory for \(store.personalDataOS.memorySettings.derivedRetentionDays) days",
-                    value: derivedRetentionDays,
-                    in: 1...365
-                )
-                Toggle("Start new sessions amnesiac by default", isOn: amnesiacMode)
-            }
-
             Section("Maintenance") {
                 HStack {
                     Button("Clean up orphan blobs") {
@@ -86,25 +77,6 @@ struct StorageSettingsPane: View {
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, Spacing.s2)
         }
-        .task { await store.personalDataOS.loadMemory() }
-    }
-
-    private var amnesiacMode: Binding<Bool> {
-        Binding(
-            get: { store.personalDataOS.memorySettings.amnesiacMode },
-            set: { value in
-                Task { await store.personalDataOS.updateMemorySettings(amnesiacMode: value) }
-            }
-        )
-    }
-
-    private var derivedRetentionDays: Binding<Int> {
-        Binding(
-            get: { store.personalDataOS.memorySettings.derivedRetentionDays },
-            set: { value in
-                Task { await store.personalDataOS.updateMemorySettings(derivedRetentionDays: value) }
-            }
-        )
     }
 }
 

@@ -62,6 +62,8 @@ extension ManifoldStore: ManifoldCommands {
             selectedEmailIDs: draft.selectedEmailIDs,
             summaryFraming: draft.name.trimmedNilIfEmpty,
             noteCaptureMode: draft.trackWrites ? .basic : .off,
+            requestDetailOverride: draft.requestDetailOverride,
+            allowFileMemory: draft.allowFileMemory,
             onError: { [weak self] message in
                 capturedError = message
                 self?.lastError = message

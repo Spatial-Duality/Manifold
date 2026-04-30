@@ -163,3 +163,12 @@ enum SessionRequestDetail: String, CaseIterable, Identifiable, Sendable {
         }
     }
 }
+
+/// Reads the active grant's email count from session state, not the
+/// agent-wide shared-mail summary. Sessions are gateways, so this number must
+/// reflect the active gateway scope.
+@MainActor
+func activeMailboxCount(for store: ManifoldStore) -> Int {
+    guard store.activeSession != nil else { return 0 }
+    return store.session.activeGrantEmailCount
+}

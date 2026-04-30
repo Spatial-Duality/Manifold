@@ -1075,41 +1075,30 @@ struct ResumeAccessIntent: AppIntent {
 ```
 
 ```swift
-// ManifoldIntents/StartWorkBlockIntent.swift
+// ManifoldIntents/OpenManifoldIntent.swift
 
-struct StartWorkBlockIntent: AppIntent {
-    static var title: LocalizedStringResource = "Start Tracked Work Block"
-    static var description = IntentDescription("Opens Manifold to start a tracked work block with change monitoring.")
-    static var openAppWhenRun = true  // Must open app — needs Review sheet
-    
+struct OpenManifoldIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open Manifold"
+    static let description: IntentDescription = "Opens the Manifold window to manage AI access."
+    static let openAppWhenRun = true
+
     func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            // Trigger the Review sheet flow
-            NotificationCenter.default.post(
-                name: .manifoldStartWorkBlockFromIntent,
-                object: nil
-            )
-        }
         return .result()
     }
 }
 ```
 
 ```swift
-// ManifoldIntents/OpenAuditTrailIntent.swift
+// ManifoldIntents/StartSessionIntent.swift
 
-struct OpenAuditTrailIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open Audit Trail"
-    static var description = IntentDescription("Opens Manifold's activity drawer showing recent AI actions.")
-    static var openAppWhenRun = true
-    
+struct StartSessionIntent: AppIntent {
+    static let title: LocalizedStringResource = "Prepare Work Session"
+    static let description: IntentDescription = "Opens Manifold to prepare or activate a named AI access session."
+    static let openAppWhenRun = true
+
+    @MainActor
     func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            NotificationCenter.default.post(
-                name: .manifoldOpenActivityFromIntent,
-                object: nil
-            )
-        }
+        NotificationCenter.default.post(name: .manifoldStartSessionFromIntent, object: nil)
         return .result()
     }
 }
@@ -1131,21 +1120,12 @@ struct ManifoldShortcuts: AppShortcutsProvider {
         )
         
         AppShortcut(
-            intent: StartWorkBlockIntent(),
+            intent: StartSessionIntent(),
             phrases: [
-                "Start a tracked work block in \(.applicationName)"
+                "Prepare a work session in \(.applicationName)"
             ],
-            shortTitle: "Track Changes",
-            systemImageName: "timeline.selection"
-        )
-        
-        AppShortcut(
-            intent: OpenAuditTrailIntent(),
-            phrases: [
-                "Show AI activity in \(.applicationName)"
-            ],
-            shortTitle: "AI Activity",
-            systemImageName: "clock.arrow.circlepath"
+            shortTitle: "Work Session",
+            systemImageName: "rectangle.stack.badge.play"
         )
     }
 }
@@ -1157,8 +1137,8 @@ struct ManifoldShortcuts: AppShortcutsProvider {
 |--------|-----------|-------------------|
 | Pause All AI Access | No | No (narrowing) |
 | Resume AI Access | No | No (resuming = restoring previous policy, not broadening) |
-| Start Tracked Work Block | Yes | Yes |
-| Open Audit Trail | Yes | No |
+| Open Manifold | Yes | No |
+| Prepare Work Session | Yes | Yes |
 
 Note: There is no "Grant access to X" intent. Broadening always requires the Review sheet, which requires visual confirmation. You can't grant access via voice command or Shortcut automation because that would violate the intentionality rule in the current product model.
 

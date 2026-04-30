@@ -67,8 +67,9 @@ public enum AgentRulesTemplate {
       first. Those return prior reads, edits, and saved memory from any
       agent that worked in the same source scope.
     - **Memory**: `manifold.recall_memory` surfaces prior summaries and
-      decisions; `manifold.save_memory_note` persists new context (subject
-      to amnesiac mode and source-lineage scope).
+      decisions only when the current Manifold session has file memory
+      enabled; `manifold.save_memory_note` persists new context with
+      source-lineage scope.
     - **Verification**: when the user asks you to verify what you did, call
       `manifold.verify_claimed_actions` with structured arguments
       (`tool_name` + `resource_path`, or `content_hash`). Text-only claims

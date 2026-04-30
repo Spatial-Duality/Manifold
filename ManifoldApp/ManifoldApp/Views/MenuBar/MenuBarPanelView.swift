@@ -10,7 +10,7 @@
 //
 //   1. idle — no scope shared
 //   2. idleWithRecent — scope shared, no session, recent sessions present
-//   3. activeWithQueue — session running, 0+ pending requests
+//   3. activeWithQueue — session running, 0+ pending approvals
 //   4. trackedEdit — session with writes being tracked
 //
 // Copy is user-as-subject (Principle 5). Pulse halo respects
@@ -64,7 +64,7 @@ struct MenuBarPanelView: View {
 
             if !store.pendingRequests.isEmpty {
                 Divider()
-                RequestsQueueSection(store: store)
+                ApprovalsQueueSection(store: store)
             }
 
             if panelState != .idle {
@@ -138,7 +138,7 @@ private struct StatusHeader: View {
         }
         if let summary = store.dataControlSummary {
             if summary.pendingApprovalCount > 0 {
-                return "\(summary.pendingApprovalCount) request\(summary.pendingApprovalCount == 1 ? "" : "s") waiting on you."
+                return "\(summary.pendingApprovalCount) approval\(summary.pendingApprovalCount == 1 ? "" : "s") waiting on you."
             }
             if let exposure = summary.lastExposure {
                 return "Last exposure: \(exposureLabel(exposure))."
@@ -157,8 +157,8 @@ private struct StatusHeader: View {
             return "No session running."
         case .activeWithQueue:
             let count = store.pendingRequests.count
-            if count > 0 { return "\(count) request\(count == 1 ? "" : "s") waiting on you." }
-            return "No requests right now. Working quietly."
+            if count > 0 { return "\(count) approval\(count == 1 ? "" : "s") waiting on you." }
+            return "No approvals right now. Working quietly."
         case .trackedEdit:
             return "All writes tracked — every change is reversible."
         }
@@ -388,9 +388,9 @@ private struct PrivacyPresetChipStrip: View {
     }
 }
 
-// MARK: - Requests queue
+// MARK: - Approvals queue
 
-private struct RequestsQueueSection: View {
+private struct ApprovalsQueueSection: View {
     let store: ManifoldStore
     @State private var expanded = true
 
@@ -406,7 +406,7 @@ private struct RequestsQueueSection: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(ManifoldPalette.attention))
-                    Text("pending \(store.pendingRequests.count == 1 ? "request" : "requests")")
+                    Text("pending \(store.pendingRequests.count == 1 ? "approval" : "approvals")")
                         .font(ManifoldType.body)
                     Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -671,7 +671,7 @@ private struct FooterActions: View {
             }
 
             if !store.pendingRequests.isEmpty {
-                FooterItem(icon: "hand.raised", label: "Review requests", shortcut: nil) {
+                FooterItem(icon: "hand.raised", label: "Review approvals", shortcut: nil) {
                     presentMainLedger(destination: .work)
                 }
             }

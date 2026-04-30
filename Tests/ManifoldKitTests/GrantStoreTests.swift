@@ -102,6 +102,7 @@ struct GrantStoreTests {
 
         #expect(grant.isActive)
         #expect(grant.targetApp == "cowork")
+        #expect(grant.memoryAccessEnabled == false)
 
         let sources = try await store.grantSources(grantID: grant.grantID)
         #expect(sources.count == 1)
@@ -128,6 +129,53 @@ struct GrantStoreTests {
 
         #expect(grant.noteCaptureMode == SessionNoteCaptureMode.verbose.rawValue)
         #expect(grant.sessionNoteCaptureMode == .verbose)
+    }
+
+    @Test("Grant stores and updates session request detail")
+    func grantStoresAndUpdatesRequestDetail() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let srcID = try await store.addSource(displayName: "App", rootPath: "/path/app")
+        let grant = try await store.startGrant(
+            targetApp: .cowork,
+            profileID: "profile-1",
+            sourceIDs: [srcID],
+            materializationRoot: "/tmp/mat/request-detail",
+            requestDetailLevel: .summary
+        )
+
+        #expect(grant.requestDetailLevel == AccessRecordingLevel.summary.rawValue)
+        #expect(grant.sessionRequestDetailLevel == .summary)
+
+        try await store.updateRequestDetailLevel(grantID: grant.grantID, level: .detailed)
+        let detailed = try #require(await store.grant(id: grant.grantID))
+        #expect(detailed.sessionRequestDetailLevel == .detailed)
+
+        try await store.updateRequestDetailLevel(grantID: grant.grantID, level: nil)
+        let cleared = try #require(await store.grant(id: grant.grantID))
+        #expect(cleared.sessionRequestDetailLevel == nil)
+    }
+
+    @Test("Grant stores and updates file memory access")
+    func grantStoresAndUpdatesFileMemoryAccess() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let srcID = try await store.addSource(displayName: "App", rootPath: "/path/app")
+        let grant = try await store.startGrant(
+            targetApp: .cowork,
+            profileID: "profile-1",
+            sourceIDs: [srcID],
+            materializationRoot: "/tmp/mat/file-memory",
+            memoryAccessEnabled: true
+        )
+
+        #expect(grant.memoryAccessEnabled)
+
+        try await store.updateMemoryAccess(grantID: grant.grantID, enabled: false)
+        let updated = try #require(await store.grant(id: grant.grantID))
+        #expect(updated.memoryAccessEnabled == false)
     }
 
     @Test("Only one active grant per target/profile")

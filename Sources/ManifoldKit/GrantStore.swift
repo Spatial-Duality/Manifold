@@ -103,7 +103,9 @@ public actor GrantStore {
         emailSensitivity: String = "moderate",
         summaryFraming: String? = nil,
         explicitSelection: Bool = false,
-        noteCaptureMode: SessionNoteCaptureMode = .off
+        noteCaptureMode: SessionNoteCaptureMode = .off,
+        requestDetailLevel: AccessRecordingLevel? = nil,
+        memoryAccessEnabled: Bool = false
     ) throws -> GrantRecord {
         // End existing active grant for this target/profile
         try endActiveGrant(targetApp: targetApp, profileID: profileID, reason: .timedOut)
@@ -126,13 +128,15 @@ public actor GrantStore {
             try db.execute("""
                 INSERT INTO grants (grant_id, target_app, profile_id, status, started_at,
                     materialization_root, inactivity_deadline, refresh_of_grant_id,
-                    email_sensitivity, summary_framing, explicit_selection, note_capture_mode)
-                VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+                    email_sensitivity, summary_framing, explicit_selection, note_capture_mode,
+                    request_detail_level, memory_access_enabled)
+                VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, params: [
                 grantID, targetApp.rawValue, profileID, now,
                 materializationRoot, deadline, refreshOfGrantID,
                 emailSensitivity, summaryFraming, explicitSelection ? "1" : "0",
-                noteCaptureMode.rawValue,
+                noteCaptureMode.rawValue, requestDetailLevel?.rawValue,
+                memoryAccessEnabled ? "1" : "0",
             ])
 
             // Link sources to this grant
@@ -221,6 +225,20 @@ public actor GrantStore {
         try db.execute(
             "UPDATE grants SET inactivity_deadline = ? WHERE grant_id = ? AND status = 'active'",
             params: [deadline, grantID]
+        )
+    }
+
+    public func updateRequestDetailLevel(grantID: String, level: AccessRecordingLevel?) throws {
+        try db.execute(
+            "UPDATE grants SET request_detail_level = ? WHERE grant_id = ? AND status = 'active'",
+            params: [level?.rawValue, grantID]
+        )
+    }
+
+    public func updateMemoryAccess(grantID: String, enabled: Bool) throws {
+        try db.execute(
+            "UPDATE grants SET memory_access_enabled = ? WHERE grant_id = ? AND status = 'active'",
+            params: [enabled ? "1" : "0", grantID]
         )
     }
 

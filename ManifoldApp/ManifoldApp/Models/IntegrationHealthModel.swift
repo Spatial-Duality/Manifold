@@ -221,7 +221,7 @@ struct FixtureIntegrationHealthChecker: IntegrationHealthChecking {
                 claudeCodeConfigured: .notInstalled,
                 connectionVerified: .configured
             )
-        case .dashboard, .emailRules, .trackedWork, .activity, .privacy, .runtimePrivacy:
+        case .baseline, .emailRules, .trackedWork, .privacy, .syntheticMCPUI:
             return AgentHealthSnapshot(
                 appInstalled: .installed,
                 mcpConfigured: .connected,
@@ -238,7 +238,7 @@ struct FixtureIntegrationHealthChecker: IntegrationHealthChecking {
                 codexAppInstalled: .installed,
                 mcpAdded: .configured
             )
-        case .dashboard, .emailRules, .trackedWork, .activity, .privacy, .runtimePrivacy:
+        case .baseline, .emailRules, .trackedWork, .privacy, .syntheticMCPUI:
             return AgentHealthSnapshot(
                 codexAppInstalled: .installed,
                 mcpAdded: isConnected ? .connected : .configured

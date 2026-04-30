@@ -3,7 +3,7 @@
 //
 // AgentCard — shared "here is Claude / here is Codex" identity + health
 // card used in Settings → Agents. Can be adopted in the menu bar and
-// Requests empty state later.
+// approval empty state later.
 //
 // Shape:
 //   ┌─ GradientAvatar ─ name ────── status Pill ─┐

@@ -119,7 +119,8 @@ struct GrantBoundaryBridgeTests {
         harness: Harness,
         sources: [(id: String, record: SourceRecord)],
         targetApp: TargetApp? = nil,
-        noteCaptureMode: SessionNoteCaptureMode = .off
+        noteCaptureMode: SessionNoteCaptureMode = .off,
+        memoryAccessEnabled: Bool = false
     ) async throws -> GrantRecord {
         let materializationRoot = harness.tempDir.appendingPathComponent("materialized/\(UUID().uuidString)")
         let grant = try await harness.grantStore.startGrant(
@@ -127,7 +128,8 @@ struct GrantBoundaryBridgeTests {
             profileID: "default",
             sourceIDs: sources.map(\.id),
             materializationRoot: materializationRoot.path,
-            noteCaptureMode: noteCaptureMode
+            noteCaptureMode: noteCaptureMode,
+            memoryAccessEnabled: memoryAccessEnabled
         )
         let grantSources = try await harness.grantStore.grantSources(grantID: grant.grantID)
         let mountInputs = grantSources.compactMap { grantSource -> (source: SourceRecord, mountName: String)? in
@@ -198,7 +200,7 @@ struct GrantBoundaryBridgeTests {
         )
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
         let source = try #require(await harness.grantStore.source(id: sourceID))
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)], memoryAccessEnabled: true)
         _ = try await harness.memoryStore.save(
             kind: .sourceSchema,
             title: "Invoice schema",
@@ -229,7 +231,7 @@ struct GrantBoundaryBridgeTests {
         let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "routine"])
         let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
         let source = try #require(await harness.grantStore.source(id: sourceID))
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)], memoryAccessEnabled: true)
         _ = try await harness.memoryStore.save(
             kind: .routine,
             title: "Weekly invoice routine",
@@ -307,7 +309,7 @@ struct GrantBoundaryBridgeTests {
         let sourceAID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceAURL.path)
         let sourceBID = try await harness.grantStore.addSource(displayName: "Beta", rootPath: sourceBURL.path)
         let sourceA = try #require(await harness.grantStore.source(id: sourceAID))
-        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA)])
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceAID, sourceA)], memoryAccessEnabled: true)
 
         let inScope = try await harness.memoryStore.save(
             kind: .note,
@@ -341,8 +343,8 @@ struct GrantBoundaryBridgeTests {
         #expect(try await harness.memoryStore.memory(id: inScope.memoryID)?.status == MemoryStatus.deletedByUser.rawValue)
     }
 
-    @Test("Bridge save_memory_note obeys amnesiac mode")
-    func bridgeSaveMemoryNoteObeysAmnesiacMode() async throws {
+    @Test("Bridge save_memory_note always saves even when file memory query is off")
+    func bridgeSaveMemoryNoteAlwaysSavesWhenFileMemoryQueryIsOff() async throws {
         let harness = try makeHarness()
         defer { cleanup(harness.tempDir) }
 
@@ -351,14 +353,34 @@ struct GrantBoundaryBridgeTests {
         let source = try #require(await harness.grantStore.source(id: sourceID))
         _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
 
-        try await harness.memoryStore.upsertSettings(MemorySettings(amnesiacMode: true, derivedRetentionDays: 90))
-        let response = try await harness.bridge.saveMemoryNote(title: "Do not persist", body: "sensitive derived note")
+        let response = try await harness.bridge.saveMemoryNote(title: "Persisted note", body: "automatic file memory")
         let memories = try await harness.memoryStore.list(limit: 10, includeDeleted: true)
         let ledgerEntries = try await harness.ledgerStore.recent(limit: 10)
 
-        #expect(response == "Memory not saved because amnesiac mode is enabled.")
-        #expect(memories.contains { $0.title == "Do not persist" } == false)
-        #expect(ledgerEntries.contains { $0.subjectTable == "memory_settings" && $0.metadataJSON?.contains("amnesiac_mode") == true })
+        #expect(response.contains("Saved memory"))
+        #expect(memories.contains { $0.title == "Persisted note" && $0.expiresAt == nil })
+        #expect(ledgerEntries.contains { $0.subjectTable == "memory_items" && $0.metadataJSON?.contains("active") == true })
+    }
+
+    @Test("Bridge recall_memory requires file memory access")
+    func bridgeRecallMemoryRequiresFileMemoryAccess() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let sourceURL = try createSource(in: harness.tempDir, name: "Alpha", files: ["notes.md": "alpha"])
+        let sourceID = try await harness.grantStore.addSource(displayName: "Alpha", rootPath: sourceURL.path)
+        let source = try #require(await harness.grantStore.source(id: sourceID))
+        _ = try await startMaterializedGrant(harness: harness, sources: [(sourceID, source)])
+
+        _ = try await harness.memoryStore.save(
+            kind: .note,
+            title: "Alpha note",
+            body: "alpha memory",
+            contributingSourceIDs: [sourceID]
+        )
+
+        let response = try await harness.bridge.recallMemory(query: "alpha")
+        #expect(response.contains("File memory access is off"))
     }
 
     @Test("Bridge check_capability_flow is scoped before sink evaluation")
@@ -1027,7 +1049,8 @@ struct GrantBoundaryBridgeTests {
             profileID: "default",
             sourceIDs: [sourceID],
             materializationRoot: coworkMaterializationRoot.path,
-            noteCaptureMode: .off
+            noteCaptureMode: .off,
+            memoryAccessEnabled: true
         )
         let coworkGrantSources = try await h.grantStore.grantSources(grantID: coworkGrant.grantID)
         let coworkMountInputs = coworkGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in
@@ -1135,7 +1158,8 @@ struct GrantBoundaryBridgeTests {
             profileID: "default",
             sourceIDs: [coworkSourceID],
             materializationRoot: coworkMaterializationRoot.path,
-            noteCaptureMode: .off
+            noteCaptureMode: .off,
+            memoryAccessEnabled: true
         )
         let coworkGrantSources = try await h.grantStore.grantSources(grantID: coworkGrant.grantID)
         let coworkMountInputs = coworkGrantSources.compactMap { gs -> (source: SourceRecord, mountName: String)? in

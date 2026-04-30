@@ -16,8 +16,8 @@ final class IntegrationHealthModelTests: XCTestCase {
         XCTAssertEqual(model.codex.mcpAdded, .configured)
     }
 
-    func testFixtureCheckerReportsDashboardState() async {
-        let model = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard))
+    func testFixtureCheckerReportsRuntimeStatus() async {
+        let model = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline))
         await model.checkAll(force: true)
 
         XCTAssertTrue(model.claude.appInstalled.isPassingCheck)

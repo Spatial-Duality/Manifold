@@ -7,7 +7,7 @@ import ManifoldKit
 
 @MainActor
 final class ManifoldStoreTests: XCTestCase {
-    func testFixtureStoreLoadsDashboardSummaryWithoutStartingServices() async {
+    func testFixtureStoreLoadsRuntimeSummaryWithoutStartingServices() async {
         let runtime = FixtureRuntimeClient(profile: .trackedWork)
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
@@ -21,7 +21,7 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertFalse(store.activity.activityEntries.isEmpty)
     }
 
-    func testRefreshAllLoadsPendingRequestsFromTrackedWorkFixture() async throws {
+    func testRefreshAllLoadsPendingApprovalsFromTrackedWorkFixture() async throws {
         let runtime = FixtureRuntimeClient(profile: .trackedWork)
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
@@ -37,7 +37,7 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertNotNil(store.activeSession)
     }
 
-    func testAnsweringPendingRequestRemovesItFromFixtureQueue() async throws {
+    func testAnsweringPendingApprovalRemovesItFromFixtureQueue() async throws {
         let runtime = FixtureRuntimeClient(profile: .trackedWork)
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
@@ -50,7 +50,7 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertTrue(store.pendingRequests.isEmpty)
     }
 
-    func testRefreshAllClearsStalePendingRequestsWhenApprovalLoadFails() async {
+    func testRefreshAllClearsStalePendingApprovalsWhenApprovalLoadFails() async {
         let runtime = PendingApprovalsFailureRuntime()
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
@@ -72,9 +72,9 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertTrue(store.pendingRequests.isEmpty)
     }
 
-    func testRefreshAllFiltersRemovedSourcesFromDashboard() async {
-        let runtime = RemovedSourceDashboardRuntime()
-        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard))
+    func testRefreshAllFiltersRemovedSourcesFromRuntimeStatus() async {
+        let runtime = RemovedSourceRuntimeStatusRuntime()
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline))
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
 
         await store.refreshAll(force: true)
@@ -98,12 +98,12 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertEqual(Set(cases), ["work", "access", "mail", "rules"])
     }
 
-    func testLedgerDestinationLegacyRawValuesRouteToWork() {
-        XCTAssertEqual(LedgerDestination(rawValue: "activity"), .work)
-        XCTAssertEqual(LedgerDestination(rawValue: "sessions"), .work)
-        XCTAssertEqual(LedgerDestination(rawValue: "requests"), .work)
-        XCTAssertEqual(LedgerDestination(rawValue: "provenance"), .work)
-        XCTAssertEqual(LedgerDestination(rawValue: "agentOS"), .work)
+    func testLedgerDestinationRejectsLegacyRawValues() {
+        XCTAssertNil(LedgerDestination(rawValue: "activity"))
+        XCTAssertNil(LedgerDestination(rawValue: "sessions"))
+        XCTAssertNil(LedgerDestination(rawValue: "requests"))
+        XCTAssertNil(LedgerDestination(rawValue: "provenance"))
+        XCTAssertNil(LedgerDestination(rawValue: "agentOS"))
         XCTAssertNil(LedgerDestination(rawValue: "settings"))
     }
 
@@ -270,8 +270,8 @@ final class ManifoldStoreTests: XCTestCase {
     }
 
     func testFileVisibilityOverridesRoundTripThroughRuntime() async throws {
-        let runtime = FixtureRuntimeClient(profile: .dashboard)
-        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard))
+        let runtime = FixtureRuntimeClient(profile: .baseline)
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline))
         let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
 
         await store.setFileVisibilityOverride(
@@ -300,8 +300,8 @@ final class ManifoldStoreTests: XCTestCase {
 final class CommandPaletteModelTests: XCTestCase {
     func testBindingBuildsPrimaryCommands() {
         let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .dashboard),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard)),
+            runtime: FixtureRuntimeClient(profile: .baseline),
+            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline)),
             startServices: false
         )
         let commandCenter = CommandPaletteModel()
@@ -327,8 +327,8 @@ final class CommandPaletteModelTests: XCTestCase {
 
     func testFilteringCommandsUsesSearchText() {
         let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .dashboard),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard)),
+            runtime: FixtureRuntimeClient(profile: .baseline),
+            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline)),
             startServices: false
         )
         let commandCenter = CommandPaletteModel()
@@ -341,8 +341,8 @@ final class CommandPaletteModelTests: XCTestCase {
 
     func testBindingSameStoreTwiceDoesNotDuplicateCommands() {
         let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .dashboard),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .dashboard)),
+            runtime: FixtureRuntimeClient(profile: .baseline),
+            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline)),
             startServices: false
         )
         let commandCenter = CommandPaletteModel()
@@ -393,12 +393,17 @@ private actor PendingApprovalsFailureRuntime: RuntimeClientProtocol {
         RuntimePingResult(ok: true, agentVersion: nil)
     }
 
-    func dashboardState() async throws -> DashboardState {
-        try await fixture.dashboardState()
+    func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot {
+        try await fixture.runtimeStatusSnapshot()
     }
 
     func activeGrantState(targetApp: TargetApp) async throws -> ActiveGrantState {
-        ActiveGrantState(activeGrant: nil, activeGrantSources: [], targetApp: targetApp.rawValue)
+        ActiveGrantState(
+            activeGrant: nil,
+            activeGrantSources: [],
+            targetApp: targetApp.rawValue,
+            selectedEmailCount: nil
+        )
     }
 
     func listPendingApprovals() async throws -> [PendingApprovalRecord] {
@@ -406,12 +411,12 @@ private actor PendingApprovalsFailureRuntime: RuntimeClientProtocol {
     }
 }
 
-private actor RemovedSourceDashboardRuntime: RuntimeClientProtocol {
+private actor RemovedSourceRuntimeStatusRuntime: RuntimeClientProtocol {
     func ping() async -> RuntimePingResult {
         RuntimePingResult(ok: true, agentVersion: nil)
     }
 
-    func dashboardState() async throws -> DashboardState {
+    func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot {
         let now = ISO8601DateFormatter.shared.string(from: Date())
         let live = SourceRecord(
             sourceID: "src-live",
@@ -430,7 +435,7 @@ private actor RemovedSourceDashboardRuntime: RuntimeClientProtocol {
             updatedAt: now
         )
 
-        return DashboardState(
+        return RuntimeStatusSnapshot(
             runtimeConnected: true,
             activeBridgeCount: 0,
             connectedAgents: [],

@@ -19,12 +19,6 @@ struct RulesView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            RulesSidebar(model: store.rules)
-                .frame(width: 200)
-                .background(ManifoldPalette.surface2)
-
-            Divider()
-
             VStack(spacing: 0) {
                 RulesToolbar(model: store.rules, inspectorVisible: $inspectorVisible)
                 Divider()
@@ -233,93 +227,6 @@ private func privacyBackendLabel(for status: PrivacyRuntimeStatus) -> String {
         return status.runtimeDisplayName ?? "Fast Local Scanner"
     default:
         return status.effectiveBackend.displayName
-    }
-}
-
-// MARK: - Sidebar
-
-private struct RulesSidebar: View {
-    @Bindable var model: RulesModel
-
-    var body: some View {
-        List {
-            Section("Scope") {
-                ForEach(RulesModel.Filter.allCases) { filter in
-                    if case .scope = filter {
-                        sidebarRow(for: filter)
-                    } else if filter == .all {
-                        sidebarRow(for: filter)
-                    }
-                }
-            }
-
-            Section("Model") {
-                sidebarRow(for: .privacy)
-            }
-
-            Section("Source") {
-                ForEach(RulesModel.Filter.allCases) { filter in
-                    switch filter {
-                    case .seeded, .userAuthored, .suggested:
-                        sidebarRow(for: filter)
-                    default:
-                        EmptyView()
-                    }
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .accessibilityIdentifier("rules.sidebar")
-    }
-
-    private func sidebarRow(for filter: RulesModel.Filter) -> some View {
-        Button {
-            model.selectFilter(filter)
-        } label: {
-            HStack(spacing: Spacing.s2) {
-                Image(systemName: filter.symbol)
-                    .frame(width: 18)
-                    .foregroundStyle(model.filter == filter ? ManifoldPalette.selection : .secondary)
-                Text(filter.title)
-                    .font(ManifoldType.body)
-                    .foregroundStyle(model.filter == filter ? .primary : .secondary)
-                    .lineLimit(1)
-                Spacer(minLength: Spacing.s2)
-                Text("\(count(for: filter))")
-                    .font(ManifoldType.numericCaption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .listRowBackground(sidebarBackground(for: filter))
-        .accessibilityLabel("\(filter.title), \(count(for: filter)) rules")
-        .accessibilityAddTraits(model.filter == filter ? [.isSelected] : [])
-            .accessibilityIdentifier("rules.sidebar.\(filter.id)")
-    }
-
-    @ViewBuilder
-    private func sidebarBackground(for filter: RulesModel.Filter) -> some View {
-        if model.filter == filter {
-            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .fill(ManifoldPalette.selectionSoft.opacity(0.85))
-                .padding(.horizontal, 4)
-        } else {
-            Color.clear
-        }
-    }
-
-    private func count(for filter: RulesModel.Filter) -> Int {
-        switch filter {
-        case .all: return model.rules.count
-        case .privacy: return model.rules.filter(\.isPrivacyFilterBacked).count
-        case .scope(let s): return model.rules.filter { $0.scope == s }.count
-        case .seeded: return model.rules.filter { $0.source == .seeded }.count
-        case .userAuthored: return model.rules.filter { [.user, .userOverride, .imported].contains($0.source) }.count
-        case .suggested: return model.rules.filter { $0.source == .suggested }.count
-        }
     }
 }
 

@@ -4,7 +4,7 @@
 // EmptyStateIllustration — glowing card + icon composite.
 //
 // Used by every "nothing is here yet" surface (empty Access, empty Mail,
-// empty Requests). Gentle not celebratory — an empty state in a trust
+// empty approval queues). Gentle not celebratory — an empty state in a trust
 // product is the default state, and should feel calm.
 
 import SwiftUI
@@ -15,7 +15,7 @@ struct EmptyStateIllustration: View {
         case activity
         case access
         case mail
-        case requests
+        case approvals
     }
 
     let systemImage: String
@@ -120,7 +120,7 @@ struct EmptyStateIllustration: View {
                     .foregroundStyle(tint)
                     .offset(y: -24)
             }
-        case .requests:
+        case .approvals:
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(tint.opacity(0.09))
@@ -164,11 +164,11 @@ struct EmptyStateIllustration: View {
     .background(ManifoldPalette.bg)
 }
 
-#Preview("Empty state — requests") {
+#Preview("Empty state — approvals") {
     EmptyStateIllustration(
         systemImage: "checkmark.seal",
         title: "Nothing is waiting on you",
-        subtitle: "When an agent asks for standing write access through Manifold it lands here. Requests get answered in a ladder — not this time, once, or add to default.",
+        subtitle: "When an agent asks for standing write access through Manifold it lands here. Approvals get answered in a ladder: not this time, once, or add to default.",
         tint: ManifoldPalette.active
     )
     .frame(width: 520, height: 360)

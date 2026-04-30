@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // AccessHistoryView — past sessions grouped by day with a drift review
-// action per row. The row can reopen the session in Activity.
+// action per row. The row can reopen the session in Work.
 
 import SwiftUI
 import ManifoldKit

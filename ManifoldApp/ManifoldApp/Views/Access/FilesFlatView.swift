@@ -89,6 +89,16 @@ struct FilesFlatView: View {
         return "\(sourceReloadKey)|\(grant)|\(blockKey)"
     }
 
+    private var fileOverridesReloadKey: String {
+        fileOverridesByAgent.flatMap { agent, overrides in
+            overrides.map {
+                "\(agent.rawValue):\($0.sourceID):\($0.relativePath):\($0.isDirectory):\($0.decision.rawValue):\($0.updatedAt)"
+            }
+        }
+        .sorted()
+        .joined(separator: "|")
+    }
+
     private var defaultScopeByAgent: [TargetApp: Set<String>] {
         var result: [TargetApp: Set<String>] = [:]
         for agent in connectedAgents {
@@ -463,37 +473,45 @@ struct FilesFlatView: View {
                 AccessChipStack(
                     agents: connectedAgents,
                     visibleAgents: visibleAgents(for: file),
+                    accessibilityIDPrefix: accessIdentifierPrefix(for: file),
                     onToggle: { agent, wasVisible in
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
                     }
                 )
-                .accessibilityIdentifier(accessIdentifierPrefix(for: file))
             }
             .width(min: 56, ideal: max(56, CGFloat(connectedAgents.count) * 18 + 12), max: 140)
 
             TableColumn("Name", value: \.name) { file in
-                HStack(spacing: Spacing.s2) {
-                    FileTypeIcon(filename: file.name, size: 13)
-                    Text(file.name)
-                        .font(ManifoldType.body)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if aiTouchedPaths.contains(file.canonicalPath) {
-                        Image(systemName: "sparkle")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.tint)
-                            .help("AI has written to this file")
-                            .accessibilityLabel("AI-touched")
+                Button {
+                    selectedFilePaths = [file.path]
+                } label: {
+                    HStack(spacing: Spacing.s2) {
+                        FileTypeIcon(filename: file.name, size: 13)
+                        Text(file.name)
+                            .font(ManifoldType.body)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if aiTouchedPaths.contains(file.canonicalPath) {
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.tint)
+                                .help("AI has written to this file")
+                                .accessibilityLabel("AI-touched")
+                        }
+                        if file.isDraftWorkspace {
+                            Text("DRAFT")
+                                .font(ManifoldType.captionMedium)
+                                .foregroundStyle(ManifoldPalette.paused)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(ManifoldPalette.pausedSoft, in: Capsule())
+                        }
                     }
-                    if file.isDraftWorkspace {
-                        Text("DRAFT")
-                            .font(ManifoldType.captionMedium)
-                            .foregroundStyle(ManifoldPalette.paused)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(ManifoldPalette.pausedSoft, in: Capsule())
-                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(file.name)
+                .accessibilityIdentifier("\(accessIdentifierPrefix(for: file)).name")
             }
             .width(min: 160, ideal: 220)
 
@@ -551,6 +569,7 @@ struct FilesFlatView: View {
             }
         }
         .tableStyle(.inset)
+        .id(fileOverridesReloadKey)
         .contextMenu(forSelectionType: String.self) { selection in
             contextMenu(for: selection)
         } primaryAction: { selection in
@@ -612,10 +631,10 @@ struct FilesFlatView: View {
                 ForEach(connectedAgents, id: \.self) { agent in
                     Button(AgentMeta.label(agent)) {
                         Task { await bulkSetVisibility(agent: agent, decision: .deny, files: filesInSelection) }
+                        }
                     }
                 }
             }
-        }
         Button("Reset overrides") {
             Task { await bulkReset(files: filesInSelection) }
         }
@@ -729,7 +748,7 @@ struct FilesFlatView: View {
             relativePath: file.relativePath,
             decision: decision
         )
-        await reloadOverrides(agent: agent)
+        upsertLocalOverride(agent: agent, file: file, decision: decision)
     }
 
     private func resetOverrides(for file: SourceFile) async {
@@ -751,8 +770,8 @@ struct FilesFlatView: View {
                 relativePath: file.relativePath,
                 decision: decision
             )
+            upsertLocalOverride(agent: agent, file: file, decision: decision)
         }
-        await reloadOverrides(agent: agent)
     }
 
     private func bulkSetVisibility(agents: [TargetApp], decision: FileVisibilityOverrideDecision, files: [SourceFile]) async {
@@ -772,6 +791,24 @@ struct FilesFlatView: View {
             }
         }
         await loadOverrides()
+    }
+
+    private func upsertLocalOverride(
+        agent: TargetApp,
+        file: SourceFile,
+        decision: FileVisibilityOverrideDecision
+    ) {
+        var records = fileOverridesByAgent[agent] ?? []
+        let record = FileVisibilityOverrideRecord(
+            agent: agent,
+            sourceID: file.sourceID,
+            relativePath: file.relativePath,
+            isDirectory: false,
+            decision: decision
+        )
+        records.removeAll { $0.id == record.id }
+        records.append(record)
+        fileOverridesByAgent[agent] = records.sorted { $0.id < $1.id }
     }
 
     // MARK: - Loading

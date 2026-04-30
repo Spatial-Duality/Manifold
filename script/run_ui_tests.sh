@@ -43,8 +43,11 @@ case "$SUITE" in
   fixture)
     ONLY_TESTING+=("ManifoldAppUITests/ManifoldFixtureUITests")
     ;;
+  synthetic)
+    ONLY_TESTING+=("ManifoldAppUITests/ManifoldSyntheticMCPUITests")
+    ;;
   runtime)
-    ONLY_TESTING+=("ManifoldAppUITests/ManifoldRuntimeE2ETests")
+    ONLY_TESTING+=("ManifoldAppUITests/ManifoldSyntheticMCPUITests")
     ;;
   all)
     ;;

@@ -62,7 +62,23 @@ public struct DatabaseMigrator {
         try repairRuleRecords(db)
         try repairStandingWriteGrants(db)
         try repairRuntimeSettings(db)
+        try repairGrants(db)
         try MemoryStore.ensureSchema(db)
+    }
+
+    private static func repairGrants(_ db: DatabaseConnection) throws {
+        let tables = try db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='grants'"
+        )
+        guard !tables.isEmpty else { return }
+        let columns = try db.queryAll("PRAGMA table_info(grants)")
+        let columnNames = Set(columns.compactMap { $0["name"] })
+        if !columnNames.contains("request_detail_level") {
+            try db.execute("ALTER TABLE grants ADD COLUMN request_detail_level TEXT")
+        }
+        if !columnNames.contains("memory_access_enabled") {
+            try db.execute("ALTER TABLE grants ADD COLUMN memory_access_enabled INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     private static func repairApprovalRequests(_ db: DatabaseConnection) throws {
@@ -1680,6 +1696,22 @@ public struct DatabaseMigrator {
                 scrubbedRows += 1
             }
             logger.info("Migration 35: scrubbed orphan access records (\(scrubbedRows) policy rows updated)")
+        },
+
+        // v36: Session-scoped request detail. This keeps MCP intent
+        // requirements on the active grant instead of mutating the
+        // persistent per-agent policy while a session is live.
+        Migration(version: 36, name: "grant_request_detail_level") { db in
+            try repairGrants(db)
+            logger.info("Migration 36: grant request detail override")
+        },
+
+        // v37: Session-scoped file memory access. Memory is always saved,
+        // but active grants must opt in before agents can query prior
+        // memory for the selected files.
+        Migration(version: 37, name: "grant_memory_access") { db in
+            try repairGrants(db)
+            logger.info("Migration 37: grant file memory access")
         },
     ]
 }

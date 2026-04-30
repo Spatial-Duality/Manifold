@@ -26,7 +26,9 @@ struct StandingAccessTests {
         let approvalQueue: ApprovalQueue
         let standingWriteApprovalStore: StandingWriteApprovalStore
         let runtimeSettingsStore: RuntimeSettingsStore
+        let filterModeStore: FilterModeStore
         let exposureStore: ExposureStore
+        let memoryStore: MemoryStore
         let capabilityHandleStore: CapabilityHandleStore
         let ruleStore: RuleStore
         let bridge: ManifoldBridge
@@ -55,7 +57,9 @@ struct StandingAccessTests {
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let runtimeSettingsStore = RuntimeSettingsStore(db: db)
+        let filterModeStore = FilterModeStore(db: db)
         let exposureStore = ExposureStore(db: db)
+        let memoryStore = try MemoryStore(db: db)
         let capabilityHandleStore = try CapabilityHandleStore(db: db)
         let ruleStore = RuleStore(db: db)
         let connectionID = "standing-test-\(UUID().uuidString)"
@@ -76,8 +80,11 @@ struct StandingAccessTests {
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
             exposureStore: exposureStore,
+            memoryStore: memoryStore,
             capabilityHandleStore: capabilityHandleStore,
             ruleStore: ruleStore,
+            filterModeStore: filterModeStore,
+            filterModeFindingsProvider: RegexFilterFindingsProvider(),
             targetApp: targetApp,
             connectionID: connectionID
         )
@@ -90,7 +97,9 @@ struct StandingAccessTests {
             approvalQueue: approvalQueue,
             standingWriteApprovalStore: standingWriteApprovalStore,
             runtimeSettingsStore: runtimeSettingsStore,
-            exposureStore: exposureStore, capabilityHandleStore: capabilityHandleStore,
+            filterModeStore: filterModeStore,
+            exposureStore: exposureStore, memoryStore: memoryStore,
+            capabilityHandleStore: capabilityHandleStore,
             ruleStore: ruleStore,
             bridge: bridge, tempDir: tempDir,
             connectionID: connectionID
@@ -151,6 +160,7 @@ struct StandingAccessTests {
             sizeBytes: body.utf8.count,
             preview: body
         )
+        try harness.emailStore.updateBodyText(emailID: id, bodyText: body)
     }
 
     func materializeGrant(harness: Harness, grant: GrantRecord) async throws {
@@ -178,6 +188,473 @@ struct StandingAccessTests {
     }
 
     // MARK: - Status Tests
+
+    @Test("Synthetic MCP/UI contract explores files, mail, rules, filters, and security")
+    func syntheticMCPUIContractReport() async throws {
+        let h = try makeHarness(targetApp: .codex)
+        defer { cleanup(h.tempDir) }
+        var report = SyntheticMCPUIReport()
+
+        func createSource(name: String, files: [String: String]) async throws -> String {
+            let sourceDir = h.tempDir.appendingPathComponent("synthetic/\(name)")
+            try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+            for (relativePath, content) in files {
+                let fileURL = sourceDir.appendingPathComponent(relativePath)
+                try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data(content.utf8).write(to: fileURL)
+            }
+            return try await h.grantStore.addSource(displayName: name, rootPath: sourceDir.path)
+        }
+
+        func expectRejected(
+            _ tool: String,
+            _ invariant: String,
+            operation: () async throws -> Void
+        ) async {
+            do {
+                try await operation()
+                report.record(tool, invariant, false)
+            } catch {
+                report.record(tool, invariant, true)
+            }
+        }
+
+        func reportContains(_ text: String, _ needles: [String]) -> Bool {
+            needles.allSatisfy { text.contains($0) }
+        }
+
+        let sharedID = try await createSource(
+            name: "Shared",
+            files: [
+                "MANIFOLD_MCP_SHARED.txt": "MANIFOLD_MCP_SHARED original",
+                "Docs/ModelGardenTeaParty.md": """
+                MANIFOLD_OPENAI_ANTHROPIC_TEA_PARTY
+                OpenAI brought eval cupcakes. Anthropic brought a tiny constitution printed on a napkin.
+                The deterministic loop brought receipts.
+                """,
+                "Docs/ContextRequest.md": """
+                CONTEXT_REQUEST_BRIEF
+                User asks Codex to explain whether the model garden tea party can be shared safely.
+                Backend should preserve the request intent without exposing blocked records.
+                """,
+                "Docs/KeyLimerick.txt": """
+                FILTER_MODE_SECRET_MARKER
+                There once was a test with a key: sk-OpenAIAnthropic1234567890ABCDE
+                It stayed inside Manifold's policy tree.
+                """,
+                "Secrets/Handshake.txt": "DO_NOT_LEAK_HANDSHAKE shared secret should be denied by override."
+            ]
+        )
+        let codexOnlyID = try await createSource(
+            name: "Codex Only",
+            files: [
+                "CODEX_SYNTHETIC_TASK.md": "MANIFOLD_MCP_CODEX_ONLY task",
+                "Evals/OpenAIEvalCupcakes.md": "OPENAI_EVAL_CUPCAKES Codex checks the frosting and the file scope."
+            ]
+        )
+        _ = try await createSource(
+            name: "Cowork Only",
+            files: ["COWORK_PRIVATE_NOTE.md": "MANIFOLD_MCP_COWORK_ONLY"]
+        )
+        _ = try await createSource(
+            name: "Blocked Private",
+            files: ["PRIVATE_SECRET.txt": "MANIFOLD_MCP_BLOCKED_SECRET"]
+        )
+        let selectiveID = try await createSource(
+            name: "Selective Lab",
+            files: [
+                "Public/BakeOff.md": "SELECTIVE_FILE_ALLOW_OPENAI_ANTHROPIC public bake-off notes.",
+                "Private/SafetyValve.md": "DO_NOT_LEAK_SELECTIVE_PRIVATE private safety valve."
+            ]
+        )
+
+        try await h.policyStore.addSource(sharedID, to: .codex)
+        try await h.policyStore.addSource(codexOnlyID, to: .codex)
+        try await h.fileVisibilityOverrideStore.setOverride(
+            agent: .codex,
+            sourceID: sharedID,
+            relativePath: "Secrets/Handshake.txt",
+            isDirectory: false,
+            decision: .deny
+        )
+        try await h.fileVisibilityOverrideStore.setOverride(
+            agent: .codex,
+            sourceID: selectiveID,
+            relativePath: "Public/BakeOff.md",
+            isDirectory: false,
+            decision: .allow
+        )
+
+        try await h.ruleStore.upsert(RuleRecord(
+            name: "Warn on model garden tea party",
+            explanation: "Synthetic file warning used by the MCP/UI loop.",
+            scope: .file,
+            matcher: .pathGlob("shared/Docs/ModelGardenTeaParty.md"),
+            action: .warn,
+            agents: [.codex]
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            name: "Deny shared handshake",
+            explanation: "Synthetic deny guard for a shared-source private file.",
+            scope: .file,
+            matcher: .pathGlob("shared/Secrets/**"),
+            action: .deny,
+            agents: [.codex]
+        ))
+        try await h.ruleStore.upsert(RuleRecord(
+            name: "Block rule-store email marker",
+            explanation: "Synthetic email rule-store deny.",
+            scope: .email,
+            matcher: .emailKeyword(.anywhere, "RULE_STORE_DENY_MARKER", regex: false),
+            action: .deny,
+            agents: [.codex]
+        ))
+
+        try await h.emailRuleStore.updateRuleSet(EmailRuleSet(
+            agent: .codex,
+            domainRules: [
+                EmailDomainRule(agent: .codex, domain: "openai.test", action: .allow),
+                EmailDomainRule(agent: .codex, domain: "anthropic.test", action: .allow)
+            ],
+            contactRules: [
+                EmailContactRule(agent: .codex, name: "Sam Altman", email: "sam@openai.test", action: .block)
+            ],
+            keywordRules: [
+                EmailKeywordRule(
+                    agent: .codex,
+                    pattern: "confetti cannon",
+                    matchLocation: .subjectAndBody,
+                    action: .block,
+                    isRegex: false
+                )
+            ],
+            defaultPolicy: .blockUnlessAllowed,
+            emailSensitivity: .strict
+        ))
+
+        try createEmail(
+            harness: h,
+            id: "synthetic-email-allowed",
+            sender: "Synthetic QA <qa@synthetic.test>",
+            senderEmail: "qa@synthetic.test",
+            senderDomain: "synthetic.test",
+            subject: "MANIFOLD_EMAIL_TEST allowed",
+            body: "MANIFOLD_EMAIL_TEST_ALLOWED body for the deterministic MCP loop."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-openai-tea-party",
+            sender: "Model Garden <garden@openai.test>",
+            senderEmail: "garden@openai.test",
+            senderDomain: "openai.test",
+            subject: "Model garden tea party",
+            body: "EASTER_EGG_TEA_PARTY_ALLOWED OpenAI set the table with eval cupcakes."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-openai-codex-semicolon",
+            sender: "Codex Desk <codex@openai.test>",
+            senderEmail: "codex@openai.test",
+            senderDomain: "openai.test",
+            subject: "Codex found the missing semicolon",
+            body: "EASTER_EGG_SEMICOLON_ALLOWED The semicolon was under the test fixture."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-anthropic-karaoke",
+            sender: "Claude Notes <claude@anthropic.test>",
+            senderEmail: "claude@anthropic.test",
+            senderDomain: "anthropic.test",
+            subject: "Constitutional karaoke for deterministic tests",
+            body: "EASTER_EGG_KARAOKE_ALLOWED Anthropic harmonized with the acceptance criteria."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-anthropic-napkin",
+            sender: "Policy Poet <policy@anthropic.test>",
+            senderEmail: "policy@anthropic.test",
+            senderDomain: "anthropic.test",
+            subject: "Tiny constitution on a napkin",
+            body: "EASTER_EGG_NAPKIN_ALLOWED Useful, harmless, and easy to assert."
+        )
+        try createEmail(
+            harness: h,
+            id: "synthetic-email-blocked",
+            sender: "Private QA <private@synthetic.test>",
+            senderEmail: "private@synthetic.test",
+            senderDomain: "synthetic.test",
+            subject: "MANIFOLD_EMAIL_TEST blocked",
+            body: "MANIFOLD_EMAIL_TEST_BLOCKED body must stay outside Codex scope."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-blocked-contact",
+            sender: "Sam Altman <sam@openai.test>",
+            senderEmail: "sam@openai.test",
+            senderDomain: "openai.test",
+            subject: "Direct note that should not pass contact rules",
+            body: "DO_NOT_LEAK_BLOCKED_CONTACT contact block should outrank domain allow."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-blocked-keyword",
+            sender: "Launch Ops <launch@openai.test>",
+            senderEmail: "launch@openai.test",
+            senderDomain: "openai.test",
+            subject: "confetti cannon launch plan",
+            body: "DO_NOT_LEAK_BLOCKED_KEYWORD keyword block should outrank domain allow."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-blocked-default",
+            sender: "Unknown Lab <unknown@external.test>",
+            senderEmail: "unknown@external.test",
+            senderDomain: "external.test",
+            subject: "External default-block test",
+            body: "DO_NOT_LEAK_EXTERNAL_DEFAULT default block should hide this thread."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-rule-store-deny",
+            sender: "Allowed Domain <allowed@openai.test>",
+            senderEmail: "allowed@openai.test",
+            senderDomain: "openai.test",
+            subject: "Allowed domain with a runtime rule marker",
+            body: "RULE_STORE_DENY_MARKER email policy allows this, but RuleStore must deny the body read."
+        )
+        try createEmail(
+            harness: h,
+            id: "email-shared-only-lighthouse",
+            sender: "Shared Inbox <shared@synthetic.test>",
+            senderEmail: "shared@synthetic.test",
+            senderDomain: "synthetic.test",
+            subject: "Shared-only lighthouse",
+            body: "EASTER_EGG_SHARED_ONLY_ALLOWED shared email should pass without a domain allow."
+        )
+        try h.emailStore.shareEmails(emailIDs: [
+            "synthetic-email-allowed",
+            "email-shared-only-lighthouse"
+        ], for: .codex)
+
+        let status = await h.bridge.getStatus()
+        report.record("get_status", "Codex standing access is active", status.active)
+        report.record("get_status", "seven governed files are visible", status.fileCount == 7)
+        report.record("get_status", "seven governed emails are visible", status.emailCount == 7)
+        report.record("get_status", "current source map includes override-only source", status.sources.contains("Selective Lab"))
+
+        let files = try await h.bridge.listFiles()
+        let filePaths = Set(files.map(\.path))
+        report.record("list_files", "shared marker is visible", filePaths.contains("shared/MANIFOLD_MCP_SHARED.txt"))
+        report.record("list_files", "Codex-only marker is visible", filePaths.contains("codex-only/CODEX_SYNTHETIC_TASK.md"))
+        report.record("list_files", "selectively allowed file is visible", filePaths.contains("selective-lab/Public/BakeOff.md"))
+        report.record("list_files", "explicitly denied shared secret is hidden", !filePaths.contains("shared/Secrets/Handshake.txt"))
+        report.record("list_files", "Cowork-only marker is hidden", !filePaths.contains("cowork-only/COWORK_PRIVATE_NOTE.md"))
+        report.record("list_files", "blocked private marker is hidden", !filePaths.contains("blocked-private/PRIVATE_SECRET.txt"))
+
+        let teaParty = try await h.bridge.readFile(path: "shared/Docs/ModelGardenTeaParty.md")
+        report.record(
+            "read_file",
+            "warned but allowed model-garden file is readable",
+            teaParty.contains("MANIFOLD_OPENAI_ANTHROPIC_TEA_PARTY")
+        )
+        let selective = try await h.bridge.readFile(path: "selective-lab/Public/BakeOff.md")
+        report.record(
+            "read_file",
+            "explicit allow exposes one file from an otherwise hidden source",
+            selective.contains("SELECTIVE_FILE_ALLOW_OPENAI_ANTHROPIC")
+        )
+        await expectRejected("read_file", "explicitly denied shared secret cannot be read") {
+            _ = try await h.bridge.readFile(path: "shared/Secrets/Handshake.txt")
+        }
+        await expectRejected("read_file", "Cowork-only file cannot be read by Codex") {
+            _ = try await h.bridge.readFile(path: "cowork-only/COWORK_PRIVATE_NOTE.md")
+        }
+        await expectRejected("read_file", "override-only source does not expose sibling private file") {
+            _ = try await h.bridge.readFile(path: "selective-lab/Private/SafetyValve.md")
+        }
+        await expectRejected("read_file", "path traversal stays outside governed roots") {
+            _ = try await h.bridge.readFile(path: "shared/../Blocked Private/PRIVATE_SECRET.txt")
+        }
+
+        let fileSearch = try await h.bridge.searchFiles(query: "OPENAI")
+        let fileSearchPayload = fileSearch.map { "\($0.path)\n\($0.matches.joined(separator: "\n"))" }.joined(separator: "\n")
+        report.record("search_files", "allowed file search returns Easter egg hits", fileSearchPayload.contains("MANIFOLD_OPENAI_ANTHROPIC_TEA_PARTY") || fileSearchPayload.contains("OPENAI_EVAL_CUPCAKES"))
+        report.record("search_files", "blocked file markers are absent from search", !fileSearchPayload.contains("DO_NOT_LEAK"))
+
+        let structured = try await h.bridge.searchStructured(query: "EASTER_EGG", limit: 20)
+        report.record(
+            "search_structured",
+            "structured search includes allowed OpenAI/Anthropic mail",
+            reportContains(structured, ["email-openai-tea-party", "email-anthropic-karaoke"])
+        )
+        report.record("search_structured", "structured search excludes blocked records", !structured.contains("DO_NOT_LEAK"))
+
+        let listedEmails = try await h.bridge.listEmails()
+        let listedEmailIDs = Set(listedEmails.map(\.id))
+        report.record("list_emails", "domain-allowed OpenAI mail is listed", listedEmailIDs.contains("email-openai-tea-party"))
+        report.record("list_emails", "domain-allowed Anthropic mail is listed", listedEmailIDs.contains("email-anthropic-karaoke"))
+        report.record("list_emails", "shared-only mail is listed", listedEmailIDs.contains("email-shared-only-lighthouse"))
+        report.record("list_emails", "blocked contact mail is not listed", !listedEmailIDs.contains("email-blocked-contact"))
+        report.record("list_emails", "blocked keyword mail is not listed", !listedEmailIDs.contains("email-blocked-keyword"))
+        report.record("list_emails", "default-blocked external mail is not listed", !listedEmailIDs.contains("email-blocked-default"))
+
+        let searchedEmails = try await h.bridge.searchEmails(query: "MANIFOLD_EMAIL_TEST")
+        let searchedEmailIDs = Set(searchedEmails.map(\.emailID))
+        report.record("search_emails", "allowed synthetic email is visible", searchedEmailIDs.contains("synthetic-email-allowed"))
+        report.record("search_emails", "blocked synthetic email is hidden", !searchedEmailIDs.contains("synthetic-email-blocked"))
+        let easterEggEmails = try await h.bridge.searchEmails(query: "EASTER_EGG")
+        let easterEggEmailIDs = Set(easterEggEmails.map(\.emailID))
+        report.record(
+            "search_emails",
+            "many allowed Easter egg emails are searchable",
+            easterEggEmailIDs.isSuperset(of: [
+                "email-openai-tea-party",
+                "email-openai-codex-semicolon",
+                "email-anthropic-karaoke",
+                "email-anthropic-napkin",
+                "email-shared-only-lighthouse"
+            ])
+        )
+        report.record("search_emails", "blocked Easter egg mail stays hidden", !easterEggEmails.compactMap(\.preview).joined().contains("DO_NOT_LEAK"))
+
+        let emailBody = try await h.bridge.readEmail(id: "synthetic-email-allowed")
+        report.record("read_email", "allowed email body is readable", emailBody.contains("MANIFOLD_EMAIL_TEST_ALLOWED"))
+        let teaEmail = try await h.bridge.readEmail(id: "email-openai-tea-party")
+        report.record("read_email", "domain-allowed OpenAI Easter egg body is readable", teaEmail.contains("EASTER_EGG_TEA_PARTY_ALLOWED"))
+        let karaokeEmail = try await h.bridge.readEmail(id: "email-anthropic-karaoke")
+        report.record("read_email", "domain-allowed Anthropic Easter egg body is readable", karaokeEmail.contains("EASTER_EGG_KARAOKE_ALLOWED"))
+        await expectRejected("read_email", "blocked shared-policy email read is rejected") {
+            _ = try await h.bridge.readEmail(id: "synthetic-email-blocked")
+        }
+        await expectRejected("read_email", "blocked contact outranks allowed domain") {
+            _ = try await h.bridge.readEmail(id: "email-blocked-contact")
+        }
+        await expectRejected("read_email", "blocked keyword outranks allowed domain") {
+            _ = try await h.bridge.readEmail(id: "email-blocked-keyword")
+        }
+        await expectRejected("read_email", "default block hides external email") {
+            _ = try await h.bridge.readEmail(id: "email-blocked-default")
+        }
+        await expectRejected("read_email", "RuleStore email deny blocks an otherwise allowed domain") {
+            _ = try await h.bridge.readEmail(id: "email-rule-store-deny")
+        }
+
+        let write = try await h.bridge.writeFile(
+            path: "shared/MANIFOLD_MCP_SHARED.txt",
+            content: "MANIFOLD_MCP_WRITE_OK by synthetic loop"
+        )
+        if case .written(_, let path) = write {
+            report.record("write_file", "shared marker write uses governed path", path == "shared/MANIFOLD_MCP_SHARED.txt")
+        } else {
+            report.record("write_file", "shared marker write uses governed path", false)
+        }
+        await expectRejected("write_file", "writes to hidden source are rejected") {
+            _ = try await h.bridge.writeFile(
+                path: "blocked-private/PRIVATE_SECRET.txt",
+                content: "bad write"
+            )
+        }
+        await expectRejected("write_file", "expected-before-hash mismatch blocks stale writes") {
+            _ = try await h.bridge.writeFile(
+                path: "shared/MANIFOLD_MCP_SHARED.txt",
+                content: "stale write",
+                expectedBeforeHash: String(repeating: "0", count: 64)
+            )
+        }
+
+        let changes = try await h.bridge.listChanges()
+        report.record(
+            "list_changes",
+            "write appears in governed change history",
+            changes.contains { $0.path == "shared/MANIFOLD_MCP_SHARED.txt" && $0.action == AuditAction.fileModified.rawValue }
+        )
+
+        try await h.filterModeStore.setMode(.warn, for: .codex)
+        let warnedSecret = try await h.bridge.readFile(path: "shared/Docs/KeyLimerick.txt")
+        report.record("filter_mode", "warn mode allows but records synthetic secret content", warnedSecret.contains("FILTER_MODE_SECRET_MARKER"))
+        try await h.filterModeStore.setMode(.block, for: .codex)
+        await expectRejected("filter_mode", "block mode denies detected synthetic secret content") {
+            _ = try await h.bridge.readFile(path: "shared/Docs/KeyLimerick.txt")
+        }
+        try await h.filterModeStore.setMode(.off, for: .codex)
+
+        let capabilityCreation = try await h.bridge.createValueHandle(
+            origin: "shared/Docs/ContextRequest.md",
+            sensitivity: "secret",
+            trustLevel: "trusted",
+            allowedSinks: ["external_ticket"]
+        )
+        let handleID = capabilityCreation
+            .split(separator: " ")
+            .first { $0.hasPrefix("handle-") }
+            .map(String.init)
+        report.record("create_value_handle", "sensitive contextual data receives a handle", handleID != nil)
+        if let handleID {
+            let flow = try await h.bridge.checkCapabilityFlow(
+                handleID: handleID,
+                sink: "external_ticket",
+                untrustedInput: true,
+                stateChangingAction: true
+            )
+            report.record(
+                "check_capability_flow",
+                "Rule of Two blocks untrusted state-changing flow",
+                (flow.contains("\"allowed\": false") || flow.contains("\"allowed\":false"))
+                    && flow.contains("Rule of Two")
+            )
+        }
+
+        let verification = try await h.bridge.verifyClaimedActions(
+            claimsJSON: #"[{"tool_name":"write_file","resource_path":"shared/MANIFOLD_MCP_SHARED.txt","text":"Synthetic MCP wrote the shared marker."}]"#
+        )
+        report.record("verify_claimed_actions", "claim verification returns a report", verification.contains("Claim verification"))
+
+        try await h.policyStore.updateAccessRecordingLevel(.summary, for: .codex)
+        let requestIntent = AccessIntent(
+            summary: "Assess whether the synthetic OpenAI/Anthropic request can be shared",
+            details: "CONTEXT_REQUEST_INTENT includes requested purpose, expected output, and safety constraints."
+        )
+        let contextualRead = try await h.bridge.readFile(
+            path: "shared/Docs/ContextRequest.md",
+            intent: requestIntent
+        )
+        report.record("backend_context_analysis", "contextual request file is readable with explicit intent", contextualRead.contains("CONTEXT_REQUEST_BRIEF"))
+        let decisions = try await h.exposureStore.decisions(connectionID: h.connectionID, limit: 200)
+        report.record(
+            "backend_context_analysis",
+            "backend access decision stores request summary",
+            decisions.contains {
+                $0.toolName == "read_file"
+                    && $0.resourcePath == "shared/Docs/ContextRequest.md"
+                    && $0.intentSummary == requestIntent.summary
+            }
+        )
+        let exposures = try await h.exposureStore.exposures(connectionID: h.connectionID, limit: 200)
+        report.record(
+            "backend_context_analysis",
+            "backend exposure record stores request details and redacted byte accounting",
+            exposures.contains {
+                $0.toolName == "read_file"
+                    && $0.resourcePath == "shared/Docs/ContextRequest.md"
+                    && $0.intentDetails == requestIntent.details
+                    && $0.byteCount > 0
+                    && ($0.payloadPreview?.contains("[redacted full_file") ?? false)
+            }
+        )
+
+        try report.write(to: Self.syntheticReportURL())
+        if !report.failures.isEmpty {
+            Issue.record("\(report.render())")
+        }
+        #expect(report.failures.isEmpty)
+    }
+
+    static func syntheticReportURL() throws -> URL {
+        let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/self-improvement", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("synthetic-mcp-ui-report.txt")
+    }
 
     @Test("Status shows no access when a block-by-default agent has no standing grants")
     func emptyPolicyStatus() async throws {
@@ -991,6 +1468,41 @@ struct StandingAccessTests {
         #expect(decisions.contains { $0.intentSummary == "Checking the README before editing" })
     }
 
+    @Test("Session request detail override is resolved at MCP boundary")
+    func sessionRequestDetailOverrideControlsIntentRequirement() async throws {
+        let h = try makeHarness()
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "MyApp")
+        try await h.policyStore.addSource(sourceID, to: .cowork)
+        try await h.policyStore.updateAccessRecordingLevel(.lightweight, for: .cowork)
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [sourceID],
+            materializationRoot: h.tempDir.appendingPathComponent("request-detail-grant").path,
+            requestDetailLevel: .summary
+        )
+
+        do {
+            _ = try await h.bridge.readFile(path: "myapp/README.md")
+            Issue.record("Expected session request detail to require intent")
+        } catch let error as ManifoldMCPError {
+            if case .intentRequired = error {
+                // Expected.
+            } else {
+                Issue.record("Expected intentRequired, got \(error)")
+            }
+        }
+
+        try await h.grantStore.updateRequestDetailLevel(grantID: grant.grantID, level: nil)
+        let content = try await h.bridge.readFile(path: "myapp/README.md")
+        #expect(content == "hello world")
+
+        let policy = try await h.policyStore.policy(for: .cowork)
+        #expect(policy.accessRecordingLevel == .lightweight)
+    }
+
     @Test("Standing email access uses allowed domains without a tracked work block")
     func standingEmailAccess() async throws {
         let h = try makeHarness()
@@ -1296,5 +1808,73 @@ struct StandingAccessTests {
         let email = try #require(context.emails.first)
         #expect(email.isRedacted)
         #expect(email.from == "Redacted")
+    }
+}
+
+private struct SyntheticMCPUIReport {
+    private(set) var rows: [String] = []
+    private(set) var failures: [String] = []
+
+    mutating func record(_ tool: String, _ invariant: String, _ passed: Bool) {
+        record(
+            mcpCall: tool,
+            expectedUIState: invariant,
+            actualUIState: passed ? "matches MCP contract" : "does not match MCP contract",
+            invariant: invariant,
+            passed: passed,
+            likelySubsystem: likelySubsystem(for: tool)
+        )
+    }
+
+    mutating func record(
+        mcpCall: String,
+        expectedUIState: String,
+        actualUIState: String,
+        invariant: String,
+        passed: Bool,
+        likelySubsystem: String
+    ) {
+        let status = passed ? "pass" : "fail"
+        let row = """
+        [\(status)] mcp_call=\(mcpCall) | expected_ui_state=\(expectedUIState) | actual_ui_state=\(actualUIState) | invariant=\(invariant) | likely_subsystem=\(likelySubsystem)
+        """
+        rows.append(row)
+        if !passed {
+            failures.append(row)
+        }
+    }
+
+    private func likelySubsystem(for tool: String) -> String {
+        switch tool {
+        case "get_status":
+            return "runtime status"
+        case "list_files", "read_file", "search_files", "write_file", "list_changes":
+            return "file scope"
+        case "search_structured":
+            return "structured search"
+        case "list_emails", "search_emails", "read_email":
+            return "email scope"
+        case "filter_mode":
+            return "privacy filter mode"
+        case "create_value_handle", "check_capability_flow":
+            return "capability flow"
+        case "verify_claimed_actions":
+            return "action verification"
+        case "backend_context_analysis":
+            return "access intent recording"
+        default:
+            return "synthetic MCP/UI loop"
+        }
+    }
+
+    func render() -> String {
+        """
+        Synthetic MCP/UI self-improvement report
+        \(rows.joined(separator: "\n"))
+        """
+    }
+
+    func write(to url: URL) throws {
+        try render().write(to: url, atomically: true, encoding: .utf8)
     }
 }

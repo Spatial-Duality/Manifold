@@ -48,7 +48,7 @@ This gives Manifold:
 - easy indexing and querying
 - efficient deduplication for tracked activity
 
-## Why Record Exposure, Not Just Requests
+## Why Record Exposure, Not Just Approvals
 
 Knowing that an agent asked for `foo.txt` is weaker than knowing what Manifold actually returned.
 
