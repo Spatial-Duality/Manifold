@@ -339,6 +339,18 @@ enum ClientIdentityVerifier {
                 )
             }
             guard clientAttestation.signatureValid else {
+                // Distinguish a stale helper (the on-disk binary is
+                // well-signed, but the running process is using older
+                // in-memory code because the file was replaced under
+                // it) from a genuinely-invalid signature. The first
+                // case is fixed by relaunching the helper; the second
+                // means the helper shouldn't be trusted at all.
+                let reason: String
+                if clientAttestation.staticSignatureValid {
+                    reason = "The manifold-mcp helper is running stale code. Reconnect the agent to relaunch it."
+                } else {
+                    reason = "The manifold-mcp helper signature is invalid."
+                }
                 return VerifiedClientIdentity(
                     requestedTargetApp: requestedAgent,
                     effectiveTargetApp: effectiveTargetApp.rawValue,
@@ -348,7 +360,7 @@ enum ClientIdentityVerifier {
                     hostBundleIdentifier: hostBundleIdentifier,
                     hostExecutablePath: hostExecutablePath,
                     status: .unverified,
-                    reason: "The manifold-mcp helper signature is invalid."
+                    reason: reason
                 )
             }
             guard clientAttestation.teamIdentifier == runtimeTeamIdentifier else {

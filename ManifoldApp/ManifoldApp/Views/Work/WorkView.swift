@@ -988,6 +988,23 @@ struct WorkRuntimeIssue: Hashable {
 
 @MainActor
 private func workRuntimeIssue(store: ManifoldStore) -> WorkRuntimeIssue? {
+    let combinedError = (store.runtimeLaunchError ?? "") + " " + (store.lastError ?? "")
+    let lower = combinedError.lowercased()
+    // The verifier flags "stale" specifically when an agent helper is
+    // running older code than the binary on disk. Restarting the runtime
+    // doesn't fix that; relaunching the agent's helper does.
+    let isStaleHelper = lower.contains("stale") || lower.contains("reconnect")
+
+    if isStaleHelper {
+        return WorkRuntimeIssue(
+            title: "Agent helper out of date",
+            primaryAction: "Reconnect agents",
+            actionKind: .reconnect,
+            detail: store.runtimeLaunchError ?? store.lastError
+                ?? "Claude or Codex is running an older copy of the Manifold helper. Reconnecting will relaunch it.",
+            lastChecked: Date()
+        )
+    }
     if !store.isRuntimeConnected {
         return WorkRuntimeIssue(
             title: "Runtime unavailable",
@@ -1053,10 +1070,12 @@ private struct WorkRuntimeIssueBanner: View {
 
     private func handleAction() {
         switch issue.actionKind {
-        case .retry, .reconnect:
+        case .retry:
             Task { await store.refresh() }
         case .restart:
             Task { await store.restartRuntimeHelper() }
+        case .reconnect:
+            Task { await store.reconnectAgentHelpers() }
         }
     }
 }
@@ -1468,24 +1487,48 @@ private struct WorkRuntimeIssueInspector: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: Spacing.s2) {
-                Button {
-                    Task { await store.refresh() }
-                } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
-                }
-                .controlSize(.regular)
-                .accessibilityIdentifier("work.inspector.runtime.retry")
+                if isStaleHelper {
+                    // Stale-helper case: relaunching the agent's
+                    // helper is the targeted fix. Restart Runtime
+                    // demoted to a secondary action.
+                    Button {
+                        Task { await store.reconnectAgentHelpers() }
+                    } label: {
+                        Label("Reconnect agents", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .accessibilityIdentifier("work.inspector.runtime.reconnect")
 
-                Button {
-                    Task { await store.restartRuntimeHelper() }
-                } label: {
-                    Label("Restart", systemImage: "arrow.triangle.2.circlepath")
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        Task { await store.restartRuntimeHelper() }
+                    } label: {
+                        Label("Restart", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.regular)
+                    .accessibilityIdentifier("work.inspector.runtime.restart")
+                } else {
+                    Button {
+                        Task { await store.refresh() }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.regular)
+                    .accessibilityIdentifier("work.inspector.runtime.retry")
+
+                    Button {
+                        Task { await store.restartRuntimeHelper() }
+                    } label: {
+                        Label("Restart", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .accessibilityIdentifier("work.inspector.runtime.restart")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .accessibilityIdentifier("work.inspector.runtime.restart")
             }
 
             DisclosureGroup(isExpanded: $work.runtimeIssueDisclosureExpanded) {
@@ -1503,13 +1546,22 @@ private struct WorkRuntimeIssueInspector: View {
         }
     }
 
+    private var isStaleHelper: Bool {
+        let combined = ((store.runtimeLaunchError ?? "") + " " + (store.lastError ?? "")).lowercased()
+        return combined.contains("stale") || combined.contains("reconnect")
+    }
+
     private var title: String {
+        if isStaleHelper { return "Agent helper out of date" }
         if !store.isRuntimeConnected { return "Runtime unavailable" }
         if (store.lastError ?? "").isEmpty == false { return "Runtime needs restart" }
         return "Runtime healthy"
     }
 
     private var shortMessage: String {
+        if isStaleHelper {
+            return "Claude or Codex is using an older copy of the Manifold helper. Reconnecting will relaunch it from the up-to-date binary."
+        }
         if !store.isRuntimeConnected {
             return "Manifold can't reach the runtime helper. Try retry, then restart."
         }

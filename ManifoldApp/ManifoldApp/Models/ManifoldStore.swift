@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import Security
 import SwiftUI
 import UserNotifications
 import os
@@ -1007,6 +1008,71 @@ final class ManifoldStore {
         await integrationHealth.checkAll(force: true)
     }
 
+    /// Reconnect every agent helper (Claude / Codex `manifold-mcp`
+    /// processes). Sends SIGTERM to all running `manifold-mcp` PIDs
+    /// regardless of which agent spawned them; the host (Claude or
+    /// Codex) will relaunch the helper from the freshly-installed
+    /// binary the next time it sends a request.
+    ///
+    /// This is the targeted fix for the "stale helper signature"
+    /// problem: when the runtime overwrites the installed helper at
+    /// app launch, processes Claude spawned earlier still reference
+    /// the old code in memory and fail dynamic code-signing checks.
+    /// Killing them lets Claude relaunch a process whose in-memory
+    /// code matches the new on-disk file.
+    func reconnectAgentHelpers() async {
+        runtimeLaunchError = nil
+        lastError = nil
+        Self.terminateStaleMCPHelpers()
+        // The freshly-spawned helpers won't be ready instantly; give
+        // the host a moment to detect the disconnect and relaunch
+        // before we re-probe.
+        try? await Task.sleep(for: .seconds(1))
+        await refreshAll(force: true)
+        await integrationHealth.checkAll(force: true)
+    }
+
+    /// Find every running `manifold-mcp` process and send SIGTERM.
+    /// Only matches processes whose executable path resolves to the
+    /// same installed-helper location we ship — we don't kill arbitrary
+    /// processes whose name happens to contain "manifold-mcp".
+    private nonisolated static func terminateStaleMCPHelpers() {
+        let installedPath = mcpBinaryPath
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,comm="]
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            logger.error("Failed to enumerate processes for reconnect: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let listing = String(data: data, encoding: .utf8) else { return }
+        var terminated = 0
+        for rawLine in listing.split(whereSeparator: { $0.isNewline }) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard let firstSpace = line.firstIndex(where: { $0.isWhitespace }) else { continue }
+            let pidString = String(line[..<firstSpace])
+            guard let pid = pid_t(pidString), pid > 1 else { continue }
+            let command = String(line[line.index(after: firstSpace)...]).trimmingCharacters(in: .whitespaces)
+            // `comm` truncates after the executable basename; match
+            // either the bare basename or the full installed path.
+            guard command == installedPath
+                || (command as NSString).lastPathComponent == "manifold-mcp" else {
+                continue
+            }
+            if kill(pid, SIGTERM) == 0 {
+                terminated += 1
+            }
+        }
+        logger.info("Reconnect agents: terminated \(terminated) helper process(es)")
+    }
+
     func restoreFile(snapshotID: Int, filePath: String) async -> RestoreSnapshotResult {
         let result = await session.restoreFile(snapshotID: snapshotID, filePath: filePath)
         if result.isSuccess { await refreshAll() }
@@ -1161,7 +1227,14 @@ final class ManifoldStore {
             return false
         }
 
-        if !force, destinationExists, filesMatch(bundled, destinationURL) {
+        // Skip the overwrite when the installed helper is the same code
+        // as the bundled one. Compare CDHashes (the cryptographic digest
+        // of the code-signing payload) rather than raw bytes — Debug
+        // rebuilds can perturb non-signing bytes in the binary even when
+        // nothing meaningful changed, so byte-compare would replace the
+        // file on every launch and invalidate the running helpers Claude
+        // and Codex have already spawned.
+        if !force, destinationExists, helpersMatchByCodeIdentity(bundled, destinationURL) {
             return false
         }
 
@@ -1177,15 +1250,45 @@ final class ManifoldStore {
         return true
     }
 
-    private nonisolated static func filesMatch(_ lhs: URL, _ rhs: URL) -> Bool {
-        guard let lhsValues = try? lhs.resourceValues(forKeys: [.fileSizeKey]),
-              let rhsValues = try? rhs.resourceValues(forKeys: [.fileSizeKey]),
-              lhsValues.fileSize == rhsValues.fileSize,
-              let lhsData = try? Data(contentsOf: lhs),
-              let rhsData = try? Data(contentsOf: rhs) else {
+    /// True if the two binaries have the same code-signing identity:
+    /// same CDHash AND same team identifier. CDHash is the canonical
+    /// "is this the same code?" check — it digests the code directory
+    /// the kernel uses to validate a running process. If both files
+    /// carry the same CDHash, replacing one with the other is a no-op
+    /// from the runtime's perspective, so we skip the overwrite and
+    /// preserve any helper PIDs that are still talking to it.
+    private nonisolated static func helpersMatchByCodeIdentity(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard let lhsInfo = codeSigningInfo(at: lhs),
+              let rhsInfo = codeSigningInfo(at: rhs) else {
             return false
         }
-        return lhsData == rhsData
+        let lhsHash = lhsInfo[kSecCodeInfoUnique as String] as? Data
+        let rhsHash = rhsInfo[kSecCodeInfoUnique as String] as? Data
+        let lhsTeam = lhsInfo[kSecCodeInfoTeamIdentifier as String] as? String
+        let rhsTeam = rhsInfo[kSecCodeInfoTeamIdentifier as String] as? String
+        guard let lhsHash, let rhsHash, lhsHash == rhsHash else { return false }
+        // Allow either side to be team-less (ad-hoc) but require equality
+        // when both have a team.
+        if let lhsTeam, let rhsTeam, lhsTeam != rhsTeam {
+            return false
+        }
+        return true
+    }
+
+    private nonisolated static func codeSigningInfo(at url: URL) -> [String: Any]? {
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(url as CFURL, SecCSFlags(), &staticCode)
+        guard createStatus == errSecSuccess, let staticCode else { return nil }
+        var infoRef: CFDictionary?
+        let infoStatus = SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &infoRef
+        )
+        guard infoStatus == errSecSuccess, let info = infoRef as? [String: Any] else {
+            return nil
+        }
+        return info
     }
 
     func loadSessions() async { await activity.loadSessions() }

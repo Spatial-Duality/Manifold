@@ -54,6 +54,7 @@ struct ClientIdentityVerifierTests {
                 identifier: "manifold-mcp",
                 teamIdentifier: "9FHKB788RP",
                 signatureValid: true,
+                staticSignatureValid: true,
                 usedAuditToken: true
             ),
             hostAttestation: ProcessAttestation(
@@ -61,6 +62,7 @@ struct ClientIdentityVerifierTests {
                 identifier: "disclaimer",
                 teamIdentifier: "Q6L2SF6YDW",
                 signatureValid: true,
+                staticSignatureValid: true,
                 usedAuditToken: false
             ),
             runtimeTeamIdentifier: "9FHKB788RP",
@@ -178,6 +180,7 @@ struct ClientIdentityVerifierTests {
                 identifier: "com.spatialduality.manifold",
                 teamIdentifier: "WRONGTEAM",
                 signatureValid: true,
+                staticSignatureValid: true,
                 usedAuditToken: true
             ),
             runtimeTeamIdentifier: "9FHKB788RP",
@@ -203,6 +206,7 @@ struct ClientIdentityVerifierTests {
                 identifier: "manifold-mcp",
                 teamIdentifier: "WRONGTEAM",
                 signatureValid: true,
+                staticSignatureValid: true,
                 usedAuditToken: true
             ),
             hostAttestation: ProcessAttestation(
@@ -210,6 +214,7 @@ struct ClientIdentityVerifierTests {
                 identifier: "com.anthropic.claudefordesktop",
                 teamIdentifier: "CLAUDETEAM",
                 signatureValid: true,
+                staticSignatureValid: true,
                 usedAuditToken: false
             ),
             runtimeTeamIdentifier: "9FHKB788RP",
@@ -219,5 +224,77 @@ struct ClientIdentityVerifierTests {
 
         #expect(identity.status == .unverified)
         #expect(identity.reason.contains("same team"))
+    }
+
+    @Test("Stale helper (static valid, dynamic invalid) yields a Reconnect-style reason")
+    func staleHelperReportsReconnectGuidance() {
+        let identity = ClientIdentityVerifier.verify(
+            requestedAgent: TargetApp.cowork.rawValue,
+            clientProcessID: 42,
+            clientExecutablePath: "/Applications/Manifold.app/Contents/Library/LaunchServices/manifold-mcp",
+            hostProcessID: 99,
+            hostBundleIdentifier: "com.anthropic.claudefordesktop",
+            hostExecutablePath: "/Applications/Claude.app/Contents/Helpers/disclaimer",
+            clientAttestation: ProcessAttestation(
+                processID: 42,
+                identifier: "manifold-mcp",
+                teamIdentifier: "9FHKB788RP",
+                signatureValid: false,
+                staticSignatureValid: true,
+                usedAuditToken: true
+            ),
+            hostAttestation: ProcessAttestation(
+                processID: 99,
+                identifier: "disclaimer",
+                teamIdentifier: "Q6L2SF6YDW",
+                signatureValid: true,
+                staticSignatureValid: true,
+                usedAuditToken: false
+            ),
+            runtimeTeamIdentifier: "9FHKB788RP",
+            clientRequirementSatisfied: true,
+            hostRequirementSatisfied: true
+        )
+
+        #expect(identity.status == .unverified)
+        // The reason must point the user at "reconnect" rather than the
+        // generic "signature is invalid" so the UI can offer the right
+        // primary action.
+        #expect(identity.reason.lowercased().contains("stale"))
+        #expect(identity.reason.lowercased().contains("reconnect"))
+    }
+
+    @Test("Genuinely-invalid helper (both static and dynamic invalid) yields the strict-invalid reason")
+    func invalidHelperReportsStrictInvalidReason() {
+        let identity = ClientIdentityVerifier.verify(
+            requestedAgent: TargetApp.cowork.rawValue,
+            clientProcessID: 42,
+            clientExecutablePath: "/Applications/Manifold.app/Contents/Library/LaunchServices/manifold-mcp",
+            hostProcessID: 99,
+            hostBundleIdentifier: "com.anthropic.claudefordesktop",
+            hostExecutablePath: "/Applications/Claude.app/Contents/Helpers/disclaimer",
+            clientAttestation: ProcessAttestation(
+                processID: 42,
+                identifier: "manifold-mcp",
+                teamIdentifier: "9FHKB788RP",
+                signatureValid: false,
+                staticSignatureValid: false,
+                usedAuditToken: true
+            ),
+            hostAttestation: ProcessAttestation(
+                processID: 99,
+                identifier: "disclaimer",
+                teamIdentifier: "Q6L2SF6YDW",
+                signatureValid: true,
+                staticSignatureValid: true,
+                usedAuditToken: false
+            ),
+            runtimeTeamIdentifier: "9FHKB788RP",
+            clientRequirementSatisfied: true,
+            hostRequirementSatisfied: true
+        )
+
+        #expect(identity.status == .unverified)
+        #expect(identity.reason == "The manifold-mcp helper signature is invalid.")
     }
 }
