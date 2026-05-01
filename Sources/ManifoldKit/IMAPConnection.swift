@@ -157,7 +157,7 @@ public actor IMAPConnection {
 
     /// AUTHENTICATE with XOAUTH2 (for Gmail, Microsoft 365).
     public func authenticateOAuth2(username: String, accessToken: String) async throws {
-        let saslString = OAuthManager.xoauth2String(user: username, accessToken: accessToken)
+        let saslString = XOAUTH2Builder.payload(user: username, accessToken: accessToken)
         guard let conn = connection else { throw IMAPError.disconnected }
 
         let tag = nextTag()
@@ -205,9 +205,22 @@ public actor IMAPConnection {
         return IMAPParser.parseSelectResponses(untagged)
     }
 
+    /// EXAMINE a mailbox read-only. Returns parsed SelectResult without enabling server-side mutations.
+    public func examine(mailbox: String) async throws -> SelectResult {
+        let cmd = try IMAPCommandBuilder.build(.examine(mailbox: mailbox))
+        let (untagged, status, text) = try await sendCommand(cmd)
+        guard status == "OK" else {
+            if text.uppercased().contains("NOT") || text.uppercased().contains("NONEXISTENT") {
+                throw IMAPError.mailboxNotFound(mailbox)
+            }
+            throw IMAPError.serverError("EXAMINE failed: \(text)")
+        }
+        return IMAPParser.parseSelectResponses(untagged)
+    }
+
     /// SEARCH for UIDs matching criteria. Returns sorted UIDs.
     public func search(criteria: String) async throws -> [UInt32] {
-        let cmd = "UID SEARCH \(criteria)"
+        let cmd = try IMAPCommandBuilder.build(.uidSearch(criteria: criteria))
         let (untagged, status, text) = try await sendCommand(cmd)
         guard status == "OK" else {
             throw IMAPError.serverError("SEARCH failed: \(text)")
@@ -228,7 +241,7 @@ public actor IMAPConnection {
         guard !uids.isEmpty else { return [] }
 
         let uidSet = uids.map(String.init).joined(separator: ",")
-        let cmd = "UID FETCH \(uidSet) (\(items))"
+        let cmd = try IMAPCommandBuilder.build(.uidFetch(uidSet: uidSet, items: items))
 
         let (untagged, status, text) = try await sendCommand(cmd)
         guard status == "OK" else {
@@ -251,6 +264,7 @@ public actor IMAPConnection {
     /// FETCH the full body for a single UID. Returns the raw message data.
     public func fetchBody(uid: UInt32) async throws -> Data {
         guard let conn = connection else { throw IMAPError.disconnected }
+        _ = try IMAPCommandBuilder.build(.uidFetch(uidSet: "\(uid)", items: "BODY.PEEK[]"))
 
         let tag = nextTag()
         let cmd = "\(tag) UID FETCH \(uid) (BODY.PEEK[])\r\n"
@@ -281,6 +295,49 @@ public actor IMAPConnection {
                     logger.debug("IMAP reading \(literalSize) byte literal")
                     bodyData = try await readExactly(count: literalSize)
                     // Read the closing paren line
+                    _ = try await readLine()
+                }
+            case .continuation:
+                break
+            }
+        }
+    }
+
+    /// FETCH the full body for a single UID and stream the literal to an
+    /// owner-only local file. This keeps large RFC822 literals off the heap
+    /// before archive-v2 encryption.
+    public func fetchBody(uid: UInt32, toFileAt destinationURL: URL) async throws -> Int {
+        guard let conn = connection else { throw IMAPError.disconnected }
+        _ = try IMAPCommandBuilder.build(.uidFetch(uidSet: "\(uid)", items: "BODY.PEEK[]"))
+
+        let tag = nextTag()
+        let cmd = "\(tag) UID FETCH \(uid) (BODY.PEEK[])\r\n"
+
+        try await send(data: Data(cmd.utf8), on: conn)
+        logger.debug("C: \(tag) UID FETCH \(uid) (BODY.PEEK[])")
+
+        var bodyByteCount: Int?
+
+        while true {
+            let line = try await readLine()
+
+            let classified = IMAPParser.classifyLine(line)
+            switch classified {
+            case .tagged(let respTag, let status, let text):
+                if respTag == tag {
+                    guard status == "OK" else {
+                        throw IMAPError.serverError("FETCH BODY failed: \(text)")
+                    }
+                    if let bodyByteCount {
+                        return bodyByteCount
+                    }
+                    throw IMAPError.unexpectedResponse("No body data in FETCH response")
+                }
+            case .untagged(let text):
+                if let literalSize = IMAPParser.literalCount(in: text) {
+                    logger.debug("IMAP streaming \(literalSize) byte literal")
+                    try await readExactly(count: literalSize, toFileAt: destinationURL)
+                    bodyByteCount = literalSize
                     _ = try await readLine()
                 }
             case .continuation:
@@ -469,6 +526,29 @@ public actor IMAPConnection {
         let data = buffer.prefix(count)
         buffer.removeFirst(count)
         return Data(data)
+    }
+
+    /// Read exactly N bytes from the connection into a local file without
+    /// aggregating the full literal in memory.
+    private func readExactly(count: Int, toFileAt destinationURL: URL) async throws {
+        try LocalFileProtection.writeOwnerOnly(Data(), to: destinationURL, options: [])
+        let output = try FileHandle(forWritingTo: destinationURL)
+        defer { try? output.close() }
+
+        var remaining = count
+        while remaining > 0 {
+            if buffer.isEmpty {
+                buffer.append(try await readChunk())
+                continue
+            }
+
+            let byteCount = min(buffer.count, remaining)
+            let chunk = Data(buffer.prefix(byteCount))
+            try output.write(contentsOf: chunk)
+            buffer.removeFirst(byteCount)
+            remaining -= byteCount
+        }
+        try LocalFileProtection.secureFile(at: destinationURL)
     }
 
     /// Read a chunk of data from the connection with timeout.

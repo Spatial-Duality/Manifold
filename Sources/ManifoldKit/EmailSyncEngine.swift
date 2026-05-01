@@ -30,49 +30,41 @@ public struct EmailSyncEvent: Sendable, Codable, Hashable {
 }
 
 /// Background sync engine for email backup.
-/// Connects to IMAP, fetches messages, and saves them as .eml files.
+/// Connects to IMAP, fetches messages, and saves canonical messages as
+/// encrypted archive-v2 blobs.
 public actor EmailSyncEngine {
     private let emailStore: EmailStore
     private var connections: [String: IMAPConnection] = [:]
-    private var syncTasks: [String: Task<Void, Never>] = [:]
-    private var backfillTask: Task<Void, Never>?
     private var eventContinuations: [UUID: AsyncStream<EmailSyncEvent>.Continuation] = [:]
-    private var isStopped = false
-
-    /// Progress of FTS5 body text backfill (0.0 to 1.0). Observable from UI.
-    public private(set) var backfillProgress: Double = 1.0
-    public private(set) var isBackfilling = false
 
     public init(emailStore: EmailStore) {
         self.emailStore = emailStore
     }
 
-    // MARK: - Account Registration
-
-    /// Register an account for periodic sync.
-    public func register(accountID: String) {
-        syncTasks[accountID]?.cancel()
-        isStopped = false
-
-        let task = Task {
-            await self.periodicSync(accountID: accountID)
-        }
-        syncTasks[accountID] = task
-        logger.info("Registered account \(accountID) for sync")
-    }
-
-    /// Unregister an account and stop its sync.
+    /// Disconnect cached network state for an account.
     public func unregister(accountID: String) async {
-        syncTasks[accountID]?.cancel()
-        syncTasks.removeValue(forKey: accountID)
         if let conn = connections.removeValue(forKey: accountID) {
             await conn.disconnect()
         }
     }
 
-    /// Trigger an immediate sync for one account.
-    public func syncNow(accountID: String) async throws -> SyncResult {
-        return await syncAccount(accountID: accountID)
+    /// Execute a durable sync job using the job type as the source of truth.
+    public func syncJob(_ job: MailSyncJobRecord) async -> SyncResult {
+        let mode: MailSyncExecutionMode
+        switch job.jobType {
+        case .initial, .recentPass:
+            mode = .recentPass(limitPerMailbox: 1_000)
+        case .historicalBackfill:
+            mode = .historicalBackfill(batchLimitPerMailbox: 1_000)
+        case .incremental, .reconcile:
+            mode = .incremental
+        }
+
+        return await syncAccount(
+            accountID: job.accountID,
+            mode: mode,
+            mailboxFilter: job.mailboxName
+        )
     }
 
     public func events() -> AsyncStream<EmailSyncEvent> {
@@ -85,64 +77,8 @@ public actor EmailSyncEngine {
         }
     }
 
-    // MARK: - FTS5 Body Text Backfill
-
-    /// Start background backfill of body text for existing emails that lack it.
-    /// Processes in batches, resumable across app launches.
-    public func startBackfill() {
-        guard backfillTask == nil else { return }
-        backfillTask = Task {
-            await self.runBackfill()
-        }
-    }
-
-    private func runBackfill() async {
-        isBackfilling = true
-        defer { isBackfilling = false; backfillTask = nil }
-
-        let totalCount = (try? emailStore.emailMessageCount()) ?? 0
-        let indexedCount = (try? emailStore.bodyTextIndexedCount()) ?? 0
-        guard totalCount > indexedCount else {
-            backfillProgress = 1.0
-            return
-        }
-
-        var processed = indexedCount
-        backfillProgress = totalCount > 0 ? Double(processed) / Double(totalCount) : 1.0
-
-        while !Task.isCancelled && !isStopped {
-            let batch = (try? emailStore.emailsNeedingBodyBackfill(limit: 100)) ?? []
-            guard !batch.isEmpty else { break }
-
-            for (emailID, emlPath) in batch {
-                guard !Task.isCancelled else { return }
-
-                guard let data = Self.readStoredMessage(at: emlPath) else { continue }
-                let parsed = MIMEParser.parse(data: data)
-                let rawBody = parsed.textBody ?? parsed.htmlBody.map { Self.stripHTML($0) }
-                guard let body = rawBody else { continue }
-                let truncated = String(body.prefix(51_200))
-                try? emailStore.updateBodyText(emailID: emailID, bodyText: truncated)
-
-                processed += 1
-                backfillProgress = Double(processed) / Double(totalCount)
-            }
-
-            // Yield between batches to avoid starving sync
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-
-        backfillProgress = 1.0
-        logger.info("FTS5 body text backfill complete")
-    }
-
-    /// Stop all background sync.
+    /// Disconnect all cached IMAP connections.
     public func stop() async {
-        isStopped = true
-        backfillTask?.cancel()
-        backfillTask = nil
-        for (_, task) in syncTasks { task.cancel() }
-        syncTasks.removeAll()
         for (_, conn) in connections { await conn.disconnect() }
         connections.removeAll()
     }
@@ -164,35 +100,13 @@ public actor EmailSyncEngine {
         eventContinuations.removeValue(forKey: id)
     }
 
-    // MARK: - Periodic Sync Loop
-
-    private func periodicSync(accountID: String) async {
-        while !isStopped && !Task.isCancelled {
-            guard let account = try? emailStore.emailAccount(id: accountID) else {
-                logger.warning("Account \(accountID) not found, stopping sync")
-                break
-            }
-            guard account.syncEnabled else {
-                try? await Task.sleep(for: .seconds(60))
-                continue
-            }
-
-            let result = await syncAccount(accountID: accountID)
-            if result.isSuccess {
-                logger.info("Sync OK for \(accountID): \(result.newMessages) new")
-            } else {
-                logger.warning("Sync errors for \(accountID): \(result.errors.joined(separator: ", "))")
-            }
-
-            do {
-                try await Task.sleep(for: .seconds(account.syncIntervalSeconds))
-            } catch { break }
-        }
-    }
-
     // MARK: - Core Sync
 
-    private func syncAccount(accountID: String) async -> SyncResult {
+    private func syncAccount(
+        accountID: String,
+        mode: MailSyncExecutionMode,
+        mailboxFilter: String? = nil
+    ) async -> SyncResult {
         let start = Date()
         var totalNew = 0
         var errors: [String] = []
@@ -233,22 +147,25 @@ public actor EmailSyncEngine {
             let junkMailboxNames = Set(
                 imapMailboxes.filter { $0.folderType == .junk }.map(\.mailboxName)
             )
+            let session = ReadOnlyIMAPSession(connection: conn)
 
             // Sync all selectable mailboxes, skipping redundant Gmail system folders
             let skipPatterns = ["[gmail]/all mail", "[gmail]/important", "[gmail]/starred"]
             let toSync = listEntries.filter { entry in
                 let isSelectable = !entry.flags.contains("\\Noselect") && !entry.flags.contains("\\NonExistent")
                 let isRedundant = skipPatterns.contains(entry.name.lowercased())
-                return isSelectable && !isRedundant
+                let matchesFilter = mailboxFilter == nil || entry.name == mailboxFilter
+                return isSelectable && !isRedundant && matchesFilter
             }.map(\.name)
 
             for mailboxName in toSync {
                 do {
                     let result = try await syncMailbox(
                         accountID: accountID,
-                        conn: conn,
+                        session: session,
                         mailboxName: mailboxName,
-                        isJunkMailbox: junkMailboxNames.contains(mailboxName)
+                        isJunkMailbox: junkMailboxNames.contains(mailboxName),
+                        mode: mode
                     )
                     totalNew += result.newMessages
                     mailboxResults.append(result)
@@ -258,23 +175,25 @@ public actor EmailSyncEngine {
             }
 
             // SEARCH ALL reconciliation: detect server-side deletions
-            for mailboxName in toSync {
-                do {
-                    try await reconcileMailbox(
-                        accountID: accountID,
-                        conn: conn,
-                        mailboxName: mailboxName
-                    )
-                } catch {
-                    // Non-fatal: reconciliation failure shouldn't block sync
-                    logger.warning("Reconciliation failed for \(mailboxName): \(error.localizedDescription)")
+            if !mode.isRecentPass && !mode.isHistoricalBackfill {
+                for mailboxName in toSync {
+                    do {
+                        try await reconcileMailbox(
+                            accountID: accountID,
+                            session: session,
+                            mailboxName: mailboxName
+                        )
+                    } catch {
+                        // Non-fatal: reconciliation failure shouldn't block sync
+                        logger.warning("Reconciliation failed for \(mailboxName): \(error.localizedDescription)")
+                    }
                 }
-            }
 
-            // Confirm deletions for messages missing from ALL mailboxes across two cycles
-            let confirmed = try emailStore.confirmServerDeletions()
-            if confirmed > 0 {
-                logger.info("Confirmed \(confirmed) server-side deletions for \(accountID)")
+                // Confirm deletions for messages missing from ALL mailboxes across two cycles
+                let confirmed = try emailStore.confirmServerDeletions()
+                if confirmed > 0 {
+                    logger.info("Confirmed \(confirmed) server-side deletions for \(accountID)")
+                }
             }
         } catch {
             errors.append(error.localizedDescription)
@@ -295,17 +214,19 @@ public actor EmailSyncEngine {
 
     private func syncMailbox(
         accountID: String,
-        conn: IMAPConnection,
+        session: ReadOnlyIMAPSession,
         mailboxName: String,
-        isJunkMailbox: Bool = false
+        isJunkMailbox: Bool = false,
+        mode: MailSyncExecutionMode
     ) async throws -> MailboxSyncResult {
         // Load sync state
         let state = try emailStore.syncState(accountID: accountID, mailbox: mailboxName)
-        var lastUID = state?.lastSyncUID ?? 0
+        let previousLastUID = state?.lastSyncUID ?? 0
+        var lastUID = previousLastUID
         let savedValidity = state?.uidValidity
 
-        // SELECT mailbox
-        let selectResult = try await conn.select(mailbox: mailboxName)
+        // EXAMINE mailbox so Manifold never opens a read-write IMAP session.
+        let selectResult = try await session.examine(mailbox: mailboxName)
 
         // Check UIDVALIDITY — if changed, full resync
         if let saved = savedValidity, saved != selectResult.uidValidity {
@@ -314,13 +235,15 @@ public actor EmailSyncEngine {
             lastUID = 0
         }
 
-        // Search for new messages — sync newest-first so recent emails
-        // appear in the UI immediately while older messages backfill.
-        let criteria = lastUID > 0 ? "UID \(lastUID + 1):*" : "ALL"
-        let uids = try await conn.search(criteria: criteria)
-        let newUIDs = uids.filter { $0 > lastUID }.sorted(by: >)
+        let uidPlan = try await syncUIDPlan(
+            accountID: accountID,
+            session: session,
+            mailboxName: mailboxName,
+            mode: mode,
+            lastUID: lastUID
+        )
 
-        guard !newUIDs.isEmpty else {
+        guard !uidPlan.selectedUIDs.isEmpty else {
             try emailStore.updateSyncState(
                 accountID: accountID, mailbox: mailboxName,
                 uidValidity: selectResult.uidValidity,
@@ -328,60 +251,63 @@ public actor EmailSyncEngine {
                 messageCount: state?.messageCount ?? selectResult.exists,
                 syncStatus: .idle
             )
-            return MailboxSyncResult(mailboxName: mailboxName, lastUID: lastUID, uidValidity: selectResult.uidValidity)
+            return MailboxSyncResult(
+                mailboxName: mailboxName,
+                lastUID: lastUID,
+                uidValidity: selectResult.uidValidity
+            )
         }
 
-        // Ensure .eml directory exists
-        let emlDir = Self.emlDirectory(accountID: accountID, mailbox: mailboxName)
-        try LocalFileProtection.ensureDirectory(at: emlDir)
+        let archiveStore = try MailArchiveStore(rootURL: Self.mailArchiveRoot)
+        let shouldPersistPlaintextFTS =
+            (try? emailStore.emailAccount(id: accountID))?.indexPrivacyMode == MailIndexPrivacyMode.plaintextFTSWithDisclosure.rawValue
 
         var newCount = 0
+        var savedUIDs = Set<UInt32>()
 
         // Fetch envelopes in batches of 50 for metadata
-        for batch in stride(from: 0, to: newUIDs.count, by: 50) {
-            let end = min(batch + 50, newUIDs.count)
-            let batchUIDs = Array(newUIDs[batch..<end])
+        for batch in stride(from: 0, to: uidPlan.selectedUIDs.count, by: 50) {
+            let end = min(batch + 50, uidPlan.selectedUIDs.count)
+            let batchUIDs = Array(uidPlan.selectedUIDs[batch..<end])
 
-            let fetched = try await conn.fetch(uids: batchUIDs, items: "UID FLAGS ENVELOPE RFC822.SIZE")
+            let fetched = try await session.fetch(uids: batchUIDs, items: "UID FLAGS ENVELOPE RFC822.SIZE")
 
             for item in fetched {
                 let uid = item.uid
-                let emlFile = emlDir.appendingPathComponent("\(uid).eml")
+                let archivedMessage: MailArchiveStoredObject
+                let bodyData: Data
+                let messageStagingURL = Self.messageLiteralStagingURL(accountID: accountID, uid: uid)
 
-                // Fetch raw message body and save as .eml
+                // Fetch raw message body and save into archive v2. The archive
+                // path is not a readable EML; explicit export is the readable path.
                 do {
-                    let bodyData = try await conn.fetchBody(uid: uid)
-                    let protectedMessage = try ProtectedStorageCrypto.encrypt(bodyData)
-                    try LocalFileProtection.writeOwnerOnly(protectedMessage, to: emlFile)
+                    _ = try await session.fetchBody(uid: uid, toFileAt: messageStagingURL)
+                    archivedMessage = try archiveStore.storeMessage(accountID: accountID, plaintextFileURL: messageStagingURL)
+                    bodyData = try Data(contentsOf: messageStagingURL, options: [.mappedIfSafe])
+                    try? FileManager.default.removeItem(at: messageStagingURL)
                 } catch {
+                    try? FileManager.default.removeItem(at: messageStagingURL)
                     logger.warning("Failed to fetch body for UID \(uid): \(error.localizedDescription)")
                     continue
                 }
 
-                // Parse .eml for preview, content type, attachment count, and body text
+                // Parse the in-memory message for preview, content type, and
+                // attachment metadata. Body text is only persisted for the
+                // explicit plaintext FTS mode.
                 let preview: String?
                 let contentType: String?
                 let attachmentCount: Int
                 let bodyText: String?
-                let parsedEmail: MIMEParser.ParsedEmail?
-                if let data = Self.readStoredMessage(at: emlFile.path) {
-                    let parsed = MIMEParser.parse(data: data)
-                    parsedEmail = parsed
-                    preview = parsed.textBody.map {
-                        String($0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).prefix(200))
-                    }
-                    contentType = parsed.htmlBody != nil ? "text/html" : "text/plain"
-                    attachmentCount = parsed.attachments.count
-                    // Extract body text for FTS5 indexing (plaintext preferred, HTML stripped as fallback)
-                    let rawBody = parsed.textBody ?? parsed.htmlBody.map { Self.stripHTML($0) }
-                    bodyText = rawBody.map { String($0.prefix(51_200)) } // 50KB cap
-                } else {
-                    parsedEmail = nil
-                    preview = nil
-                    contentType = nil
-                    attachmentCount = 0
-                    bodyText = nil
+                let parsedEmail: MIMEParser.ParsedEmail
+                let parsed = MIMEParser.parse(data: bodyData)
+                parsedEmail = parsed
+                preview = parsed.textBody.map {
+                    String($0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).prefix(200))
                 }
+                contentType = parsed.htmlBody != nil ? "text/html" : "text/plain"
+                attachmentCount = parsed.attachments.count
+                let rawBody = parsed.textBody ?? parsed.htmlBody.map { Self.stripHTML($0) }
+                bodyText = shouldPersistPlaintextFTS ? rawBody.map { String($0.prefix(51_200)) } : nil
 
                 // Map envelope fields
                 let envelope = item.envelope
@@ -407,7 +333,7 @@ public actor EmailSyncEngine {
                     cc: envelope?.cc ?? "",
                     subject: envelope?.subject ?? "(no subject)",
                     receivedAt: Self.normalizeDate(envelope?.date ?? ISO8601DateFormatter.shared.string(from: Date())),
-                    emlPath: emlFile.path,
+                    emlPath: archivedMessage.manifestURL.path,
                     sizeBytes: item.rfc822Size,
                     preview: preview,
                     contentType: contentType,
@@ -415,8 +341,10 @@ public actor EmailSyncEngine {
                     isFlagged: isFlagged,
                     inReplyTo: envelope?.inReplyTo.nilIfEmpty,
                     messageIDHeader: messageID,
-                    attachmentCount: attachmentCount
+                    attachmentCount: attachmentCount,
+                    canonicalBlobCID: archivedMessage.contentID
                 )
+                try emailStore.recordMailBlob(archivedMessage)
 
                 // Insert membership row (links this message to this mailbox)
                 try emailStore.upsertMailboxMembership(
@@ -432,23 +360,41 @@ public actor EmailSyncEngine {
                 }
 
                 var attachmentIDs: [String] = []
-                if let parsedEmail {
-                    try emailStore.deleteEmailAttachments(emailID: emailID)
-                    for (index, attachment) in parsedEmail.attachments.enumerated() {
-                        let contentHash = SHA256.hash(data: attachment.data).hexString
-                        let attachmentID = "\(emailID)-att-\(index)-\(contentHash.prefix(12))"
-                        try emailStore.upsertEmailAttachment(
-                            attachmentID: attachmentID,
-                            emailID: emailID,
-                            filename: attachment.filename,
-                            mimeType: attachment.mimeType,
-                            sizeBytes: attachment.size,
-                            contentHash: contentHash,
-                            contentID: attachment.contentID
-                        )
-                        attachmentIDs.append(attachmentID)
-                    }
+                var attachmentIndexText: [String] = []
+                try emailStore.deleteEmailAttachments(emailID: emailID)
+                for (index, attachment) in parsedEmail.attachments.enumerated() {
+                    let contentHash = SHA256.hash(data: attachment.data).hexString
+                    let attachmentID = "\(emailID)-att-\(index)-\(contentHash.prefix(12))"
+                    let archivedAttachment = try archiveStore.store(
+                        accountID: accountID,
+                        kind: .attachment,
+                        plaintext: attachment.data
+                    )
+                    try emailStore.recordMailBlob(archivedAttachment)
+                    try emailStore.upsertEmailAttachment(
+                        attachmentID: attachmentID,
+                        emailID: emailID,
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        sizeBytes: attachment.size,
+                        contentHash: contentHash,
+                        contentID: attachment.contentID,
+                        attachmentBlobCID: archivedAttachment.contentID
+                    )
+                    attachmentIDs.append(attachmentID)
+                    attachmentIndexText.append(Self.indexableAttachmentText(attachment))
                 }
+                try emailStore.replacePrivateTokenIndex(
+                    accountID: accountID,
+                    emailID: emailID,
+                    fields: [
+                        .subject: envelope?.subject ?? "",
+                        .sender: envelope?.from ?? "",
+                        .recipients: [envelope?.to, envelope?.cc].compactMap { $0 }.joined(separator: " "),
+                        .body: rawBody ?? "",
+                        .attachment: attachmentIndexText.joined(separator: " "),
+                    ]
+                )
 
                 // Tag messages in junk/spam folders
                 if isJunkMailbox {
@@ -466,9 +412,18 @@ public actor EmailSyncEngine {
                 )
 
                 newCount += 1
-                lastUID = max(lastUID, uid)
+                savedUIDs.insert(uid)
             }
         }
+
+        lastUID = Self.nextHighWatermark(
+            previousLastUID: previousLastUID,
+            searchedUIDs: uidPlan.searchedUIDs,
+            savedUIDs: savedUIDs,
+            mode: mode,
+            selectedUIDCount: uidPlan.selectedUIDs.count,
+            candidateUIDCount: uidPlan.candidateUIDCount
+        )
 
         // Update sync state
         try emailStore.updateSyncState(
@@ -482,8 +437,82 @@ public actor EmailSyncEngine {
         logger.info("Synced \(newCount) new messages from \(mailboxName)")
         return MailboxSyncResult(
             mailboxName: mailboxName, newMessages: newCount,
-            lastUID: lastUID, uidValidity: selectResult.uidValidity
+            lastUID: lastUID, uidValidity: selectResult.uidValidity,
+            oldestFetchedUID: savedUIDs.min(),
+            fetchedUIDCount: savedUIDs.count,
+            hasMoreHistory: uidPlan.hasMoreHistory
         )
+    }
+
+    private struct MailboxUIDPlan: Sendable {
+        let searchedUIDs: [UInt32]
+        let selectedUIDs: [UInt32]
+        let candidateUIDCount: Int
+        let hasMoreHistory: Bool
+    }
+
+    private func syncUIDPlan(
+        accountID: String,
+        session: ReadOnlyIMAPSession,
+        mailboxName: String,
+        mode: MailSyncExecutionMode,
+        lastUID: UInt32
+    ) async throws -> MailboxUIDPlan {
+        switch mode {
+        case .incremental:
+            let criteria = lastUID > 0 ? "UID \(lastUID + 1):*" : "ALL"
+            let uids = try await session.search(criteria: criteria)
+            let candidates = uids.filter { $0 > lastUID }.sorted(by: >)
+            return MailboxUIDPlan(
+                searchedUIDs: candidates,
+                selectedUIDs: candidates,
+                candidateUIDCount: candidates.count,
+                hasMoreHistory: false
+            )
+
+        case .recentPass(let limitPerMailbox):
+            let criteria = lastUID > 0 ? "UID \(lastUID + 1):*" : "ALL"
+            let uids = try await session.search(criteria: criteria)
+            let candidates = uids.filter { $0 > lastUID }.sorted(by: >)
+            let selected = Array(candidates.prefix(max(0, limitPerMailbox)))
+            return MailboxUIDPlan(
+                searchedUIDs: candidates,
+                selectedUIDs: selected,
+                candidateUIDCount: candidates.count,
+                hasMoreHistory: selected.count < candidates.count
+            )
+
+        case .historicalBackfill(let batchLimitPerMailbox):
+            let storedUIDs = try emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
+            guard let oldestStoredUID = storedUIDs.min(), oldestStoredUID > 1 else {
+                return MailboxUIDPlan(
+                    searchedUIDs: [],
+                    selectedUIDs: [],
+                    candidateUIDCount: 0,
+                    hasMoreHistory: false
+                )
+            }
+
+            let criteria = "UID 1:\(oldestStoredUID - 1)"
+            let uids = try await session.search(criteria: criteria)
+            let candidates = uids
+                .filter { $0 < oldestStoredUID && !storedUIDs.contains($0) }
+                .sorted(by: >)
+            let selected = Array(candidates.prefix(max(0, batchLimitPerMailbox)))
+            return MailboxUIDPlan(
+                searchedUIDs: candidates,
+                selectedUIDs: selected,
+                candidateUIDCount: candidates.count,
+                hasMoreHistory: selected.count < candidates.count
+            )
+        }
+    }
+
+    private static func messageLiteralStagingURL(accountID: String, uid: UInt32) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ManifoldMailSync", isDirectory: true)
+            .appendingPathComponent(accountID, isDirectory: true)
+            .appendingPathComponent("\(UUID().uuidString)-\(uid).rfc822")
     }
 
     // MARK: - EXPUNGE Detection (SEARCH ALL reconciliation)
@@ -493,13 +522,13 @@ public actor EmailSyncEngine {
     /// Confirmed deletion happens on the NEXT sync cycle (deferred marking).
     private func reconcileMailbox(
         accountID: String,
-        conn: IMAPConnection,
+        session: ReadOnlyIMAPSession,
         mailboxName: String
     ) async throws {
-        let selectResult = try await conn.select(mailbox: mailboxName)
+        let selectResult = try await session.examine(mailbox: mailboxName)
 
         // Get all UIDs currently on the server
-        let serverUIDs = Set(try await conn.search(criteria: "ALL"))
+        let serverUIDs = Set(try await session.search(criteria: "ALL"))
 
         // Get all UIDs we have stored for this mailbox
         let storedUIDs = try emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
@@ -531,6 +560,49 @@ public actor EmailSyncEngine {
         _ = selectResult // suppress unused warning
     }
 
+    nonisolated static func safeHighWatermark(
+        previousLastUID: UInt32,
+        searchedUIDs: [UInt32],
+        savedUIDs: Set<UInt32>
+    ) -> UInt32 {
+        var highWatermark = previousLastUID
+        for uid in searchedUIDs.sorted() where uid > previousLastUID {
+            guard savedUIDs.contains(uid) else { break }
+            highWatermark = uid
+        }
+        return highWatermark
+    }
+
+    nonisolated static func nextHighWatermark(
+        previousLastUID: UInt32,
+        searchedUIDs: [UInt32],
+        savedUIDs: Set<UInt32>,
+        mode: MailSyncExecutionMode,
+        selectedUIDCount: Int,
+        candidateUIDCount: Int
+    ) -> UInt32 {
+        guard !savedUIDs.isEmpty else { return previousLastUID }
+
+        switch mode {
+        case .historicalBackfill:
+            return previousLastUID
+        case .recentPass:
+            // Recent pass intentionally skips older UIDs for later backfill.
+            // The high-water mark tracks newest-mail incremental progress only;
+            // historical jobs fill the lower UID range from stored membership.
+            return max(previousLastUID, savedUIDs.max() ?? previousLastUID)
+        case .incremental:
+            if selectedUIDCount < candidateUIDCount {
+                return max(previousLastUID, savedUIDs.max() ?? previousLastUID)
+            }
+            return safeHighWatermark(
+                previousLastUID: previousLastUID,
+                searchedUIDs: searchedUIDs,
+                savedUIDs: savedUIDs
+            )
+        }
+    }
+
     // MARK: - HTML Stripping
 
     /// Strip HTML tags for plaintext body extraction (fallback when no text/plain part).
@@ -551,6 +623,26 @@ public actor EmailSyncEngine {
             mutable.replaceOccurrences(of: entity as String, with: replacement as String, range: NSRange(location: 0, length: mutable.length))
         }
         return (mutable as String).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated static func indexableAttachmentText(_ attachment: MIMEParser.AttachmentPart) -> String {
+        var parts = [attachment.filename]
+        let mimeType = attachment.mimeType.lowercased()
+        let isTextLike = mimeType.hasPrefix("text/")
+            || mimeType == "application/json"
+            || mimeType == "application/xml"
+            || mimeType == "application/csv"
+            || mimeType.hasSuffix("+json")
+            || mimeType.hasSuffix("+xml")
+
+        if isTextLike {
+            let capped = Data(attachment.data.prefix(1_048_576))
+            if let text = String(data: capped, encoding: .utf8)
+                ?? String(data: capped, encoding: .isoLatin1) {
+                parts.append(text)
+            }
+        }
+        return parts.joined(separator: " ")
     }
 
     /// Pre-compiled regex patterns for HTML stripping. Compiled once, reused for every email.
@@ -622,38 +714,118 @@ public actor EmailSyncEngine {
         let conn = IMAPConnection(host: server, port: UInt16(port))
         try await conn.connect()
 
-        // Authenticate — fail fast if credentials are missing rather than
-        // sending an empty LOGIN that the server will reject.
-        guard let password = KeychainHelper.retrieve(accountID: accountID), !password.isEmpty else {
-            await conn.disconnect()
-            throw IMAPError.authenticationFailed("No stored credential — please re-enter your password in Settings → Email Backup")
-        }
         guard let username = account.username, !username.isEmpty else {
             await conn.disconnect()
             throw IMAPError.authenticationFailed("No username configured for this account")
         }
-        try await conn.login(username: username, password: password)
+
+        if account.mailCredentialReference?.kind == .oauthTokenSet {
+            try await authenticateWithOAuth2(conn: conn, accountID: accountID, username: username)
+        } else {
+            // Authenticate — fail fast if credentials are missing rather than
+            // sending an empty LOGIN that the server will reject.
+            guard let password = Self.storedCredential(for: account), !password.isEmpty else {
+                await conn.disconnect()
+                throw IMAPError.authenticationFailed("No stored credential — please re-enter your password in Settings -> Email Backup")
+            }
+            try await conn.login(username: username, password: password)
+            try? emailStore.setEmailAccountAuthState(accountID: accountID, authState: .valid)
+        }
 
         connections[accountID] = conn
         return conn
     }
 
-    // MARK: - .eml Storage
+    private func authenticateWithOAuth2(
+        conn: IMAPConnection,
+        accountID: String,
+        username: String
+    ) async throws {
+        let oauthClient = MicrosoftOAuthClient(config: LocalAuthConfig.load())
+        guard var tokenSet = try oauthClient.loadTokenSet(accountID: accountID) else {
+            try? emailStore.setEmailAccountAuthState(accountID: accountID, authState: .needsReauthentication)
+            throw IMAPError.authenticationFailed("Microsoft OAuth token is missing. Reconnect the account.")
+        }
 
-    /// Root directory for all email backups.
+        if tokenSet.expires(within: 300) {
+            tokenSet = try await refreshedMicrosoftToken(
+                oauthClient: oauthClient,
+                tokenSet: tokenSet,
+                accountID: accountID
+            )
+        }
+
+        do {
+            try await conn.authenticateOAuth2(username: username, accessToken: tokenSet.accessToken)
+            try? emailStore.setEmailAccountAuthState(accountID: accountID, authState: .valid)
+        } catch {
+            do {
+                let refreshed = try await refreshedMicrosoftToken(
+                    oauthClient: oauthClient,
+                    tokenSet: tokenSet,
+                    accountID: accountID
+                )
+                try await conn.authenticateOAuth2(username: username, accessToken: refreshed.accessToken)
+                try? emailStore.setEmailAccountAuthState(accountID: accountID, authState: .valid)
+            } catch {
+                try? emailStore.setEmailAccountAuthState(accountID: accountID, authState: .needsReauthentication)
+                throw IMAPError.authenticationFailed("Microsoft OAuth token could not be refreshed. Reconnect the account.")
+            }
+        }
+    }
+
+    private func refreshedMicrosoftToken(
+        oauthClient: MicrosoftOAuthClient,
+        tokenSet: MicrosoftOAuthTokenSet,
+        accountID: String
+    ) async throws -> MicrosoftOAuthTokenSet {
+        do {
+            let refreshed = try await oauthClient.refresh(tokenSet)
+            try oauthClient.storeTokenSet(refreshed, accountID: accountID)
+            return refreshed
+        } catch {
+            try? emailStore.setEmailAccountAuthState(accountID: accountID, authState: .needsReauthentication)
+            throw error
+        }
+    }
+
+    public nonisolated static func storedCredential(
+        for account: EmailAccountRecord,
+        secretStore: KeychainMailSecretStore = KeychainMailSecretStore()
+    ) -> String? {
+        if let reference = account.mailCredentialReference,
+           let data = secretStore.retrieve(reference: reference),
+           let secret = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !secret.isEmpty {
+            return secret
+        }
+
+        return nil
+    }
+
+    // MARK: - Mail Storage Roots
+
+    /// Legacy pre-v2 backup root. Fresh-start cleanup removes this directory;
+    /// new sync writes only archive-v2 objects under `mailArchiveRoot`.
     public static var backupRoot: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport.appendingPathComponent("Manifold/EmailBackup")
     }
 
-    /// Directory for a specific account + mailbox.
-    public static func emlDirectory(accountID: String, mailbox: String) -> URL {
-        let safe = mailbox.replacingOccurrences(of: "/", with: "_")
-        return backupRoot.appendingPathComponent(accountID).appendingPathComponent(safe)
+    /// Root directory for archive-v2 canonical mail blobs.
+    public static var mailArchiveRoot: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return appSupport.appendingPathComponent("Manifold/MailArchive")
     }
 
+    /// Reads archive-v2 message data. The legacy encrypted-EML branch remains
+    /// only for tests and developer safety during the fresh-start transition.
     public static func readStoredMessage(at path: String) -> Data? {
         let url = URL(fileURLWithPath: path)
+        if MailArchiveStore.isArchiveV2Path(url) {
+            return try? MailArchiveStore.readArchivedObject(atManifestURL: url)
+        }
         guard let stored = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
         return try? ProtectedStorageCrypto.decrypt(stored)
     }

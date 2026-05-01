@@ -273,8 +273,8 @@ Email features:
 - Toggle per-message sharing per connected AI.
 - Use the same `AccessChipStack` pattern as file rows.
 - Open the inspector by selecting/double-clicking a message or using the toolbar toggle.
-- Show a scrollable plaintext body extracted from `.eml`, falling back to preview text.
-- Open the original `.eml` in the default mail client.
+- Show a scrollable message excerpt, falling back to preview text when body extraction is unavailable.
+- Keep readable `.eml` creation behind explicit export.
 - Show conversation context and per-message visibility.
 
 ## Email State Flow

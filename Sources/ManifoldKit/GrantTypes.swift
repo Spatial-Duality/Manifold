@@ -416,7 +416,7 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
     }
 }
 
-// MARK: - Email Message (metadata index for .eml files)
+// MARK: - Email Message (metadata index for local mail archive)
 
 public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public var id: String { emailID }
@@ -430,7 +430,8 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public let cc: String
     public let subject: String
     public let receivedAt: String
-    public let emlPath: String?         // path to .eml file on disk
+    public let emlPath: String?         // archive-v2 manifest path; legacy encrypted EML in tests/dev safety only
+    public let canonicalBlobCID: String?
     public let sizeBytes: Int
     public let preview: String?
     public let contentType: String?     // "text/plain" or "text/html"
@@ -444,7 +445,7 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public let localIsViewed: Bool       // v10: opened in Manifold (not IMAP \Seen)
     public let isJunk: Bool              // v10: in a junk/spam IMAP folder
     public let deletedOnServerAt: String? // v10: ISO8601 timestamp when server UID disappeared
-    public let bodyText: String?         // v10: plaintext extracted from .eml for FTS5
+    public let bodyText: String?         // plaintext FTS body, present only for explicit plaintext index mode
 
     public init(
         emailID: String,
@@ -458,6 +459,7 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
         subject: String,
         receivedAt: String,
         emlPath: String? = nil,
+        canonicalBlobCID: String? = nil,
         sizeBytes: Int = 0,
         preview: String? = nil,
         contentType: String? = nil,
@@ -484,6 +486,7 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
         self.subject = subject
         self.receivedAt = receivedAt
         self.emlPath = emlPath
+        self.canonicalBlobCID = canonicalBlobCID
         self.sizeBytes = sizeBytes
         self.preview = preview
         self.contentType = contentType
@@ -522,6 +525,7 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
         self.subject = subject
         self.receivedAt = receivedAt
         self.emlPath = row["eml_path"]
+        self.canonicalBlobCID = row["canonical_blob_cid"]
         self.sizeBytes = row["size_bytes"].flatMap { Int($0) } ?? 0
         self.preview = row["preview"]
         self.contentType = row["content_type"]
@@ -550,6 +554,7 @@ public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable, Codable {
     public let sizeBytes: Int
     public let contentHash: String
     public let contentID: String?
+    public let attachmentBlobCID: String?
 
     init?(row: [String: String]) {
         guard let attachmentID = row["attachment_id"],
@@ -567,6 +572,7 @@ public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable, Codable {
         self.sizeBytes = row["size_bytes"].flatMap { Int($0) } ?? 0
         self.contentHash = contentHash
         self.contentID = row["content_id"]
+        self.attachmentBlobCID = row["attachment_blob_cid"]
     }
 }
 

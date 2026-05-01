@@ -4259,7 +4259,7 @@ public actor ManifoldBridge {
         return "Session \(noteType.displayName.lowercased()) saved for grant \(grant.grantID.prefix(12))..."
     }
 
-    // MARK: - Email Tools (reads from .eml-backed email index)
+    // MARK: - Email Tools (reads from governed local mail archive)
 
     /// Lists governed emails currently visible to this bridge.
     public func listEmails(intent: AccessIntent? = nil) async throws -> [EmailSummary] {
@@ -4325,7 +4325,6 @@ public actor ManifoldBridge {
 
         try await enforceEmailReadRules(email: email, grantID: grantID)
 
-        // Read from .eml file on disk
         if let emlPath = email.emlPath,
            let data = EmailSyncEngine.readStoredMessage(at: emlPath) {
             let parsed = MIMEParser.parse(data: data)
@@ -4428,6 +4427,7 @@ public actor ManifoldBridge {
                     subject: email.subject,
                     receivedAt: email.receivedAt,
                     emlPath: email.emlPath,
+                    canonicalBlobCID: email.canonicalBlobCID,
                     sizeBytes: email.sizeBytes,
                     preview: deliveredPreview,
                     contentType: email.contentType,

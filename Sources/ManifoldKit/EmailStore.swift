@@ -17,7 +17,7 @@ public struct EmailStore: Sendable {
         self.db = db
     }
 
-    // MARK: - Email Messages (metadata index for .eml files)
+    // MARK: - Email Messages (metadata index for local mail archive)
 
     public func upsertEmailMessage(
         emailID: String,
@@ -39,16 +39,17 @@ public struct EmailStore: Sendable {
         inReplyTo: String? = nil,
         referencesHeader: String? = nil,
         messageIDHeader: String? = nil,
-        attachmentCount: Int = 0
+        attachmentCount: Int = 0,
+        canonicalBlobCID: String? = nil
     ) throws {
         try db.execute("""
             INSERT INTO email_messages (
                 email_id, account, account_id, mailbox, sender, sender_email, sender_domain,
                 recipients, cc, subject, received_at, eml_path, size_bytes, preview,
                 content_type, is_read, is_flagged, in_reply_to, references_header,
-                message_id_header, attachment_count
+                message_id_header, attachment_count, canonical_blob_cid
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email_id) DO UPDATE SET
                 account_id = excluded.account_id,
                 mailbox = excluded.mailbox,
@@ -68,12 +69,13 @@ public struct EmailStore: Sendable {
                 in_reply_to = COALESCE(excluded.in_reply_to, email_messages.in_reply_to),
                 references_header = COALESCE(excluded.references_header, email_messages.references_header),
                 message_id_header = COALESCE(excluded.message_id_header, email_messages.message_id_header),
-                attachment_count = excluded.attachment_count
+                attachment_count = excluded.attachment_count,
+                canonical_blob_cid = COALESCE(excluded.canonical_blob_cid, email_messages.canonical_blob_cid)
         """, params: [
             emailID, accountID, accountID, mailbox, sender, senderEmail, senderDomain,
             recipients, cc, subject, receivedAt, emlPath, "\(sizeBytes)", preview,
             contentType, isRead ? "1" : "0", isFlagged ? "1" : "0",
-            inReplyTo, referencesHeader, messageIDHeader, "\(attachmentCount)",
+            inReplyTo, referencesHeader, messageIDHeader, "\(attachmentCount)", canonicalBlobCID,
         ])
     }
 
@@ -209,20 +211,23 @@ public struct EmailStore: Sendable {
         mimeType: String,
         sizeBytes: Int,
         contentHash: String,
-        contentID: String? = nil
+        contentID: String? = nil,
+        attachmentBlobCID: String? = nil
     ) throws {
         try db.execute(
             """
             INSERT INTO email_attachments (
-                attachment_id, email_id, filename, mime_type, size_bytes, content_hash, content_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                attachment_id, email_id, filename, mime_type, size_bytes,
+                content_hash, content_id, attachment_blob_cid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(attachment_id) DO UPDATE SET
                 email_id = excluded.email_id,
                 filename = excluded.filename,
                 mime_type = excluded.mime_type,
                 size_bytes = excluded.size_bytes,
                 content_hash = excluded.content_hash,
-                content_id = excluded.content_id
+                content_id = excluded.content_id,
+                attachment_blob_cid = excluded.attachment_blob_cid
             """,
             params: [
                 attachmentID,
@@ -232,12 +237,157 @@ public struct EmailStore: Sendable {
                 "\(sizeBytes)",
                 contentHash,
                 contentID,
+                attachmentBlobCID,
             ]
         )
     }
 
     public func deleteEmailAttachments(emailID: String) throws {
         try db.execute("DELETE FROM email_attachments WHERE email_id = ?", params: [emailID])
+    }
+
+    public func recordMailBlob(_ object: MailArchiveStoredObject) throws {
+        try db.execute("""
+            INSERT INTO mail_blobs (
+                content_id, account_id, kind, manifest_id, byte_count_plaintext,
+                byte_count_ciphertext, created_at, last_verified_at, ref_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(content_id) DO UPDATE SET
+                last_verified_at = excluded.last_verified_at,
+                ref_count = mail_blobs.ref_count + 1
+        """, params: [
+            object.contentID,
+            object.accountID,
+            object.kind.rawValue,
+            object.manifestID,
+            "\(object.byteCountPlaintext)",
+            "\(object.byteCountCiphertext)",
+            object.createdAt,
+            object.createdAt,
+        ])
+    }
+
+    public func recordMailAccessAuditEvent(
+        accountID: String?,
+        emailID: String?,
+        agentID: String,
+        sessionID: String?,
+        accessKind: String,
+        policyGrantID: String?,
+        detailsRedacted: String?
+    ) throws {
+        try db.execute("""
+            INSERT INTO mail_access_audit_events (
+                id, account_id, email_id, agent_id, session_id,
+                access_kind, policy_grant_id, created_at, details_redacted
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            UUID().uuidString,
+            accountID,
+            emailID,
+            agentID,
+            sessionID ?? "",
+            accessKind,
+            policyGrantID,
+            ISO8601DateFormatter.shared.string(from: Date()),
+            detailsRedacted,
+        ])
+    }
+
+    public func replacePrivateTokenIndex(
+        accountID: String,
+        emailID: String,
+        fields: [MailPrivateTokenField: String]
+    ) throws {
+        var terms: [String: (fieldMask: Int, count: Int, firstPosition: Int)] = [:]
+        var position = 0
+
+        for field in MailPrivateTokenField.allCases {
+            guard let text = fields[field], !text.isEmpty else { continue }
+            for token in MailPrivateTokenIndex.normalizedTokenSequence(text) {
+                position += 1
+                let termHMAC = try MailPrivateTokenIndex.termHMAC(accountID: accountID, normalizedToken: token)
+                if let existing = terms[termHMAC] {
+                    terms[termHMAC] = (
+                        fieldMask: existing.fieldMask | field.rawValue,
+                        count: existing.count + 1,
+                        firstPosition: existing.firstPosition
+                    )
+                } else {
+                    terms[termHMAC] = (field.rawValue, 1, position)
+                }
+            }
+        }
+
+        try db.transaction {
+            try db.execute(
+                "DELETE FROM mail_private_terms WHERE account_id = ? AND email_id = ?",
+                params: [accountID, emailID]
+            )
+            for (termHMAC, value) in terms {
+                try db.execute("""
+                    INSERT INTO mail_private_terms (
+                        account_id, term_hmac, email_id, field_mask, term_count, first_seen_position
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, params: [
+                    accountID,
+                    termHMAC,
+                    emailID,
+                    "\(value.fieldMask)",
+                    "\(value.count)",
+                    "\(value.firstPosition)",
+                ])
+            }
+        }
+    }
+
+    public func privateTokenSearchEmailIDs(
+        query: String,
+        accountID: String? = nil,
+        limit: Int = 500
+    ) throws -> [String] {
+        let tokens = MailPrivateTokenIndex.normalizedTokens(query)
+        guard !tokens.isEmpty else { return [] }
+
+        let accountIDs: [String]
+        if let accountID {
+            accountIDs = [accountID]
+        } else {
+            accountIDs = try db.queryAll("SELECT account_id FROM email_accounts")
+                .compactMap { $0["account_id"] }
+        }
+
+        var scored: [String: Int] = [:]
+        for candidateAccountID in accountIDs {
+            let termHMACs = try tokens.map {
+                try MailPrivateTokenIndex.termHMAC(accountID: candidateAccountID, normalizedToken: $0)
+            }
+            let placeholders = termHMACs.map { _ in "?" }.joined(separator: ",")
+            let params: [String?] = [candidateAccountID] + termHMACs + ["\(tokens.count)", "\(limit)"]
+            let rows = try db.queryAll("""
+                SELECT email_id, COALESCE(SUM(term_count), 0) AS score
+                FROM mail_private_terms
+                WHERE account_id = ? AND term_hmac IN (\(placeholders))
+                GROUP BY email_id
+                HAVING COUNT(DISTINCT term_hmac) = CAST(? AS INTEGER)
+                ORDER BY score DESC
+                LIMIT CAST(? AS INTEGER)
+            """, params: params)
+            for row in rows {
+                guard let emailID = row["email_id"] else { continue }
+                scored[emailID] = max(scored[emailID] ?? 0, Int(row["score"] ?? "0") ?? 0)
+            }
+        }
+
+        return scored.sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            return lhs.key < rhs.key
+        }
+        .prefix(limit)
+        .map(\.key)
     }
 
     public func emailMessage(id: String) throws -> EmailMessageRecord? {
@@ -264,26 +414,44 @@ public struct EmailStore: Sendable {
         username: String?,
         authType: String = "password",
         keychainRef: String? = nil,
-        syncIntervalSeconds: Int = 300
+        syncIntervalSeconds: Int = 300,
+        indexPrivacyMode: MailIndexPrivacyMode = .privateTokenIndex
     ) throws -> EmailAccountRecord {
         let accountID = "email-\(UUID().uuidString.prefix(8).lowercased())"
         let now = ISO8601DateFormatter.shared.string(from: Date())
+        let credentialReference = Self.credentialReference(for: authType, accountID: accountID)
         try db.execute("""
             INSERT INTO email_accounts (
                 account_id, display_name, provider_type, server, port, username,
                 auth_type, keychain_ref, sync_enabled, sync_interval_seconds,
-                created_at, updated_at
+                created_at, updated_at, credential_kind, credential_keychain_service,
+                credential_keychain_account, auth_state, index_privacy_mode
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'valid', ?)
         """, params: [
             accountID, displayName, providerType, server,
             port.map { "\($0)" }, username, authType, keychainRef,
             "\(syncIntervalSeconds)", now, now,
+            credentialReference.kind.rawValue,
+            credentialReference.keychainService,
+            credentialReference.keychainAccount,
+            indexPrivacyMode.rawValue,
         ])
         guard let created = try emailAccount(id: accountID) else {
             throw ManifoldError.database("Email account \(accountID) not found after insert")
         }
         return created
+    }
+
+    public static func credentialReference(for authType: String, accountID: String) -> MailCredentialReference {
+        switch authType {
+        case "oauth2":
+            KeychainMailSecretStore.microsoftTokenReference(accountID: accountID)
+        case "app_password":
+            KeychainMailSecretStore.appPasswordReference(accountID: accountID)
+        default:
+            KeychainMailSecretStore.manualPasswordReference(accountID: accountID)
+        }
     }
 
     public func emailAccount(id: String) throws -> EmailAccountRecord? {
@@ -300,6 +468,7 @@ public struct EmailStore: Sendable {
     }
 
     public func removeEmailAccount(id: String) throws {
+        let account = try emailAccount(id: id)
         try db.transaction {
             try db.execute("""
                 DELETE FROM email_attachments WHERE email_id IN (
@@ -334,11 +503,20 @@ public struct EmailStore: Sendable {
             try db.execute("DELETE FROM email_mailbox_membership WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_messages WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_messages WHERE account = ?", params: [id])
+            try db.execute("DELETE FROM mail_private_terms WHERE account_id = ?", params: [id])
+            try db.execute("DELETE FROM mail_sync_jobs WHERE account_id = ?", params: [id])
+            try db.execute("DELETE FROM mail_access_audit_events WHERE account_id = ?", params: [id])
+            try db.execute("DELETE FROM mail_blobs WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM imap_mailboxes WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_sync_state WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_accounts WHERE account_id = ?", params: [id])
         }
-        KeychainHelper.delete(accountID: id)
+        if let reference = account?.mailCredentialReference {
+            KeychainMailSecretStore().delete(reference: reference)
+        }
+        for reference in MailFreshStartReset.knownCredentialReferences(accountID: id) {
+            KeychainMailSecretStore().delete(reference: reference)
+        }
     }
 
     public func setEmailAccountSyncEnabled(accountID: String, enabled: Bool) throws {
@@ -347,6 +525,18 @@ public struct EmailStore: Sendable {
             "UPDATE email_accounts SET sync_enabled = ?, updated_at = ? WHERE account_id = ?",
             params: [enabled ? "1" : "0", now, accountID]
         )
+    }
+
+    public func setEmailAccountAuthState(accountID: String, authState: String) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute(
+            "UPDATE email_accounts SET auth_state = ?, updated_at = ? WHERE account_id = ?",
+            params: [authState, now, accountID]
+        )
+    }
+
+    public func setEmailAccountAuthState(accountID: String, authState: MailAccountAuthState) throws {
+        try setEmailAccountAuthState(accountID: accountID, authState: authState.rawValue)
     }
 
     // MARK: - Email Sync State
@@ -403,6 +593,198 @@ public struct EmailStore: Sendable {
             "DELETE FROM email_sync_state WHERE account_id = ? AND mailbox_name = ?",
             params: [accountID, mailbox]
         )
+    }
+
+    // MARK: - Durable Mail Sync Jobs
+
+    @discardableResult
+    public func enqueueMailSyncJob(
+        accountID: String,
+        mailboxName: String? = nil,
+        jobType: MailSyncJobType,
+        priority: Int,
+        cursorJSONCiphertext: String? = nil,
+        allowDuplicate: Bool = false
+    ) throws -> MailSyncJobRecord {
+        if !allowDuplicate,
+           let existing = try existingActiveMailSyncJob(
+                accountID: accountID,
+                mailboxName: mailboxName,
+                jobType: jobType
+           ) {
+            return existing
+        }
+
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        let job = MailSyncJobRecord(
+            accountID: accountID,
+            mailboxName: mailboxName,
+            jobType: jobType,
+            state: .queued,
+            priority: priority,
+            cursorJSONCiphertext: cursorJSONCiphertext,
+            createdAt: now,
+            updatedAt: now
+        )
+        try db.execute("""
+            INSERT INTO mail_sync_jobs (
+                id, account_id, mailbox_name, job_type, state, priority,
+                cursor_json_ciphertext, error_code, error_redacted, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            job.id,
+            job.accountID,
+            job.mailboxName,
+            job.jobType.rawValue,
+            job.state.rawValue,
+            "\(job.priority)",
+            job.cursorJSONCiphertext,
+            job.errorCode,
+            job.errorRedacted,
+            job.createdAt,
+            job.updatedAt,
+        ])
+        return job
+    }
+
+    public func mailSyncJob(id: String) throws -> MailSyncJobRecord? {
+        let rows = try db.queryAll(
+            "SELECT * FROM mail_sync_jobs WHERE id = ? LIMIT 1",
+            params: [id]
+        )
+        return rows.first.flatMap { MailSyncJobRecord(row: $0) }
+    }
+
+    public func mailSyncJobs(
+        accountID: String? = nil,
+        states: [MailSyncJobState]? = nil,
+        limit: Int = 500
+    ) throws -> [MailSyncJobRecord] {
+        var whereParts: [String] = []
+        var params: [String?] = []
+        if let accountID {
+            whereParts.append("account_id = ?")
+            params.append(accountID)
+        }
+        if let states, !states.isEmpty {
+            whereParts.append("state IN (\(states.map { _ in "?" }.joined(separator: ",")))")
+            params.append(contentsOf: states.map(\.rawValue))
+        }
+        let whereClause = whereParts.isEmpty ? "" : "WHERE " + whereParts.joined(separator: " AND ")
+        params.append("\(limit)")
+        let rows = try db.queryAll("""
+            SELECT * FROM mail_sync_jobs
+            \(whereClause)
+            ORDER BY priority DESC, created_at ASC
+            LIMIT ?
+        """, params: params)
+        return rows.compactMap { MailSyncJobRecord(row: $0) }
+    }
+
+    public func claimNextQueuedMailSyncJob(accountID: String) throws -> MailSyncJobRecord? {
+        var claimed: MailSyncJobRecord?
+        try db.transaction {
+            let rows = try db.queryAll("""
+                SELECT * FROM mail_sync_jobs
+                WHERE account_id = ? AND state = ?
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+            """, params: [accountID, MailSyncJobState.queued.rawValue])
+            guard let row = rows.first,
+                  let id = row["id"] else { return }
+            let now = ISO8601DateFormatter.shared.string(from: Date())
+            try db.execute("""
+                UPDATE mail_sync_jobs
+                SET state = ?, updated_at = ?, error_code = NULL, error_redacted = NULL
+                WHERE id = ? AND state = ?
+            """, params: [
+                MailSyncJobState.running.rawValue,
+                now,
+                id,
+                MailSyncJobState.queued.rawValue,
+            ])
+            guard try db.queryScalar("SELECT changes()") == "1" else { return }
+            claimed = try mailSyncJob(id: id)
+        }
+        return claimed
+    }
+
+    public func updateMailSyncJobState(
+        id: String,
+        state: MailSyncJobState,
+        errorCode: String? = nil,
+        errorRedacted: String? = nil
+    ) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute("""
+            UPDATE mail_sync_jobs
+            SET state = ?, updated_at = ?, error_code = ?, error_redacted = ?
+            WHERE id = ?
+        """, params: [
+            state.rawValue,
+            now,
+            errorCode,
+            errorRedacted,
+            id,
+        ])
+    }
+
+    public func pauseMailSyncJobs(accountID: String) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute("""
+            UPDATE mail_sync_jobs
+            SET state = ?, updated_at = ?
+            WHERE account_id = ? AND state IN (?, ?)
+        """, params: [
+            MailSyncJobState.paused.rawValue,
+            now,
+            accountID,
+            MailSyncJobState.queued.rawValue,
+            MailSyncJobState.running.rawValue,
+        ])
+    }
+
+    public func resumeMailSyncJobs(accountID: String) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute("""
+            UPDATE mail_sync_jobs
+            SET state = ?, updated_at = ?
+            WHERE account_id = ? AND state = ?
+        """, params: [
+            MailSyncJobState.queued.rawValue,
+            now,
+            accountID,
+            MailSyncJobState.paused.rawValue,
+        ])
+    }
+
+    private func existingActiveMailSyncJob(
+        accountID: String,
+        mailboxName: String?,
+        jobType: MailSyncJobType
+    ) throws -> MailSyncJobRecord? {
+        let rows = try db.queryAll("""
+            SELECT * FROM mail_sync_jobs
+            WHERE account_id = ?
+              AND job_type = ?
+              AND state IN (?, ?, ?)
+              AND (
+                    (mailbox_name IS NULL AND ? IS NULL)
+                    OR mailbox_name = ?
+              )
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+        """, params: [
+            accountID,
+            jobType.rawValue,
+            MailSyncJobState.queued.rawValue,
+            MailSyncJobState.running.rawValue,
+            MailSyncJobState.paused.rawValue,
+            mailboxName,
+            mailboxName,
+        ])
+        return rows.first.flatMap { MailSyncJobRecord(row: $0) }
     }
 
     // MARK: - Email Read/Flag/Viewed State
@@ -510,8 +892,11 @@ public struct EmailStore: Sendable {
     /// Get email IDs that need body text backfill, ordered by received_at DESC.
     public func emailsNeedingBodyBackfill(limit: Int = 100) throws -> [(emailID: String, emlPath: String)] {
         let rows = try db.queryAll("""
-            SELECT email_id, eml_path FROM email_messages
-            WHERE body_text IS NULL AND eml_path IS NOT NULL
+            SELECT em.email_id, em.eml_path FROM email_messages em
+            JOIN email_accounts ea ON ea.account_id = em.account_id
+            WHERE em.body_text IS NULL
+              AND em.eml_path IS NOT NULL
+              AND ea.index_privacy_mode = 'plaintextFTSWithDisclosure'
             ORDER BY received_at DESC
             LIMIT ?
         """, params: ["\(limit)"])
@@ -918,7 +1303,8 @@ public struct EmailStore: Sendable {
         limit: Int = 500
     ) throws -> [EmailMessageRecord] {
         // Convert all inputs to RuleConditions for unified handling
-        var conditions = conditionsFromTokens(tokens)
+        let bodyTokens = tokens.filter { $0.type == .body }
+        var conditions = conditionsFromTokens(tokens.filter { $0.type != .body })
         if let filterConditions = conditionsFromQuickFilter(filter) {
             conditions.append(contentsOf: filterConditions)
         }
@@ -948,17 +1334,51 @@ public struct EmailStore: Sendable {
             extraParams.append(mailbox)
         }
 
+        let privateIndexLimit = min(max(limit * 4, 500), 5_000)
+        if !bodyTokens.isEmpty {
+            let bodyQuery = bodyTokens.map(\.value).joined(separator: " ")
+            var bodySQL = [
+                "em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?)",
+            ]
+            extraParams.append(bodyQuery)
+
+            let privateIDs = try privateTokenSearchEmailIDs(
+                query: bodyQuery,
+                accountID: accountID,
+                limit: privateIndexLimit
+            )
+            if !privateIDs.isEmpty {
+                bodySQL.append("em.email_id IN (\(privateIDs.map { _ in "?" }.joined(separator: ",")))")
+                extraParams.append(contentsOf: privateIDs)
+            }
+            extraSQL.append("(" + bodySQL.joined(separator: " OR ") + ")")
+        }
+
         // Free text search across sender, subject, preview, and body
         if !freeText.isEmpty {
-            extraSQL.append("""
-                (em.sender LIKE ? OR em.subject LIKE ? OR em.preview LIKE ?
-                 OR em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?))
-            """)
+            var freeTextSQL = [
+                "em.sender LIKE ?",
+                "em.subject LIKE ?",
+                "em.preview LIKE ?",
+                "em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?)",
+            ]
             let pattern = "%\(freeText)%"
             extraParams.append(pattern)
             extraParams.append(pattern)
             extraParams.append(pattern)
             extraParams.append(freeText)
+
+            let privateIDs = try privateTokenSearchEmailIDs(
+                query: freeText,
+                accountID: accountID,
+                limit: privateIndexLimit
+            )
+            if !privateIDs.isEmpty {
+                freeTextSQL.append("em.email_id IN (\(privateIDs.map { _ in "?" }.joined(separator: ",")))")
+                extraParams.append(contentsOf: privateIDs)
+            }
+
+            extraSQL.append("(" + freeTextSQL.joined(separator: " OR ") + ")")
         }
 
         let (ruleWhere, ruleParams) = buildConditionSQL(from: conditions, match: .all)

@@ -5,7 +5,6 @@ import SwiftUI
 import ManifoldKit
 
 /// Provider-first email account setup sheet.
-/// Wraps the existing EmailAccountSetupView in a provider selection flow.
 struct AddMailAccountSheet: View {
     @Environment(ManifoldStore.self) var store
     @Environment(\.dismiss) private var dismiss

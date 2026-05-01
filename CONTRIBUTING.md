@@ -25,7 +25,7 @@ swift test
 ### Quick build script
 
 ```bash
-bash script/build_and_run.sh
+bash scripts/build_and_run.sh
 ```
 
 ## Code structure
@@ -50,8 +50,7 @@ bash script/build_and_run.sh
 If your change affects the product story or first-run experience, update the docs that match the audience:
 
 - `README.md` for first impression and quick start
-- `docs/` for outsider-facing usage and architecture
-- `design/` for the deeper product and implementation source of truth
+- `docs/` for outsider-facing usage and architecture, plus the deeper product spec ([docs/product-spec.md](docs/product-spec.md))
 
 ## Commit messages
 

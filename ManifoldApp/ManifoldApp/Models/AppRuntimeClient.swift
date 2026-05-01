@@ -157,7 +157,7 @@ extension RestoreSnapshotResult {
     var isConflict: Bool { status == "conflict" }
 }
 
-struct EmailBackupInfo: Codable, Sendable {
+struct MailArchiveInfo: Codable, Sendable {
     let path: String
     let diskUsage: Int64
 }
@@ -282,6 +282,14 @@ protocol RuntimeClientProtocol: Sendable {
         username: String,
         password: String
     ) async throws -> EmailAccountRecord
+    func addOAuthIMAPAccount(
+        displayName: String,
+        provider: EmailProvider,
+        server: String,
+        port: Int,
+        username: String,
+        tokenSet: MicrosoftOAuthTokenSet
+    ) async throws -> EmailAccountRecord
     func removeEmailAccount(id: String) async throws
     func toggleEmailSync(accountID: String, enabled: Bool) async throws
     func syncEmailNow(accountID: String) async throws -> SyncResult
@@ -313,7 +321,7 @@ protocol RuntimeClientProtocol: Sendable {
     func listSmartMailboxes() async throws -> [SmartMailboxRecord]
     func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws
     func deleteSmartMailbox(mailboxID: String) async throws
-    func emailBackupInfo() async throws -> EmailBackupInfo
+    func emailBackupInfo() async throws -> MailArchiveInfo
     func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord]
     func setFileVisibilityOverride(
         agent: TargetApp,
@@ -612,6 +620,7 @@ extension RuntimeClientProtocol {
     func syncStates(accountID: String) async throws -> [SyncStateRecord] { [] }
     func emailMessageCount() async throws -> Int { 0 }
     func addIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, password: String) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addIMAPAccount") }
+    func addOAuthIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, tokenSet: MicrosoftOAuthTokenSet) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addOAuthIMAPAccount") }
     func removeEmailAccount(id: String) async throws { throw RuntimeClientStubError.unimplemented("removeEmailAccount") }
     func toggleEmailSync(accountID: String, enabled: Bool) async throws { throw RuntimeClientStubError.unimplemented("toggleEmailSync") }
     func syncEmailNow(accountID: String) async throws -> SyncResult { throw RuntimeClientStubError.unimplemented("syncEmailNow") }
@@ -640,7 +649,7 @@ extension RuntimeClientProtocol {
     func listSmartMailboxes() async throws -> [SmartMailboxRecord] { [] }
     func updateSmartMailbox(mailboxID: String, displayName: String, iconName: String, rulesJSON: String) async throws { throw RuntimeClientStubError.unimplemented("updateSmartMailbox") }
     func deleteSmartMailbox(mailboxID: String) async throws { throw RuntimeClientStubError.unimplemented("deleteSmartMailbox") }
-    func emailBackupInfo() async throws -> EmailBackupInfo { EmailBackupInfo(path: "", diskUsage: 0) }
+    func emailBackupInfo() async throws -> MailArchiveInfo { MailArchiveInfo(path: "", diskUsage: 0) }
     func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] { [] }
     func setFileVisibilityOverride(agent: TargetApp, sourceID: String, relativePath: String, isDirectory: Bool, decision: FileVisibilityOverrideDecision) async throws {}
     func clearFileVisibilityOverride(agent: TargetApp, sourceID: String, relativePath: String, isDirectory: Bool) async throws {}
@@ -3702,6 +3711,30 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         )
     }
 
+    func addOAuthIMAPAccount(
+        displayName: String,
+        provider: EmailProvider,
+        server: String,
+        port: Int,
+        username: String,
+        tokenSet: MicrosoftOAuthTokenSet
+    ) async throws -> EmailAccountRecord {
+        let tokenSetData = try JSONEncoder().encode(tokenSet).base64EncodedString()
+        return try await command(
+            name: "addOAuthIMAPAccount",
+            payload: [
+                "displayName": displayName,
+                "provider": provider.rawValue,
+                "server": server,
+                "port": port,
+                "username": username,
+                "tokenSet": tokenSetData,
+            ],
+            field: "account",
+            as: EmailAccountRecord.self
+        )
+    }
+
     func removeEmailAccount(id: String) async throws {
         _ = try await xpc.command(name: "removeEmailAccount", payload: ["accountID": id])
     }
@@ -3837,8 +3870,8 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         _ = try await xpc.command(name: "deleteSmartMailbox", payload: ["mailboxID": mailboxID])
     }
 
-    func emailBackupInfo() async throws -> EmailBackupInfo {
-        try await command(name: "emailBackupInfo", field: "info", as: EmailBackupInfo.self)
+    func emailBackupInfo() async throws -> MailArchiveInfo {
+        try await command(name: "emailBackupInfo", field: "info", as: MailArchiveInfo.self)
     }
 
     func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] {

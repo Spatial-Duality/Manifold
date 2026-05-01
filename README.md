@@ -38,7 +38,7 @@ If that fits your setup, you can clone, build, and run the app locally today.
 
 - Lets you choose, per AI, which files, folders, and emails Claude (Desktop, Cowork, Claude Code) and Codex CLI can see through Manifold. The Folders matrix and Files list show one chip per connected AI inline so you never have to switch a "target agent" dropdown.
 - Drag a folder from Finder to add it as a source; drag a file and Manifold asks whether to add the whole folder or just that file (siblings denied via per-file overrides).
-- Mail surface mirrors Files: per-message chip stack, scrollable message body in the inspector, and a one-click **Open in Mail** button that hands the original `.eml` to your default email client.
+- Mail surface mirrors Files: per-message chip stack, scrollable message excerpts in the inspector, and explicit export when readable `.eml` files are needed.
 - Sharing column on each folder reads as plain English — `Not shared`, `Shared with Claude`, `Partly shared · 1 of 2`, `Shared with all` — with a small dot when individual files inside have explicit allow/deny overrides.
 - Enforces a unified rule system across files, emails, and agent behavior, with seeded denies for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
 - Records what was actually exposed through the governed Manifold path
@@ -99,7 +99,7 @@ See [docs/architecture.md](docs/architecture.md) for the outsider-friendly syste
 ### Use It
 
 - [docs/getting-started.md](docs/getting-started.md)
-- [design/CLAUDE-CODEX-TESTING.md](design/CLAUDE-CODEX-TESTING.md)
+- [docs/claude-codex-testing.md](docs/claude-codex-testing.md)
 
 ### Understand It
 
@@ -111,8 +111,8 @@ See [docs/architecture.md](docs/architecture.md) for the outsider-friendly syste
 ### Contribute To It
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
-- [design/PRODUCT-SPEC.md](design/PRODUCT-SPEC.md)
-- [design/README.md](design/README.md)
+- [docs/product-spec.md](docs/product-spec.md)
+- [docs/design/README.md](docs/design/README.md)
 
 ## Current Status
 
@@ -161,9 +161,9 @@ What Manifold **does not** govern (intentionally surfaced):
 ## How To Get Help
 
 - Start with [docs/getting-started.md](docs/getting-started.md) if you want to run it
-- Use [design/CLAUDE-CODEX-TESTING.md](design/CLAUDE-CODEX-TESTING.md) if you want to test live Claude/Codex integration
+- Use [docs/claude-codex-testing.md](docs/claude-codex-testing.md) if you want to test live Claude/Codex integration
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) if you want to change code
-- Read [design/PRODUCT-SPEC.md](design/PRODUCT-SPEC.md) if you want the canonical product definition
+- Read [docs/product-spec.md](docs/product-spec.md) if you want the canonical product definition
 
 ## Contributing
 

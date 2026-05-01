@@ -1,18 +1,39 @@
+# Build outputs
 .build/
 .swiftpm/
-.claude/settings.local.json
 **/xcuserdata/
 *.xcuserstate
 DerivedData/
 .deriveddata-*/
+ManifoldApp/build/
+
+# macOS / editor cruft
 .DS_Store
-.gstack/
 default.profraw
+*.afdesign~lock~
+
+# Python
+scripts/__pycache__/
+script/__pycache__/
+
+# Tooling caches
+.gstack/
+.xcodebuildmcp/
+
+# AI collaborator configs (kept locally, not shipped in public repo)
+/.claude/
+/.codex/
+/codex/
+/CLAUDE.md
+/AGENTS.md
+/TODOS.md
 .mcp.json
 .mcp.json.disabled
-.xcodebuildmcp/
-ManifoldApp/build/
-.claude/worktrees/
-.claude/plans/
-script/__pycache__/
-*.afdesign~lock~
+ManifoldLocalAuthConfig.plist
+**/ManifoldLocalAuthConfig.plist
+
+# Personal scratch dropzone — never tracked, never pushed
+/unsort/
+
+# In-session parking lot for the local cleanup pass — see scripts/cleanup-pending.sh
+.trash-pending-user-delete/

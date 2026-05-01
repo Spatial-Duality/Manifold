@@ -19,6 +19,12 @@ struct PrivacyExtractionResult: Sendable {
 }
 
 actor PrivacyContentExtractor {
+    private let mailArchiveRoot: URL
+
+    init(mailArchiveRoot: URL = EmailSyncEngine.mailArchiveRoot) {
+        self.mailArchiveRoot = mailArchiveRoot
+    }
+
     func extractSourceFile(
         source: SourceRecord,
         relativePath: String
@@ -91,6 +97,25 @@ actor PrivacyContentExtractor {
         _ attachment: EmailAttachmentRecord,
         email: EmailMessageRecord
     ) async -> PrivacyExtractionResult {
+        if let attachmentBlobCID = attachment.attachmentBlobCID {
+            do {
+                let archive = try MailArchiveStore(rootURL: mailArchiveRoot)
+                let data = try archive.readObject(
+                    contentID: attachmentBlobCID,
+                    accountID: email.accountID
+                )
+                return await extract(
+                    data: data,
+                    fileExtension: URL(fileURLWithPath: attachment.filename).pathExtension.lowercased(),
+                    fileURL: nil,
+                    defaultHash: attachment.contentHash
+                )
+            } catch {
+                // Fall back to the canonical message path for dev/test recovery
+                // and for rows created before attachment archive blobs existed.
+            }
+        }
+
         guard let emlPath = email.emlPath,
               let data = EmailSyncEngine.readStoredMessage(at: emlPath) else {
             return PrivacyExtractionResult(

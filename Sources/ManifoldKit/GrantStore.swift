@@ -78,7 +78,7 @@ public actor GrantStore {
         logger.info("Removed source \(sourceID)")
     }
 
-    /// Pause a source (hidden from MCP, visible in dashboard).
+    /// Pause a source (hidden from MCP, still visible in the app's Access inventory).
     public func pauseSource(sourceID: String) throws {
         try updateSourceStatus(sourceID: sourceID, status: "paused")
     }

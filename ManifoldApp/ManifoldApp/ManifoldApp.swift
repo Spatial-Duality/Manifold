@@ -177,15 +177,15 @@ struct ManifoldApp: App {
         // explicitly overrides that, so the mark visually matches its
         // neighbours.
         //
-        // isTemplate=true keeps macOS native template tinting — the
-        // mark inverts correctly for dark/light menu bar appearance and
-        // the panel-open highlight state.
+        // The rendered icon preserves the store-driven badge states, so
+        // pending approvals, pause, and disconnected runtime states stay
+        // visible from the menu bar.
         MenuBarExtra {
             MenuBarPanelView()
                 .environment(store)
                 .environment(commandPalette)
         } label: {
-            Image(nsImage: menuBarBrandImage())
+            Image(nsImage: menuBarImage())
                 .accessibilityLabel("Manifold")
         }
         .menuBarExtraStyle(.window)
@@ -216,5 +216,11 @@ struct ManifoldApp: App {
             store.setup.hasCompletedOnboarding = true
             return store
         }
+    }
+
+    @MainActor
+    private func menuBarImage() -> NSImage {
+        MenuBarBrandIcon.renderTemplateImage(state: store.menuBarBadgeState)
+            ?? menuBarBrandImage()
     }
 }

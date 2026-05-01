@@ -13,7 +13,7 @@ private struct StorageStatsPayload: Codable, Sendable {
     let storageUsed: Int64
 }
 
-private struct EmailBackupInfoPayload: Codable, Sendable {
+private struct MailArchiveInfoPayload: Codable, Sendable {
     let path: String
     let diskUsage: Int64
 }
@@ -439,22 +439,38 @@ extension ManifoldXPCService {
                   let password = payload["password"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            let connection = IMAPConnection(host: server, port: UInt16(port))
-            try await connection.connect()
-            try await connection.login(username: username, password: password)
-            await connection.disconnect()
+            let profile = MailProviderCatalog.profile(for: provider)
+            let validatedUsername = try await AppPasswordIMAPValidator().validate(
+                endpoint: MailEndpoint(host: server, port: port, security: .tlsOnConnect),
+                username: username,
+                password: password,
+                usernameRule: profile.usernameRule
+            )
+            let authType: String
+            switch profile.defaultAuthMethod {
+            case .appPasswordIMAP:
+                authType = "app_password"
+            case .manualPasswordIMAP, .oauthIMAPXOAUTH2:
+                authType = "password"
+            }
+            let indexPrivacyMode = (payload["indexPrivacyMode"] as? String)
+                .flatMap(MailIndexPrivacyMode.init(rawValue:)) ?? .privateTokenIndex
 
             let account = try runtime.emailStore.addEmailAccount(
                 displayName: displayName,
                 providerType: provider.rawValue,
                 server: server,
                 port: port,
-                username: username,
-                authType: "password",
+                username: validatedUsername,
+                authType: authType,
                 keychainRef: nil,
-                syncIntervalSeconds: 300
+                syncIntervalSeconds: 300,
+                indexPrivacyMode: indexPrivacyMode
             )
-            guard KeychainHelper.store(accountID: account.accountID, credential: password) else {
+            let cleanedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let credentialData = cleanedPassword.data(using: .utf8),
+                  let credentialReference = account.mailCredentialReference,
+                  KeychainMailSecretStore().store(credentialData, reference: credentialReference) else {
                 try? runtime.emailStore.removeEmailAccount(id: account.accountID)
                 throw NSError(
                     domain: "com.spatialduality.manifold.xpc",
@@ -462,7 +478,65 @@ extension ManifoldXPCService {
                     userInfo: [NSLocalizedDescriptionKey: "Failed to store credentials securely"]
                 )
             }
-            await runtime.emailSyncEngine.register(accountID: account.accountID)
+            _ = try await runtime.mailSyncCoordinator.enqueueInitialSync(accountID: account.accountID)
+            try await runtime.mailSyncCoordinator.resume(accountID: account.accountID)
+            await runtime.privacyIndexCoordinator.bootstrap()
+            return ["account": try XPCJSON.object(from: account)]
+
+        case "addOAuthIMAPAccount":
+            guard let displayName = payload["displayName"] as? String,
+                  let providerRaw = payload["provider"] as? String,
+                  let provider = EmailProvider(rawValue: providerRaw),
+                  let server = payload["server"] as? String,
+                  let port = payload["port"] as? Int,
+                  let username = payload["username"] as? String,
+                  let tokenSetString = payload["tokenSet"] as? String,
+                  let tokenSetData = Data(base64Encoded: tokenSetString),
+                  let tokenSet = try? JSONDecoder().decode(MicrosoftOAuthTokenSet.self, from: tokenSetData) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            guard provider == .outlook else {
+                throw NSError(
+                    domain: "com.spatialduality.manifold.xpc",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "OAuth IMAP is only enabled for Microsoft mail in v1"]
+                )
+            }
+            let indexPrivacyMode = (payload["indexPrivacyMode"] as? String)
+                .flatMap(MailIndexPrivacyMode.init(rawValue:)) ?? .privateTokenIndex
+
+            let conn = IMAPConnection(host: server, port: UInt16(port), useTLS: true)
+            do {
+                try await conn.connect()
+                try await conn.authenticateOAuth2(username: username, accessToken: tokenSet.accessToken)
+                await conn.disconnect()
+            } catch {
+                await conn.disconnect()
+                throw error
+            }
+
+            let account = try runtime.emailStore.addEmailAccount(
+                displayName: displayName,
+                providerType: provider.rawValue,
+                server: server,
+                port: port,
+                username: username,
+                authType: "oauth2",
+                keychainRef: nil,
+                syncIntervalSeconds: 300,
+                indexPrivacyMode: indexPrivacyMode
+            )
+            guard let credentialReference = account.mailCredentialReference,
+                  KeychainMailSecretStore().store(tokenSetData, reference: credentialReference) else {
+                try? runtime.emailStore.removeEmailAccount(id: account.accountID)
+                throw NSError(
+                    domain: "com.spatialduality.manifold.xpc",
+                    code: 500,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to store OAuth token securely"]
+                )
+            }
+            _ = try await runtime.mailSyncCoordinator.enqueueInitialSync(accountID: account.accountID)
+            try await runtime.mailSyncCoordinator.resume(accountID: account.accountID)
             await runtime.privacyIndexCoordinator.bootstrap()
             return ["account": try XPCJSON.object(from: account)]
 
@@ -470,8 +544,8 @@ extension ManifoldXPCService {
             guard let accountID = payload["accountID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
+            try? await runtime.mailSyncCoordinator.pause(accountID: accountID)
             await runtime.emailSyncEngine.unregister(accountID: accountID)
-            KeychainHelper.delete(accountID: accountID)
             try runtime.emailStore.removeEmailAccount(id: accountID)
             await runtime.privacyIndexCoordinator.bootstrap()
             return ["ok": true]
@@ -481,10 +555,10 @@ extension ManifoldXPCService {
                   let enabled = payload["enabled"] as? Bool else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try runtime.emailStore.setEmailAccountSyncEnabled(accountID: accountID, enabled: enabled)
             if enabled {
-                await runtime.emailSyncEngine.register(accountID: accountID)
+                try await runtime.mailSyncCoordinator.resume(accountID: accountID)
             } else {
+                try await runtime.mailSyncCoordinator.pause(accountID: accountID)
                 await runtime.emailSyncEngine.unregister(accountID: accountID)
             }
             await runtime.privacyIndexCoordinator.bootstrap()
@@ -494,7 +568,12 @@ extension ManifoldXPCService {
             guard let accountID = payload["accountID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            let result = try await runtime.emailSyncEngine.syncNow(accountID: accountID)
+            _ = try await runtime.mailSyncCoordinator.enqueueIncrementalSync(accountID: accountID)
+            let processed = try await runtime.mailSyncCoordinator.processNextJobWithResult(accountID: accountID)
+            let result = processed?.result ?? SyncResult(
+                accountID: accountID,
+                errors: ["No queued sync job was available"]
+            )
             await runtime.privacyIndexCoordinator.bootstrap()
             return ["result": try XPCJSON.object(from: result)]
 
@@ -648,7 +727,14 @@ extension ManifoldXPCService {
             return ["ok": true]
 
         case "emailBackupInfo":
-            return ["info": try XPCJSON.object(from: EmailBackupInfoPayload(path: EmailSyncEngine.backupRoot.path, diskUsage: backupDiskUsage()))]
+            return [
+                "info": try XPCJSON.object(
+                    from: MailArchiveInfoPayload(
+                        path: EmailSyncEngine.mailArchiveRoot.path,
+                        diskUsage: mailArchiveDiskUsage()
+                    )
+                )
+            ]
 
         case "listPendingApprovals":
             let pending = try await runtime.approvalQueue.pending()
@@ -1827,8 +1913,8 @@ extension ManifoldXPCService {
         return Array(unique.values)
     }
 
-    private func backupDiskUsage() -> Int64 {
-        let root = EmailSyncEngine.backupRoot
+    private func mailArchiveDiskUsage() -> Int64 {
+        let root = EmailSyncEngine.mailArchiveRoot
         guard FileManager.default.fileExists(atPath: root.path),
               let enumerator = FileManager.default.enumerator(
                 at: root,

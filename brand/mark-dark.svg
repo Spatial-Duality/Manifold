@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160" role="img" aria-label="Manifold mark">
+  <title>Manifold</title>
+  <g fill="#faf9f5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', 'IBM Plex Mono', Menlo, Consolas, monospace" font-size="160" font-weight="500" text-anchor="middle">
+    <text x="60" y="120">{</text>
+    <text x="160" y="120">|</text>
+    <text x="260" y="120">}</text>
+  </g>
+</svg>

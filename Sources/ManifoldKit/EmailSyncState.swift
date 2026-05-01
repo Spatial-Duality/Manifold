@@ -96,16 +96,124 @@ public struct MailboxSyncResult: Sendable, Codable {
     public let newMessages: Int
     public let lastUID: UInt32
     public let uidValidity: UInt32
+    public let oldestFetchedUID: UInt32?
+    public let fetchedUIDCount: Int
+    public let hasMoreHistory: Bool
 
     public init(
         mailboxName: String,
         newMessages: Int = 0,
         lastUID: UInt32 = 0,
-        uidValidity: UInt32 = 0
+        uidValidity: UInt32 = 0,
+        oldestFetchedUID: UInt32? = nil,
+        fetchedUIDCount: Int = 0,
+        hasMoreHistory: Bool = false
     ) {
         self.mailboxName = mailboxName
         self.newMessages = newMessages
         self.lastUID = lastUID
         self.uidValidity = uidValidity
+        self.oldestFetchedUID = oldestFetchedUID
+        self.fetchedUIDCount = fetchedUIDCount
+        self.hasMoreHistory = hasMoreHistory
+    }
+}
+
+// MARK: - Durable Mail Sync Jobs
+
+public enum MailSyncExecutionMode: Sendable, Equatable {
+    case incremental
+    case recentPass(limitPerMailbox: Int)
+    case historicalBackfill(batchLimitPerMailbox: Int)
+
+    public var isHistoricalBackfill: Bool {
+        if case .historicalBackfill = self { return true }
+        return false
+    }
+
+    public var isRecentPass: Bool {
+        if case .recentPass = self { return true }
+        return false
+    }
+}
+
+public enum MailSyncJobType: String, Sendable, Codable, CaseIterable {
+    case initial
+    case recentPass
+    case historicalBackfill
+    case incremental
+    case reconcile
+}
+
+public enum MailSyncJobState: String, Sendable, Codable, CaseIterable {
+    case queued
+    case running
+    case succeeded
+    case failed
+    case paused
+    case cancelled
+}
+
+public struct MailSyncJobRecord: Sendable, Codable, Identifiable, Equatable {
+    public let id: String
+    public let accountID: String
+    public let mailboxName: String?
+    public let jobType: MailSyncJobType
+    public let state: MailSyncJobState
+    public let priority: Int
+    public let cursorJSONCiphertext: String?
+    public let errorCode: String?
+    public let errorRedacted: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String = UUID().uuidString,
+        accountID: String,
+        mailboxName: String? = nil,
+        jobType: MailSyncJobType,
+        state: MailSyncJobState = .queued,
+        priority: Int,
+        cursorJSONCiphertext: String? = nil,
+        errorCode: String? = nil,
+        errorRedacted: String? = nil,
+        createdAt: String = ISO8601DateFormatter.shared.string(from: Date()),
+        updatedAt: String = ISO8601DateFormatter.shared.string(from: Date())
+    ) {
+        self.id = id
+        self.accountID = accountID
+        self.mailboxName = mailboxName
+        self.jobType = jobType
+        self.state = state
+        self.priority = priority
+        self.cursorJSONCiphertext = cursorJSONCiphertext
+        self.errorCode = errorCode
+        self.errorRedacted = errorRedacted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public init?(row: [String: String]) {
+        guard let id = row["id"],
+              let accountID = row["account_id"],
+              let rawType = row["job_type"],
+              let jobType = MailSyncJobType(rawValue: rawType),
+              let rawState = row["state"],
+              let state = MailSyncJobState(rawValue: rawState),
+              let createdAt = row["created_at"],
+              let updatedAt = row["updated_at"] else {
+            return nil
+        }
+        self.id = id
+        self.accountID = accountID
+        self.mailboxName = row["mailbox_name"]
+        self.jobType = jobType
+        self.state = state
+        self.priority = row["priority"].flatMap(Int.init) ?? 0
+        self.cursorJSONCiphertext = row["cursor_json_ciphertext"]
+        self.errorCode = row["error_code"]
+        self.errorRedacted = row["error_redacted"]
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }

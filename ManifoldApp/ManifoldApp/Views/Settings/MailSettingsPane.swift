@@ -1,14 +1,5 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
-//
-// MailSettingsPane — the mailboxes + storage settings pane.
-//
-// Stage-11 redesign:
-//   - Empty state uses ContentUnavailableView (references/design.md).
-//   - Sync toggle binding extracted into syncBinding(for:) — no more
-//     inline Binding(get:set:) in view body.
-//   - Storage row uses the shared PathLabel primitive.
-//   - Type and palette tokens migrated to ManifoldType / ManifoldPalette.
 
 import SwiftUI
 import ManifoldKit
@@ -45,8 +36,8 @@ struct MailSettingsPane: View {
                 }
 
                 Section("Storage") {
-                    LabeledContent("Backup location") {
-                        PathLabel(store.mailAccounts.backupRootPath)
+                    LabeledContent("Archive location") {
+                        PathLabel(store.mailAccounts.archiveRootPath)
                     }
                     LabeledContent("Total messages") {
                         Text("\(store.mailAccounts.totalMessageCount)")

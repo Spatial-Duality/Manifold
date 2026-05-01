@@ -284,4 +284,62 @@ struct PrivacyIndexCoordinatorTests {
         #expect(result.text?.contains("Account number 1234-5678") == true)
         #expect(result.text?.contains("sk-abcdef1234567890abcdef12") == true)
     }
+
+    @Test("Extractor reads attachment text from archive v2 attachment blob")
+    func extractorReadsAttachmentFromArchiveBlob() async throws {
+        let context = try makeContext()
+        defer { cleanup(context.tempDir) }
+
+        let account = try context.emailStore.addEmailAccount(
+            displayName: "Runtime Inbox",
+            providerType: EmailProvider.gmail.rawValue,
+            server: "imap.runtime.test",
+            port: 993,
+            username: "runtime@manifold.test"
+        )
+        try context.emailStore.upsertEmailMessage(
+            emailID: "runtime-email-archive-attachment",
+            accountID: account.accountID,
+            mailbox: "INBOX",
+            sender: "Ops <ops@runtime.test>",
+            senderEmail: "ops@runtime.test",
+            senderDomain: "runtime.test",
+            recipients: "ada@example.com",
+            subject: "Attachment archive test",
+            receivedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            emlPath: nil,
+            sizeBytes: 0,
+            preview: nil,
+            contentType: "text/plain"
+        )
+
+        let archiveRoot = context.tempDir.appendingPathComponent("MailArchive")
+        let archive = try MailArchiveStore(rootURL: archiveRoot)
+        let attachmentData = Data("Token abc-123 and customer account 9876".utf8)
+        let stored = try archive.store(
+            accountID: account.accountID,
+            kind: .attachment,
+            plaintext: attachmentData
+        )
+        try context.emailStore.recordMailBlob(stored)
+        try context.emailStore.upsertEmailAttachment(
+            attachmentID: "runtime-attachment-archive-v2",
+            emailID: "runtime-email-archive-attachment",
+            filename: "archive-packet.txt",
+            mimeType: "text/plain",
+            sizeBytes: attachmentData.count,
+            contentHash: sha256(attachmentData),
+            attachmentBlobCID: stored.contentID
+        )
+
+        let extractor = PrivacyContentExtractor(mailArchiveRoot: archiveRoot)
+        let attachment = try #require(try context.emailStore.emailAttachment(id: "runtime-attachment-archive-v2"))
+        let email = try #require(try context.emailStore.emailMessage(id: "runtime-email-archive-attachment"))
+
+        let result = await extractor.extractEmailAttachment(attachment, email: email)
+
+        #expect(result.extractStatus == .ready)
+        #expect(result.extractor == "plain-text")
+        #expect(result.text?.contains("customer account 9876") == true)
+    }
 }

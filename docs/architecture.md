@@ -243,4 +243,4 @@ So the simple rule is:
 - [ui-map.md](ui-map.md) for the current window and surface map
 - [mcp-integration.md](mcp-integration.md) for Claude/Codex wiring
 - [design-decisions.md](design-decisions.md) for why the system is shaped this way
-- [../design/PRODUCT-SPEC.md](../design/PRODUCT-SPEC.md) for the canonical product definition
+- [product-spec.md](product-spec.md) for the canonical product definition

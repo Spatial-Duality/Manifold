@@ -3,6 +3,7 @@
 
 import Testing
 import Foundation
+import CryptoKit
 @testable import ManifoldKit
 
 @Suite("EmailStore")
@@ -112,6 +113,180 @@ struct EmailStoreTests {
         let preset = mailboxes.first { $0.displayName == "Shared with Cowork" }
         #expect(preset != nil)
         #expect(preset?.iconName == "person.2.fill")
+    }
+
+    @Test("Migration v38 creates production mail foundation tables")
+    func migrationV38ProductionMailFoundations() async throws {
+        let (_, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        _ = try db.queryAll("SELECT credential_kind, credential_keychain_service, credential_keychain_account, auth_state, index_privacy_mode FROM email_accounts LIMIT 1")
+        _ = try db.queryAll("SELECT canonical_blob_cid, header_blob_cid, rfc_message_id_hmac FROM email_messages LIMIT 1")
+        _ = try db.queryAll("SELECT attachment_blob_cid FROM email_attachments LIMIT 1")
+        _ = try db.queryAll("SELECT content_id, kind, manifest_id FROM mail_blobs LIMIT 1")
+        _ = try db.queryAll("SELECT term_hmac, field_mask, term_count FROM mail_private_terms LIMIT 1")
+        _ = try db.queryAll("SELECT job_type, state, cursor_json_ciphertext FROM mail_sync_jobs LIMIT 1")
+        _ = try db.queryAll("SELECT access_kind, details_redacted FROM mail_access_audit_events LIMIT 1")
+    }
+
+    @Test("New email accounts store v2 credential references")
+    func addEmailAccountStoresV2CredentialReference() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let account = try store.addEmailAccount(
+            displayName: "Fastmail",
+            providerType: EmailProvider.fastmail.rawValue,
+            server: "imap.fastmail.com",
+            port: 993,
+            username: "user@example.com",
+            authType: "app_password"
+        )
+
+        let row = try #require(try db.queryAll(
+            """
+            SELECT credential_kind, credential_keychain_service, credential_keychain_account
+            FROM email_accounts
+            WHERE account_id = ?
+            """,
+            params: [account.accountID]
+        ).first)
+        #expect(row["credential_kind"] == MailCredentialKind.appPassword.rawValue)
+        #expect(row["credential_keychain_service"] == KeychainMailSecretStore.credentialService)
+        #expect(row["credential_keychain_account"] == "mail-account:\(account.accountID):app-password")
+        #expect(account.mailCredentialReference?.keychainAccount == "mail-account:\(account.accountID):app-password")
+    }
+
+    @Test("Email accounts persist selected index privacy mode")
+    func addEmailAccountPersistsIndexPrivacyMode() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let account = try store.addEmailAccount(
+            displayName: "Fastmail FTS",
+            providerType: EmailProvider.fastmail.rawValue,
+            server: "imap.fastmail.com",
+            port: 993,
+            username: "user@example.com",
+            authType: "app_password",
+            indexPrivacyMode: .plaintextFTSWithDisclosure
+        )
+
+        let stored = try #require(try store.emailAccount(id: account.accountID))
+        #expect(stored.indexPrivacyMode == MailIndexPrivacyMode.plaintextFTSWithDisclosure.rawValue)
+    }
+
+    @Test("Email messages can reference archive v2 canonical blobs")
+    func upsertMessageWithCanonicalBlobReference() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let archiveRoot = tempDir.appendingPathComponent("MailArchive")
+        let archive = try MailArchiveStore(rootURL: archiveRoot)
+        let stored = try archive.storeMessage(
+            accountID: Self.testAccountID,
+            plaintext: Data("Subject: Stored\r\n\r\nArchived body".utf8)
+        )
+
+        try store.upsertEmailMessage(
+            emailID: "msg-archive-v2",
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sender: "Test User <test@example.com>",
+            senderEmail: "test@example.com",
+            senderDomain: "example.com",
+            recipients: "recipient@test.com",
+            subject: "Stored",
+            receivedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            emlPath: stored.manifestURL.path,
+            sizeBytes: Int(stored.byteCountPlaintext),
+            preview: nil,
+            canonicalBlobCID: stored.contentID
+        )
+        try store.recordMailBlob(stored)
+
+        let message = try #require(try store.emailMessage(id: "msg-archive-v2"))
+        #expect(message.canonicalBlobCID == stored.contentID)
+        #expect(EmailSyncEngine.readStoredMessage(at: stored.manifestURL.path) == Data("Subject: Stored\r\n\r\nArchived body".utf8))
+
+        let blobRefCount = try db.queryScalar(
+            "SELECT ref_count FROM mail_blobs WHERE content_id = ?",
+            params: [stored.contentID]
+        )
+        #expect(blobRefCount == "1")
+    }
+
+    @Test("Email attachments can reference archive v2 attachment blobs")
+    func upsertAttachmentWithArchiveBlobReference() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let emailID = try await insertTestMessage(
+            store: store,
+            emailID: "msg-attachment-archive-v2",
+            attachmentCount: 1
+        )
+        let archive = try MailArchiveStore(rootURL: tempDir.appendingPathComponent("MailArchive"))
+        let attachmentData = Data("attachment secret payload".utf8)
+        let stored = try archive.store(
+            accountID: Self.testAccountID,
+            kind: .attachment,
+            plaintext: attachmentData
+        )
+
+        try store.recordMailBlob(stored)
+        try store.upsertEmailAttachment(
+            attachmentID: "att-archive-v2",
+            emailID: emailID,
+            filename: "secret.txt",
+            mimeType: "text/plain",
+            sizeBytes: attachmentData.count,
+            contentHash: SHA256.hash(data: attachmentData).hexString,
+            contentID: "<mime-content-id>",
+            attachmentBlobCID: stored.contentID
+        )
+
+        let attachment = try #require(try store.emailAttachment(id: "att-archive-v2"))
+        #expect(attachment.contentID == "<mime-content-id>")
+        #expect(attachment.attachmentBlobCID == stored.contentID)
+        #expect(try archive.readObject(contentID: stored.contentID, accountID: Self.testAccountID) == attachmentData)
+
+        let row = try #require(try db.queryAll(
+            "SELECT kind, ref_count FROM mail_blobs WHERE content_id = ?",
+            params: [stored.contentID]
+        ).first)
+        #expect(row["kind"] == MailArchiveObjectKind.attachment.rawValue)
+        #expect(row["ref_count"] == "1")
+    }
+
+    @Test("Private index mode does not enqueue plaintext body backfill")
+    func privateModeSkipsPlaintextBodyBackfill() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        try store.upsertEmailMessage(
+            emailID: "msg-private-index",
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sender: "Test User <test@example.com>",
+            senderEmail: "test@example.com",
+            senderDomain: "example.com",
+            recipients: "recipient@test.com",
+            subject: "Private",
+            receivedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            emlPath: tempDir.appendingPathComponent("legacy.eml").path,
+            sizeBytes: 123,
+            preview: nil
+        )
+
+        #expect(try store.emailsNeedingBodyBackfill(limit: 10).isEmpty)
+
+        try db.execute(
+            "UPDATE email_accounts SET index_privacy_mode = 'plaintextFTSWithDisclosure' WHERE account_id = ?",
+            params: [Self.testAccountID]
+        )
+        let queued = try store.emailsNeedingBodyBackfill(limit: 10)
+        #expect(queued.map { $0.emailID } == ["msg-private-index"])
     }
 
     // MARK: - CRUD

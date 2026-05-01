@@ -1,0 +1,36 @@
+# Manifold — swiftformat config (https://github.com/nicklockwood/SwiftFormat)
+# Keep this file small and opinionated. Resist the urge to over-configure;
+# Apple-house style is fine.
+
+--swiftversion 6.0
+
+# Indentation
+--indent 4
+--indentcase false
+--ifdef no-indent
+
+# Width
+--maxwidth 120
+
+# Imports
+--importgrouping testable-bottom
+
+# Wraps
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--closingparen balanced
+
+# Trailing
+--trimwhitespace always
+--commas inline
+
+# Spacing
+--operatorfunc spaced
+--ranges no-space
+
+# Headers — leave alone, the project uses SPDX headers manually
+--header ignore
+
+# Excludes
+--exclude .build,.swiftpm,DerivedData,.deriveddata-*,docs,brand,scripts/__pycache__

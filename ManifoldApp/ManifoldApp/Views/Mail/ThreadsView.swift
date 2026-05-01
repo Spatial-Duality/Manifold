@@ -419,11 +419,6 @@ private struct ThreadInspector: View {
     let connectedAgents: [TargetApp]
     let onClose: () -> Void
 
-    private func openInDefaultMailClient(_ message: EmailMessageRecord) {
-        guard let path = message.emlPath, !path.isEmpty else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
-    }
-
     var body: some View {
         ScrollView {
             if let selectedThread = mailReview.selectedThread,
@@ -494,8 +489,6 @@ private struct ThreadInspector: View {
                         inspectorRow("Attachments", "\(selectedMessage.attachmentCount)")
                     }
 
-                    // bodyText is FTS5-indexed plaintext from the .eml;
-                    // preview is the fallback for rows still being parsed.
                     VStack(alignment: .leading, spacing: Spacing.s2) {
                         HStack {
                             Text("Message")
@@ -503,16 +496,6 @@ private struct ThreadInspector: View {
                                 .foregroundStyle(.secondary)
                                 .tracking(0.4)
                             Spacer()
-                            Button {
-                                openInDefaultMailClient(selectedMessage)
-                            } label: {
-                                Label("Open in Mail", systemImage: "envelope.open")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled((selectedMessage.emlPath ?? "").isEmpty)
-                            .help("Open the original .eml in your default email client")
-                            .accessibilityIdentifier("mail.message.openExternal")
                         }
 
                         let messageBody = (selectedMessage.bodyText?.isEmpty == false
@@ -522,7 +505,7 @@ private struct ThreadInspector: View {
                         ScrollView {
                             Text(messageBody?.isEmpty == false
                                  ? messageBody!
-                                 : "No message body extracted yet. Open in Mail to see the original.")
+                                 : "No message body extracted yet.")
                                 .font(ManifoldType.body)
                                 .foregroundStyle(messageBody?.isEmpty == false ? .primary : .secondary)
                                 .textSelection(.enabled)

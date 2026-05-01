@@ -83,7 +83,7 @@ above and below is preserved verbatim across re-installs.
 
 Practical testing guide:
 
-- [../design/CLAUDE-CODEX-TESTING.md](../design/CLAUDE-CODEX-TESTING.md)
+- [claude-codex-testing.md](claude-codex-testing.md)
 
 Relevant code:
 

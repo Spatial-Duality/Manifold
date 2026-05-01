@@ -68,8 +68,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 11)
-        #expect(try migrator.currentVersion() == 37)
+        #expect(applied == 14)
+        #expect(try migrator.currentVersion() == 40)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
     }
@@ -81,14 +81,14 @@ struct DatabaseMigratorTests {
 
         let migrator = try DatabaseMigrator(db: db)
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        for version in 1...37 {
+        for version in 1...40 {
             try db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 params: ["\(version)", now]
             )
         }
 
-        #expect(try migrator.currentVersion() == 37)
+        #expect(try migrator.currentVersion() == 40)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
         try db.execute("""
@@ -747,8 +747,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 4)
-        #expect(try migrator.currentVersion() == 37)
+        #expect(applied == 7)
+        #expect(try migrator.currentVersion() == 40)
         let settings = try #require(try db.queryAll("SELECT selected_backend, install_state, model_version, installed_at FROM privacy_preflight_settings").first)
         #expect(settings["selected_backend"] == "mlx")
         #expect(settings["install_state"] == "download_required")
@@ -844,10 +844,13 @@ struct DatabaseMigratorTests {
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["35"])
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["36"])
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["37"])
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["38"])
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["39"])
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["40"])
         let applied = try migrator.migrate()
 
-        #expect(applied == 3)
-        #expect(try migrator.currentVersion() == 37)
+        #expect(applied == 6)
+        #expect(try migrator.currentVersion() == 40)
 
         let liveOverride = try db.queryAll(
             "SELECT relative_path FROM file_visibility_overrides WHERE source_id = ?",
@@ -873,5 +876,166 @@ struct DatabaseMigratorTests {
             params: ["p-cowork"]
         ).first)
         #expect(policy["allowed_source_ids"] == #"["src-live"]"#)
+    }
+
+    @Test("Migration v39 resets legacy mail data and keeps only v2-compatible accounts")
+    func mailFreshStartReset() throws {
+        let (db, tempDir) = try makeDB()
+        defer { cleanup(tempDir) }
+
+        let migrator = try DatabaseMigrator(db: db)
+        _ = try migrator.migrate()
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+
+        try db.execute("""
+            INSERT INTO email_accounts (
+                account_id, display_name, provider_type, server, port, username,
+                auth_type, sync_enabled, sync_interval_seconds, created_at, updated_at,
+                credential_kind, credential_keychain_service, credential_keychain_account,
+                auth_state, index_privacy_mode
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 300, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            "legacy-mail", "Legacy", "gmail", "imap.gmail.com", "993", "legacy@example.com",
+            "app_password", now, now, "appPassword", "com.spatialduality.manifold.email",
+            "legacy-mail", "valid", "plaintextFTSWithDisclosure",
+        ])
+        try db.execute("""
+            INSERT INTO email_accounts (
+                account_id, display_name, provider_type, server, port, username,
+                auth_type, sync_enabled, sync_interval_seconds, created_at, updated_at,
+                credential_kind, credential_keychain_service, credential_keychain_account,
+                auth_state, index_privacy_mode
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 300, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            "v2-mail", "V2", "fastmail", "imap.fastmail.com", "993", "v2@example.com",
+            "app_password", now, now, "appPassword", KeychainMailSecretStore.credentialService,
+            "mail-account:v2-mail:app-password", "valid", "privateTokenIndex",
+        ])
+
+        for accountID in ["legacy-mail", "v2-mail"] {
+            let emailID = "msg-\(accountID)"
+            try db.execute("""
+                INSERT INTO email_messages (
+                    email_id, account, account_id, mailbox, sender, recipients, subject,
+                    received_at, eml_path, size_bytes, preview, body_text
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, params: [
+                emailID, accountID, accountID, "INBOX", "Sender <sender@example.com>",
+                "recipient@example.com", "Plaintext subject", now,
+                tempDir.appendingPathComponent("\(emailID).eml").path, "128",
+                "Plaintext preview", "Plaintext body",
+            ])
+            try db.execute("""
+                INSERT INTO email_fts(rowid, email_id, body_text)
+                SELECT rowid, email_id, body_text FROM email_messages WHERE email_id = ?
+            """, params: [emailID])
+            try db.execute("""
+                INSERT INTO email_mailbox_membership (account_id, mailbox, imap_uid, email_id)
+                VALUES (?, ?, ?, ?)
+            """, params: [accountID, "INBOX", "1", emailID])
+            try db.execute("""
+                INSERT INTO email_attachments (attachment_id, email_id, filename, mime_type, size_bytes, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, params: ["att-\(accountID)", emailID, "secret.txt", "text/plain", "7", "hash-\(accountID)"])
+            try db.execute("""
+                INSERT INTO shared_emails (share_id, agent, email_id, shared_at)
+                VALUES (?, ?, ?, ?)
+            """, params: ["share-\(accountID)", "cowork", emailID, now])
+            try db.execute("""
+                INSERT INTO temporary_reveals (reveal_id, agent, email_id, work_block_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, params: ["reveal-\(accountID)", "cowork", emailID, "wb-\(accountID)", now])
+            try db.execute("""
+                INSERT INTO access_presets (preset_id, name, created_at, updated_at, target_app)
+                VALUES (?, ?, ?, ?, ?)
+            """, params: ["preset-\(accountID)", "Preset \(accountID)", now, now, "cowork"])
+            try db.execute("""
+                INSERT INTO access_preset_emails (preset_id, email_id)
+                VALUES (?, ?)
+            """, params: ["preset-\(accountID)", emailID])
+            try db.execute("""
+                INSERT INTO privacy_content_index (
+                    content_id, subject_kind, email_id, display_name, extract_status,
+                    scan_status, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, params: ["privacy-\(accountID)", "email_body", emailID, "Email", "complete", "complete", now])
+            try db.execute("""
+                INSERT INTO privacy_detected_spans (
+                    span_id, content_id, category, start_utf16, end_utf16, source, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, params: ["span-\(accountID)", "privacy-\(accountID)", "email", "0", "5", "rules", now])
+            try db.execute("""
+                INSERT INTO privacy_index_jobs (job_id, content_id, reason, priority, status, scheduled_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, params: ["job-\(accountID)", "privacy-\(accountID)", "sync", "1", "queued", now])
+            try db.execute("""
+                INSERT INTO mail_private_terms (account_id, term_hmac, email_id, field_mask, term_count)
+                VALUES (?, ?, ?, ?, ?)
+            """, params: [accountID, "term-\(accountID)", emailID, "1", "1"])
+            try db.execute("""
+                INSERT INTO mail_blobs (
+                    content_id, account_id, kind, manifest_id, byte_count_plaintext,
+                    byte_count_ciphertext, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, params: ["blob-\(accountID)", accountID, "messageRFC822", "manifest-\(accountID)", "128", "160", now])
+            try db.execute("""
+                INSERT INTO mail_sync_jobs (id, account_id, job_type, state, priority, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, params: ["sync-\(accountID)", accountID, "initial", "queued", "1", now, now])
+            try db.execute("""
+                INSERT INTO mail_access_audit_events (id, account_id, agent_id, session_id, access_kind, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, params: ["audit-\(accountID)", accountID, "cowork", "session", "search", now])
+            try db.execute("""
+                INSERT INTO email_sync_state (account_id, mailbox_name, last_sync_uid)
+                VALUES (?, ?, ?)
+            """, params: [accountID, "INBOX", "1"])
+            try db.execute("""
+                INSERT INTO imap_mailboxes (account_id, mailbox_name)
+                VALUES (?, ?)
+            """, params: [accountID, "INBOX"])
+        }
+
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["39"])
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["40"])
+
+        let applied = try migrator.migrate()
+
+        #expect(applied == 2)
+        #expect(try migrator.currentVersion() == 40)
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM email_accounts WHERE account_id = 'legacy-mail'") == "0")
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM email_accounts WHERE account_id = 'v2-mail'") == "1")
+        for table in [
+            "email_messages",
+            "email_attachments",
+            "email_mailbox_membership",
+            "shared_emails",
+            "access_preset_emails",
+            "privacy_content_index",
+            "privacy_detected_spans",
+            "privacy_index_jobs",
+            "mail_private_terms",
+            "mail_blobs",
+            "mail_sync_jobs",
+            "mail_access_audit_events",
+            "email_sync_state",
+            "imap_mailboxes",
+        ] {
+            #expect(try db.queryScalar("SELECT COUNT(*) FROM \(table)") == "0", "\(table) should be cleared")
+        }
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM temporary_reveals WHERE email_id IS NOT NULL") == "0")
+
+        let legacyJSON = try #require(try db.queryScalar(
+            "SELECT value FROM runtime_settings WHERE key = ?",
+            params: [MailFreshStartReset.legacyAccountIDsKey]
+        ))
+        let legacyIDs = (try? JSONDecoder().decode([String].self, from: Data(legacyJSON.utf8))) ?? []
+        #expect(legacyIDs == ["legacy-mail"])
     }
 }

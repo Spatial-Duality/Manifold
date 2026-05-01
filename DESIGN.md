@@ -73,7 +73,7 @@ Agent identity is communicated through content, not decoration:
 bar is content authority (what flows through Manifold). The curly braces are
 the trust boundary that scopes it. The bar between braces IS the product.
 
-Live in `brand/` (sibling to `design/`). The folder is the canonical source;
+Live in `brand/` (sibling to `docs/`). The folder is the canonical source;
 DESIGN.md references it.
 
 ### Static variants
@@ -335,7 +335,7 @@ Base-4 scale. Defined in `Components/Spacing.swift`. No ad-hoc values.
 | 2026-04-26 | Brand colors are NOT UI colors | Brand uses specific hex (warm ink + #B86A1E halo); UI stays system semantic only. Regression if brand hex appears in SwiftUI UI. |
 | 2026-04-26 | Title-sequence morph slots match real Manifold scopes | `{ /files }` `{ /emails }` `{ /history }` — animation demonstrates the product, not decorates around it. |
 | 2026-04-28 | Title sequence final polish deferred to post-launch brand sprint | Pre-launch: SwiftUI port is in the app target as functional placeholder, not wired into any surface. Post-launch sprint bundles cinematic Apple-style title sequence, color theme refinement, custom SF Symbols, and icon design as one brand identity push. Resolves all 4 open decisions from `brand/iteration-log.md` (slot inventory, web hero loop behavior, in-app reactive vs cosmetic, sound design) by deferring them to this future sprint. |
-| 2026-04-28 | Per-AI selector is `AccessChipStack` (chip-only) in dense table rows; `AccessCheckboxStrip` (labelled + tri-state All) in inspector panes | Tables are space-constrained and consistent across Folders/Files/Mail; inspectors have room to label every state. One control language across the entire access surface, no surface-specific divergence. See [`design/13-access-redesign.md`](design/13-access-redesign.md). |
+| 2026-04-28 | Per-AI selector is `AccessChipStack` (chip-only) in dense table rows; `AccessCheckboxStrip` (labelled + tri-state All) in inspector panes | Tables are space-constrained and consistent across Folders/Files/Mail; inspectors have room to label every state. One control language across the entire access surface, no surface-specific divergence. See [`docs/archive/design-iterations/13-access-redesign.md`](docs/archive/design-iterations/13-access-redesign.md). |
 | 2026-04-28 | Mail surface has no "target agent" picker; every connected AI renders inline | Files already showed all AIs at once; the dropdown was the Mail surface diverging from the rest of the product. Per-message chip stack matches Files exactly. |
 | 2026-04-28 | Folders Sharing column is plain-English source-level scope only | Conflating health (Removed/Offline) with sharing labels confused users. Health is whether the folder exists on disk; the Sharing column answers "what's shared with whom". Per-file overrides surface as a small dot beside the pill so the user knows there's extra detail without cluttering the headline label. |
 | 2026-04-28 | Drag-and-drop is the primary "add" affordance; `+ Add ▾` toolbar menu deferred | One shared `View.manifoldFileDropTarget(store:)` modifier covers folders + files on both surfaces. Files raise a confirmation dialog asking whether to add the whole folder or only that file (the latter writes per-file deny overrides for siblings). Toolbar menu and menu-bar quick-add remain on the redesign roadmap. |

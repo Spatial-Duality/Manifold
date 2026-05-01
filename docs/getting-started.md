@@ -228,7 +228,7 @@ If you are just trying to understand the core product, you can ignore mail on da
 
 For the deeper live-agent workflow, use:
 
-- [../design/CLAUDE-CODEX-TESTING.md](../design/CLAUDE-CODEX-TESTING.md)
+- [claude-codex-testing.md](claude-codex-testing.md)
 
 That guide is the fuller integration pass. This page is just the shortest path to understanding the current shell and getting one real governed session running.
 
@@ -238,4 +238,4 @@ That guide is the fuller integration pass. This page is just the shortest path t
 - [ui-map.md](ui-map.md) for the current window and surface map
 - [mcp-integration.md](mcp-integration.md) for Claude/Codex setup details
 - [design-decisions.md](design-decisions.md) for the rationale behind the runtime and coverage model
-- [../design/PRODUCT-SPEC.md](../design/PRODUCT-SPEC.md) for the full product definition
+- [product-spec.md](product-spec.md) for the full product definition

@@ -100,11 +100,11 @@ Rules is the live governance surface. Seeded and user rules share one grammar ac
 | Menu bar panel | Ambient status, current session, approvals, recent sessions, and quick actions |
 | Command palette | Keyboard-first command search |
 | Settings | General, Agents, Storage, Mail, Rules defaults, Privacy, Sessions, and Advanced |
-| Synthetic loop | Deterministic MCP/UI self-improvement harness via `script/run_self_improvement_loop.sh` |
+| Synthetic loop | Deterministic MCP/UI self-improvement harness via `scripts/run_self_improvement_loop.sh` |
 
 ## Testing Map
 
 - Package baseline: `swift test`
-- Fixture UI: `bash script/run_ui_tests.sh --suite fixture`
-- Synthetic UI: `bash script/run_ui_tests.sh --suite synthetic`
-- Full synthetic loop: `bash script/run_self_improvement_loop.sh`
+- Fixture UI: `bash scripts/run_ui_tests.sh --suite fixture`
+- Synthetic UI: `bash scripts/run_ui_tests.sh --suite synthetic`
+- Full synthetic loop: `bash scripts/run_self_improvement_loop.sh`

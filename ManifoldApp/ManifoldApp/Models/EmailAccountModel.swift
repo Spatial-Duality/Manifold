@@ -22,7 +22,7 @@ final class MailAccountsModel {
     }
 
     private var client: (any RuntimeClientProtocol)?
-    private var backupInfo: EmailBackupInfo?
+    private var archiveInfo: MailArchiveInfo?
 
     init() {}
 
@@ -35,14 +35,14 @@ final class MailAccountsModel {
         do {
             let fetchedAccounts = try await client.listEmailAccounts()
             let fetchedMessageCount = try await client.emailMessageCount()
-            let fetchedBackupInfo = try? await client.emailBackupInfo()
+            let fetchedArchiveInfo = try? await client.emailBackupInfo()
             var nextStates: [String: [SyncStateRecord]] = [:]
             for account in fetchedAccounts {
                 nextStates[account.accountID] = try await client.syncStates(accountID: account.accountID)
             }
             accounts = fetchedAccounts
             totalMessageCount = fetchedMessageCount
-            backupInfo = fetchedBackupInfo
+            archiveInfo = fetchedArchiveInfo
             syncStates = nextStates
             mailboxRefreshToken &+= 1
         } catch {
@@ -72,6 +72,32 @@ final class MailAccountsModel {
             return nil
         } catch {
             logger.error("Failed to add email account: \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
+    func addOAuthIMAPAccount(
+        displayName: String,
+        provider: EmailProvider,
+        server: String,
+        port: Int,
+        username: String,
+        tokenSet: MicrosoftOAuthTokenSet
+    ) async -> String? {
+        guard let client else { return "Runtime unavailable" }
+        do {
+            _ = try await client.addOAuthIMAPAccount(
+                displayName: displayName,
+                provider: provider,
+                server: server,
+                port: port,
+                username: username,
+                tokenSet: tokenSet
+            )
+            await loadAccounts()
+            return nil
+        } catch {
+            logger.error("Failed to add OAuth email account: \(error.localizedDescription)")
             return error.localizedDescription
         }
     }
@@ -352,7 +378,7 @@ final class MailAccountsModel {
         try await client.deleteSmartMailbox(mailboxID: mailboxID)
     }
 
-    var backupRootPath: String {
-        backupInfo?.path ?? EmailSyncEngine.backupRoot.path
+    var archiveRootPath: String {
+        archiveInfo?.path ?? EmailSyncEngine.mailArchiveRoot.path
     }
 }

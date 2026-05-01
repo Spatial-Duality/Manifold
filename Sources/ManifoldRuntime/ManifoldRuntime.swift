@@ -46,6 +46,8 @@ public actor ManifoldRuntime {
     public nonisolated let filterModeFindingsProvider: any FilterModeFindingsProvider
     /// Mail synchronization engine.
     public nonisolated let emailSyncEngine: EmailSyncEngine
+    /// Durable queue/coordinator for production mail sync jobs.
+    public nonisolated let mailSyncCoordinator: MailSyncCoordinator
     /// Approval queue for governed escalations.
     public nonisolated let approvalQueue: ApprovalQueue
     /// Persisted standing-write grants for queue approvals.
@@ -88,6 +90,15 @@ public actor ManifoldRuntime {
         let db = try DatabaseConnection(url: rootURL.appendingPathComponent("manifold.db"))
         let migrator = try DatabaseMigrator(db: db)
         try migrator.migrate()
+        do {
+            try MailFreshStartReset.cleanupIfNeeded(
+                db: db,
+                backupRoot: Self.mailBackupRoot(for: rootURL),
+                archiveRoot: Self.mailArchiveRoot(for: rootURL)
+            )
+        } catch {
+            runtimeLogger.error("Mail fresh-start cleanup failed: \(String(describing: error), privacy: .public)")
+        }
 
         let contentStore = try ContentStore(rootURL: rootURL, db: db)
         let auditStore = try AuditStore(db: db)
@@ -105,6 +116,7 @@ public actor ManifoldRuntime {
         let filterModeStore = FilterModeStore(db: db)
         let filterModeFindingsProvider: any FilterModeFindingsProvider = RegexFilterFindingsProvider()
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
+        let mailSyncCoordinator = MailSyncCoordinator(emailStore: emailStore, syncEngine: emailSyncEngine)
         let approvalQueue = ApprovalQueue(db: db)
         let standingWriteApprovalStore = StandingWriteApprovalStore(db: db)
         let exposureStore = ExposureStore(db: db)
@@ -156,6 +168,7 @@ public actor ManifoldRuntime {
         self.filterModeStore = filterModeStore
         self.filterModeFindingsProvider = filterModeFindingsProvider
         self.emailSyncEngine = emailSyncEngine
+        self.mailSyncCoordinator = mailSyncCoordinator
         self.approvalQueue = approvalQueue
         self.standingWriteApprovalStore = standingWriteApprovalStore
         self.exposureStore = exposureStore
@@ -190,6 +203,7 @@ public actor ManifoldRuntime {
         }
 
         await privacyIndexCoordinator.bootstrap()
+        await mailSyncCoordinator.startRuntimeSync()
     }
 
     /// Mutates standing source scope through the same runtime-owned path the
@@ -540,6 +554,20 @@ public actor ManifoldRuntime {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Manifold")
             .appendingPathComponent("store")
+    }
+
+    private nonisolated static func mailBackupRoot(for rootURL: URL) -> URL {
+        if rootURL.standardizedFileURL.path == defaultStoreURL.standardizedFileURL.path {
+            return EmailSyncEngine.backupRoot
+        }
+        return rootURL.appendingPathComponent("EmailBackup")
+    }
+
+    private nonisolated static func mailArchiveRoot(for rootURL: URL) -> URL {
+        if rootURL.standardizedFileURL.path == defaultStoreURL.standardizedFileURL.path {
+            return EmailSyncEngine.mailArchiveRoot
+        }
+        return rootURL.appendingPathComponent("MailArchive")
     }
 
     private static func hashForFile(at url: URL) -> String? {

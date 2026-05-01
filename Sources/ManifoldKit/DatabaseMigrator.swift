@@ -66,6 +66,42 @@ public struct DatabaseMigrator {
         try MemoryStore.ensureSchema(db)
     }
 
+    private static func tableExists(_ db: DatabaseConnection, named table: String) throws -> Bool {
+        precondition(isValidSQLIdentifier(table), "Invalid SQL table identifier: \(table)")
+        return try !db.queryAll(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1",
+            params: [table]
+        ).isEmpty
+    }
+
+    private static func deleteRowsIfTableExists(
+        _ db: DatabaseConnection,
+        table: String,
+        where whereClause: String? = nil,
+        params: [String?] = []
+    ) throws {
+        precondition(isValidSQLIdentifier(table), "Invalid SQL table identifier: \(table)")
+        guard try tableExists(db, named: table) else { return }
+        if let whereClause {
+            try db.execute("DELETE FROM \(table) WHERE \(whereClause)", params: params)
+        } else {
+            try db.execute("DELETE FROM \(table)")
+        }
+    }
+
+    private static func upsertRuntimeSetting(_ db: DatabaseConnection, key: String, value: String) throws {
+        try repairRuntimeSettings(db)
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO runtime_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            params: [key, value, now]
+        )
+    }
+
     private static func repairGrants(_ db: DatabaseConnection) throws {
         let tables = try db.queryAll(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='grants'"
@@ -1712,6 +1748,305 @@ public struct DatabaseMigrator {
         Migration(version: 37, name: "grant_memory_access") { db in
             try repairGrants(db)
             logger.info("Migration 37: grant file memory access")
+        },
+
+        // v38: Production mail subsystem foundations. This keeps the
+        // existing email_* surface intact while adding the credential,
+        // archive-v2, private-index, sync-job, and audit tables needed by
+        // the redesigned read-only mail pipeline.
+        Migration(version: 38, name: "production_mail_foundations") { db in
+            let accountTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='email_accounts'"
+            )
+            guard !accountTables.isEmpty else {
+                logger.info("Migration 38: no email_accounts table, skipping mail foundations")
+                return
+            }
+
+            let accountColumns = try db.queryAll("PRAGMA table_info(email_accounts)")
+            let accountColumnNames = Set(accountColumns.compactMap { $0["name"] })
+            let accountAdditions: [(String, String)] = [
+                ("credential_kind", "TEXT"),
+                ("credential_keychain_service", "TEXT"),
+                ("credential_keychain_account", "TEXT"),
+                ("last_successful_sync_at", "TEXT"),
+                ("auth_state", "TEXT NOT NULL DEFAULT 'valid'"),
+                ("index_privacy_mode", "TEXT NOT NULL DEFAULT 'privateTokenIndex'"),
+            ]
+            for (name, type) in accountAdditions where !accountColumnNames.contains(name) {
+                precondition(isValidSQLIdentifier(name), "Migration v38 column name is not valid: \(name)")
+                try db.execute("ALTER TABLE email_accounts ADD COLUMN \(name) \(type)")
+            }
+            try db.execute("""
+                UPDATE email_accounts
+                SET credential_kind = CASE
+                        WHEN auth_type = 'oauth2' THEN 'oauthTokenSet'
+                        WHEN auth_type = 'app_password' THEN 'appPassword'
+                        ELSE 'manualPassword'
+                    END,
+                    credential_keychain_service = COALESCE(credential_keychain_service, 'com.spatialduality.manifold.email'),
+                    credential_keychain_account = COALESCE(credential_keychain_account, account_id),
+                    index_privacy_mode = COALESCE(index_privacy_mode, 'privateTokenIndex')
+                WHERE credential_kind IS NULL
+                   OR credential_keychain_service IS NULL
+                   OR credential_keychain_account IS NULL
+                   OR index_privacy_mode IS NULL
+            """)
+
+            let messageTables = try db.queryAll(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='email_messages'"
+            )
+            if !messageTables.isEmpty {
+                let messageColumns = try db.queryAll("PRAGMA table_info(email_messages)")
+                let messageColumnNames = Set(messageColumns.compactMap { $0["name"] })
+                let messageAdditions: [(String, String)] = [
+                    ("canonical_blob_cid", "TEXT"),
+                    ("header_blob_cid", "TEXT"),
+                    ("rfc_message_id_hmac", "TEXT"),
+                ]
+                for (name, type) in messageAdditions where !messageColumnNames.contains(name) {
+                    precondition(isValidSQLIdentifier(name), "Migration v38 column name is not valid: \(name)")
+                    try db.execute("ALTER TABLE email_messages ADD COLUMN \(name) \(type)")
+                }
+            }
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS mail_blobs (
+                    content_id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    manifest_id TEXT NOT NULL,
+                    byte_count_plaintext INTEGER NOT NULL,
+                    byte_count_ciphertext INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_verified_at TEXT,
+                    ref_count INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY(account_id) REFERENCES email_accounts(account_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_mail_blobs_account ON mail_blobs(account_id)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS mail_private_terms (
+                    account_id TEXT NOT NULL,
+                    term_hmac TEXT NOT NULL,
+                    email_id TEXT NOT NULL,
+                    field_mask INTEGER NOT NULL,
+                    term_count INTEGER NOT NULL,
+                    first_seen_position INTEGER,
+                    PRIMARY KEY(account_id, term_hmac, email_id),
+                    FOREIGN KEY(account_id) REFERENCES email_accounts(account_id),
+                    FOREIGN KEY(email_id) REFERENCES email_messages(email_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_mail_private_terms_lookup ON mail_private_terms(account_id, term_hmac)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS mail_sync_jobs (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    mailbox_name TEXT,
+                    job_type TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    priority INTEGER NOT NULL,
+                    cursor_json_ciphertext TEXT,
+                    error_code TEXT,
+                    error_redacted TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(account_id) REFERENCES email_accounts(account_id)
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_mail_sync_jobs_account_state ON mail_sync_jobs(account_id, state)")
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS mail_access_audit_events (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT,
+                    email_id TEXT,
+                    agent_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    access_kind TEXT NOT NULL,
+                    policy_grant_id TEXT,
+                    created_at TEXT NOT NULL,
+                    details_redacted TEXT
+                )
+            """)
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_mail_access_audit_agent ON mail_access_audit_events(agent_id, created_at)")
+
+            logger.info("Migration 38: production mail subsystem foundations")
+        },
+
+        // v39: Fresh-start mail reset. The production mail subsystem now
+        // treats archive-v2 as the only canonical storage path for newly
+        // synced mail. This migration clears legacy mail rows, plaintext
+        // search/index state, sync cursors, and archive bookkeeping so setup
+        // starts from a clean baseline. Filesystem and Keychain cleanup is
+        // performed by MailFreshStartReset at runtime using the account IDs
+        // recorded here.
+        Migration(version: 39, name: "mail_fresh_start_reset") { db in
+            try repairRuntimeSettings(db)
+
+            let emailAccountsExist = try tableExists(db, named: "email_accounts")
+            let legacyAccountIDs: [String]
+            if emailAccountsExist {
+                legacyAccountIDs = try db.queryAll(
+                    """
+                    SELECT account_id FROM email_accounts
+                    WHERE credential_kind IS NULL
+                       OR credential_keychain_service IS NULL
+                       OR credential_keychain_account IS NULL
+                       OR NOT (
+                            (
+                                credential_kind IN ('appPassword', 'manualPassword')
+                                AND credential_keychain_service = ?
+                                AND credential_keychain_account LIKE 'mail-account:%'
+                            )
+                            OR (
+                                credential_kind = 'oauthTokenSet'
+                                AND credential_keychain_service = ?
+                                AND credential_keychain_account LIKE 'mail-account:%'
+                            )
+                       )
+                    """,
+                    params: [
+                        KeychainMailSecretStore.credentialService,
+                        KeychainMailSecretStore.oauthService,
+                    ]
+                ).compactMap { $0["account_id"] }
+
+                if !legacyAccountIDs.isEmpty,
+                   let data = try? JSONEncoder().encode(legacyAccountIDs.sorted()),
+                   let json = String(data: data, encoding: .utf8) {
+                    try upsertRuntimeSetting(
+                        db,
+                        key: MailFreshStartReset.legacyAccountIDsKey,
+                        value: json
+                    )
+                }
+            } else {
+                legacyAccountIDs = []
+            }
+
+            if try tableExists(db, named: "privacy_content_index") {
+                let mailContentWhere = """
+                    content_id IN (
+                        SELECT content_id FROM privacy_content_index
+                        WHERE email_id IS NOT NULL
+                           OR attachment_id IS NOT NULL
+                           OR subject_kind IN ('email_body', 'email_attachment')
+                    )
+                """
+                try deleteRowsIfTableExists(db, table: "privacy_detected_spans", where: mailContentWhere)
+                try deleteRowsIfTableExists(db, table: "privacy_index_jobs", where: mailContentWhere)
+                try db.execute("""
+                    DELETE FROM privacy_content_index
+                    WHERE email_id IS NOT NULL
+                       OR attachment_id IS NOT NULL
+                       OR subject_kind IN ('email_body', 'email_attachment')
+                """)
+            }
+
+            let emailMessagesExist = try tableExists(db, named: "email_messages")
+
+            if try tableExists(db, named: "email_fts"), emailMessagesExist {
+                do {
+                    try db.execute("""
+                        INSERT INTO email_fts(email_fts, rowid, email_id, body_text)
+                        SELECT 'delete', rowid, email_id, COALESCE(body_text, '')
+                        FROM email_messages
+                        WHERE body_text IS NOT NULL
+                    """)
+                } catch {
+                    logger.warning("Migration 39: email_fts delete sweep failed before reset: \(error.localizedDescription)")
+                }
+            }
+
+            if emailMessagesExist {
+                try deleteRowsIfTableExists(db, table: "email_attachments")
+                try deleteRowsIfTableExists(db, table: "email_mailbox_membership")
+                try deleteRowsIfTableExists(db, table: "grant_emails")
+                try deleteRowsIfTableExists(db, table: "shared_emails")
+                try deleteRowsIfTableExists(db, table: "temporary_reveals", where: "email_id IS NOT NULL")
+                try deleteRowsIfTableExists(db, table: "access_preset_emails")
+                try deleteRowsIfTableExists(db, table: "mail_private_terms")
+            }
+            try deleteRowsIfTableExists(db, table: "mail_sync_jobs")
+            try deleteRowsIfTableExists(db, table: "mail_access_audit_events")
+            try deleteRowsIfTableExists(db, table: "mail_blobs")
+            try deleteRowsIfTableExists(db, table: "email_sync_state")
+            try deleteRowsIfTableExists(db, table: "imap_mailboxes")
+            if emailMessagesExist {
+                try deleteRowsIfTableExists(db, table: "email_messages")
+            }
+
+            if try tableExists(db, named: "email_fts") {
+                do {
+                    try db.execute("INSERT INTO email_fts(email_fts) VALUES('rebuild')")
+                } catch {
+                    logger.warning("Migration 39: email_fts rebuild failed after reset: \(error.localizedDescription)")
+                }
+            }
+
+            if emailAccountsExist {
+                try db.execute(
+                    """
+                    DELETE FROM email_accounts
+                    WHERE credential_kind IS NULL
+                       OR credential_keychain_service IS NULL
+                       OR credential_keychain_account IS NULL
+                       OR NOT (
+                            (
+                                credential_kind IN ('appPassword', 'manualPassword')
+                                AND credential_keychain_service = ?
+                                AND credential_keychain_account LIKE 'mail-account:%'
+                            )
+                            OR (
+                                credential_kind = 'oauthTokenSet'
+                                AND credential_keychain_service = ?
+                                AND credential_keychain_account LIKE 'mail-account:%'
+                            )
+                       )
+                    """,
+                    params: [
+                        KeychainMailSecretStore.credentialService,
+                        KeychainMailSecretStore.oauthService,
+                    ]
+                )
+
+                let now = ISO8601DateFormatter.shared.string(from: Date())
+                try db.execute("""
+                    UPDATE email_accounts
+                    SET last_successful_sync_at = NULL,
+                        auth_state = 'valid',
+                        updated_at = ?
+                """, params: [now])
+            }
+
+            try upsertRuntimeSetting(
+                db,
+                key: MailFreshStartReset.appliedKey,
+                value: ISO8601DateFormatter.shared.string(from: Date())
+            )
+            logger.info("Migration 39: mail fresh-start reset; legacy accounts recorded \(legacyAccountIDs.count)")
+        },
+
+        // v40: Extracted MIME attachments now have their own archive-v2 blob
+        // reference. Keep MIME Content-ID separate from the encrypted blob CID
+        // so agent/export paths can address the stored attachment object
+        // without overloading message-internal MIME metadata.
+        Migration(version: 40, name: "mail_attachment_archive_blob_reference") { db in
+            guard try tableExists(db, named: "email_attachments") else { return }
+            try addColumnIfMissing(
+                db,
+                table: "email_attachments",
+                column: "attachment_blob_cid",
+                sql: "ALTER TABLE email_attachments ADD COLUMN attachment_blob_cid TEXT"
+            )
+            try db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_attachments_blob_cid
+                ON email_attachments(attachment_blob_cid)
+            """)
         },
     ]
 }

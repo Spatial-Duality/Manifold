@@ -314,7 +314,7 @@ struct MCPAccessControlTests {
 
     // MARK: - Bug 4: Remove vs Pause Distinction
 
-    @Test("Removed workspace excluded from both MCP and dashboard queries")
+    @Test("Removed workspace excluded from both MCP and app inventory queries")
     func removedWorkspaceFullyHidden() async throws {
         let (db, _, leaseManager, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
@@ -328,14 +328,14 @@ struct MCPAccessControlTests {
         #expect(mcpAccessible.count == 1)
         #expect(mcpAccessible[0]["workspace_id"] == "ws-keep")
 
-        // Dashboard query: everything except removed
-        let dashboardVisible = try db.queryAll("SELECT workspace_id FROM workspaces WHERE status != 'removed'")
-        #expect(dashboardVisible.count == 1)
-        #expect(dashboardVisible[0]["workspace_id"] == "ws-keep")
+        // App inventory query: everything except removed
+        let appInventoryVisible = try db.queryAll("SELECT workspace_id FROM workspaces WHERE status != 'removed'")
+        #expect(appInventoryVisible.count == 1)
+        #expect(appInventoryVisible[0]["workspace_id"] == "ws-keep")
     }
 
-    @Test("Paused workspace visible in dashboard but not in MCP")
-    func pausedVisibleInDashboardNotMCP() async throws {
+    @Test("Paused workspace visible in app inventory but not in MCP")
+    func pausedVisibleInAppInventoryNotMCP() async throws {
         let (db, _, leaseManager, tempDir) = try makeStores()
         defer { cleanup(tempDir) }
 
@@ -346,9 +346,9 @@ struct MCPAccessControlTests {
         let mcpRows = try db.queryAll("SELECT workspace_id FROM workspaces WHERE status IN ('idle', 'active')")
         #expect(mcpRows.isEmpty, "Paused source should not be accessible via MCP")
 
-        // Dashboard: visible (for pause/resume toggle)
-        let dashboardRows = try db.queryAll("SELECT workspace_id FROM workspaces WHERE status != 'removed'")
-        #expect(dashboardRows.count == 1, "Paused source should still appear in dashboard")
+        // App inventory: visible (for pause/resume toggle)
+        let appInventoryRows = try db.queryAll("SELECT workspace_id FROM workspaces WHERE status != 'removed'")
+        #expect(appInventoryRows.count == 1, "Paused source should still appear in the app inventory")
     }
 
     @Test("Removed workspace distinct from paused workspace")
