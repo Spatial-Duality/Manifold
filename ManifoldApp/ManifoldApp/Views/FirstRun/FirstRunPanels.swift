@@ -56,25 +56,30 @@ struct DefaultsPanel: View {
     let back: () -> Void
 
     var body: some View {
-        VStack(spacing: Spacing.s6) {
-            Spacer()
-            EmptyStateIllustration(
-                systemImage: "lock.shield",
-                title: "Nothing is shared until you share it",
-                subtitle: "No agent can see anything until you share it. The next panel helps you protect one project folder for the next session."
-            )
-            Spacer()
-            HStack(spacing: Spacing.s3) {
-                Button("Back", action: back)
-                    .buttonStyle(.bordered)
-                Button("Continue", action: next)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("onboarding.defaults.continue")
+        // mesh-only mode keeps saffron warmth without the Metal cloud
+        // shader cost — the onboarding flow reads as one experience
+        // instead of warm-then-cold.
+        AtmosphericBackground(meshOnly: true) {
+            VStack(spacing: Spacing.s6) {
+                Spacer()
+                EmptyStateIllustration(
+                    systemImage: "lock.shield",
+                    title: "Nothing is shared until you share it",
+                    subtitle: "No agent can see anything until you share it. The next panel helps you protect one project folder for the next session."
+                )
+                Spacer()
+                HStack(spacing: Spacing.s3) {
+                    Button("Back", action: back)
+                        .buttonStyle(.bordered)
+                    Button("Continue", action: next)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("onboarding.defaults.continue")
+                }
             }
+            .padding(Spacing.s6)
         }
-        .padding(Spacing.s6)
         .accessibilityIdentifier("onboarding.panel.defaults")
     }
 }
@@ -84,28 +89,30 @@ struct GuidedAddPanel: View {
     let back: () -> Void
 
     var body: some View {
-        VStack(spacing: Spacing.s6) {
-            Spacer()
-            EmptyStateIllustration(
-                systemImage: "folder.badge.plus",
-                title: "Protect one project first",
-                subtitle: "Pick one project folder. Files inside it become visible here when you choose to share them. Everything else stays outside this governed path.",
-                tint: ManifoldPalette.active
-            )
-            Spacer()
-            HStack(spacing: Spacing.s3) {
-                Button("Back", action: back)
-                    .buttonStyle(.bordered)
-                Button(action: choose) {
-                    Label("Choose folder\u{2026}", systemImage: "folder.badge.plus")
+        AtmosphericBackground(meshOnly: true) {
+            VStack(spacing: Spacing.s6) {
+                Spacer()
+                EmptyStateIllustration(
+                    systemImage: "folder.badge.plus",
+                    title: "Protect one project first",
+                    subtitle: "Pick one project folder. Files inside it become visible here when you choose to share them. Everything else stays outside this governed path.",
+                    tint: ManifoldPalette.active
+                )
+                Spacer()
+                HStack(spacing: Spacing.s3) {
+                    Button("Back", action: back)
+                        .buttonStyle(.bordered)
+                    Button(action: choose) {
+                        Label("Choose folder\u{2026}", systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding.guidedAdd.chooseFolder")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("onboarding.guidedAdd.chooseFolder")
             }
+            .padding(Spacing.s6)
         }
-        .padding(Spacing.s6)
         .accessibilityIdentifier("onboarding.panel.guidedAdd")
     }
 }
@@ -121,6 +128,13 @@ struct ScopeReviewPanel: View {
     }
 
     var body: some View {
+        AtmosphericBackground(meshOnly: true) {
+            scopeReviewBody
+        }
+        .accessibilityIdentifier("onboarding.panel.scopeReview")
+    }
+
+    private var scopeReviewBody: some View {
         VStack(spacing: Spacing.s6) {
             Spacer(minLength: 0)
 
@@ -195,7 +209,6 @@ struct ScopeReviewPanel: View {
             }
         }
         .padding(Spacing.s6)
-        .accessibilityIdentifier("onboarding.panel.scopeReview")
     }
 }
 
@@ -205,40 +218,42 @@ struct HelpImprovePanel: View {
     let back: () -> Void
 
     var body: some View {
-        VStack(spacing: Spacing.s6) {
-            Spacer()
-            EmptyStateIllustration(
-                systemImage: "chart.bar.doc.horizontal",
-                title: "Help improve Manifold (optional)",
-                subtitle: "Local diagnostics are kept on this Mac. Sending is manual — Manifold never uploads automatically and never sends governed data."
-            )
-            VStack(alignment: .leading, spacing: Spacing.s2) {
-                Toggle("Share diagnostic reports when I press Send", isOn: $diagnostics.diagnosticSharingEnabled)
-                    .accessibilityIdentifier("onboarding.help.sharing")
-                Toggle("Check for app updates automatically", isOn: $diagnostics.updateChecksEnabled)
-                    .accessibilityIdentifier("onboarding.help.updates")
-                Text("You can change these later in Settings -> General. Reset the anonymous identifier any time.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(Spacing.s4)
-            .background(
-                RoundedRectangle(cornerRadius: Spacing.r5, style: .continuous)
-                    .fill(ManifoldPalette.surface2)
-            )
+        AtmosphericBackground(meshOnly: true) {
+            VStack(spacing: Spacing.s6) {
+                Spacer()
+                EmptyStateIllustration(
+                    systemImage: "chart.bar.doc.horizontal",
+                    title: "Help improve Manifold (optional)",
+                    subtitle: "Local diagnostics are kept on this Mac. Sending is manual — Manifold never uploads automatically and never sends governed data."
+                )
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    Toggle("Share diagnostic reports when I press Send", isOn: $diagnostics.diagnosticSharingEnabled)
+                        .accessibilityIdentifier("onboarding.help.sharing")
+                    Toggle("Check for app updates automatically", isOn: $diagnostics.updateChecksEnabled)
+                        .accessibilityIdentifier("onboarding.help.updates")
+                    Text("You can change these later in Settings → General. Reset the anonymous identifier any time.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(Spacing.s4)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.r5, style: .continuous)
+                        .fill(ManifoldPalette.surface2)
+                )
 
-            Spacer()
-            HStack(spacing: Spacing.s3) {
-                Button("Back", action: back)
-                    .buttonStyle(.bordered)
-                Button("Continue", action: next)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("onboarding.help.continue")
+                Spacer()
+                HStack(spacing: Spacing.s3) {
+                    Button("Back", action: back)
+                        .buttonStyle(.bordered)
+                    Button("Continue", action: next)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("onboarding.help.continue")
+                }
             }
+            .padding(Spacing.s6)
         }
-        .padding(Spacing.s6)
         .accessibilityIdentifier("onboarding.panel.helpImprove")
     }
 }

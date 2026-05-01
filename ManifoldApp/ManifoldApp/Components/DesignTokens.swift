@@ -270,6 +270,11 @@ enum Typ {
     static let heading: Font        = .system(size: 17, weight: .semibold)
     /// 22/28 — display type for first-run and big empty states.
     static let display: Font        = .system(size: 22, weight: .semibold)
+    /// Wordmark — the "Manifold" name itself. One single use site
+    /// (sidebar brand header) so it reads as identity, not as a heading.
+    /// Light weight + slightly tighter tracking sets it apart from any
+    /// other label in the app.
+    static let wordmark: Font       = .system(size: 16, weight: .light)
 
     /// Section title legacy alias (used by Settings, etc).
     static let sectionTitle: Font   = .title3.weight(.semibold)
@@ -293,6 +298,7 @@ enum ManifoldType {
     static let title          = Typ.title
     static let heading        = Typ.heading
     static let display        = Typ.display
+    static let wordmark       = Typ.wordmark
     static let mono           = Typ.mono
     static let monoBody       = Typ.monoBody
     static let numericBody    = Typ.numericBody
@@ -336,8 +342,29 @@ extension View {
 
 // MARK: - Motion
 
-/// Motion presets. Every animated state transition goes through these so
-/// reduce-motion can dampen them centrally.
+/// Motion grammar.
+///
+/// Every animation in Manifold goes through one of these presets so the
+/// motion language stays coherent and reduce-motion can dampen them
+/// centrally. The grammar:
+///
+/// - `micro`   — 150ms ease-out. Hover-in, hover-out, focus ring, tooltip
+///   reveal. Anything where the user wants the response immediately.
+/// - `state`   — 200ms ease-out. Status color change, badge swap,
+///   selection highlight. State communication where the eye should
+///   register the change but not be drawn to it.
+/// - `landing` — 300ms ease-out. Entrance of a new surface (sheet body
+///   appearing, panel transition, content swap). Lands deliberately.
+/// - `spring`  — 0.32s response, 0.82 damping. Structural movement
+///   (column resize, sheet present, drawer open). Inertia carries the
+///   eye to the new position.
+/// - `pulseEaseOut` — 2s ease-out repeating. Reserved for "needs
+///   attention" affordances and brand moments. Use sparingly: pulsing
+///   reads as "do something" in macOS.
+///
+/// **Don't add a new constant for a one-off duration.** If you find
+/// yourself reaching for `.easeInOut(duration: 0.42)` inline, the
+/// motion either belongs in this grammar or doesn't belong at all.
 enum ManifoldMotion {
     static let micro:      Animation = .easeOut(duration: 0.15)
     static let state:      Animation = .easeOut(duration: 0.20)

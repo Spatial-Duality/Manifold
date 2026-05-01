@@ -41,6 +41,7 @@ struct LedgerView: View {
             // it.
             content
                 .frame(minWidth: 720, minHeight: 480)
+                .background(workingSurfaceVignette, alignment: .top)
                 .navigationTitle(destination.title)
                 .toolbar { LedgerToolbar(destination: destination) }
         }
@@ -70,6 +71,24 @@ struct LedgerView: View {
         case .rules:
             RulesView()
         }
+    }
+
+    /// Quiet saffron vignette that fades from a 4% wash at the top of
+    /// the detail column to clear by ~220pt. Carries the brand warmth
+    /// from the splash + first-run atmosphere into the working surface
+    /// without interfering with content readability below.
+    private var workingSurfaceVignette: some View {
+        LinearGradient(
+            stops: [
+                .init(color: ManifoldPalette.brand.opacity(0.04), location: 0),
+                .init(color: ManifoldPalette.brand.opacity(0.02), location: 0.4),
+                .init(color: .clear,                              location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 220)
+        .allowsHitTesting(false)
     }
 }
 

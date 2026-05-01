@@ -114,12 +114,12 @@ private struct SidebarBrandHeader: View {
 
     private var statusLabel: String {
         switch sessionState {
-        case .disconnected: return "DISCONNECTED"
-        case .warning:      return "WARNING"
-        case .idle:         return "IDLE"
-        case .prepared:     return "READY"
-        case .active:       return "ACTIVE"
-        case .trackedEdit:  return "WRITING"
+        case .disconnected: return "Disconnected"
+        case .warning:      return "Warning"
+        case .idle:         return "Idle"
+        case .prepared:     return "Ready"
+        case .active:       return "Active"
+        case .trackedEdit:  return "Writing"
         }
     }
 
@@ -141,12 +141,12 @@ private struct SidebarBrandHeader: View {
                     .frame(width: 36, height: 36)
 
                 Text("Manifold")
-                    .font(ManifoldType.heading)
+                    .font(ManifoldType.wordmark)
+                    .tracking(-0.4)
                     .foregroundStyle(ManifoldPalette.text)
 
                 Text(statusLabel)
-                    .font(ManifoldType.tiny)
-                    .tracking(1.5)
+                    .font(ManifoldType.captionMedium)
                     .foregroundStyle(stateColor)
                     .accessibilityIdentifier("ledger.sidebar.brand.state")
             }
