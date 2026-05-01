@@ -23,13 +23,28 @@ struct ApprovalResolutionValues: Animatable {
     var scale: CGFloat = 1.0
     var opacity: CGFloat = 1.0
     var blur: CGFloat = 0.0
+    /// R3.3 enhancement: brand-tinted sparkle accent that overlays the
+    /// resolving row. 0 = invisible, 1 = peak. Travels with the row's
+    /// scale/opacity envelope so it lands as a single moment.
+    var sparkleOpacity: CGFloat = 0.0
+    var sparkleScale: CGFloat = 0.6
 
-    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>> {
-        get { AnimatablePair(scale, AnimatablePair(opacity, blur)) }
+    var animatableData: AnimatablePair<
+        AnimatablePair<CGFloat, CGFloat>,
+        AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>
+    > {
+        get {
+            AnimatablePair(
+                AnimatablePair(scale, opacity),
+                AnimatablePair(blur, AnimatablePair(sparkleOpacity, sparkleScale))
+            )
+        }
         set {
-            scale = newValue.first
-            opacity = newValue.second.first
-            blur = newValue.second.second
+            scale = newValue.first.first
+            opacity = newValue.first.second
+            blur = newValue.second.first
+            sparkleOpacity = newValue.second.second.first
+            sparkleScale = newValue.second.second.second
         }
     }
 }
@@ -54,6 +69,23 @@ struct ApprovalResolutionModifier: ViewModifier {
                         .scaleEffect(value.scale)
                         .opacity(value.opacity)
                         .blur(radius: value.blur)
+                        .overlay(alignment: .trailing) {
+                            // R3.3 brand sparkle — fires on resolution
+                            // and fades with the row. Tints with the
+                            // brand saffron so the resolution feels
+                            // like a Manifold moment, not a generic
+                            // fade-out. Single sparkle, ~16pt, anchored
+                            // to the trailing edge near the action
+                            // buttons that just fired.
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(ManifoldPalette.brand)
+                                .scaleEffect(value.sparkleScale)
+                                .opacity(value.sparkleOpacity)
+                                .padding(.trailing, 16)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
                 } keyframes: { _ in
                     KeyframeTrack(\.scale) {
                         SpringKeyframe(1.03, duration: 0.18, spring: .smooth)
@@ -66,6 +98,16 @@ struct ApprovalResolutionModifier: ViewModifier {
                     KeyframeTrack(\.blur) {
                         LinearKeyframe(0, duration: 0.20)
                         CubicKeyframe(2.0, duration: 0.30)
+                    }
+                    KeyframeTrack(\.sparkleOpacity) {
+                        LinearKeyframe(0.0, duration: 0.0)
+                        SpringKeyframe(0.85, duration: 0.16, spring: .bouncy)
+                        LinearKeyframe(0.0, duration: 0.32)
+                    }
+                    KeyframeTrack(\.sparkleScale) {
+                        LinearKeyframe(0.6, duration: 0.0)
+                        SpringKeyframe(1.30, duration: 0.18, spring: .bouncy)
+                        SpringKeyframe(0.85, duration: 0.30, spring: .smooth)
                     }
                 }
         }

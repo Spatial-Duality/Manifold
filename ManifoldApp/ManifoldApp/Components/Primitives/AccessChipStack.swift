@@ -156,6 +156,22 @@ private struct AccessCheckButton: View {
     let accessibilityIdentifier: String?
     let action: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// R3.2 magic moment: bumps on every state transition into .on so
+    /// the checkbox blooms when a share toggle confirms. The trigger is
+    /// the state value itself — SwiftUI fires the keyframeAnimator on
+    /// every change. Reduce-motion skips the animator entirely.
+    private var bloomTrigger: Int {
+        // Encode state as a stable Int so the trigger can be any
+        // Equatable-Hashable value. SwiftUI's keyframeAnimator fires
+        // on inequality.
+        switch state {
+        case .off:   return 0
+        case .mixed: return 1
+        case .on:    return 2
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 1) {
@@ -233,6 +249,12 @@ private struct AccessCheckButton: View {
                 EmptyView()
             }
         }
+        // R3.2 magic moment: brief bloom on state transition into .on
+        // (or any state change). Reduce-motion skips entirely.
+        .modifier(ShareConfirmationMoment(trigger: bloomTrigger,
+                                           tint: tint,
+                                           isOn: state == .on,
+                                           reduceMotion: reduceMotion))
     }
 
     private var accessibilityLabel: String {
@@ -304,4 +326,61 @@ extension String {
     }
     .padding()
     .background(ManifoldPalette.bg)
+}
+
+// MARK: - R3.2 magic moment: share confirmation
+
+/// Brief scale bloom + halo when a share toggle transitions into `.on`.
+/// Anchored on the checkbox so it visually confirms the action that
+/// changed state. Reduce-motion aware — the animator collapses to a
+/// no-op when accessibility motion is disabled.
+private struct ShareConfirmationMoment: ViewModifier {
+    let trigger: Int
+    let tint: Color
+    let isOn: Bool
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.keyframeAnimator(
+                initialValue: ShareBloomState(scale: 1, haloOpacity: 0),
+                trigger: trigger
+            ) { view, value in
+                view
+                    .scaleEffect(value.scale)
+                    .overlay {
+                        Circle()
+                            .stroke(tint, lineWidth: 1.5)
+                            .scaleEffect(1 + (1 - value.haloOpacity) * 0.4)
+                            .opacity(value.haloOpacity)
+                            .allowsHitTesting(false)
+                    }
+            } keyframes: { _ in
+                KeyframeTrack(\.scale) {
+                    SpringKeyframe(1.0,  duration: 0.0)
+                    SpringKeyframe(1.18, duration: 0.12, spring: .bouncy)
+                    SpringKeyframe(1.0,  duration: 0.20, spring: .smooth)
+                }
+                KeyframeTrack(\.haloOpacity) {
+                    LinearKeyframe(0.0, duration: 0.0)
+                    LinearKeyframe(isOn ? 0.6 : 0.0, duration: 0.05)
+                    LinearKeyframe(0.0, duration: 0.35)
+                }
+            }
+        }
+    }
+}
+
+private struct ShareBloomState: Animatable {
+    var scale: CGFloat
+    var haloOpacity: Double
+    var animatableData: AnimatablePair<CGFloat, Double> {
+        get { AnimatablePair(scale, haloOpacity) }
+        set {
+            scale = newValue.first
+            haloOpacity = newValue.second
+        }
+    }
 }

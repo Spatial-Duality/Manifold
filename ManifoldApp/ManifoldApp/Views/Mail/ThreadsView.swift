@@ -416,6 +416,12 @@ private struct EmptyMailboxState: View {
 private struct ThreadInspector: View {
     @Environment(MailAccountsModel.self) private var mailAccounts
     @Environment(MailReviewModel.self) private var mailReview
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Magic moment trigger (R3.1): increments on every distinct
+    /// message-open so the inspector body breathes in with a brief
+    /// scale + opacity pulse. Honors reduce-motion automatically:
+    /// keyframeAnimator is skipped entirely when disabled.
+    @State private var openMomentToken: Int = 0
     let connectedAgents: [TargetApp]
     let onClose: () -> Void
 
@@ -550,6 +556,11 @@ private struct ThreadInspector: View {
                     }
                 }
                 .padding(Spacing.s4)
+                // R3.1 magic moment: brief breathe-in on every distinct
+                // message-open. Reduce-motion skips the animation
+                // entirely (the content appears immediately).
+                .modifier(MailBodyOpenMoment(trigger: openMomentToken,
+                                              reduceMotion: reduceMotion))
             } else {
                 ContentUnavailableView(
                     "No message selected",
@@ -558,6 +569,9 @@ private struct ThreadInspector: View {
                 )
                 .frame(maxWidth: .infinity, minHeight: 360)
             }
+        }
+        .onChange(of: mailReview.selectedMessageID) { _, newID in
+            if newID != nil { openMomentToken &+= 1 }
         }
     }
 
@@ -716,5 +730,53 @@ enum MailDisplayFormatter {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - R3.1 magic moment: mail body open
+
+/// Brief scale + opacity pulse fired when a new message is selected.
+/// One of three R3 magic moments per primary surface (Mail / Files /
+/// Approvals) that bring the working surface to ADA-grade interaction
+/// polish. Reduce-motion aware — the animator is skipped entirely
+/// when the user has accessibility motion disabled.
+private struct MailBodyOpenMoment: ViewModifier {
+    let trigger: Int
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.keyframeAnimator(
+                initialValue: BodyOpenState(scale: 1, opacity: 1),
+                trigger: trigger
+            ) { view, value in
+                view
+                    .scaleEffect(value.scale)
+                    .opacity(value.opacity)
+            } keyframes: { _ in
+                KeyframeTrack(\.scale) {
+                    SpringKeyframe(0.985, duration: 0.0)
+                    SpringKeyframe(1.000, duration: 0.30, spring: .smooth)
+                }
+                KeyframeTrack(\.opacity) {
+                    LinearKeyframe(0.6, duration: 0.0)
+                    LinearKeyframe(1.0, duration: 0.22)
+                }
+            }
+        }
+    }
+}
+
+private struct BodyOpenState: Animatable {
+    var scale: CGFloat
+    var opacity: Double
+    var animatableData: AnimatablePair<CGFloat, Double> {
+        get { AnimatablePair(scale, opacity) }
+        set {
+            scale = newValue.first
+            opacity = newValue.second
+        }
     }
 }
