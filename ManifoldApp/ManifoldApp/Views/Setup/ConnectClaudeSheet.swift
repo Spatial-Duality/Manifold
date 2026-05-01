@@ -113,6 +113,11 @@ struct ConnectClaudeSheet: View {
             }
         }
         .frame(width: 480, height: 460)
+        // Clamp at xLarge: the StepProgressBar's four labels would
+        // wrap and the sheet body would scroll under AX sizes. Setup
+        // flows are short enough that the user's reading-size needs
+        // are met by the rest of the app.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .task { await store.integrationHealth.checkAll(force: true) }
         .confirmationDialog(
             "Remove Manifold from Claude?",

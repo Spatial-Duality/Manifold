@@ -36,6 +36,7 @@
 		402B9C93576224F1E53A6C74 /* RuleListTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07663F34627D1E9A9D3283D9 /* RuleListTable.swift */; };
 		44A5C067DED843768F7CAEB6 /* ManifoldStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D54697975287E64B2E0BE35 /* ManifoldStoreTests.swift */; };
 		46040B11E204F2D8966FA96B /* EmailRulesModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A77A01E8015C708884AEBE6D /* EmailRulesModelTests.swift */; };
+		4FCBD06463E38521207AEABC /* ManifoldTypeDynamicTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32DAF062A47D937C99B18745 /* ManifoldTypeDynamicTypeTests.swift */; };
 		516D5E047E71B26F39DE8C1A /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = C2910946E949A8F592980971 /* ManifoldXPC */; };
 		518EF078E6F82F743E959890 /* StorageSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 009EA04550A7634D95791F57 /* StorageSettingsPane.swift */; };
 		527808D9447CEA98E82AEB55 /* IntegrationHealthModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FF9F7B8DBA9337056A84D8 /* IntegrationHealthModelTests.swift */; };
@@ -197,6 +198,7 @@
 		2EB6201733D6CF2A55D93970 /* FileTypeIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypeIcon.swift; sourceTree = "<group>"; };
 		2FA3464757E7EAC283874F48 /* SessionWorkbenchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWorkbenchModel.swift; sourceTree = "<group>"; };
 		30983BAE0F13BB9B1D6419DA /* RulesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesModelTests.swift; sourceTree = "<group>"; };
+		32DAF062A47D937C99B18745 /* ManifoldTypeDynamicTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldTypeDynamicTypeTests.swift; sourceTree = "<group>"; };
 		3F37BF1876CC8B3D18D265A5 /* EmailRulesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesModel.swift; sourceTree = "<group>"; };
 		4331F73A42EB2B126226A9EB /* EmptyStateIllustration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateIllustration.swift; sourceTree = "<group>"; };
 		4A7C615557944B55EE371C2D /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
@@ -587,6 +589,7 @@
 				21370F952F6C83332969F820 /* InspectorContextProviderTests.swift */,
 				D2FF9F7B8DBA9337056A84D8 /* IntegrationHealthModelTests.swift */,
 				4D54697975287E64B2E0BE35 /* ManifoldStoreTests.swift */,
+				32DAF062A47D937C99B18745 /* ManifoldTypeDynamicTypeTests.swift */,
 				30983BAE0F13BB9B1D6419DA /* RulesModelTests.swift */,
 				C5E2DCAA81987FFC2FFD2C0B /* RuntimeIssueClassifierTests.swift */,
 				F7ED0FAC0CC5575150B7D13C /* RuntimeStatusSnapshotTests.swift */,
@@ -941,6 +944,7 @@
 				D6914168C731E755087000C6 /* InspectorContextProviderTests.swift in Sources */,
 				527808D9447CEA98E82AEB55 /* IntegrationHealthModelTests.swift in Sources */,
 				44A5C067DED843768F7CAEB6 /* ManifoldStoreTests.swift in Sources */,
+				4FCBD06463E38521207AEABC /* ManifoldTypeDynamicTypeTests.swift in Sources */,
 				83E40122DD048E80F8A6D2B6 /* RulesModelTests.swift in Sources */,
 				BA457EC74D4FD9927716FBF7 /* RuntimeIssueClassifierTests.swift in Sources */,
 				DE0BBB760DA37FFA9A965F55 /* RuntimeStatusSnapshotTests.swift in Sources */,

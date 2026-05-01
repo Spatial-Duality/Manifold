@@ -64,6 +64,12 @@ private struct SidebarBrandHeader: View {
     @Environment(ManifoldStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+    /// Brand mark scales alongside the wordmark text style. Keeps the
+    /// mark + wordmark + status badge in proportion under any Dynamic
+    /// Type size. Apple HIG: visual elements adjacent to text should
+    /// scale together via @ScaledMetric.
+    /// https://developer.apple.com/documentation/swiftui/scaledmetric
+    @ScaledMetric(relativeTo: .body) private var markSize: CGFloat = 36
 
     private enum SessionState {
         case disconnected
@@ -138,7 +144,7 @@ private struct SidebarBrandHeader: View {
         Button(action: handleAction) {
             VStack(spacing: 6) {
                 BrandMark(placement: .display, color: stateColor)
-                    .frame(width: 36, height: 36)
+                    .frame(width: markSize, height: markSize)
 
                 Text("Manifold")
                     .font(ManifoldType.wordmark)

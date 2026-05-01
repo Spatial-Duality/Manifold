@@ -59,6 +59,10 @@ struct SpaceSwitcher: View {
         .padding(.horizontal, Spacing.s3)
         .padding(.top, Spacing.s2)
         .padding(.bottom, Spacing.s1)
+        // Clamp at xxLarge: at AX1+ Dynamic Type sizes the four labels
+        // collide in the 248pt sidebar. Apple HIG: clamp where layout
+        // would shatter; do not block scaling globally.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .accessibilityIdentifier("ledger.spaceSwitcher")
     }
 

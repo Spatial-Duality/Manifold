@@ -88,6 +88,8 @@ struct ConnectCodexSheet: View {
             }
         }
         .frame(width: 480, height: 440)
+        // Clamp at xLarge — see ConnectClaudeSheet for rationale.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .task { await store.integrationHealth.checkCodex() }
         .confirmationDialog(
             "Remove Manifold from Codex?",

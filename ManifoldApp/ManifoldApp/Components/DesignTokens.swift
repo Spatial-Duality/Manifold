@@ -254,37 +254,54 @@ extension Color {
 // MARK: - Typography
 
 /// Named type roles — use these everywhere instead of ad-hoc `.font()` calls.
-/// Sizes track `tokens.css` so Swift and mockups stay aligned.
+///
+/// Every token is bound to a semantic Apple text style so it scales with
+/// Dynamic Type. Apple HIG (Inclusivity / Dynamic Type): "When you use
+/// Dynamic Type, your content automatically adapts to the user's
+/// preferred reading size."
+///
+/// - Reference: https://developer.apple.com/documentation/swiftui/dynamictypesize
+/// - Reference: https://developer.apple.com/design/human-interface-guidelines/typography
+///
+/// Where a numeric pixel size used to live, the equivalent semantic
+/// style is selected by mapping the legacy point size to its closest
+/// Apple style at the default Dynamic Type size:
+///   10pt → caption2, 11pt → caption, 12pt → footnote, 13pt → callout/body,
+///   14pt → subheadline, 16-17pt → headline, 22pt → title2.
 enum Typ {
     /// 10/14 uppercase — kickers, stage tags, section labels in dense UI.
-    static let tiny: Font           = .system(size: 10, weight: .medium)
-    /// 11/16 — timestamps, counts, micro meta.
+    /// Scales from caption2.
+    static let tiny: Font           = .system(.caption2, weight: .medium)
+    /// 11/16 — timestamps, counts, micro meta. Scales from caption.
     static let caption: Font        = .caption
     static let captionMedium: Font  = .caption.weight(.medium)
-    /// 13/20 — primary body text.
+    /// 13/20 — primary body text. Scales from callout.
     static let body: Font           = .callout
     static let bodyMedium: Font     = .callout.weight(.medium)
     /// 14/20 — section titles in tight space (toolbars, inspectors).
-    static let title: Font          = .system(size: 14, weight: .semibold)
-    /// 17/24 — window / inspector heading.
-    static let heading: Font        = .system(size: 17, weight: .semibold)
-    /// 22/28 — display type for first-run and big empty states.
-    static let display: Font        = .system(size: 22, weight: .semibold)
+    /// Scales from subheadline.
+    static let title: Font          = .system(.subheadline, weight: .semibold)
+    /// 17/24 — window / inspector heading. Scales from headline.
+    static let heading: Font        = .system(.headline)
+    /// 22/28 — display type for first-run and big empty states. Scales
+    /// from title2.
+    static let display: Font        = .system(.title2, weight: .semibold)
     /// Wordmark — the "Manifold" name itself. One single use site
     /// (sidebar brand header) so it reads as identity, not as a heading.
-    /// Light weight + slightly tighter tracking sets it apart from any
-    /// other label in the app.
-    static let wordmark: Font       = .system(size: 16, weight: .light)
+    /// Scales from body so the brand stays at the user's preferred
+    /// reading size, with a light weight for distinction.
+    static let wordmark: Font       = .system(.body, weight: .light)
 
     /// Section title legacy alias (used by Settings, etc).
     static let sectionTitle: Font   = .title3.weight(.semibold)
-    /// Mono body — file paths, code, version hashes.
+    /// Mono body — file paths, code, version hashes. Scales from caption.
     static let mono: Font           = .caption.monospaced()
-    /// Mono primary body.
-    static let monoBody: Font       = .system(size: 12, weight: .regular, design: .monospaced)
-    /// Numeric body — counts, byte sizes.
+    /// Mono primary body. Scales from footnote with monospaced design.
+    static let monoBody: Font       = .system(.footnote, design: .monospaced)
+    /// Numeric body — counts, byte sizes. Scales from callout with
+    /// monospaced digits so columns stay aligned at any Dynamic Type size.
     static let numericBody: Font    = .callout.monospacedDigit()
-    /// Numeric caption — counts in badges, timestamps.
+    /// Numeric caption — counts in badges, timestamps. Scales from caption.
     static let numericCaption: Font = .caption.monospacedDigit()
 }
 
