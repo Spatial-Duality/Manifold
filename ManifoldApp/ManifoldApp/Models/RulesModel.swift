@@ -51,8 +51,8 @@ final class RulesModel {
             case .scope(.email): return "Emails"
             case .scope(.content): return "Files + Mail"
             case .scope(.agent): return "Agent Behaviour"
-            case .seeded: return "Auto (seeded)"
-            case .userAuthored: return "My Rules"
+            case .seeded: return "Built-in"
+            case .userAuthored: return "Mine"
             case .suggested: return "Suggested"
             }
         }

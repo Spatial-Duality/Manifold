@@ -58,60 +58,37 @@ private struct RulesPolicyHeader: View {
     let privacyStatus: PrivacyRuntimeStatus?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s3) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Policy runs before content leaves Manifold")
-                        .font(ManifoldType.bodyMedium)
-                    Text(enforcementMessage)
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: Spacing.s4)
-                PrivacyBackendPill(status: privacyStatus)
-            }
-
-            HStack(spacing: Spacing.s2) {
-                RulesMetric(
-                    title: "Enabled",
-                    value: "\(model.enabledRuleCount)",
-                    symbol: "checkmark.circle",
-                    tint: ManifoldPalette.active
-                )
-                RulesMetric(
-                    title: "Privacy filter",
-                    value: "\(model.privacyFilterRuleCount)",
-                    symbol: "sparkles.rectangle.stack",
-                    tint: ManifoldPalette.selection
-                )
-                RulesMetric(
-                    title: "Blocking",
-                    value: "\(model.blockingRuleCount)",
-                    symbol: "hand.raised",
-                    tint: ManifoldPalette.attention
-                )
-                RulesMetric(
-                    title: "Advisory",
-                    value: "\(model.previewOnlyStructuralRuleCount)",
-                    symbol: "eye",
-                    tint: ManifoldPalette.text3
-                )
-            }
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 170), spacing: Spacing.s2)],
-                alignment: .leading,
-                spacing: Spacing.s2
-            ) {
-                RulesPlaybookCard(systemImage: "hand.raised.fill", title: "Always Block", detail: "Secrets, tokens, account numbers", variant: .attention)
-                RulesPlaybookCard(systemImage: "text.badge.checkmark", title: "Redact", detail: "My Identity and private people", variant: .defaultScope)
-                RulesPlaybookCard(systemImage: "checkmark.shield", title: "Keep", detail: "Public/company allowlist", variant: .session)
-                RulesPlaybookCard(systemImage: "text.quote", title: "Downgrade", detail: "Summary or metadata only", variant: .preview)
-            }
+        HStack(spacing: Spacing.s2) {
+            RulesMetric(
+                title: "Enabled",
+                value: "\(model.enabledRuleCount)",
+                symbol: "checkmark.circle",
+                tint: ManifoldPalette.active
+            )
+            RulesMetric(
+                title: "Privacy filter",
+                value: "\(model.privacyFilterRuleCount)",
+                symbol: "sparkles.rectangle.stack",
+                tint: ManifoldPalette.selection
+            )
+            RulesMetric(
+                title: "Blocking",
+                value: "\(model.blockingRuleCount)",
+                symbol: "hand.raised",
+                tint: ManifoldPalette.attention
+            )
+            RulesMetric(
+                title: "Advisory",
+                value: "\(model.previewOnlyStructuralRuleCount)",
+                symbol: "eye",
+                tint: ManifoldPalette.text3
+            )
+            Spacer(minLength: Spacing.s2)
+            PrivacyBackendPill(status: privacyStatus)
+                .help(enforcementMessage)
         }
         .padding(.horizontal, Spacing.s4)
-        .padding(.vertical, Spacing.s3)
+        .padding(.vertical, Spacing.s2)
         .background(.thinMaterial)
         .accessibilityIdentifier("rules.enforcementBanner")
     }
@@ -124,39 +101,6 @@ private struct RulesPolicyHeader: View {
             return "\(privacyBackendLabel(for: privacyStatus)) feeds privacy matchers. File and email rules run before sharing; agent behavior rules are tracked as advisory policies."
         }
         return "File and email rules are enforced live. Privacy filter rules enforce during preflight after the model is enabled."
-    }
-}
-
-private struct RulesPlaybookCard: View {
-    let systemImage: String
-    let title: String
-    let detail: String
-    let variant: Pill.Variant
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Spacing.s2) {
-            Image(systemName: systemImage)
-                .foregroundStyle(variant.color)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(ManifoldType.captionMedium)
-                Text(detail)
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(Spacing.s3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .fill(variant.color.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .strokeBorder(variant.color.opacity(0.18), lineWidth: 0.5)
-        )
     }
 }
 
@@ -235,27 +179,28 @@ private func privacyBackendLabel(for status: PrivacyRuntimeStatus) -> String {
 private struct RulesToolbar: View {
     @Bindable var model: RulesModel
     @Binding var inspectorVisible: Bool
+    @State private var isResettingSeeded = false
 
     var body: some View {
-        HStack(spacing: Spacing.s3) {
+        HStack(spacing: Spacing.s2) {
+            Button {
+                addBlankRule()
+            } label: {
+                Label("New Rule", systemImage: "plus")
+            }
+            .help(blankRuleHelp)
+            .accessibilityIdentifier("rules.toolbar.newRule")
+
             Menu {
-                Menu("Privacy Filter Rule") {
-                    newRuleButton(
-                        "Block secrets",
-                        systemImage: "hand.raised",
-                        action: .deny
-                    ) {
+                Section("Privacy filter templates") {
+                    newRuleButton("Block secrets", systemImage: "hand.raised", action: .deny) {
                         RuleRecord.newPrivacyFilterRule(
                             name: "Block secrets before sharing",
                             category: .secret,
                             action: .deny
                         )
                     }
-                    newRuleButton(
-                        "Redact My Identity",
-                        systemImage: "text.badge.checkmark",
-                        action: .redact
-                    ) {
+                    newRuleButton("Redact My Identity", systemImage: "text.badge.checkmark", action: .redact) {
                         RuleRecord.newPrivacyControlRule(
                             name: "Redact My Identity before sharing",
                             matcher: .privacyMatchesMyIdentity,
@@ -263,11 +208,7 @@ private struct RulesToolbar: View {
                             explanation: "Redacts registered My Identity matches before content is shared with an agent."
                         )
                     }
-                    newRuleButton(
-                        "Keep allowlisted public data",
-                        systemImage: "checkmark.shield",
-                        action: .allow
-                    ) {
+                    newRuleButton("Keep allowlisted public data", systemImage: "checkmark.shield", action: .allow) {
                         RuleRecord.newPrivacyControlRule(
                             name: "Keep public or company allowlist",
                             matcher: .privacyInOrgAllowlist,
@@ -275,11 +216,7 @@ private struct RulesToolbar: View {
                             explanation: "Allows findings when they are covered by the public/company allowlist."
                         )
                     }
-                    newRuleButton(
-                        "Warn on high severity",
-                        systemImage: "exclamationmark.triangle",
-                        action: .warn
-                    ) {
+                    newRuleButton("Warn on high severity", systemImage: "exclamationmark.triangle", action: .warn) {
                         RuleRecord.newPrivacyControlRule(
                             name: "Warn on high severity privacy findings",
                             matcher: .privacySeverityAtLeast(.high),
@@ -287,11 +224,7 @@ private struct RulesToolbar: View {
                             explanation: "Allows high-severity findings but records a warning in the provenance ledger."
                         )
                     }
-                    newRuleButton(
-                        "Metadata only for medium severity",
-                        systemImage: "tag",
-                        action: .downgrade
-                    ) {
+                    newRuleButton("Metadata only (medium+)", systemImage: "tag", action: .downgrade) {
                         RuleRecord.newPrivacyControlRule(
                             name: "Metadata only for medium privacy findings",
                             matcher: .privacySeverityAtLeast(.medium),
@@ -300,29 +233,17 @@ private struct RulesToolbar: View {
                         )
                     }
                 }
-                Divider()
-
-                Menu("File Rule") {
+                Section("File templates") {
                     newRuleButton("Deny file reads", systemImage: "hand.raised", action: .deny) {
                         RuleRecord.newUserFileRule(name: "Deny file rule", action: .deny)
                     }
                     newRuleButton("Redact before sharing", systemImage: "text.badge.checkmark", action: .redact) {
                         RuleRecord.newUserFileRule(name: "Redact file rule", action: .redact)
                     }
-                    newRuleButton("Warn and record", systemImage: "exclamationmark.triangle", action: .warn) {
-                        RuleRecord.newUserFileRule(name: "Warn on file rule", action: .warn)
-                    }
-                    newRuleButton("Log only", systemImage: "list.bullet.rectangle", action: .log) {
-                        RuleRecord.newUserFileRule(name: "Log file rule", action: .log)
-                    }
                 }
-
-                Menu("Email Rule") {
+                Section("Email templates") {
                     newRuleButton("Deny email exposure", systemImage: "hand.raised", action: .deny) {
                         RuleRecord.newUserEmailRule(name: "Deny email rule", action: .deny)
-                    }
-                    newRuleButton("Redact before sharing", systemImage: "text.badge.checkmark", action: .redact) {
-                        RuleRecord.newUserEmailRule(name: "Redact email rule", action: .redact)
                     }
                     newRuleButton("Summarize only", systemImage: "text.quote", action: .summarize) {
                         RuleRecord.newUserEmailRule(name: "Summarize email rule", action: .summarize)
@@ -330,61 +251,26 @@ private struct RulesToolbar: View {
                     newRuleButton("Metadata only", systemImage: "tag", action: .downgrade) {
                         RuleRecord.newUserEmailRule(name: "Metadata-only email rule", action: .downgrade)
                     }
-                    newRuleButton("Warn and record", systemImage: "exclamationmark.triangle", action: .warn) {
-                        RuleRecord.newUserEmailRule(name: "Warn on email rule", action: .warn)
-                    }
-                    newRuleButton("Log only", systemImage: "list.bullet.rectangle", action: .log) {
-                        RuleRecord.newUserEmailRule(name: "Log email rule", action: .log)
-                    }
                 }
-
-                Menu("Files + Mail Rule") {
-                    newRuleButton("Redact medium-severity findings", systemImage: "text.badge.checkmark", action: .redact) {
-                        RuleRecord.newUserContentRule(
-                            name: "Redact medium severity in files and email",
-                            action: .redact
-                        )
-                    }
-                    newRuleButton("Block secrets in any payload", systemImage: "hand.raised", action: .deny) {
-                        RuleRecord.newPrivacyFilterRule(
-                            name: "Block secrets before sharing",
-                            category: .secret,
-                            action: .deny
-                        )
-                    }
-                    newRuleButton("Warn on high severity", systemImage: "exclamationmark.triangle", action: .warn) {
-                        RuleRecord.newPrivacyControlRule(
-                            name: "Warn on high severity findings",
-                            matcher: .privacySeverityAtLeast(.high),
-                            action: .warn,
-                            explanation: "Records a warning on high-severity findings in either files or email."
-                        )
-                    }
-                    newRuleButton("Log only", systemImage: "list.bullet.rectangle", action: .log) {
-                        RuleRecord.newUserContentRule(
-                            name: "Log cross-content findings",
-                            action: .log
-                        )
-                    }
-                }
-
-                Menu("Agent Behaviour Rule") {
+                Section("Agent behaviour templates") {
                     newRuleButton("Deny matching action", systemImage: "hand.raised", action: .deny) {
                         RuleRecord.newUserAgentRule(name: "Deny agent rule", action: .deny)
                     }
                     newRuleButton("Warn and record", systemImage: "exclamationmark.triangle", action: .warn) {
                         RuleRecord.newUserAgentRule(name: "Warn on agent rule", action: .warn)
                     }
-                    newRuleButton("Log only", systemImage: "list.bullet.rectangle", action: .log) {
-                        RuleRecord.newUserAgentRule(name: "Log agent rule", action: .log)
-                    }
                 }
             } label: {
-                Label("New Rule", systemImage: "plus")
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
-            .accessibilityIdentifier("rules.toolbar.newRule")
+            .help("Start from a template")
+            .accessibilityLabel("New rule from template")
+            .accessibilityIdentifier("rules.toolbar.newRuleTemplates")
 
             Divider().frame(height: 16)
 
@@ -412,6 +298,27 @@ private struct RulesToolbar: View {
             .buttonStyle(.plain)
             .help(inspectorVisible ? "Hide inspector" : "Show inspector")
             .accessibilityIdentifier("rules.toolbar.inspector")
+
+            Menu {
+                Button {
+                    Task {
+                        isResettingSeeded = true
+                        defer { isResettingSeeded = false }
+                        await model.resetSeededRules()
+                    }
+                } label: {
+                    Label("Restore Built-in Rules", systemImage: "arrow.clockwise")
+                }
+                .disabled(isResettingSeeded)
+                .help("Re-enables built-in rules that were disabled and resyncs the catalog after an app update.")
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityIdentifier("rules.toolbar.overflow")
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
@@ -445,6 +352,44 @@ private struct RulesToolbar: View {
         case .summarize: return "Share a summary instead of raw matching content."
         case .downgrade: return "Share metadata only for matching content."
         case .log: return "Record matches without changing access."
+        }
+    }
+
+    /// Adds a blank rule of the most likely scope based on the current sidebar
+    /// filter. Selecting "Emails" and clicking + makes a blank email rule;
+    /// selecting "Privacy filter" makes a default block-secrets rule.
+    private func addBlankRule() {
+        inspectorVisible = true
+        let rule = makeBlankRule(for: model.filter)
+        Task { await model.addRule(rule) }
+    }
+
+    private func makeBlankRule(for filter: RulesModel.Filter) -> RuleRecord {
+        switch filter {
+        case .scope(.email):
+            return RuleRecord.newUserEmailRule()
+        case .scope(.agent):
+            return RuleRecord.newUserAgentRule()
+        case .scope(.content):
+            return RuleRecord.newUserContentRule()
+        case .privacy:
+            return RuleRecord.newPrivacyFilterRule(
+                name: "New privacy rule",
+                category: .secret,
+                action: .deny
+            )
+        case .scope(.file), .all, .seeded, .userAuthored, .suggested:
+            return RuleRecord.newUserFileRule()
+        }
+    }
+
+    private var blankRuleHelp: String {
+        switch model.filter {
+        case .scope(.email): return "Add a blank email rule"
+        case .scope(.agent): return "Add a blank agent behaviour rule"
+        case .scope(.content): return "Add a blank rule that covers files and email"
+        case .privacy: return "Add a blank privacy filter rule"
+        case .scope(.file), .all, .seeded, .userAuthored, .suggested: return "Add a blank file rule"
         }
     }
 }

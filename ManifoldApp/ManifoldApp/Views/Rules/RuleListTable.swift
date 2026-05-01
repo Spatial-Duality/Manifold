@@ -11,6 +11,12 @@ import ManifoldKit
 
 struct RuleListTable: View {
     @Bindable var model: RulesModel
+    @State private var columnCustomization: TableColumnCustomization<RuleRecord> = {
+        var c = TableColumnCustomization<RuleRecord>()
+        c[visibility: "source"] = .hidden
+        c[visibility: "hits"] = .hidden
+        return c
+    }()
 
     var body: some View {
         Group {
@@ -28,10 +34,12 @@ struct RuleListTable: View {
     }
 
     private var table: some View {
-        Table(of: RuleRecord.self, selection: Binding(
-            get: { model.selectedRuleID.map { Set([$0]) } ?? Set<String>() },
-            set: { model.selectedRuleID = $0.first }
-        )) {
+        Table(of: RuleRecord.self,
+              selection: Binding(
+                get: { model.selectedRuleID.map { Set([$0]) } ?? Set<String>() },
+                set: { model.selectedRuleID = $0.first }
+              ),
+              columnCustomization: $columnCustomization) {
             TableColumn("Status") { rule in
                 Toggle("", isOn: Binding(
                     get: { rule.enabled },
@@ -44,11 +52,14 @@ struct RuleListTable: View {
                 .accessibilityLabel(rule.enabled ? "Enabled" : "Disabled")
             }
             .width(44)
+            .customizationID("status")
+            .disabledCustomizationBehavior(.visibility)
 
             TableColumn("Action") { rule in
                 RuleActionBadge(action: rule.action)
             }
             .width(72)
+            .customizationID("action")
 
             TableColumn("Name") { rule in
                 VStack(alignment: .leading, spacing: 2) {
@@ -74,11 +85,14 @@ struct RuleListTable: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("rules.rowTitle.\(rule.id)")
             }
+            .customizationID("name")
+            .disabledCustomizationBehavior(.visibility)
 
             TableColumn("Gate") { rule in
                 RuleGatePill(rule: rule)
             }
             .width(124)
+            .customizationID("gate")
 
             TableColumn("Scope") { rule in
                 HStack(spacing: Spacing.s1) {
@@ -89,16 +103,19 @@ struct RuleListTable: View {
                 }
             }
             .width(86)
+            .customizationID("scope")
 
             TableColumn("Agents") { rule in
                 AgentsChipRow(agents: rule.agents)
             }
             .width(100)
+            .customizationID("agents")
 
             TableColumn("Source") { rule in
                 SourcePill(source: rule.source)
             }
             .width(90)
+            .customizationID("source")
 
             TableColumn("Hits (30d)") { rule in
                 Text("\(rule.matchCount)")
@@ -107,6 +124,7 @@ struct RuleListTable: View {
                     .monospacedDigit()
             }
             .width(72)
+            .customizationID("hits")
         } rows: {
             ForEach(model.filteredRules) { rule in
                 TableRow(rule)
