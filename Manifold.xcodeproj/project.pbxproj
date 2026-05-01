@@ -93,6 +93,7 @@
 		AB73A856DCC2BE53D2783481 /* EmailSelectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23760AEA487279BB56652F47 /* EmailSelectionModel.swift */; };
 		AC07102B386DB0CB25D8E322 /* ManifoldStore+ConnectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE1B7673EC17DF38814F2D4 /* ManifoldStore+ConnectionState.swift */; };
 		AF88EFD4981DFD77F09A9C99 /* LiveCheckRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12E49541D0A150EF71C98FA /* LiveCheckRow.swift */; };
+		B17DF85E58BDC0310D9C917D /* ConnectAgentPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03E422BA144DAA92B4859FC0 /* ConnectAgentPanel.swift */; };
 		B577D153ED08F7D8012E8642 /* ManifoldAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE7ED146F47690C064E79D0 /* ManifoldAppUITests.swift */; };
 		B5B5755EC34FBB0286432FC9 /* TitleSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6887F8452E06D8FB1F5BF979 /* TitleSequence.swift */; };
 		B68F43799D17150AE093B5CC /* SetupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB68B0854C6DD4AA29058275 /* SetupModel.swift */; };
@@ -173,6 +174,7 @@
 		0095F0998503E87F97508D06 /* FoldersMatrixView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldersMatrixView.swift; sourceTree = "<group>"; };
 		009EA04550A7634D95791F57 /* StorageSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageSettingsPane.swift; sourceTree = "<group>"; };
 		0283F724FBEDA2995DC661A3 /* InspectorContextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorContextProvider.swift; sourceTree = "<group>"; };
+		03E422BA144DAA92B4859FC0 /* ConnectAgentPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectAgentPanel.swift; sourceTree = "<group>"; };
 		07663F34627D1E9A9D3283D9 /* RuleListTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleListTable.swift; sourceTree = "<group>"; };
 		07D674EC5D561D8FB5323CE9 /* PrivacyDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyDiffView.swift; sourceTree = "<group>"; };
 		0B8E4E39B96F337AFE711560 /* WorkModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkModel.swift; sourceTree = "<group>"; };
@@ -355,6 +357,7 @@
 		16ED22755577F60200F60721 /* FirstRun */ = {
 			isa = PBXGroup;
 			children = (
+				03E422BA144DAA92B4859FC0 /* ConnectAgentPanel.swift */,
 				4BA913448A193A3763D27E58 /* FirstRunFlow.swift */,
 				C2490787A48C47E6B5387C30 /* FirstRunPanels.swift */,
 			);
@@ -834,6 +837,7 @@
 				DB83D5D4F1443A77649FD60D /* CommandCenter.swift in Sources */,
 				F711EC11A62C0798BB1112B6 /* CommandPaletteView.swift in Sources */,
 				C07539145FD00F66E2A60B46 /* CommitLadder.swift in Sources */,
+				B17DF85E58BDC0310D9C917D /* ConnectAgentPanel.swift in Sources */,
 				75BF198A602A21AB8290604B /* ConnectClaudeSheet.swift in Sources */,
 				BAD8C5E020409EBE19EA8D79 /* ConnectCodexSheet.swift in Sources */,
 				FCBB42EF3BD92787F93DEF3C /* ConnectionEventTracker.swift in Sources */,

@@ -18,7 +18,7 @@ struct FirstRunFlow: View {
     @State private var selectedPaths: [String] = []
 
     enum Panel: Int, CaseIterable {
-        case concept, defaults, helpImprove, guidedAdd, scopeReview
+        case concept, defaults, helpImprove, guidedAdd, scopeReview, connectAgent
     }
 
     var body: some View {
@@ -33,7 +33,9 @@ struct FirstRunFlow: View {
             case .guidedAdd:
                 GuidedAddPanel(choose: chooseFirstProject, back: back)
             case .scopeReview:
-                ScopeReviewPanel(selectedPaths: selectedPaths, finish: finish, back: back)
+                ScopeReviewPanel(selectedPaths: selectedPaths, finish: advance, back: back)
+            case .connectAgent:
+                ConnectAgentPanel(finish: finish, back: back)
             }
 
             Divider()
