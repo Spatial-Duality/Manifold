@@ -80,7 +80,7 @@ private struct WorkCommandStrip: View {
                     work.sessionSelection = .prepared
                     work.inspectorSelection = .session(.prepared)
                 } label: {
-                    Label("Build on Default", systemImage: "plus.rectangle.on.rectangle")
+                    Label("Build on default", systemImage: "plus.rectangle.on.rectangle")
                 }
                 Button {
                     store.beginSessionPreload(
@@ -90,7 +90,7 @@ private struct WorkCommandStrip: View {
                     work.sessionSelection = .prepared
                     work.inspectorSelection = .session(.prepared)
                 } label: {
-                    Label("Start Blank", systemImage: "plus.rectangle")
+                    Label("Start blank", systemImage: "plus.rectangle")
                 }
             } label: {
                 Label("New Session", systemImage: "plus")
@@ -108,6 +108,7 @@ private struct WorkCommandStrip: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Label("Activate", systemImage: "play.fill")
+                            .symbolEffect(.bounce, value: store.activeSession?.id)
                     }
                 }
                 .controlSize(.small)
@@ -131,6 +132,7 @@ private struct WorkCommandStrip: View {
                 Task { await store.restartRuntimeHelper() }
             } label: {
                 Label("Restart Runtime", systemImage: "arrow.clockwise")
+                    .symbolEffect(.rotate, value: store.isRuntimeConnected)
             }
             .controlSize(.small)
             .accessibilityIdentifier("work.command.restartRuntime")
@@ -321,7 +323,7 @@ private struct WorkCurrentSessionSummary: View {
                 Spacer()
                 if isSessionScoped {
                     Pill(text: "Session", variant: .session)
-                    Button("Use Default") {
+                    Button("Use default") {
                         Task { await store.clearRequestDetailOverride(for: agent) }
                     }
                     .buttonStyle(.borderless)
@@ -406,6 +408,7 @@ private struct WorkPendingApprovalsSection: View {
             HStack {
                 Label("Pending approvals", systemImage: "hand.raised")
                     .font(ManifoldType.bodyMedium)
+                    .symbolEffect(.bounce, value: store.pendingRequests.count)
                 Spacer()
                 if !store.pendingRequests.isEmpty {
                     Pill(text: "\(store.pendingRequests.count) waiting", variant: .attention)
@@ -444,6 +447,20 @@ private struct WorkApprovalRow: View {
     let request: ApprovalRequest
     @Bindable var work: WorkModel
     @Environment(ManifoldStore.self) private var store
+    @State private var resolutionTrigger: Int = 0
+
+    /// Resolves the approval through the store, but plays the local
+    /// resolution animation first so the user feels the action land.
+    /// The store call is delayed by `approvalResolutionDuration` so the
+    /// row's keyframe sequence completes before the parent ForEach
+    /// removes it.
+    private func resolve(with answer: ApprovalAnswer) {
+        resolutionTrigger += 1
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(approvalResolutionDuration * 1_000_000_000))
+            await store.answer(request, with: answer)
+        }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s3) {
@@ -498,6 +515,7 @@ private struct WorkApprovalRow: View {
             RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
                 .strokeBorder(isSelected ? ManifoldPalette.selection.opacity(0.4) : ManifoldPalette.border, lineWidth: 0.5)
         )
+        .approvalResolution(trigger: resolutionTrigger)
     }
 
     private var agentSymbol: String {
@@ -525,9 +543,7 @@ private struct WorkApprovalRow: View {
 
     private var approvalActionButtons: some View {
         HStack(spacing: Spacing.s1) {
-            Button("Deny") {
-                Task { await store.answer(request, with: .notThisTime) }
-            }
+            Button("Deny") { resolve(with: .notThisTime) }
             .buttonStyle(.borderless)
             .controlSize(.small)
             .accessibilityIdentifier("work.approval.\(request.id).deny")
@@ -536,12 +552,8 @@ private struct WorkApprovalRow: View {
             // with extra options in the inspector.
             if request.kind == .standingWrite {
                 Menu {
-                    Button("Allow once") {
-                        Task { await store.answer(request, with: .once) }
-                    }
-                    Button("Add to default") {
-                        Task { await store.answer(request, with: .addToDefault) }
-                    }
+                    Button("Allow once") { resolve(with: .once) }
+                    Button("Add to default") { resolve(with: .addToDefault) }
                 } label: {
                     Text("Allow…")
                 }
@@ -549,9 +561,7 @@ private struct WorkApprovalRow: View {
                 .controlSize(.small)
                 .accessibilityIdentifier("work.approval.\(request.id).allowMenu")
             } else {
-                Button("Allow once") {
-                    Task { await store.answer(request, with: .once) }
-                }
+                Button("Allow once") { resolve(with: .once) }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .accessibilityIdentifier("work.approval.\(request.id).once")
@@ -1401,13 +1411,13 @@ private struct WorkSessionInspector: View {
                 Button {
                     store.beginSessionPreload(agent: store.defaultSessionAgent, baseMode: .buildOnDefault)
                 } label: {
-                    Label("Build on Default", systemImage: "plus.rectangle.on.rectangle")
+                    Label("Build on default", systemImage: "plus.rectangle.on.rectangle")
                 }
                 .controlSize(.small)
                 Button {
                     store.beginSessionPreload(agent: store.defaultSessionAgent, baseMode: .blank)
                 } label: {
-                    Label("Start Blank", systemImage: "plus.rectangle")
+                    Label("Start blank", systemImage: "plus.rectangle")
                 }
                 .controlSize(.small)
             }

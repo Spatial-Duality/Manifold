@@ -51,18 +51,20 @@ final class ManifoldStore {
     private var didAttemptDefaultSessionStart = false
     private var suppressDefaultSessionUntilNextLaunch = false
 
-    var menuBarIcon: String {
-        guard isRuntimeConnected else { return "shield.slash" }
-        if dataControlSummary?.pendingApprovalCount ?? governance.pendingApprovals.count > 0 {
-            return "hand.raised.fill"
-        }
-        if dataControlSummary?.activeWorkBlock != nil || activeSession != nil {
-            return "checkmark.shield.fill"
+    /// Drives the menu bar icon. Replaces the previous SF-Symbol-name string
+    /// so the menu bar shows the Manifold mark with a small state badge
+    /// instead of a generic Apple shield. Active session and tracked-edit
+    /// states are deliberately badge-less — the mark's presence is the
+    /// signal, less is more.
+    var menuBarBadgeState: MenuBarBadgeState {
+        guard isRuntimeConnected else { return .disconnected }
+        if (dataControlSummary?.pendingApprovalCount ?? governance.pendingApprovals.count) > 0 {
+            return .approvalsPending
         }
         if dataControlSummary?.agents.allSatisfy(\.isPaused) == true {
-            return "pause.circle.fill"
+            return .paused
         }
-        return "checkmark.shield.fill"
+        return .clear
     }
 
     init(

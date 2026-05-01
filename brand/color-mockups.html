@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Manifold — Colour Treatment Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-page: #f5f3ee;        /* warm off-white page bg */
+    --ink:   #1a1716;          /* warm near-black */
+    --ink-2: #4a4644;          /* warm charcoal */
+    --ink-3: #8a8480;          /* warm mid-grey */
+    --ink-4: #c8c2bc;          /* warm border */
+    --surface: #fdfbf6;        /* card surface */
+    /* candidate Manifold yellow */
+    --brand-saffron: #f5b400;
+    --brand-saffron-bright: #ffcc2c;
+    --brand-saffron-deep: #d99800;
+    --brand-saffron-burnt: #b87f00;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg-page);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', -apple-system, system-ui, sans-serif;
+    font-feature-settings: "ss01", "ss02";
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+  .page {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 64px 32px 96px;
+  }
+  .page-header {
+    margin-bottom: 64px;
+  }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-family: 'IBM Plex Sans';
+    font-weight: 600;
+    font-size: 38px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+  .lede {
+    color: var(--ink-2);
+    font-size: 16px;
+    max-width: 680px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px;
+  }
+  @media (max-width: 880px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .mockup {
+    background: var(--surface);
+    border: 1px solid var(--ink-4);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .mockup-stage {
+    aspect-ratio: 4 / 3;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    overflow: hidden;
+    position: relative;
+  }
+  .icon-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 32px;
+  }
+  .icon-tile {
+    width: 152px;
+    height: 152px;
+    border-radius: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow:
+      0 10px 30px -8px rgba(20, 16, 12, 0.18),
+      0 2px 6px -1px rgba(20, 16, 12, 0.12);
+    overflow: hidden;
+    position: relative;
+  }
+  .icon-tile-sm {
+    width: 64px;
+    height: 64px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px -4px rgba(20, 16, 12, 0.2);
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .icon-tile-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 32px;
+    border-top: 1px solid var(--ink-4);
+    background: rgba(0,0,0,0.015);
+  }
+  .icon-tile-row .meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .icon-tile-row .meta strong {
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .icon-tile-row .meta span {
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+  .mark { display: block; }
+  .label-block {
+    padding: 18px 24px 22px;
+    border-top: 1px solid var(--ink-4);
+  }
+  .label-block .name {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 4px;
+    letter-spacing: -0.005em;
+  }
+  .label-block .summary {
+    color: var(--ink-2);
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .label-block .pros, .label-block .cons {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--ink-2);
+    margin-top: 4px;
+  }
+  .label-block .pros::before { content: "+"; color: #1a8f3f; font-weight: 600; }
+  .label-block .cons::before { content: "−"; color: #c45a00; font-weight: 600; }
+  .swatch-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .swatch {
+    height: 18px;
+    flex: 1;
+    border-radius: 4px;
+    border: 1px solid var(--ink-4);
+  }
+  /* ====== TREATMENTS ====== */
+  /* 1. Solid Apple-Ideas yellow */
+  .treat-solid {
+    background: var(--brand-saffron);
+  }
+  /* 2. Linear gradient top→bottom */
+  .treat-linear {
+    background: linear-gradient(180deg,
+      var(--brand-saffron-bright) 0%,
+      var(--brand-saffron) 55%,
+      var(--brand-saffron-deep) 100%);
+  }
+  /* 3. Radial cloud — center-out warmth */
+  .treat-radial {
+    background:
+      radial-gradient(ellipse at 30% 30%, #ffd955 0%, transparent 55%),
+      radial-gradient(ellipse at 70% 75%, #e89a00 0%, transparent 50%),
+      var(--brand-saffron);
+  }
+  /* 4. Animated cloud — slow drift */
+  .treat-animated {
+    background:
+      radial-gradient(ellipse at var(--cx, 30%) var(--cy, 30%), #ffd955 0%, transparent 55%),
+      radial-gradient(ellipse at var(--cx2, 70%) var(--cy2, 75%), #e89a00 0%, transparent 50%),
+      var(--brand-saffron);
+    animation: drift 18s ease-in-out infinite alternate;
+  }
+  @keyframes drift {
+    0%   { background-position: 0% 0%, 100% 100%; }
+    50%  { background-position: 30% 20%, 70% 80%; }
+    100% { background-position: 0% 0%, 100% 100%; }
+  }
+  /* 5. Grain texture — tactile paper */
+  .treat-grain {
+    background:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' seed='3'/><feColorMatrix type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/></svg>"),
+      var(--brand-saffron);
+    background-blend-mode: multiply, normal;
+  }
+  /* 6. Hybrid — radial + grain (recommended) */
+  .treat-hybrid {
+    background:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='2' seed='5'/><feColorMatrix type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/></svg>"),
+      radial-gradient(ellipse at 28% 32%, #ffd755 0%, transparent 60%),
+      radial-gradient(ellipse at 72% 78%, #d99800 0%, transparent 55%),
+      var(--brand-saffron);
+    background-blend-mode: multiply, normal, normal, normal;
+  }
+  /* The brand mark — wraps a 100x100 SVG */
+  .mark-large {
+    color: var(--ink);
+    width: 100%;
+    height: 100%;
+    padding: 26%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mark-large svg { width: 100%; height: 100%; display: block; }
+  .mark-small {
+    color: var(--ink);
+    width: 70%;
+    height: 70%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mark-small svg { width: 100%; height: 100%; display: block; }
+  /* Splash / hero example below grid */
+  .splash-section {
+    margin-top: 88px;
+  }
+  .splash-stage {
+    border-radius: 18px;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 20px;
+    box-shadow: 0 30px 80px -30px rgba(20, 16, 12, 0.3);
+    position: relative;
+  }
+  .splash-stage .mark-hero {
+    width: 18%;
+    color: var(--ink);
+  }
+  .splash-stage .wordmark {
+    font-family: 'IBM Plex Sans';
+    font-weight: 500;
+    font-size: 32px;
+    letter-spacing: 0.16em;
+    color: var(--ink);
+  }
+  .splash-stage .tagline {
+    font-family: 'IBM Plex Mono';
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    color: rgba(20, 16, 12, 0.65);
+    text-transform: uppercase;
+  }
+  /* Recommendation block */
+  .recommendation {
+    margin-top: 64px;
+    padding: 32px 36px;
+    background: var(--surface);
+    border: 1px solid var(--ink-4);
+    border-radius: 14px;
+  }
+  .recommendation h2 {
+    font-weight: 600;
+    font-size: 22px;
+    margin-bottom: 8px;
+    letter-spacing: -0.015em;
+  }
+  .recommendation p {
+    color: var(--ink-2);
+    margin-bottom: 12px;
+    max-width: 740px;
+  }
+  .recommendation strong {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .pill-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+  .pill {
+    padding: 6px 12px;
+    border-radius: 100px;
+    background: var(--ink);
+    color: var(--surface);
+    font-size: 12px;
+    font-family: 'IBM Plex Mono';
+  }
+  .pill.alt {
+    background: var(--brand-saffron);
+    color: var(--ink);
+  }
+  /* Section labels */
+  .section-label {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 32px 0 16px;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-header">
+    <div class="kicker">Mockups · Brand colour exploration</div>
+    <h1>Six treatments. Solid → cloud → texture.</h1>
+    <p class="lede">Each tile shows the same mark + same Apple-Ideas saffron base, with one design decision changed. The icon-tile row at the bottom of each card shows how the same treatment reads at small scale (32–64pt).</p>
+  </header>
+
+  <div class="section-label">Treatments — at a glance</div>
+  <div class="grid">
+
+    <!-- 1. Solid -->
+    <div class="mockup">
+      <div class="mockup-stage">
+        <div class="icon-row">
+          <div class="icon-tile treat-solid">
+            <div class="mark-large"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+          <div class="icon-tile treat-solid" style="width:72px;height:72px;border-radius:16px;">
+            <div class="mark-large" style="padding:24%;"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+        </div>
+        <div class="icon-tile-row">
+          <div class="icon-tile-sm treat-solid"><div class="mark-small"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div></div>
+          <div class="meta">
+            <strong>At dock size (64pt)</strong>
+            <span>Reads as a flat tile of one colour</span>
+          </div>
+        </div>
+      </div>
+      <div class="label-block">
+        <div class="name">1 — Solid saffron</div>
+        <div class="summary">Apple Ideas approach. One colour, no gradient, no texture. The mark does all the work.</div>
+        <div class="pros">Maximum confidence. Reads as a brand decision, not a design accident.</div>
+        <div class="cons">Can feel flat in the middle of a long page; the icon needs the surrounding UI to give it air.</div>
+        <div class="swatch-row">
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#f5b400"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Linear gradient -->
+    <div class="mockup">
+      <div class="mockup-stage">
+        <div class="icon-row">
+          <div class="icon-tile treat-linear">
+            <div class="mark-large"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+          <div class="icon-tile treat-linear" style="width:72px;height:72px;border-radius:16px;">
+            <div class="mark-large" style="padding:24%;"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+        </div>
+        <div class="icon-tile-row">
+          <div class="icon-tile-sm treat-linear"><div class="mark-small"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div></div>
+          <div class="meta">
+            <strong>At dock size (64pt)</strong>
+            <span>Subtle dimension top → bottom</span>
+          </div>
+        </div>
+      </div>
+      <div class="label-block">
+        <div class="name">2 — Linear gradient</div>
+        <div class="summary">Top-light, bottom-deep. Adds quiet dimensionality without changing the colour story.</div>
+        <div class="pros">Reads as "considered" without losing the saffron commit. Reduces the flat-icon problem at small sizes.</div>
+        <div class="cons">Slightly conventional. Every gradient app on the App Store does this — uniqueness is borrowed.</div>
+        <div class="swatch-row">
+          <div class="swatch" style="background:#ffcc2c"></div>
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#d99800"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Radial cloud -->
+    <div class="mockup">
+      <div class="mockup-stage">
+        <div class="icon-row">
+          <div class="icon-tile treat-radial">
+            <div class="mark-large"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+          <div class="icon-tile treat-radial" style="width:72px;height:72px;border-radius:16px;">
+            <div class="mark-large" style="padding:24%;"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+        </div>
+        <div class="icon-tile-row">
+          <div class="icon-tile-sm treat-radial"><div class="mark-small"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div></div>
+          <div class="meta">
+            <strong>At dock size (64pt)</strong>
+            <span>Atmosphere reads as "warmth"</span>
+          </div>
+        </div>
+      </div>
+      <div class="label-block">
+        <div class="name">3 — Radial cloud</div>
+        <div class="summary">Two soft radial centres (light upper-left, deeper lower-right) blended into the saffron base. Static.</div>
+        <div class="pros">Atmospheric without animation. Each render looks like a moment of light, not a flat colour. OpenAI-recommended.</div>
+        <div class="cons">Slightly less iconic than solid — the icon's silhouette has to do more work.</div>
+        <div class="swatch-row">
+          <div class="swatch" style="background:#ffd955"></div>
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#e89a00"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Animated cloud -->
+    <div class="mockup">
+      <div class="mockup-stage">
+        <div class="icon-row">
+          <div class="icon-tile treat-animated">
+            <div class="mark-large"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+          <div class="icon-tile treat-animated" style="width:72px;height:72px;border-radius:16px;">
+            <div class="mark-large" style="padding:24%;"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+        </div>
+        <div class="icon-tile-row">
+          <div class="icon-tile-sm treat-animated"><div class="mark-small"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div></div>
+          <div class="meta">
+            <strong>Live drift (18s loop)</strong>
+            <span>Watch the cloud shift behind the marks ↑</span>
+          </div>
+        </div>
+      </div>
+      <div class="label-block">
+        <div class="name">4 — Animated cloud (web only)</div>
+        <div class="summary">The radial centres slowly drift across an 18-second cycle. For the marketing site hero, not the app icon.</div>
+        <div class="pros">Looks alive without flashing. OpenAI's "atmosphere" recommendation in motion. Hero-grade.</div>
+        <div class="cons">Don't put this on the dock icon — it can't animate. Web-only.</div>
+        <div class="swatch-row">
+          <div class="swatch" style="background:#ffd955"></div>
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#e89a00"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Grain texture -->
+    <div class="mockup">
+      <div class="mockup-stage">
+        <div class="icon-row">
+          <div class="icon-tile treat-grain">
+            <div class="mark-large"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+          <div class="icon-tile treat-grain" style="width:72px;height:72px;border-radius:16px;">
+            <div class="mark-large" style="padding:24%;"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+        </div>
+        <div class="icon-tile-row">
+          <div class="icon-tile-sm treat-grain"><div class="mark-small"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div></div>
+          <div class="meta">
+            <strong>At dock size (64pt)</strong>
+            <span>Paper-grain feel — tactile</span>
+          </div>
+        </div>
+      </div>
+      <div class="label-block">
+        <div class="name">5 — Grain texture</div>
+        <div class="summary">Solid saffron with a fine SVG-noise overlay (≈18% multiply). Imperceptible at first glance, premium on second.</div>
+        <div class="pros">Defeats the "flat icon" criticism without resorting to gradient. Pixelmator/Affinity-grade tactility.</div>
+        <div class="cons">Subtle effect — at very small scales the grain disappears. Not a hero gesture.</div>
+        <div class="swatch-row">
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#f5b400; opacity: 0.85"></div>
+          <div class="swatch" style="background:#000; opacity: 0.18"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Hybrid (recommended) -->
+    <div class="mockup" style="border-color:#1a1716; box-shadow: 0 24px 60px -24px rgba(20,16,12,0.18);">
+      <div class="mockup-stage">
+        <div class="icon-row">
+          <div class="icon-tile treat-hybrid">
+            <div class="mark-large"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+          <div class="icon-tile treat-hybrid" style="width:72px;height:72px;border-radius:16px;">
+            <div class="mark-large" style="padding:24%;"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div>
+          </div>
+        </div>
+        <div class="icon-tile-row">
+          <div class="icon-tile-sm treat-hybrid"><div class="mark-small"><svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg></div></div>
+          <div class="meta">
+            <strong>Recommended for the icon</strong>
+            <span>Radial cloud + 10% grain. Tactile + atmospheric.</span>
+          </div>
+        </div>
+      </div>
+      <div class="label-block">
+        <div class="name">6 — Hybrid (radial + grain) — recommended</div>
+        <div class="summary">Radial cloud (treatment 3) with a faint grain layer (treatment 5 at 10%). Combines atmosphere with tactility.</div>
+        <div class="pros">Looks crafted at every scale: dock icon, splash, screenshot. Holds up against Pixelmator/Things in the same dock. The "static cloud + grain" pattern is exactly what Apple Ideas does, just in saffron instead of mustard.</div>
+        <div class="cons">More complex to ship in Icon Composer than a flat fill — requires layering. Worth it.</div>
+        <div class="swatch-row">
+          <div class="swatch" style="background:#ffd755"></div>
+          <div class="swatch" style="background:#f5b400"></div>
+          <div class="swatch" style="background:#d99800"></div>
+          <div class="swatch" style="background:#000; opacity: 0.10"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Splash example showing recommended treatment in hero context -->
+  <div class="splash-section">
+    <div class="section-label">In context — splash / hero (recommended treatment)</div>
+    <div class="splash-stage treat-hybrid">
+      <div class="mark-hero">
+        <svg viewBox="0 0 320 220" xmlns="http://www.w3.org/2000/svg"><g fill="currentColor"><path d="M114.79,212.23c-2.29,0-4.4-.86-5.99-2.46-1.59-1.6-2.46-3.71-2.46-5.99v-30.1c0-3.71-1.18-6.53-3.5-8.45-2.32-1.92-5.16-2.88-8.50-2.88v-12.42c3.34,0,6.18-.97,8.50-2.91,2.32-1.94,3.5-4.78,3.5-8.50v-30.1c0-2.29.87-4.4,2.46-5.99,1.59-1.59,3.7-2.46,5.99-2.46h12.74v10.74h-11.27v33.46c0,2.81-.62,5.46-1.83,7.93-1.19,2.45-2.81,4.5-4.83,6.13-2.04,1.65-4.34,2.79-6.83,3.41v1.61c2.49.61,4.79,1.7,6.83,3.32,2.02,1.61,3.64,3.65,4.83,6.07,1.21,2.45,1.83,5.06,1.83,7.79v33.7h11.27v10.74h-12.74Z M168.62,212.23h-12.74V108.46h12.74v103.77Z M232.30,108.46c2.29,0,4.4,.86,5.99,2.46,1.59,1.59,2.46,3.7,2.46,5.99v30.1c0,3.71,1.18,6.55,3.50,8.50,2.32,1.94,5.16,2.91,8.50,2.91v12.42c-3.34,0-6.18,.96-8.50,2.88-2.32,1.92-3.50,4.74-3.50,8.45v30.1c0,2.29-.86,4.4-2.46,5.99-1.59,1.60-3.70,2.46-5.99,2.46h-12.74v-10.74h11.51v-33.7c0-2.74,.62-5.34,1.83-7.79,1.19-2.42,2.81-4.46,4.83-6.07,2.05-1.61,4.36-2.71,6.85-3.32v-1.61c-2.49-.61-4.80-1.76-6.85-3.41-2.02-1.63-3.64-3.68-4.83-6.13-1.21-2.46-1.83-5.12-1.83-7.93v-33.46h-11.51v-10.74h12.74Z"/></g></svg>
+      </div>
+      <div class="wordmark">MANIFOLD</div>
+      <div class="tagline">access, recorded.</div>
+    </div>
+  </div>
+
+  <!-- Recommendation -->
+  <div class="recommendation">
+    <h2>Recommendation: treatment 6 (hybrid)</h2>
+    <p>The Apple Ideas reference is not really "solid yellow" once you look closely at it — there's a gentle radial warmth from the lightbulb's centre and a fine paper-like grain across the canvas. The flat-yellow appearance is a render artefact at thumbnail scale.</p>
+    <p>Treatment 6 reproduces what makes Ideas read as <em>crafted</em>: <strong>one colour commit (saffron #F5B400)</strong>, plus subtle <strong>atmosphere</strong> (radial cloud), plus subtle <strong>tactility</strong> (10% grain). The mark sits on top in dark ink. Total file size when shipped as PNG renditions: still under 200KB.</p>
+    <p><strong>For the icon (Icon Composer):</strong> use treatment 6 as the static base. Skip animation — the icon doesn't need to move.</p>
+    <p><strong>For the splash (TitleSequence):</strong> use treatment 6 as the settle background, with the mark animating in via SF Symbols 7 Draw On. The settle = ~1.5s of the cloud + mark holding still before the wordmark fades in.</p>
+    <p><strong>For the marketing site hero:</strong> use treatment 4 (animated cloud) — slow drift adds life to the page hero where the user has time to notice.</p>
+    <p><strong>For everything else in the app:</strong> the saffron (#F5B400) is a brand accent only — sparse, on hover backgrounds, on the single CTA per first-run panel, on the easter-egg spin. Status colours stay semantic.</p>
+    <div class="pill-row">
+      <div class="pill alt">#F5B400 — light</div>
+      <div class="pill alt">#FFC940 — dark mode</div>
+      <div class="pill">#FFD755 — radial highlight</div>
+      <div class="pill">#D99800 — radial shadow</div>
+      <div class="pill">#000 @ 10% — grain</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

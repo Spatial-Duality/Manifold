@@ -46,7 +46,7 @@ enum LedgerDestination: String, Hashable, CaseIterable, Identifiable {
         case .work: return "square.stack.3d.up"
         case .access: return "folder.badge.gearshape"
         case .mail: return "envelope"
-        case .rules: return "checklist"
+        case .rules: return "slider.horizontal.3"
         }
     }
 

@@ -16,6 +16,11 @@ struct EmptyStateIllustration: View {
         case access
         case mail
         case approvals
+        /// Low-emphasis Manifold mark sitting behind/under the icon. Used
+        /// where the surface is empty *because the user hasn't done
+        /// anything yet* — the mark says "this is the product" without
+        /// shouting. Earned-presence brand identity, no animation.
+        case brandMark
     }
 
     let systemImage: String
@@ -148,6 +153,17 @@ struct EmptyStateIllustration: View {
                     .frame(width: 72, height: 72)
                 Image(systemName: systemImage)
                     .font(.system(size: 32, weight: .light))
+                    .foregroundStyle(tint)
+            }
+        case .brandMark:
+            ZStack {
+                BrandMark(
+                    placement: .display,
+                    color: ManifoldPalette.text2.opacity(0.16)
+                )
+                .frame(width: 116, height: 116)
+                Image(systemName: systemImage)
+                    .font(.system(size: 26, weight: .light))
                     .foregroundStyle(tint)
             }
         }

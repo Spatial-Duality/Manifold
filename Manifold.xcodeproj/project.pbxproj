@@ -45,6 +45,9 @@
 		6D091E5697C9D3A78045EDAB /* SegmentedToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFDC8760CA4A77FC8C7A925 /* SegmentedToggle.swift */; };
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
 		6E592096E933DF72477EFEE1 /* AgentStatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */; };
+		370B18C78B6C8B97E187172E /* BrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11E03FB4B757A6F31C52DD66 /* BrandMark.swift */; };
+		2998A5AE247FB55DDFC15989 /* MenuBarBrandIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67BFECA0B0AE1E68A7651BB2 /* MenuBarBrandIcon.swift */; };
+		D6372AED072DBA75B29034FE /* ApprovalResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D8A43287820FA5C121164D /* ApprovalResolution.swift */; };
 		6FB8176527DA56476B2B26E9 /* SessionPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CF25DC3B06D1813DDE4F801 /* SessionPrimitivesTests.swift */; };
 		75BF198A602A21AB8290604B /* ConnectClaudeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D2331C5DCB60B7F4F57912 /* ConnectClaudeSheet.swift */; };
 		771A9CD50913839945E83A55 /* NewRuleSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDEB7405E7E39B14EE4B0C85 /* NewRuleSheet.swift */; };
@@ -229,6 +232,9 @@
 		A83032B9351A37B478098245 /* UpdaterModelClassifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterModelClassifyTests.swift; sourceTree = "<group>"; };
 		AAF7A39E9DC920D0FFC0413F /* Manifold */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifold; path = .; sourceTree = SOURCE_ROOT; };
 		ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusDot.swift; sourceTree = "<group>"; };
+		11E03FB4B757A6F31C52DD66 /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
+		67BFECA0B0AE1E68A7651BB2 /* MenuBarBrandIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarBrandIcon.swift; sourceTree = "<group>"; };
+		E7D8A43287820FA5C121164D /* ApprovalResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalResolution.swift; sourceTree = "<group>"; };
 		ACE0BFDF787B5C2CB0D3B87C /* Pill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pill.swift; sourceTree = "<group>"; };
 		ACE7ED146F47690C064E79D0 /* ManifoldAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldAppUITests.swift; sourceTree = "<group>"; };
 		AD21F463E8A0DD4E7E5B25C8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -419,6 +425,9 @@
 				DDCCF34DB1CE80E481C55382 /* AccessChipStack.swift */,
 				EB438FF3647437EBED8BF70D /* AgentCard.swift */,
 				ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */,
+				11E03FB4B757A6F31C52DD66 /* BrandMark.swift */,
+				67BFECA0B0AE1E68A7651BB2 /* MenuBarBrandIcon.swift */,
+				E7D8A43287820FA5C121164D /* ApprovalResolution.swift */,
 				B1B3C61AB4243F58346D1B8E /* CategoryChip.swift */,
 				2503627A27A75894E6EF02BF /* CommitLadder.swift */,
 				4331F73A42EB2B126226A9EB /* EmptyStateIllustration.swift */,
@@ -777,6 +786,9 @@
 				045A18D0B9D5EC53F16E88C0 /* AgentCard.swift in Sources */,
 				A24F6381D0BB34D18DFA9376 /* AgentConnectionState.swift in Sources */,
 				6E592096E933DF72477EFEE1 /* AgentStatusDot.swift in Sources */,
+				370B18C78B6C8B97E187172E /* BrandMark.swift in Sources */,
+				2998A5AE247FB55DDFC15989 /* MenuBarBrandIcon.swift in Sources */,
+				D6372AED072DBA75B29034FE /* ApprovalResolution.swift in Sources */,
 				2049BC2D5AA1902B06F61EF5 /* AppRuntimeClient+AccessRedesign.swift in Sources */,
 				846308CAB1AA2EEBD7C6DD76 /* AppRuntimeClient.swift in Sources */,
 				78C694F935FF22E93BE2F227 /* CategoryChip.swift in Sources */,

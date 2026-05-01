@@ -24,15 +24,35 @@ extension Notification.Name {
 struct AppRootView: View {
     @Environment(ManifoldStore.self) private var store
     @Environment(CommandPaletteModel.self) private var commandPalette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasLoadedInitialSummary = false
+    @State private var splashFinished = false
 
     private var shouldShowFirstRun: Bool {
         !store.hasCompletedOnboarding && store.sources.isEmpty
     }
 
+    /// Plays once before first-run on a cold launch where reduce-motion is
+    /// off. After it finishes the user transitions into FirstRunFlow.
+    /// There is no replay path — the splash is a one-shot brand moment.
+    private var shouldShowSplash: Bool {
+        shouldShowFirstRun && !splashFinished && !reduceMotion
+    }
+
     var body: some View {
         Group {
-            if shouldShowFirstRun {
+            if shouldShowSplash {
+                ManifoldTitleSequence(speed: 2.2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+                    .task {
+                        // Compressed runtime: ~2.5s including settle + tagline.
+                        try? await Task.sleep(nanoseconds: 2_600_000_000)
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            splashFinished = true
+                        }
+                    }
+            } else if shouldShowFirstRun {
                 FirstRunFlow()
             } else {
                 LedgerView()

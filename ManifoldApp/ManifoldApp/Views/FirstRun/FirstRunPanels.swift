@@ -20,25 +20,20 @@ struct ConceptPanel: View {
 
             ZStack {
                 if !reduceMotion {
+                    // Soft halo behind the mark. Tinted to the neutral text token
+                    // (not an agent color) so the brand reads as the brand;
+                    // agent colors come back in once the icon + palette land.
                     Circle()
-                        .fill(ManifoldPalette.claude.opacity(0.22))
-                        .frame(width: 160, height: 160)
-                        .blur(radius: 28)
-                        .scaleEffect(glow ? 1.1 : 0.85)
-                        .opacity(glow ? 0.5 : 0.9)
+                        .fill(ManifoldPalette.text2.opacity(0.18))
+                        .frame(width: 180, height: 180)
+                        .blur(radius: 32)
+                        .scaleEffect(glow ? 1.08 : 0.88)
+                        .opacity(glow ? 0.6 : 0.9)
                         .animation(.easeInOut(duration: 3).repeatForever(autoreverses: true), value: glow)
                         .onAppear { glow = true }
                 }
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(LinearGradient(colors: [ManifoldPalette.claude, ManifoldPalette.codex],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 96, height: 96)
-                    .overlay(
-                        Image(systemName: "sparkle")
-                            .font(.system(size: 36, weight: .semibold))
-                            .foregroundStyle(.white)
-                    )
-                    .shadow(color: ManifoldPalette.claude.opacity(0.4), radius: 20, y: 8)
+                BrandMark(placement: .display, color: ManifoldPalette.text)
+                    .frame(width: 140, height: 140)
             }
             .frame(height: 180)
 

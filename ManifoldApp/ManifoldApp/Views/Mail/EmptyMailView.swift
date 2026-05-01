@@ -19,7 +19,7 @@ struct EmptyMailView: View {
                 title: "No mailboxes connected",
                 subtitle: "Connect a mailbox so you can review backed-up mail and share individual messages with confidence.",
                 tint: ManifoldPalette.selection,
-                style: .mail
+                style: .brandMark
             )
 
             HStack(spacing: Spacing.s2) {

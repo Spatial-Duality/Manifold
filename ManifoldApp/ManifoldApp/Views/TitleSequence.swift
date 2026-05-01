@@ -64,20 +64,58 @@ public struct ManifoldTitleSequence: View {
         self.tagline = tagline
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     public var body: some View {
         GeometryReader { proxy in
             ZStack {
                 BackgroundLayer()
-                CompositionLayer(
-                    speed: speed,
-                    cycle: cycle,
-                    wordmark: wordmark,
-                    tagline: tagline,
-                    size: proxy.size
-                )
+                if reduceMotion {
+                    // Reduce-motion bypass: render the static composed mark
+                    // and the wordmark/tagline at their final state. Skips
+                    // particle morphing, halos, and bracket springs entirely.
+                    StaticMarkLayer(
+                        wordmark: wordmark,
+                        tagline: tagline,
+                        size: proxy.size
+                    )
+                } else {
+                    CompositionLayer(
+                        speed: speed,
+                        cycle: cycle,
+                        wordmark: wordmark,
+                        tagline: tagline,
+                        size: proxy.size
+                    )
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
+    }
+}
+
+// MARK: - Static fallback (reduce-motion)
+
+private struct StaticMarkLayer: View {
+    let wordmark: String
+    let tagline: String
+    let size: CGSize
+
+    var body: some View {
+        VStack(spacing: 22) {
+            BrandMark(placement: .display, color: Tokens.ink)
+                .frame(width: 240, height: 240)
+            Text(wordmark)
+                .font(.system(size: 28, weight: .light))
+                .foregroundColor(Tokens.inkSoft)
+                .tracking(2)
+            Text(tagline)
+                .font(.system(size: 12, weight: .light))
+                .tracking(4)
+                .foregroundColor(Tokens.inkMute)
+                .opacity(0.8)
+        }
+        .frame(width: size.width, height: size.height)
     }
 }
 

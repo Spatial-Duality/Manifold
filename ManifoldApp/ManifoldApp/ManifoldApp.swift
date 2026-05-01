@@ -4,6 +4,30 @@
 import SwiftUI
 import ManifoldKit
 
+/// Builds the menu bar mark — just the {|}, no background. The
+/// underlying SF Symbol is sized so its cap-height portion fills the
+/// full menu-bar height (instead of the typographic ~85% it would get
+/// at default sizing), so the brackets read at the same visual scale
+/// as filled neighbouring icons.
+///
+/// Math: our custom symbol has cap-height = 70 units and total bounding
+/// box (cap → descender) = 83 units. To put the visible bracket cap at
+/// 22pt, the NSImage size needs to be 22 × (83/70) ≈ 26pt.
+@MainActor
+private func menuBarBrandImage() -> NSImage {
+    guard let original = NSImage(named: "Manifold Icon SF") else {
+        let fallback = NSImage(systemSymbolName: "curlybraces",
+                               accessibilityDescription: "Manifold")
+            ?? NSImage(size: NSSize(width: 22, height: 22))
+        fallback.isTemplate = true
+        return fallback
+    }
+    let sized = original.copy() as! NSImage
+    sized.size = NSSize(width: 26, height: 26)
+    sized.isTemplate = true
+    return sized
+}
+
 @MainActor
 func presentMainLedger(destination: LedgerDestination? = nil) {
     NSApp.activate(ignoringOtherApps: true)
@@ -142,10 +166,27 @@ struct ManifoldApp: App {
             }
         }
 
-        MenuBarExtra("Manifold", systemImage: store.menuBarIcon) {
+        // Custom Manifold mark in the menu bar.
+        //
+        // We use the `content:label:` form (not `image:`) and load the
+        // asset catalog symbol via NSImage so we can set an explicit
+        // pixel size. The default `MenuBarExtra(image:)` sizes the
+        // symbol to its cap height (~14pt), which makes the mark read
+        // smaller than filled menu-bar icons (Codex, ChatGPT) that span
+        // the full ~18-22pt status bar height. Setting NSImage.size
+        // explicitly overrides that, so the mark visually matches its
+        // neighbours.
+        //
+        // isTemplate=true keeps macOS native template tinting — the
+        // mark inverts correctly for dark/light menu bar appearance and
+        // the panel-open highlight state.
+        MenuBarExtra {
             MenuBarPanelView()
                 .environment(store)
                 .environment(commandPalette)
+        } label: {
+            Image(nsImage: menuBarBrandImage())
+                .accessibilityLabel("Manifold")
         }
         .menuBarExtraStyle(.window)
 

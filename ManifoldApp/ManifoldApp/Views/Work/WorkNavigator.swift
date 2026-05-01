@@ -30,12 +30,12 @@ struct WorkNavigator: View {
                 Button {
                     beginPreload(baseMode: .buildOnDefault)
                 } label: {
-                    Label("Build on Default", systemImage: "plus.rectangle.on.rectangle")
+                    Label("Build on default", systemImage: "plus.rectangle.on.rectangle")
                 }
                 Button {
                     beginPreload(baseMode: .blank)
                 } label: {
-                    Label("Start Blank", systemImage: "plus.rectangle")
+                    Label("Start blank", systemImage: "plus.rectangle")
                 }
             } label: {
                 Label("New Session", systemImage: "plus")

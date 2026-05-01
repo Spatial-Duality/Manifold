@@ -82,24 +82,61 @@ struct GeneralSettingsPane: View {
     }
 }
 
-/// Small app-identity row matching Notes / Freeform's Settings top strip.
+/// Centered app-identity stack at the top of the General settings pane.
+/// Matches the Apple convention of stock Settings panes (Notes,
+/// Reminders) where the app icon sits centered above the wordmark.
+/// Bold but refined: the wordmark uses display (22pt semibold), large
+/// enough to feel like a header but not heavy.
+///
+/// Easter egg: triple-clicking the mark spins it continuously. Click
+/// again to stop and the mark springs back to rest. Reduce-motion is
+/// respected — the toggle still works for keyboard cycles, but no
+/// rotation runs.
 private struct IdentityRow: View {
-    var body: some View {
-        HStack(spacing: Spacing.s3) {
-            GradientAvatar(brand: true, size: .extraLarge)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var spinning = false
+    @State private var rotation: Double = 0
 
-            VStack(alignment: .leading, spacing: 2) {
+    var body: some View {
+        VStack(spacing: Spacing.s2) {
+            BrandMark(placement: .display, color: ManifoldPalette.text)
+                .frame(width: 56, height: 56)
+                .rotationEffect(.degrees(rotation))
+                .onTapGesture(count: 3) { toggleSpin() }
+
+            VStack(spacing: 4) {
                 Text("Manifold")
-                    .font(ManifoldType.heading)
+                    .font(ManifoldType.display)
+                    .foregroundStyle(ManifoldPalette.text)
                 Text("A local control layer for Claude and Codex through Manifold.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
                 Text("Version \(Bundle.main.shortVersionString)")
                     .font(ManifoldType.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
-            Spacer()
         }
-        .padding(.vertical, Spacing.s1)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Spacing.s2)
+        .accessibilityIdentifier("settings.general.identity")
+    }
+
+    private func toggleSpin() {
+        spinning.toggle()
+        guard !reduceMotion else { return }
+        if spinning {
+            // Reset to 0 first so the loop starts cleanly each time.
+            rotation = 0
+            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+        } else {
+            // Spring back to rest from wherever the rotation currently is.
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                rotation = 0
+            }
+        }
     }
 }
