@@ -3696,19 +3696,45 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         username: String,
         password: String
     ) async throws -> EmailAccountRecord {
-        try await command(
-            name: "addIMAPAccount",
-            payload: [
-                "displayName": displayName,
-                "provider": provider.rawValue,
-                "server": server,
-                "port": port,
-                "username": username,
-                "password": password,
-            ],
-            field: "account",
-            as: EmailAccountRecord.self
-        )
+        // R5: cleartext password no longer crosses XPC. We stage the
+        // password in Keychain at a `pending-{uuid}` slot and send only
+        // the UUID over IPC. The agent reads from Keychain, validates
+        // the IMAP login, then rotates the entry to its canonical
+        // location on success or deletes it on failure.
+        let pendingID = UUID().uuidString
+        let kind: MailCredentialKind = (
+            provider == .gmail || provider == .yahoo || provider == .icloud || provider == .fastmail
+        ) ? .appPassword : .manualPassword
+        let pendingRef = KeychainMailSecretStore.pendingReference(pendingID: pendingID, kind: kind)
+        let secretStore = KeychainMailSecretStore()
+        guard let credentialData = password.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
+              secretStore.store(credentialData, reference: pendingRef) else {
+            throw NSError(
+                domain: "com.spatialduality.manifold.app",
+                code: 500,
+                userInfo: [NSLocalizedDescriptionKey: "Couldn't stage credential in Keychain. Check Keychain permissions and try again."]
+            )
+        }
+        do {
+            return try await command(
+                name: "addIMAPAccount",
+                payload: [
+                    "displayName": displayName,
+                    "provider": provider.rawValue,
+                    "server": server,
+                    "port": port,
+                    "username": username,
+                    "pendingCredentialID": pendingID,
+                ],
+                field: "account",
+                as: EmailAccountRecord.self
+            )
+        } catch {
+            // Agent failed before consuming the pending entry. Clean up
+            // so the launch sweep doesn't have to.
+            secretStore.delete(reference: pendingRef)
+            throw error
+        }
     }
 
     func addOAuthIMAPAccount(
@@ -3719,20 +3745,37 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         username: String,
         tokenSet: MicrosoftOAuthTokenSet
     ) async throws -> EmailAccountRecord {
-        let tokenSetData = try JSONEncoder().encode(tokenSet).base64EncodedString()
-        return try await command(
-            name: "addOAuthIMAPAccount",
-            payload: [
-                "displayName": displayName,
-                "provider": provider.rawValue,
-                "server": server,
-                "port": port,
-                "username": username,
-                "tokenSet": tokenSetData,
-            ],
-            field: "account",
-            as: EmailAccountRecord.self
-        )
+        // R5: same pattern — token set stays in Keychain, only the
+        // pending UUID crosses XPC.
+        let pendingID = UUID().uuidString
+        let pendingRef = KeychainMailSecretStore.pendingReference(pendingID: pendingID, kind: .oauthTokenSet)
+        let secretStore = KeychainMailSecretStore()
+        let tokenSetData = try JSONEncoder().encode(tokenSet)
+        guard secretStore.store(tokenSetData, reference: pendingRef) else {
+            throw NSError(
+                domain: "com.spatialduality.manifold.app",
+                code: 500,
+                userInfo: [NSLocalizedDescriptionKey: "Couldn't stage OAuth tokens in Keychain. Check Keychain permissions and try again."]
+            )
+        }
+        do {
+            return try await command(
+                name: "addOAuthIMAPAccount",
+                payload: [
+                    "displayName": displayName,
+                    "provider": provider.rawValue,
+                    "server": server,
+                    "port": port,
+                    "username": username,
+                    "pendingCredentialID": pendingID,
+                ],
+                field: "account",
+                as: EmailAccountRecord.self
+            )
+        } catch {
+            secretStore.delete(reference: pendingRef)
+            throw error
+        }
     }
 
     func removeEmailAccount(id: String) async throws {

@@ -129,6 +129,12 @@ final class ManifoldStore {
             diagnostics.record(.appLaunch)
             diagnostics.checkAgentExitState()
 
+            // R5: clean any pending Keychain credential entries left over
+            // from a previous app crash mid-IMAP-handoff. Idempotent.
+            // Stale entries older than 1 hour are deleted so the user's
+            // Keychain doesn't accumulate noise.
+            KeychainMailSecretStore().sweepStalePendingCredentials()
+
             // Sparkle: thread the agent shutdown into the updater so the
             // app/agent versions never go out of sync across an auto-update.
             updater?.agentShutdown = { [weak self] in self?.unregisterAgent() }

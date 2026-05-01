@@ -430,22 +430,50 @@ extension ManifoldXPCService {
             return ["count": try runtime.emailStore.emailMessageCount()]
 
         case "addIMAPAccount":
+            // R5: cleartext password no longer crosses XPC. The app
+            // writes to a `pending-{uuid}` Keychain slot and only sends
+            // the UUID over IPC. We read from Keychain here, validate,
+            // and rotate the entry to its canonical location on success.
+            // Apple security guidance: pass references over IPC, not
+            // secrets.
+            // https://developer.apple.com/documentation/security/adding-a-password-to-the-keychain
             guard let displayName = payload["displayName"] as? String,
                   let providerRaw = payload["provider"] as? String,
                   let provider = EmailProvider(rawValue: providerRaw),
                   let server = payload["server"] as? String,
                   let port = payload["port"] as? Int,
                   let username = payload["username"] as? String,
-                  let password = payload["password"] as? String else {
+                  let pendingID = payload["pendingCredentialID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
             let profile = MailProviderCatalog.profile(for: provider)
-            let validatedUsername = try await AppPasswordIMAPValidator().validate(
-                endpoint: MailEndpoint(host: server, port: port, security: .tlsOnConnect),
-                username: username,
-                password: password,
-                usernameRule: profile.usernameRule
+            let secretStore = KeychainMailSecretStore()
+            let pendingRef = KeychainMailSecretStore.pendingReference(
+                pendingID: pendingID,
+                kind: profile.defaultAuthMethod == .appPasswordIMAP ? .appPassword : .manualPassword
             )
+            guard let credentialData = secretStore.retrieve(reference: pendingRef),
+                  let password = String(data: credentialData, encoding: .utf8) else {
+                throw NSError(
+                    domain: "com.spatialduality.manifold.xpc",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "Pending credential not found in Keychain. The app may have failed to write it before the XPC call."]
+                )
+            }
+            // Always sweep the pending entry by the time we leave this
+            // case — success rotates it; failure deletes it.
+            defer { secretStore.delete(reference: pendingRef) }
+            let validatedUsername: String
+            do {
+                validatedUsername = try await AppPasswordIMAPValidator().validate(
+                    endpoint: MailEndpoint(host: server, port: port, security: .tlsOnConnect),
+                    username: username,
+                    password: password,
+                    usernameRule: profile.usernameRule
+                )
+            } catch {
+                throw error
+            }
             let authType: String
             switch profile.defaultAuthMethod {
             case .appPasswordIMAP:
@@ -467,10 +495,8 @@ extension ManifoldXPCService {
                 syncIntervalSeconds: 300,
                 indexPrivacyMode: indexPrivacyMode
             )
-            let cleanedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let credentialData = cleanedPassword.data(using: .utf8),
-                  let credentialReference = account.mailCredentialReference,
-                  KeychainMailSecretStore().store(credentialData, reference: credentialReference) else {
+            guard let credentialReference = account.mailCredentialReference,
+                  secretStore.store(credentialData, reference: credentialReference) else {
                 try? runtime.emailStore.removeEmailAccount(id: account.accountID)
                 throw NSError(
                     domain: "com.spatialduality.manifold.xpc",
@@ -484,15 +510,17 @@ extension ManifoldXPCService {
             return ["account": try XPCJSON.object(from: account)]
 
         case "addOAuthIMAPAccount":
+            // R5: same pattern as addIMAPAccount — the OAuth token set
+            // (which contains both access + refresh tokens) is staged in
+            // Keychain by the app and only the pendingCredentialID
+            // crosses XPC.
             guard let displayName = payload["displayName"] as? String,
                   let providerRaw = payload["provider"] as? String,
                   let provider = EmailProvider(rawValue: providerRaw),
                   let server = payload["server"] as? String,
                   let port = payload["port"] as? Int,
                   let username = payload["username"] as? String,
-                  let tokenSetString = payload["tokenSet"] as? String,
-                  let tokenSetData = Data(base64Encoded: tokenSetString),
-                  let tokenSet = try? JSONDecoder().decode(MicrosoftOAuthTokenSet.self, from: tokenSetData) else {
+                  let pendingID = payload["pendingCredentialID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
             guard provider == .outlook else {
@@ -502,6 +530,20 @@ extension ManifoldXPCService {
                     userInfo: [NSLocalizedDescriptionKey: "OAuth IMAP is only enabled for Microsoft mail in v1"]
                 )
             }
+            let secretStore = KeychainMailSecretStore()
+            let pendingRef = KeychainMailSecretStore.pendingReference(
+                pendingID: pendingID,
+                kind: .oauthTokenSet
+            )
+            guard let tokenSetData = secretStore.retrieve(reference: pendingRef),
+                  let tokenSet = try? JSONDecoder().decode(MicrosoftOAuthTokenSet.self, from: tokenSetData) else {
+                throw NSError(
+                    domain: "com.spatialduality.manifold.xpc",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "Pending OAuth credential not found in Keychain."]
+                )
+            }
+            defer { secretStore.delete(reference: pendingRef) }
             let indexPrivacyMode = (payload["indexPrivacyMode"] as? String)
                 .flatMap(MailIndexPrivacyMode.init(rawValue:)) ?? .privateTokenIndex
 
@@ -527,7 +569,7 @@ extension ManifoldXPCService {
                 indexPrivacyMode: indexPrivacyMode
             )
             guard let credentialReference = account.mailCredentialReference,
-                  KeychainMailSecretStore().store(tokenSetData, reference: credentialReference) else {
+                  secretStore.store(tokenSetData, reference: credentialReference) else {
                 try? runtime.emailStore.removeEmailAccount(id: account.accountID)
                 throw NSError(
                     domain: "com.spatialduality.manifold.xpc",
