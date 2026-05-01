@@ -47,19 +47,9 @@ struct SessionsSettingsPane: View {
         .formStyle(.grouped)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.sessions.pane")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showCaptureSheet = true
-                } label: {
-                    Label("Capture current scope", systemImage: "plus")
-                }
-                .help("Save what an assistant can currently see as a named template")
-            }
-        }
         .sheet(isPresented: $showCaptureSheet) {
             CaptureScopeSheet(
-                connectedAgents: connectedAgents,
+                selectableAgents: selectableAgents,
                 onSave: { name, agent in
                     Task { await captureScope(name: name, agent: agent) }
                     showCaptureSheet = false
@@ -70,7 +60,10 @@ struct SessionsSettingsPane: View {
         .task { await loadIfNeeded() }
     }
 
-    private var connectedAgents: [TargetApp] {
+    /// All agents the user can pick to capture scope for. Falls back to the full
+    /// known set when no agent is currently connected — this is a "selectable"
+    /// list, not a connection claim.
+    private var selectableAgents: [TargetApp] {
         let raw = store.connectedAgents.compactMap { TargetApp(rawValue: $0) }
         return raw.isEmpty ? [.cowork, .codex] : raw
     }
@@ -137,6 +130,14 @@ struct SessionsSettingsPane: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
+                Button {
+                    showCaptureSheet = true
+                } label: {
+                    Label("Capture", systemImage: "plus")
+                }
+                .controlSize(.small)
+                .help("Save what an assistant can currently see as a named template")
+                .accessibilityIdentifier("settings.sessions.capture")
             }
             if let statusMessage {
                 Label(statusMessage, systemImage: "checkmark.circle.fill")
@@ -215,8 +216,7 @@ struct SessionsSettingsPane: View {
     private func loadIfNeeded() async {
         guard !loaded else { return }
         do {
-            let connectedAgents = store.connectedAgents.compactMap { TargetApp(rawValue: $0) }
-            let agents: [TargetApp] = connectedAgents.isEmpty ? [.cowork, .codex] : connectedAgents
+            let agents: [TargetApp] = selectableAgents
             var groups: [TemplateGroup] = []
             for agent in agents {
                 let list = try await store.runtime.accessTemplates(for: agent)
@@ -328,7 +328,7 @@ private struct TemplateGroup: Identifiable {
 /// gets saved (sources only, not per-file overrides) so users aren't
 /// surprised when they re-run later and find overrides have changed.
 private struct CaptureScopeSheet: View {
-    let connectedAgents: [TargetApp]
+    let selectableAgents: [TargetApp]
     let onSave: (String, TargetApp) -> Void
     let onCancel: () -> Void
 
@@ -336,14 +336,14 @@ private struct CaptureScopeSheet: View {
     @State private var selectedAgent: TargetApp
 
     init(
-        connectedAgents: [TargetApp],
+        selectableAgents: [TargetApp],
         onSave: @escaping (String, TargetApp) -> Void,
         onCancel: @escaping () -> Void
     ) {
-        self.connectedAgents = connectedAgents
+        self.selectableAgents = selectableAgents
         self.onSave = onSave
         self.onCancel = onCancel
-        _selectedAgent = State(initialValue: connectedAgents.first ?? .cowork)
+        _selectedAgent = State(initialValue: selectableAgents.first ?? .cowork)
     }
 
     var body: some View {
@@ -366,7 +366,7 @@ private struct CaptureScopeSheet: View {
 
                 Section("Capture from") {
                     Picker("Agent", selection: $selectedAgent) {
-                        ForEach(connectedAgents, id: \.rawValue) { agent in
+                        ForEach(selectableAgents, id: \.rawValue) { agent in
                             Text(displayName(for: agent)).tag(agent)
                         }
                     }

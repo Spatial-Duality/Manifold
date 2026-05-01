@@ -50,7 +50,7 @@ struct GeneralSettingsPane: View {
                 Toggle("Access denied alerts", isOn: $store.notifyOnAccessDenied)
             }
 
-            Section("Updates & Diagnostics") {
+            Section {
                 Toggle("Check for updates automatically", isOn: $diagnostics.updateChecksEnabled)
                 Toggle("Share diagnostic reports", isOn: $diagnostics.diagnosticSharingEnabled)
                 if diagnostics.diagnosticSharingEnabled {
@@ -65,17 +65,16 @@ struct GeneralSettingsPane: View {
                             .controlSize(.small)
                     }
                 }
-                Text("Diagnostic reports are kept on this Mac. Sending is manual — see the Advanced tab to preview, save, or send.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Data & Privacy") {
-                Text("All governed data stays on your Mac. Manifold records what Claude and Codex saw through Manifold, not everything they can do outside that path.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Updates & Diagnostics")
+            } footer: {
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    Text("Diagnostic reports are kept on this Mac. Sending is manual — see the Advanced tab to preview, save, or send.")
+                    Text("All governed data stays on your Mac. Manifold records what Claude and Codex saw through Manifold, not everything they can do outside that path.")
+                }
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)

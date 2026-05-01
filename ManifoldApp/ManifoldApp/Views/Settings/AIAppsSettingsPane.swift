@@ -18,56 +18,53 @@ struct AgentsSettingsPane: View {
 
     var body: some View {
         Form {
-            Section {
+            // Claude — connection, then this agent's recording + privacy
+            Section("Claude") {
                 claudeCard
-            } header: {
-                Text("Claude").font(ManifoldType.title)
             }
-
             if let governance = store.governance.claudePolicy {
-                Section("Recording level · Claude") {
+                Section("Recording level") {
                     AccessRecordingLevelPicker(
                         agent: .cowork,
                         selection: governance.accessRecordingLevel
                     )
                 }
             }
-
-            Section {
-                codexCard
-            } header: {
-                Text("Codex").font(ManifoldType.title)
+            if store.governance.privacySettings != nil,
+               let claudePrivacy = store.governance.claudePrivacyPolicy {
+                Section {
+                    AgentPrivacyPolicyEditor(policy: claudePrivacy)
+                } header: {
+                    Text("Privacy policy")
+                } footer: {
+                    Text("Global privacy settings live in the Privacy pane.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
+            // Codex — same shape
+            Section("Codex") {
+                codexCard
+            }
             if let governance = store.governance.codexPolicy {
-                Section("Recording level · Codex") {
+                Section("Recording level") {
                     AccessRecordingLevelPicker(
                         agent: .codex,
                         selection: governance.accessRecordingLevel
                     )
                 }
             }
-
-            if store.governance.privacySettings != nil {
-                if let claudePrivacy = store.governance.claudePrivacyPolicy {
-                    Section {
-                        AgentPrivacyPolicyEditor(policy: claudePrivacy)
-                    } header: {
-                        HStack(spacing: Spacing.s2) {
-                            Text("Privacy policy · Claude")
-                            Spacer(minLength: 0)
-                            Text("Global settings live in the Privacy pane")
-                                .font(ManifoldType.caption)
-                                .foregroundStyle(.secondary)
-                                .textCase(nil)
-                        }
-                    }
-                }
-
-                if let codexPrivacy = store.governance.codexPrivacyPolicy {
-                    Section("Privacy policy · Codex") {
-                        AgentPrivacyPolicyEditor(policy: codexPrivacy)
-                    }
+            if store.governance.privacySettings != nil,
+               let codexPrivacy = store.governance.codexPrivacyPolicy {
+                Section {
+                    AgentPrivacyPolicyEditor(policy: codexPrivacy)
+                } header: {
+                    Text("Privacy policy")
+                } footer: {
+                    Text("Global privacy settings live in the Privacy pane.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

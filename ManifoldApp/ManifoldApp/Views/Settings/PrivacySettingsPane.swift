@@ -52,7 +52,7 @@ struct PrivacySettingsPane: View {
 
     @ViewBuilder
     private var modelSection: some View {
-        Section {
+        Section("Fast Local Scanner") {
             if let settings = store.governance.privacySettings,
                let status = store.governance.privacyRuntimeStatus {
                 PrivacyModelCard(settings: settings, status: status)
@@ -60,8 +60,6 @@ struct PrivacySettingsPane: View {
                 ProgressView("Loading scanner model…")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } header: {
-            Text("Fast Local Scanner").font(ManifoldType.title)
         }
     }
 
@@ -74,7 +72,7 @@ struct PrivacySettingsPane: View {
                 PrivacyPresetsRow()
             }
         } header: {
-            Text("Auto-Settings").font(ManifoldType.title)
+            Text("Auto-Settings")
         } footer: {
             Text("Presets write global privacy settings and seed per-agent policies. Hand-tuned changes in Agents ▸ Privacy switch the preset to Custom.")
                 .font(ManifoldType.caption)
@@ -130,7 +128,7 @@ struct PrivacySettingsPane: View {
                 .accessibilityIdentifier("settings.privacy.identities.add")
             }
         } header: {
-            Text("My Identity").font(ManifoldType.title)
+            Text("My Identity")
         } footer: {
             Text("Identities in this list are treated as you. Anything matching here is redacted or blocked before agents see it, even if nothing else would have flagged it.")
                 .font(ManifoldType.caption)
@@ -172,7 +170,7 @@ struct PrivacySettingsPane: View {
                 .accessibilityIdentifier("settings.privacy.allowlist.add")
             }
         } header: {
-            Text("Org Allowlist").font(ManifoldType.title)
+            Text("Org Allowlist")
         } footer: {
             Text("Allowlist entries suppress contact-category findings (emails, URLs) from their domain. Secrets and identity matches are never suppressed.")
                 .font(ManifoldType.caption)
@@ -187,7 +185,7 @@ struct PrivacySettingsPane: View {
         Section {
             IndexStatusCard()
         } header: {
-            Text("Index Status").font(ManifoldType.title)
+            Text("Index Status")
         } footer: {
             Text("Content is scanned when folders or mailboxes change. Findings feed the approval queue and the My Identity suggestions list.")
                 .font(ManifoldType.caption)
