@@ -3,8 +3,8 @@
 //
 // GradientAvatar — agent identity tile used in rows, cards, and inspectors.
 //
-// Renders a rounded square with an agent-colored gradient fill and the
-// agent's SF Symbol. Color is drawn from the fixed ManifoldPalette
+// Renders a rounded square with an agent-colored fill and the agent's
+// product mark. Color is drawn from the fixed ManifoldPalette
 // (Principle 6), never from system accent.
 //
 // A brand-gradient variant (Claude + Codex blended) is available for
@@ -55,6 +55,16 @@ struct GradientAvatar: View {
         }
     }
 
+    private var logoLength: CGFloat {
+        switch size {
+        case .tiny:       return 8
+        case .small:      return 12
+        case .medium:     return 16
+        case .large:      return 21
+        case .extraLarge: return 37
+        }
+    }
+
     private var cornerRadius: CGFloat {
         switch size {
         case .tiny:       return 3
@@ -65,33 +75,35 @@ struct GradientAvatar: View {
         }
     }
 
-    private var symbolName: String {
-        switch identity {
-        case .agent(let agent):
-            return agent == .codex ? "chevron.left.forwardslash.chevron.right" : "sparkle"
-        case .brand:
-            return "sparkle"
-        }
-    }
-
     private var gradientColors: [Color] {
-        switch identity {
-        case .agent(let agent):
-            let base = ManifoldPalette.agent(agent)
-            return [base, base.opacity(0.82)]
-        case .brand:
-            return [ManifoldPalette.claude, ManifoldPalette.codex]
-        }
-    }
-
-    private var accessibilityText: String {
-        switch identity {
-        case .agent(let agent): return agent == .codex ? "Codex" : "Claude"
-        case .brand:            return "Manifold"
-        }
+        [ManifoldPalette.claude, ManifoldPalette.codex]
     }
 
     var body: some View {
+        switch identity {
+        case .agent(let agent):
+            agentAvatar(agent)
+        case .brand:
+            brandAvatar
+        }
+    }
+
+    private func agentAvatar(_ agent: TargetApp) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(ManifoldPalette.agentSoft(agent))
+            .frame(width: sideLength, height: sideLength)
+            .overlay(
+                AgentLogo(agent: agent, size: logoLength)
+                    .accessibilityHidden(true)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(ManifoldPalette.agent(agent).opacity(0.18), lineWidth: 0.5)
+            )
+            .accessibilityLabel(AgentMeta.label(agent))
+    }
+
+    private var brandAvatar: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(
                 LinearGradient(
@@ -102,7 +114,7 @@ struct GradientAvatar: View {
             )
             .frame(width: sideLength, height: sideLength)
             .overlay(
-                Image(systemName: symbolName)
+                Image(systemName: "sparkle")
                     .font(iconFont)
                     .foregroundStyle(.white)
             )
@@ -111,7 +123,44 @@ struct GradientAvatar: View {
                     .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
                     .blendMode(.plusLighter)
             )
-            .accessibilityLabel(accessibilityText)
+            .accessibilityLabel("Manifold")
+    }
+}
+
+struct AgentLogo: View {
+    enum Treatment {
+        case adaptive
+        case monochrome(Color)
+    }
+
+    let agent: TargetApp
+    var size: CGFloat
+    var treatment: Treatment = .adaptive
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        mark
+            .frame(width: size, height: size)
+            .accessibilityLabel(AgentMeta.label(agent))
+    }
+
+    @ViewBuilder
+    private var mark: some View {
+        switch treatment {
+        case .adaptive:
+            Image(AgentMeta.logoImageName(agent, colorScheme: colorScheme))
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(AgentMeta.color(agent))
+        case .monochrome(let color):
+            Image(agent == .codex ? "AgentCodexLight" : "AgentClaude")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(color)
+        }
     }
 }
 

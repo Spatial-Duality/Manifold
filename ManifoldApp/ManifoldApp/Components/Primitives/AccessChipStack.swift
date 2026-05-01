@@ -52,9 +52,8 @@ struct AccessChipStack: View {
                     .strokeBorder(visible ? tint.opacity(0.4) : ManifoldPalette.border2,
                                   lineWidth: visible ? 0.5 : 1)
                 if visible {
-                    Image(systemName: AgentMeta.systemImage(agent))
-                        .font(.system(size: 7, weight: .semibold))
-                        .foregroundStyle(.white)
+                    AgentLogo(agent: agent, size: 8, treatment: .monochrome(.white))
+                        .accessibilityHidden(true)
                 }
             }
             .frame(width: 14, height: 14)
@@ -119,6 +118,7 @@ struct AccessCheckboxStrip: View {
                     AccessCheckButton(
                         title: AgentMeta.label(agent),
                         systemImage: AgentMeta.systemImage(agent),
+                        agent: agent,
                         state: visible ? .on : .off,
                         tint: AgentMeta.color(agent),
                         isExplicitOverride: isOverride,
@@ -149,6 +149,7 @@ private struct AccessCheckButton: View {
 
     let title: String
     let systemImage: String
+    var agent: TargetApp? = nil
     let state: State
     let tint: Color
     var isExplicitOverride: Bool = false
@@ -160,8 +161,17 @@ private struct AccessCheckButton: View {
             VStack(spacing: 1) {
                 HStack(spacing: 4) {
                     checkbox
-                    Image(systemName: systemImage)
-                        .font(.system(size: 10, weight: .semibold))
+                    if let agent {
+                        AgentLogo(
+                            agent: agent,
+                            size: 10,
+                            treatment: .monochrome(state == .off ? ManifoldPalette.text2 : tint)
+                        )
+                        .accessibilityHidden(true)
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
                     Text(title)
                         .font(ManifoldType.tiny.weight(.semibold))
                         .lineLimit(1)

@@ -17,8 +17,7 @@ struct ConnectClaudeSheet: View {
             SettingsSheetHeader(
                 title: "Connect Claude",
                 subtitle: "Install Manifold in Claude Desktop and Claude Code, then verify the MCP connection.",
-                systemImage: AgentMeta.systemImage(.cowork),
-                accent: AgentMeta.color(.cowork)
+                agent: .cowork
             )
 
             Divider()

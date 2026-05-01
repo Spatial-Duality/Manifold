@@ -24,17 +24,17 @@ import ManifoldKit
 enum ManifoldPalette {
 
     // Agent identity — fixed, reserved, never tied to system accent
-    static let claude       = dynamicColor(light: 0x3B6DE6, dark: 0x6A94F5)
-    static let claudeSoft   = dynamicColor(light: 0x3B6DE6, lightAlpha: 0.10,
-                                           dark: 0x6A94F5,  darkAlpha: 0.16)
-    static let claudeSoft2  = dynamicColor(light: 0x3B6DE6, lightAlpha: 0.18,
-                                           dark: 0x6A94F5,  darkAlpha: 0.26)
+    static let claude       = dynamicColor(light: 0xD97757, dark: 0xE99A7F)
+    static let claudeSoft   = dynamicColor(light: 0xD97757, lightAlpha: 0.10,
+                                           dark: 0xE99A7F,  darkAlpha: 0.16)
+    static let claudeSoft2  = dynamicColor(light: 0xD97757, lightAlpha: 0.18,
+                                           dark: 0xE99A7F,  darkAlpha: 0.26)
 
-    static let codex        = dynamicColor(light: 0x7C46D6, dark: 0xA67AE8)
-    static let codexSoft    = dynamicColor(light: 0x7C46D6, lightAlpha: 0.10,
-                                           dark: 0xA67AE8,  darkAlpha: 0.16)
-    static let codexSoft2   = dynamicColor(light: 0x7C46D6, lightAlpha: 0.18,
-                                           dark: 0xA67AE8,  darkAlpha: 0.26)
+    static let codex        = dynamicColor(light: 0x5C7FF7, dark: 0x9EACFE)
+    static let codexSoft    = dynamicColor(light: 0x5C7FF7, lightAlpha: 0.10,
+                                           dark: 0x9EACFE,  darkAlpha: 0.16)
+    static let codexSoft2   = dynamicColor(light: 0x5C7FF7, lightAlpha: 0.18,
+                                           dark: 0x9EACFE,  darkAlpha: 0.26)
 
     // Product chrome / selection — neutral, never agent-coded
     static let selection    = dynamicColor(light: 0x51627D, dark: 0xA6B1C2)
@@ -138,6 +138,16 @@ enum AgentMeta {
         switch agent {
         case .codex:  return "chevron.left.forwardslash.chevron.right"
         case .cowork: return "sparkle"
+        }
+    }
+
+    /// Asset-catalog image for the agent's product mark.
+    static func logoImageName(_ agent: TargetApp, colorScheme: ColorScheme) -> String {
+        switch agent {
+        case .codex:
+            return colorScheme == .dark ? "AgentCodexDark" : "AgentCodexLight"
+        case .cowork:
+            return "AgentClaude"
         }
     }
 

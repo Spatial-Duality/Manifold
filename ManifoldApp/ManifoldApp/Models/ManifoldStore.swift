@@ -1537,7 +1537,7 @@ final class ManifoldStore {
             try data.write(to: Self.launchAgentPlistURL, options: .atomic)
 
             _ = try? Self.runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(Self.agentLabel)"])
-            let bootstrap = try Self.runLaunchctl(arguments: ["bootstrap", "gui/\(getuid())", Self.launchAgentPlistURL.path])
+            let bootstrap = try Self.bootstrapRuntimeAgent()
             if bootstrap.exitCode != 0 {
                 diagnostics.record(.runtimeRegistrationFailedLaunchctlBootstrap(code: bootstrap.exitCode))
                 throw RuntimeRegistrationError(
@@ -1558,6 +1558,32 @@ final class ManifoldStore {
 
     func unregisterAgent() {
         _ = try? Self.runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(Self.agentLabel)"])
+    }
+
+    private static func bootstrapRuntimeAgent() throws -> ProcessResult {
+        let domain = "gui/\(getuid())"
+        let arguments = ["bootstrap", domain, launchAgentPlistURL.path]
+        var lastResult = try runLaunchctl(arguments: arguments)
+        guard shouldRetryBootstrap(lastResult) else { return lastResult }
+
+        for attempt in 1...5 {
+            let delay = UInt64(attempt * 200_000_000)
+            Thread.sleep(forTimeInterval: Double(delay) / 1_000_000_000)
+            lastResult = try runLaunchctl(arguments: arguments)
+            if !shouldRetryBootstrap(lastResult) {
+                return lastResult
+            }
+        }
+        return lastResult
+    }
+
+    private static func shouldRetryBootstrap(_ result: ProcessResult) -> Bool {
+        guard result.exitCode != 0 else { return false }
+        let output = result.output.lowercased()
+        return result.exitCode == 37
+            || result.exitCode == 5
+            || output.contains("operation already in progress")
+            || output.contains("input/output error")
     }
 
     private func verifyRuntimeLaunch() async {

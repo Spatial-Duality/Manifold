@@ -225,10 +225,31 @@ struct SettingsSheetHeader: View {
     let subtitle: String
     let systemImage: String
     let accent: Color
+    var agent: TargetApp?
+
+    init(title: String, subtitle: String, systemImage: String, accent: Color) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.accent = accent
+        self.agent = nil
+    }
+
+    init(title: String, subtitle: String, agent: TargetApp) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = AgentMeta.systemImage(agent)
+        self.accent = AgentMeta.color(agent)
+        self.agent = agent
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: Spacing.s3) {
-            SettingsSymbolTile(systemImage: systemImage, accent: accent, size: 44)
+            if let agent {
+                SettingsAgentTile(agent: agent, accent: accent, size: 44)
+            } else {
+                SettingsSymbolTile(systemImage: systemImage, accent: accent, size: 44)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -246,6 +267,26 @@ struct SettingsSheetHeader: View {
         .padding(.vertical, Spacing.s4)
         .background(ManifoldPalette.surface)
         .accessibilityElement(children: .combine)
+    }
+}
+
+struct SettingsAgentTile: View {
+    let agent: TargetApp
+    let accent: Color
+    var size: CGFloat = 40
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .fill(accent.opacity(0.14))
+            AgentLogo(agent: agent, size: size * 0.58)
+                .accessibilityHidden(true)
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                .strokeBorder(accent.opacity(0.18), lineWidth: 0.5)
+        )
     }
 }
 

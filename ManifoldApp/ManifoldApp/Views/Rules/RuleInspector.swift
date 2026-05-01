@@ -386,7 +386,11 @@ private struct AgentPicker: View {
                                 if agents.isEmpty { agents.insert(agent) }
                             }
                         )) {
-                            Label(AgentMeta.label(agent), systemImage: AgentMeta.systemImage(agent))
+                            HStack(spacing: 4) {
+                                AgentLogo(agent: agent, size: 12, treatment: .monochrome(ManifoldPalette.agent(agent)))
+                                    .accessibilityHidden(true)
+                                Text(AgentMeta.label(agent))
+                            }
                         }
                         .toggleStyle(.button)
                         .tint(ManifoldPalette.agent(agent))

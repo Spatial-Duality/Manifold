@@ -189,8 +189,8 @@ private struct WorkSessionListRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.s2) {
-            Image(systemName: AgentMeta.systemImage(agent))
-                .foregroundStyle(.secondary)
+            AgentLogo(agent: agent, size: 14)
+                .accessibilityHidden(true)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {

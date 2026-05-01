@@ -17,8 +17,7 @@ struct ConnectCodexSheet: View {
             SettingsSheetHeader(
                 title: "Connect Codex",
                 subtitle: "Add Manifold to Codex MCP configuration and verify the local bridge.",
-                systemImage: AgentMeta.systemImage(.codex),
-                accent: AgentMeta.color(.codex)
+                agent: .codex
             )
 
             Divider()
