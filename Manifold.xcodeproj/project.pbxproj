@@ -46,6 +46,8 @@
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
 		6E592096E933DF72477EFEE1 /* AgentStatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */; };
 		370B18C78B6C8B97E187172E /* BrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11E03FB4B757A6F31C52DD66 /* BrandMark.swift */; };
+		A757765C06EE94C3B5A974E5 /* AtmosphericBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD2EE4B2573CBB91DA54293 /* AtmosphericBackground.swift */; };
+		7F44FA05F4FB46070DE6ED2F /* Atmosphere.metal in Sources */ = {isa = PBXBuildFile; fileRef = A0FC5C5109B2B7E9AF8DB53C /* Atmosphere.metal */; };
 		2998A5AE247FB55DDFC15989 /* MenuBarBrandIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67BFECA0B0AE1E68A7651BB2 /* MenuBarBrandIcon.swift */; };
 		D6372AED072DBA75B29034FE /* ApprovalResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D8A43287820FA5C121164D /* ApprovalResolution.swift */; };
 		6FB8176527DA56476B2B26E9 /* SessionPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CF25DC3B06D1813DDE4F801 /* SessionPrimitivesTests.swift */; };
@@ -233,6 +235,8 @@
 		AAF7A39E9DC920D0FFC0413F /* Manifold */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifold; path = .; sourceTree = SOURCE_ROOT; };
 		ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusDot.swift; sourceTree = "<group>"; };
 		11E03FB4B757A6F31C52DD66 /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
+		2DD2EE4B2573CBB91DA54293 /* AtmosphericBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphericBackground.swift; sourceTree = "<group>"; };
+		A0FC5C5109B2B7E9AF8DB53C /* Atmosphere.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Atmosphere.metal; sourceTree = "<group>"; };
 		67BFECA0B0AE1E68A7651BB2 /* MenuBarBrandIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarBrandIcon.swift; sourceTree = "<group>"; };
 		E7D8A43287820FA5C121164D /* ApprovalResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalResolution.swift; sourceTree = "<group>"; };
 		ACE0BFDF787B5C2CB0D3B87C /* Pill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pill.swift; sourceTree = "<group>"; };
@@ -425,6 +429,7 @@
 				DDCCF34DB1CE80E481C55382 /* AccessChipStack.swift */,
 				EB438FF3647437EBED8BF70D /* AgentCard.swift */,
 				ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */,
+				2DD2EE4B2573CBB91DA54293 /* AtmosphericBackground.swift */,
 				11E03FB4B757A6F31C52DD66 /* BrandMark.swift */,
 				67BFECA0B0AE1E68A7651BB2 /* MenuBarBrandIcon.swift */,
 				E7D8A43287820FA5C121164D /* ApprovalResolution.swift */,
@@ -531,6 +536,7 @@
 				F00B9F88805F35215FC8149C /* Components */,
 				426CDE5A8424FAF755F23E62 /* Intents */,
 				F2EC59648DA1B62188DA4583 /* Models */,
+				1DBAED7A59A3F62322CEC599 /* Shaders */,
 				8318F9009B9A6F86C2A68433 /* Views */,
 			);
 			name = ManifoldApp;
@@ -560,6 +566,14 @@
 				A83032B9351A37B478098245 /* UpdaterModelClassifyTests.swift */,
 			);
 			path = ManifoldAppTests;
+			sourceTree = "<group>";
+		};
+		1DBAED7A59A3F62322CEC599 /* Shaders */ = {
+			isa = PBXGroup;
+			children = (
+				A0FC5C5109B2B7E9AF8DB53C /* Atmosphere.metal */,
+			);
+			path = Shaders;
 			sourceTree = "<group>";
 		};
 		F00B9F88805F35215FC8149C /* Components */ = {
@@ -786,6 +800,8 @@
 				045A18D0B9D5EC53F16E88C0 /* AgentCard.swift in Sources */,
 				A24F6381D0BB34D18DFA9376 /* AgentConnectionState.swift in Sources */,
 				6E592096E933DF72477EFEE1 /* AgentStatusDot.swift in Sources */,
+				A757765C06EE94C3B5A974E5 /* AtmosphericBackground.swift in Sources */,
+				7F44FA05F4FB46070DE6ED2F /* Atmosphere.metal in Sources */,
 				370B18C78B6C8B97E187172E /* BrandMark.swift in Sources */,
 				2998A5AE247FB55DDFC15989 /* MenuBarBrandIcon.swift in Sources */,
 				D6372AED072DBA75B29034FE /* ApprovalResolution.swift in Sources */,

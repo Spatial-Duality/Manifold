@@ -61,6 +61,29 @@ enum ManifoldPalette {
     static let dangerSoft   = dynamicColor(light: 0xC8201E, lightAlpha: 0.10,
                                            dark: 0xE05450,  darkAlpha: 0.15)
 
+    // Brand identity — Manifold's signature accent.
+    //
+    // Saffron yellow, in the same family as Apple Ideas. Lives in its own
+    // channel separate from agent identity (claude/codex) and state colours
+    // (active/preview/attention/danger). Used SPARSELY: app icon, splash
+    // settle, hero atmosphere, hover-tinted Liquid Glass, single CTAs.
+    // Never used as a session-state colour — that's what `active` etc. are
+    // for.
+    //
+    // The 1.7:1 contrast against white is intentional — `brand` is a
+    // FILL colour, not a TEXT colour. Foreground content sits in `text`
+    // (warm-charcoal) on top of the saffron, which gives 11:1 contrast.
+    static let brand        = dynamicColor(light: 0xF5B400, dark: 0xFFC940)
+    static let brandSoft    = dynamicColor(light: 0xF5B400, lightAlpha: 0.10,
+                                           dark: 0xFFC940,  darkAlpha: 0.16)
+    static let brandSoft2   = dynamicColor(light: 0xF5B400, lightAlpha: 0.18,
+                                           dark: 0xFFC940,  darkAlpha: 0.26)
+    /// Lighter highlight for atmospheric mesh gradients — "sun catching the cloud".
+    static let brandLift    = dynamicColor(light: 0xFFD755, dark: 0xFFE08A)
+    /// Deeper shadow for atmospheric mesh gradients — "the side of the cloud
+    /// the light isn't hitting".
+    static let brandDeep    = dynamicColor(light: 0xD99800, dark: 0xC89030)
+
     // Surfaces — used by chrome, inspectors, ledger rows
     static let bg           = dynamicColor(light: 0xF5F5F7, dark: 0x1C1C1E)
     static let surface      = dynamicColor(light: 0xFFFFFF, dark: 0x2C2C2E)
