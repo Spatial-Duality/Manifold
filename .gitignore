@@ -37,3 +37,6 @@ ManifoldLocalAuthConfig.plist
 
 # In-session parking lot for the local cleanup pass — see scripts/cleanup-pending.sh
 .trash-pending-user-delete/
+
+# DocC generated output (build via scripts/generate-docs.sh)
+/docs/
