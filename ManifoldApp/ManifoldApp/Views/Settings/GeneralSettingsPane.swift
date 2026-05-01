@@ -99,9 +99,17 @@ private struct IdentityRow: View {
 
     var body: some View {
         VStack(spacing: Spacing.s2) {
-            BrandMark(placement: .display, color: ManifoldPalette.text)
+            // Mark tints to brand saffron while spinning — the easter egg
+            // is a small celebration of identity, so the colour shift
+            // matches the motion. Cross-fade is animated so the colour
+            // change isn't a jarring step.
+            BrandMark(
+                placement: .display,
+                color: spinning ? ManifoldPalette.brand : ManifoldPalette.text
+            )
                 .frame(width: 56, height: 56)
                 .rotationEffect(.degrees(rotation))
+                .animation(.easeInOut(duration: 0.4), value: spinning)
                 .onTapGesture(count: 3) { toggleSpin() }
 
             VStack(spacing: 4) {

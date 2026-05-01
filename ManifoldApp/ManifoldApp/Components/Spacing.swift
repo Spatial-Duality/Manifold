@@ -92,6 +92,17 @@ extension View {
         modifier(GlassBackground(in: shape, tint: tint))
     }
 
+    /// Brand-tinted glass: a saffron-tinted Liquid Glass surface for
+    /// brand-presence chrome moments (sidebar header hover, brand
+    /// confirmation chips). Earned-presence — only used where the
+    /// brand is actively reinforcing identity, never as decoration.
+    /// Falls back to a tinted ultra-thin material on older macOS.
+    func liquidGlassBrand(
+        in shape: some Shape = RoundedRectangle(cornerRadius: Spacing.r6)
+    ) -> some View {
+        modifier(GlassBackground(in: shape, tint: ManifoldPalette.brandSoft))
+    }
+
     /// Calm, non-glass card fill for content-area surfaces.
     @ViewBuilder
     func contentCard(tint: Color? = nil) -> some View {

@@ -492,10 +492,12 @@ struct FilesFlatView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         if aiTouchedPaths.contains(file.canonicalPath) {
-                            Image(systemName: "sparkle")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.tint)
-                                .help("AI has written to this file")
+                            // Manifold mark = tracked-edit indicator. Saffron
+                            // says "Manifold saw this write" — brand presence
+                            // doing real work as a column glyph.
+                            BrandMark(placement: .inline, color: ManifoldPalette.brand)
+                                .frame(width: 10, height: 10)
+                                .help("Manifold tracked an AI write to this file")
                                 .accessibilityLabel("AI-touched")
                         }
                         if file.isDraftWorkspace {

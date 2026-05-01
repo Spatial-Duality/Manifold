@@ -153,12 +153,22 @@ private struct SidebarBrandHeader: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.s3)
             .padding(.horizontal, Spacing.s3)
-            .background(
-                RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                    .fill(isHovering
-                          ? ManifoldPalette.surface3.opacity(0.7)
-                          : Color.clear)
-            )
+            .background {
+                // Hover swaps the flat surface3 fill for brand-tinted
+                // Liquid Glass — a brief saffron warmth on the navigation
+                // chrome that says "this *is* Manifold." Honest brand
+                // presence: it only appears when you're actually
+                // interacting with the brand button.
+                if isHovering {
+                    RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                        .fill(.clear)
+                        .liquidGlassBrand(
+                            in: RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
+                        )
+                } else {
+                    Color.clear
+                }
+            }
             .contentShape(Rectangle())
             .animation(ManifoldMotion.effective(ManifoldMotion.micro,
                                                 reduceMotion: reduceMotion),

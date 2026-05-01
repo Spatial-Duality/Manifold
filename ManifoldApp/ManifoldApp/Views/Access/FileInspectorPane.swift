@@ -192,15 +192,14 @@ struct FileInspectorPane: View {
         let mostRecentTimestamp: String
     }
 
-    /// Sparkle inline next to the filename. Tinted in the accent color
-    /// (we don't yet know which specific agent wrote the bytes — runID
-    /// → grant → targetApp join is a future refinement). Tooltip names
-    /// the count + relative recency of the latest AI write.
+    /// Brand mark inline next to the filename. The Manifold mark *is* the
+    /// tracked-edit symbol — its presence says "Manifold saw this write."
+    /// Saffron tint so it reads as brand identity, not generic AI sparkle.
+    /// Tooltip names the count + relative recency of the latest AI write.
     @ViewBuilder
     private func sparkleBadge(_ summary: AITouchSummary) -> some View {
-        Image(systemName: "sparkle")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.tint)
+        BrandMark(placement: .inline, color: ManifoldPalette.brand)
+            .frame(width: 11, height: 11)
             .help(sparkleHelpText(summary))
             .accessibilityLabel(sparkleHelpText(summary))
     }
