@@ -67,11 +67,30 @@ private struct WorkMainPane: View {
 }
 
 /// One-shot welcome card shown on a fresh user's first visit to Work.
-/// Quietly explains the three regions (sessions, approvals, activity)
-/// and dismisses on first interaction or click. Auto-dismisses on the
-/// first user action so it doesn't outstay its welcome.
+/// Adapts content to whether an agent is connected: if not, point the
+/// user at Settings → Agents (R3 — onboarding never mentions Claude /
+/// Codex setup, this fixes the post-onboarding gap). If an agent IS
+/// connected, the original three-region orientation is shown.
+/// Auto-dismisses on first user action so it doesn't outstay its welcome.
 private struct WorkFirstRunCoachmark: View {
+    @Environment(ManifoldStore.self) private var store
     @AppStorage("work.coachmark.dismissed") private var dismissed: Bool = false
+
+    private var hasAgentConnected: Bool {
+        store.isClaudeConnected || store.isCodexConnected
+    }
+
+    private var title: String {
+        hasAgentConnected ? "Welcome to Work" : "Connect an agent to start sharing"
+    }
+
+    private var body_text: String {
+        if hasAgentConnected {
+            return "Sessions land in the command strip above. Pending approvals and the activity ledger flow here. The inspector on the right shows whatever you've selected."
+        } else {
+            return "Manifold governs what Claude and Codex can see. Open Settings → Agents to install Manifold for either, then come back here to start a session."
+        }
+    }
 
     var body: some View {
         if !dismissed {
@@ -80,13 +99,27 @@ private struct WorkFirstRunCoachmark: View {
                     .frame(width: 22, height: 22)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Welcome to Work")
+                    Text(title)
                         .font(ManifoldType.bodyMedium)
                         .foregroundStyle(ManifoldPalette.text)
-                    Text("Sessions land in the command strip above. Pending approvals and the activity ledger flow here. The inspector on the right shows whatever you've selected.")
+                    Text(body_text)
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if !hasAgentConnected {
+                        Button {
+                            // SettingsLink-style routing: opens Settings.
+                            // The user navigates to Agents themselves on
+                            // first visit; once they touch Agents, the
+                            // coachmark stays dismissed via the close X.
+                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        } label: {
+                            Label("Open Settings → Agents", systemImage: "sparkle")
+                        }
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                        .accessibilityIdentifier("work.coachmark.openAgents")
+                    }
                 }
                 Spacer(minLength: Spacing.s2)
                 Button {
@@ -637,6 +670,10 @@ private struct WorkTimelineSection: View {
                     .accessibilityIdentifier("work.timeline.search")
             }
 
+            if !store.connectionEvents.isEmpty {
+                ConnectionEventsStrip(events: store.connectionEvents)
+            }
+
             HStack(spacing: Spacing.s2) {
                 ForEach(WorkTimelineFilter.allCases) { filter in
                     Button {
@@ -897,42 +934,22 @@ struct WorkRuntimeIssue: Hashable {
 
 @MainActor
 private func workRuntimeIssue(store: ManifoldStore) -> WorkRuntimeIssue? {
-    let combinedError = (store.runtimeLaunchError ?? "") + " " + (store.lastError ?? "")
-    let lower = combinedError.lowercased()
-    // The verifier flags "stale" specifically when an agent helper is
-    // running older code than the binary on disk. Restarting the runtime
-    // doesn't fix that; relaunching the agent's helper does.
-    let isStaleHelper = lower.contains("stale") || lower.contains("reconnect")
-
-    if isStaleHelper {
-        return WorkRuntimeIssue(
-            title: "Agent helper out of date",
-            primaryAction: "Reconnect agents",
-            actionKind: .reconnect,
-            detail: store.runtimeLaunchError ?? store.lastError
-                ?? "Claude or Codex is running an older copy of the Manifold helper. Reconnecting will relaunch it.",
-            lastChecked: Date()
-        )
+    // Single source of truth: ManifoldStore.currentRuntimeIssue.
+    // The view layer no longer matches strings — it reads the typed
+    // enum and renders whatever the classifier decided.
+    guard let issue = store.currentRuntimeIssue else { return nil }
+    let actionKind: WorkRuntimeIssue.ActionKind = switch issue.recoveryAction {
+    case .retry:     .retry
+    case .restart:   .restart
+    case .reconnect: .reconnect
     }
-    if !store.isRuntimeConnected {
-        return WorkRuntimeIssue(
-            title: "Runtime unavailable",
-            primaryAction: "Retry",
-            actionKind: .retry,
-            detail: store.runtimeLaunchError ?? store.lastError ?? "Manifold can't reach the runtime right now.",
-            lastChecked: Date()
-        )
-    }
-    if let helperError = store.lastError, !helperError.isEmpty {
-        return WorkRuntimeIssue(
-            title: "Runtime needs restart",
-            primaryAction: "Restart Runtime",
-            actionKind: .restart,
-            detail: helperError,
-            lastChecked: Date()
-        )
-    }
-    return nil
+    return WorkRuntimeIssue(
+        title: issue.title,
+        primaryAction: issue.primaryActionLabel,
+        actionKind: actionKind,
+        detail: issue.detail,
+        lastChecked: Date()
+    )
 }
 
 private struct WorkRuntimeIssueBanner: View {
