@@ -46,30 +46,24 @@ final class ManifoldStore {
     let updater: UpdaterModel?
 
     let runtime: any RuntimeClientProtocol
-    private var connectionMonitorTask: Task<Void, Never>?
-    private var xpcConnectionObserver: NSObjectProtocol?
-    private var didAttemptAgentRestart = false
-    private var didAttemptDefaultSessionStart = false
-    private var suppressDefaultSessionUntilNextLaunch = false
 
-    /// Typed classification of any active runtime/connection problem.
-    /// Single source of truth — replaces ad-hoc string-grep classification
-    /// scattered across views. `nil` when everything is healthy.
-    var currentRuntimeIssue: RuntimeIssue? {
-        RuntimeIssueClassifier.classify(
-            isRuntimeConnected: isRuntimeConnected,
-            runtimeLaunchError: runtimeLaunchError,
-            lastError: lastError
-        )
-    }
+    // Cross-cohort properties: declared `internal` so the
+    // ManifoldStore+ConnectionState extension (in a sibling file) can
+    // access them. Module-internal — no visibility leak outside the app
+    // target.
+    var connectionMonitorTask: Task<Void, Never>?
+    var xpcConnectionObserver: NSObjectProtocol?
+    var didAttemptAgentRestart = false
+    var didAttemptDefaultSessionStart = false
+    var suppressDefaultSessionUntilNextLaunch = false
 
     /// Per-agent connection events, newest first. Capped at 50 — older
     /// events fall off so the in-memory list stays bounded. Surfaced in
     /// the Activity timeline; not persisted across launches.
     var connectionEvents: [ConnectionEvent] = []
-    private var lastObservedConnectedAgents: Set<String> = []
-    private let connectionAlerts: any ConnectionAlertPresenting = SystemConnectionAlertPresenter()
-    private static let connectionEventCap = 50
+    var lastObservedConnectedAgents: Set<String> = []
+    let connectionAlerts: any ConnectionAlertPresenting = SystemConnectionAlertPresenter()
+    static let connectionEventCap = 50
 
     /// Drives the menu bar icon. Replaces the previous SF-Symbol-name string
     /// so the menu bar shows the Manifold mark with a small state badge
@@ -298,119 +292,9 @@ final class ManifoldStore {
         }
     }
 
-    /// Subscribes to `ManifoldXPCClient.connectionStateChangedNotification`
-    /// so disconnects propagate to the UI in <100ms instead of waiting
-    /// for the next 5-second ping. The observer is held weakly so the
-    /// store doesn't leak; release on deinit.
-    private func startXPCConnectionObserver() {
-        xpcConnectionObserver = NotificationCenter.default.addObserver(
-            forName: ManifoldXPCClient.connectionStateChangedNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            // Extract the Sendable Bool here so the non-Sendable
-            // Notification doesn't cross the actor hop below.
-            let connected = (notification.userInfo?["connected"] as? Bool) ?? false
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if !connected, self.isRuntimeConnected {
-                    // Push the truth immediately; the next ping cycle
-                    // will reconcile. Pre-empts the 5-second lying-window.
-                    self.isRuntimeConnected = false
-                    self.isConnected = false
-                    self.connectedAgent = nil
-                    self.connectedAgents = []
-                }
-            }
-        }
-    }
-
-    // No explicit observer cleanup: ManifoldStore lives for the app
-    // lifetime, and the closure captures `[weak self]` so a leaked
-    // notification fires harmlessly if the store ever deallocs.
-
-    /// Diff the previous-vs-new connected-agents set, append events to
-    /// the chronological history, and post a system notification when
-    /// an agent disconnects during an active session. Idempotent.
-    private func recordConnectionTransition(newConnectedAgents: Set<String>) {
-        let events = ConnectionEventDiff.events(
-            previous: lastObservedConnectedAgents,
-            current: newConnectedAgents,
-            at: Date()
-        )
-        guard !events.isEmpty else {
-            lastObservedConnectedAgents = newConnectedAgents
-            return
-        }
-        // Newest first; cap.
-        connectionEvents.insert(contentsOf: events.reversed(), at: 0)
-        if connectionEvents.count > Self.connectionEventCap {
-            connectionEvents.removeLast(connectionEvents.count - Self.connectionEventCap)
-        }
-        lastObservedConnectedAgents = newConnectedAgents
-
-        // Notify the user only on disconnect-during-session — at-rest
-        // disconnects are typically lid-close noise.
-        let sessionWasActive = activeSession != nil
-        for event in events where event.kind == .disconnected {
-            Task { [presenter = connectionAlerts] in
-                await presenter.presentDisconnectAlert(
-                    agent: event.agent,
-                    sessionWasActive: sessionWasActive
-                )
-            }
-        }
-    }
-
-    private func startConnectionMonitor() {
-        connectionMonitorTask?.cancel()
-        connectionMonitorTask = Task { [weak self] in
-            var ticks = 0
-            var previousConnected = false
-            // Exponential backoff while disconnected. Reset to 5s the
-            // moment the runtime comes back. Saves wakeups + battery
-            // when the agent has been killed (e.g. user closed the lid
-            // and the helper got swept).
-            var sleepInterval: TimeInterval = 5
-            while let self, !Task.isCancelled {
-                let pingResult = await self.runtime.ping()
-                let connected = pingResult.ok
-                await MainActor.run {
-                    self.isRuntimeConnected = connected
-                    self.isConnected = connected
-                    if !connected {
-                        self.connectedAgent = nil
-                        self.connectedAgents = []
-                        if self.lastError == nil, let runtimeLaunchError = self.runtimeLaunchError {
-                            self.lastError = runtimeLaunchError
-                        }
-                    }
-                }
-
-                ticks += 1
-                if connected && (!previousConnected || ticks % 6 == 0) {
-                    await self.refreshAll()
-                }
-
-                // Backoff schedule: connected stays at 5s; disconnected
-                // doubles with cap at 30s. Reconnect immediately drops
-                // back to 5s on the next loop iteration.
-                if connected {
-                    sleepInterval = 5
-                } else {
-                    sleepInterval = min(sleepInterval * 2, 30)
-                }
-
-                previousConnected = connected
-                try? await Task.sleep(for: .seconds(sleepInterval))
-            }
-        }
-    }
-
-    private func requestNotificationPermission() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
+    // Connection-state cohort moved to ManifoldStore+ConnectionState.swift.
+    // Cross-file extensions can't see `private`, so the supporting stored
+    // properties were promoted to module-internal in the type body above.
 
     private func consumePendingFinderRequest() {
         let requestURL = FileManager.default.homeDirectoryForCurrentUser
