@@ -46,7 +46,9 @@ public struct DatabaseMigrator {
         if applied > 0 {
             logger.info("Migrations complete. Schema at version \(Self.migrations.last?.version ?? 0)")
         }
-        try Self.repairCurrentSchema(db)
+        try db.transaction {
+            try Self.repairCurrentSchema(db)
+        }
         return applied
     }
 

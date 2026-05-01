@@ -19,7 +19,7 @@ struct MailReviewView: View {
     @State private var sortOrder = [KeyPathComparator(\MailReviewRow.receivedDate, order: .reverse)]
 
     private var connectedAgents: [TargetApp] {
-        TargetApp.allCases
+        store.connectedAgents.compactMap(TargetApp.init(rawValue:))
     }
 
     private var connectedAgentsKey: String {
@@ -675,6 +675,21 @@ private struct SenderAvatar: View {
 }
 
 enum MailDisplayFormatter {
+    nonisolated(unsafe) private static let todayTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    nonisolated(unsafe) private static let monthDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM d")
+        return f
+    }()
+
+    nonisolated(unsafe) private static let relativeFormatter = RelativeDateTimeFormatter()
+
     static func date(from rawValue: String) -> Date {
         ISO8601DateFormatter.shared.date(from: rawValue) ?? .distantPast
     }
@@ -683,23 +698,17 @@ enum MailDisplayFormatter {
         let date = date(from: rawValue)
         let calendar = Calendar.current
         if calendar.isDateInToday(date) {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .none
-            formatter.timeStyle = .short
-            return "Today \(formatter.string(from: date))"
+            return "Today \(todayTimeFormatter.string(from: date))"
         }
         if calendar.isDateInYesterday(date) {
             return "Yesterday"
         }
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMM d")
-        return formatter.string(from: date)
+        return monthDayFormatter.string(from: date)
     }
 
     static func relativeTimestamp(_ rawValue: String?) -> String {
         guard let rawValue else { return "recently" }
-        let formatter = RelativeDateTimeFormatter()
-        return formatter.localizedString(for: date(from: rawValue), relativeTo: .now)
+        return relativeFormatter.localizedString(for: date(from: rawValue), relativeTo: .now)
     }
 
     static func compactPreview(_ rawValue: String) -> String {

@@ -20,6 +20,12 @@ struct AdvancedSettingsPane: View {
     @State private var deleteConfirmationPresented = false
     @State private var saveSheetPresented = false
 
+    private var connectedAgentsLabel: String {
+        let agents = store.connectedAgents.compactMap(TargetApp.init(rawValue:))
+        guard !agents.isEmpty else { return "none" }
+        return agents.map(AgentMeta.label).joined(separator: ", ")
+    }
+
     var body: some View {
         Form {
             Section("Runtime") {
@@ -35,9 +41,7 @@ struct AdvancedSettingsPane: View {
                     }
                 }
                 LabeledContent("Connected agents") {
-                    Text(store.connectedAgents.isEmpty
-                         ? "none"
-                         : store.connectedAgents.joined(separator: ", "))
+                    Text(connectedAgentsLabel)
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -172,10 +172,11 @@ struct EmailAccountSetupView: View {
         }
     }
 
+    private static let cachedAuthConfig = LocalAuthConfig.load()
+
     private var oauthUnavailableMessage: String? {
         guard isOAuthProvider else { return nil }
-        let config = LocalAuthConfig.load()
-        guard config.isMicrosoftOAuthConfigured else {
+        guard Self.cachedAuthConfig.isMicrosoftOAuthConfigured else {
             return "This build does not include Microsoft OAuth configuration. Developer and fork builds must configure MicrosoftClientID and a redirect URI locally."
         }
         return nil
@@ -198,9 +199,9 @@ struct EmailAccountSetupView: View {
     private var providerTint: Color {
         switch provider {
         case .gmail:    return .red
-        case .outlook:  return ManifoldPalette.claude
+        case .outlook:  return .blue
         case .icloud:   return .cyan
-        case .yahoo:    return ManifoldPalette.codex
+        case .yahoo:    return .purple
         case .fastmail: return .indigo
         case .other:    return .secondary
         }
@@ -248,8 +249,7 @@ struct EmailAccountSetupView: View {
             return
         }
 
-        let config = LocalAuthConfig.load()
-        let client = MicrosoftOAuthClient(config: config)
+        let client = MicrosoftOAuthClient(config: Self.cachedAuthConfig)
         let request: MicrosoftOAuthAuthorizationRequest
         do {
             request = try client.makeAuthorizationRequest(emailAddress: username)

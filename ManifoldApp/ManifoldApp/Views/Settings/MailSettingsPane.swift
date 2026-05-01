@@ -112,9 +112,9 @@ private struct MailAccountRow: View {
     private var providerTint: Color {
         switch provider {
         case .gmail:    return .red
-        case .outlook:  return ManifoldPalette.claude
+        case .outlook:  return .blue
         case .icloud:   return .cyan
-        case .yahoo:    return ManifoldPalette.codex
+        case .yahoo:    return .purple
         case .fastmail: return .indigo
         case .other:    return .secondary
         }

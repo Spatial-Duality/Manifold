@@ -70,13 +70,6 @@ struct StorageSettingsPane: View {
             }
         }
         .formStyle(.grouped)
-        .safeAreaInset(edge: .bottom) {
-            Text("Manifold \(Bundle.main.shortVersionString)")
-                .font(ManifoldType.caption)
-                .foregroundStyle(.quaternary)
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, Spacing.s2)
-        }
     }
 }
 
