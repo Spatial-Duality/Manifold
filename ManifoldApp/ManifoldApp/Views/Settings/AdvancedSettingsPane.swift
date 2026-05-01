@@ -123,7 +123,7 @@ struct AdvancedSettingsPane: View {
             }
 
             Section {
-                Text("Landing here is a self-selection into engineering diagnostics. Plain-language controls live in the other panes; this one exists so you can see exactly what Manifold is doing on your Mac.")
+                Text("Advanced contains runtime paths and diagnostics for troubleshooting. Everyday controls live in the other Settings panes.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -174,12 +174,15 @@ private struct DiagnosticReportPreviewSheet: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s2) {
-            Text("Diagnostic Report")
-                .font(ManifoldType.heading)
-            Text("Preview the exact JSON that would be saved or sent. Nothing leaves your Mac unless you press Send.")
-                .font(ManifoldType.caption)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            SettingsSheetHeader(
+                title: "Diagnostic Report",
+                subtitle: "Preview the JSON that would be saved or sent. Nothing leaves your Mac unless you press Send.",
+                systemImage: "doc.text.magnifyingglass",
+                accent: ManifoldPalette.selection
+            )
+
+            Divider()
 
             ScrollView {
                 Text(json)
@@ -188,12 +191,18 @@ private struct DiagnosticReportPreviewSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Spacing.s2)
             }
-            .background(Color(NSColor.textBackgroundColor))
-            .cornerRadius(6)
+            .background(ManifoldPalette.surface2)
+            .clipShape(RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+            )
+            .padding(Spacing.s5)
             .accessibilityIdentifier("diagnostics.preview")
 
-            HStack {
-                Spacer()
+            Divider()
+
+            SettingsSheetFooter {
                 Button("Save to File…", action: onSave)
                     .accessibilityIdentifier("diagnostics.saveToFile")
                 if canSend {
@@ -201,11 +210,11 @@ private struct DiagnosticReportPreviewSheet: View {
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("diagnostics.send")
                 }
+
                 Button("Close", action: onClose)
                     .keyboardShortcut(.cancelAction)
             }
         }
-        .padding(Spacing.s4)
     }
 }
 

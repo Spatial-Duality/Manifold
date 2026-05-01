@@ -347,47 +347,51 @@ private struct CaptureScopeSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s4) {
-            Text("Capture current scope as a template")
-                .font(ManifoldType.heading)
+        VStack(spacing: 0) {
+            SettingsSheetHeader(
+                title: "Capture current scope",
+                subtitle: "Save the sources \(displayName(for: selectedAgent)) can currently see as a reusable session template.",
+                systemImage: "person.badge.clock",
+                accent: ManifoldPalette.preview
+            )
 
-            Text("Saves the sources \(displayName(for: selectedAgent)) can currently see as a named template you can re-run later. Per-file overrides aren't captured — they're persistent across sessions.")
-                .font(ManifoldType.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Divider()
 
-            VStack(alignment: .leading, spacing: Spacing.s2) {
-                Text("Name")
-                    .font(ManifoldType.captionMedium)
-                    .foregroundStyle(.secondary)
-                TextField("e.g. Q4 Reporting", text: $draftName)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(saveIfValid)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.s2) {
-                Text("Capture from")
-                    .font(ManifoldType.captionMedium)
-                    .foregroundStyle(.secondary)
-                Picker("Capture from", selection: $selectedAgent) {
-                    ForEach(connectedAgents, id: \.rawValue) { agent in
-                        Text(displayName(for: agent)).tag(agent)
-                    }
+            Form {
+                Section("Template") {
+                    TextField("Name", text: $draftName, prompt: Text("e.g. Q4 Reporting"))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveIfValid)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-            }
 
-            HStack {
-                Spacer()
+                Section("Capture from") {
+                    Picker("Agent", selection: $selectedAgent) {
+                        ForEach(connectedAgents, id: \.rawValue) { agent in
+                            Text(displayName(for: agent)).tag(agent)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Per-file overrides are not copied into the template. They remain persistent policy and apply when the template runs.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(ManifoldPalette.bg)
+
+            Divider()
+
+            SettingsSheetFooter {
                 Button("Cancel", role: .cancel, action: onCancel)
                 Button("Save", action: saveIfValid)
                     .keyboardShortcut(.defaultAction)
                     .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(Spacing.s4)
-        .frame(width: 420)
+        .frame(width: 460, height: 360)
     }
 
     private func saveIfValid() {

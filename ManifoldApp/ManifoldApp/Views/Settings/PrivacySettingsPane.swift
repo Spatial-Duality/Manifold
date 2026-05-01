@@ -920,16 +920,12 @@ private struct AddPrivacyIdentitySheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: Spacing.s2) {
-                Text("Add Identity")
-                    .font(ManifoldType.heading)
-                Text("Anything matching this value will be treated as yours and redacted or blocked before agents see it.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Spacing.s4)
+            SettingsSheetHeader(
+                title: "Add Identity",
+                subtitle: "Anything matching this value is treated as yours and protected before agents see it.",
+                systemImage: "person.crop.circle.badge.shield.checkmark",
+                accent: ManifoldPalette.attention
+            )
 
             Divider()
 
@@ -953,13 +949,15 @@ private struct AddPrivacyIdentitySheet: View {
             }
             .formStyle(.grouped)
             .frame(minHeight: 220)
+            .scrollContentBackground(.hidden)
+            .background(ManifoldPalette.bg)
 
             Divider()
 
-            HStack {
-                Spacer()
+            SettingsSheetFooter {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+
                 Button("Add") {
                     let record = PrivacyIdentityRecord(
                         kind: kind,
@@ -975,9 +973,8 @@ private struct AddPrivacyIdentitySheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(value.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(Spacing.s4)
         }
-        .frame(width: 460)
+        .frame(width: 480)
     }
 }
 
@@ -992,16 +989,12 @@ private struct AddOrgAllowEntrySheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: Spacing.s2) {
-                Text("Add Allowlist Entry")
-                    .font(ManifoldType.heading)
-                Text("Suppress contact-category findings from this source. Secrets and identity matches are never suppressed.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Spacing.s4)
+            SettingsSheetHeader(
+                title: "Add Allowlist Entry",
+                subtitle: "Suppress contact findings from a trusted source. Secrets and identity matches still stay protected.",
+                systemImage: "building.2.crop.circle",
+                accent: ManifoldPalette.selection
+            )
 
             Divider()
 
@@ -1021,13 +1014,15 @@ private struct AddOrgAllowEntrySheet: View {
             }
             .formStyle(.grouped)
             .frame(minHeight: 180)
+            .scrollContentBackground(.hidden)
+            .background(ManifoldPalette.bg)
 
             Divider()
 
-            HStack {
-                Spacer()
+            SettingsSheetFooter {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+
                 Button("Add") {
                     let entry = PrivacyOrgAllowEntry(
                         kind: kind,
@@ -1043,8 +1038,7 @@ private struct AddOrgAllowEntrySheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(pattern.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(Spacing.s4)
         }
-        .frame(width: 460)
+        .frame(width: 480)
     }
 }

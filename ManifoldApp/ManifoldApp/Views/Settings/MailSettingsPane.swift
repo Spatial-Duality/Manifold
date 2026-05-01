@@ -15,47 +15,46 @@ import ManifoldKit
 
 struct MailSettingsPane: View {
     @Environment(ManifoldStore.self) var store
-    @State private var showAddAccount = false
+    @Binding var addAccountSheetPresented: Bool
 
     var body: some View {
-        Form {
-            Section("Accounts") {
-                if store.mailAccounts.accounts.isEmpty {
-                    ContentUnavailableView(
-                        "No mailboxes connected",
-                        systemImage: "envelope.badge",
-                        description: Text("Connect a mailbox so Claude or Codex can see subject lines — or trusted-sender bodies — during a session.")
-                    )
-                    .padding(.vertical, Spacing.s4)
-                } else {
-                    ForEach(store.mailAccounts.accounts) { account in
-                        MailAccountRow(
-                            account: account,
-                            syncEnabled: syncBinding(for: account)
+        VStack(spacing: 0) {
+            Form {
+                Section("Accounts") {
+                    if store.mailAccounts.accounts.isEmpty {
+                        ContentUnavailableView(
+                            "No mailboxes connected",
+                            systemImage: "envelope.badge",
+                            description: Text("Connect a mailbox so Claude or Codex can see subject lines — or trusted-sender bodies — during a session.")
                         )
+                        .padding(.vertical, Spacing.s4)
+                    } else {
+                        ForEach(store.mailAccounts.accounts) { account in
+                            MailAccountRow(
+                                account: account,
+                                syncEnabled: syncBinding(for: account)
+                            )
+                        }
+                    }
+
+                    Button("Connect a mailbox\u{2026}", systemImage: "plus") {
+                        addAccountSheetPresented = true
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("settings.mail.connectAccount")
+                }
+
+                Section("Storage") {
+                    LabeledContent("Backup location") {
+                        PathLabel(store.mailAccounts.backupRootPath)
+                    }
+                    LabeledContent("Total messages") {
+                        Text("\(store.mailAccounts.totalMessageCount)")
+                            .monospacedDigit()
                     }
                 }
-
-                Button("Connect a mailbox\u{2026}", systemImage: "plus") {
-                    showAddAccount = true
-                }
-                .controlSize(.small)
             }
-
-            Section("Storage") {
-                LabeledContent("Backup location") {
-                    PathLabel(store.mailAccounts.backupRootPath)
-                }
-                LabeledContent("Total messages") {
-                    Text("\(store.mailAccounts.totalMessageCount)")
-                        .monospacedDigit()
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .sheet(isPresented: $showAddAccount) {
-            AddMailAccountSheet()
-                .environment(store)
+            .formStyle(.grouped)
         }
     }
 

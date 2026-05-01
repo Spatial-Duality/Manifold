@@ -31,9 +31,6 @@ struct EmailAccountSetupView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, Spacing.s6)
-                .padding(.top, Spacing.s6)
-                .padding(.bottom, Spacing.s4)
 
             Divider()
 
@@ -41,21 +38,26 @@ struct EmailAccountSetupView: View {
                 Section("Mailbox") {
                     TextField("Display name", text: $displayName)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("settings.mail.account.displayName")
                     TextField("Email address", text: $username)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("settings.mail.account.username")
                 }
 
                 Section("IMAP server") {
                     TextField("Server", text: $server)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("settings.mail.account.server")
                     TextField("Port", text: $portText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 96)
+                        .accessibilityIdentifier("settings.mail.account.port")
                 }
 
                 Section("Credential") {
                     SecureField("Password or app password", text: $password)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("settings.mail.account.password")
                 }
 
                 if let errorMessage {
@@ -67,14 +69,13 @@ struct EmailAccountSetupView: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
+            .background(ManifoldPalette.bg)
 
             Divider()
 
-            HStack {
+            SettingsSheetFooter {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-
-                Spacer()
 
                 Button {
                     submit()
@@ -89,29 +90,20 @@ struct EmailAccountSetupView: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSubmit || isSaving)
+                .accessibilityIdentifier("settings.mail.account.connect")
             }
-            .padding(Spacing.s5)
         }
         .frame(width: 500, height: 520)
     }
 
     private var header: some View {
-        HStack(spacing: Spacing.s3) {
-            Image(systemName: provider.systemImage)
-                .font(.system(size: 30, weight: .regular))
-                .foregroundStyle(providerTint)
-                .frame(width: 40)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Connect \(provider.displayName)")
-                    .font(ManifoldType.heading)
-                Text("Credentials are stored in your macOS keychain.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
+        SettingsSheetHeader(
+            title: "Connect \(provider.displayName)",
+            subtitle: "Enter the IMAP details Manifold will use for local sync. Credentials are stored in your macOS keychain.",
+            systemImage: provider.systemImage,
+            accent: providerTint
+        )
+        .accessibilityIdentifier("settings.mail.account.header")
     }
 
     private var canSubmit: Bool {

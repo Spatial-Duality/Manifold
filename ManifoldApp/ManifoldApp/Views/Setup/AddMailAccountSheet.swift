@@ -13,43 +13,41 @@ struct AddMailAccountSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(spacing: Spacing.s2) {
-                Image(systemName: "envelope.badge.shield.half.filled")
-                    .font(.system(size: 40, weight: .regular))
-                    .foregroundStyle(ManifoldPalette.codex)
-                Text("Connect a mailbox")
-                    .font(ManifoldType.heading)
-                Text("Choose your email provider to get started.")
-                    .font(ManifoldType.body)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, Spacing.s6)
-            .padding(.bottom, Spacing.s4)
+            SettingsSheetHeader(
+                title: "Connect a mailbox",
+                subtitle: "Pick the account type Manifold should sync into its local mail backup.",
+                systemImage: "envelope.badge.shield.half.filled",
+                accent: ManifoldPalette.claude
+            )
+            .accessibilityIdentifier("settings.mail.addAccount.header")
 
             Divider()
 
-            // Provider selection
             ScrollView {
-                VStack(spacing: Spacing.standard) {
+                VStack(alignment: .leading, spacing: Spacing.s3) {
+                    Text("Provider")
+                        .font(ManifoldType.tiny)
+                        .textCase(.uppercase)
+                        .tracking(0.4)
+                        .foregroundStyle(ManifoldPalette.text2)
+
                     providerButton(.gmail, icon: "envelope.fill", color: .red, label: "Gmail")
                     providerButton(.outlook, icon: "envelope.fill", color: .blue, label: "Outlook / Microsoft 365")
                     providerButton(.icloud, icon: "envelope.fill", color: .cyan, label: "iCloud Mail")
                     providerButton(.yahoo, icon: "envelope.fill", color: .purple, label: "Yahoo Mail")
+                    providerButton(.fastmail, icon: "paperplane.fill", color: .indigo, label: "Fastmail")
                     providerButton(.other, icon: "server.rack", color: .secondary, label: "Other IMAP Server")
                 }
-                .padding(Spacing.edge)
+                .padding(Spacing.s5)
             }
+            .background(ManifoldPalette.bg)
 
             Divider()
 
-            // Footer
-            HStack {
+            SettingsSheetFooter {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Spacer()
             }
-            .padding(Spacing.edge)
         }
         .frame(width: 460, height: 440)
         .sheet(item: $selectedProvider) { provider in
@@ -66,27 +64,54 @@ struct AddMailAccountSheet: View {
             selectedProvider = provider
         } label: {
             HStack(spacing: Spacing.section) {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                    .frame(width: 24)
-                Text(label)
-                    .font(.body)
+                SettingsSymbolTile(systemImage: icon, accent: color, size: 34)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(ManifoldType.bodyMedium)
+                        .foregroundStyle(ManifoldPalette.text)
+                    Text(provider.detail)
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(ManifoldPalette.text2)
+                }
+
                 Spacer()
+
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.tertiary)
                     .imageScale(.small)
             }
-            .padding(Spacing.section)
-            .background(.background, in: .rect(cornerRadius: 8))
+            .padding(Spacing.s3)
+            .background(ManifoldPalette.surface, in: RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(.separator, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.mail.provider.\(provider.rawValue)")
     }
 }
 
 extension EmailProvider: @retroactive Identifiable {
     public var id: String { rawValue }
+}
+
+private extension EmailProvider {
+    var detail: String {
+        switch self {
+        case .gmail:
+            return "imap.gmail.com"
+        case .outlook:
+            return "Microsoft 365 and Outlook IMAP"
+        case .icloud:
+            return "iCloud Mail app-password flow"
+        case .yahoo:
+            return "Yahoo Mail IMAP"
+        case .fastmail:
+            return "Fastmail IMAP"
+        case .other:
+            return "Custom host, port, and credentials"
+        }
+    }
 }

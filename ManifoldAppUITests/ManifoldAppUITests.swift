@@ -268,6 +268,40 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "mail.message.share.agent.codex").exists)
     }
 
+    func testMailSettingsConnectMailboxFlowShowsProviderAndCredentialSteps() {
+        let app = launchFixture(profile: "tracked-work")
+
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
+        openSettings(in: app)
+        clickSettingsTab("Mail", contentID: "settings.mail.connectAccount", in: app)
+
+        let connectAccount = element(in: app, id: "settings.mail.connectAccount")
+        XCTAssertTrue(connectAccount.waitForExistence(timeout: 8))
+        connectAccount.click()
+
+        XCTAssertTrue(element(in: app, id: "settings.mail.addAccount.header").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "settings.mail.provider.fastmail").exists)
+
+        let gmailProvider = element(in: app, id: "settings.mail.provider.gmail")
+        XCTAssertTrue(gmailProvider.waitForExistence(timeout: 8))
+        gmailProvider.click()
+
+        XCTAssertTrue(element(in: app, id: "settings.mail.account.header").waitForExistence(timeout: 8))
+        XCTAssertTrue(element(in: app, id: "settings.mail.account.displayName").waitForExistence(timeout: 5))
+
+        let username = element(in: app, id: "settings.mail.account.username")
+        clearAndType(username, text: "ada.lovelace@example.test")
+
+        let password = element(in: app, id: "settings.mail.account.password")
+        XCTAssertTrue(password.waitForExistence(timeout: 5))
+        password.click()
+        password.typeText("sample-app-password-only")
+
+        XCTAssertTrue(element(in: app, id: "settings.mail.account.server").exists)
+        XCTAssertTrue(element(in: app, id: "settings.mail.account.port").exists)
+        XCTAssertTrue(element(in: app, id: "settings.mail.account.connect").isEnabled)
+    }
+
     func testAccessFoldersCanClearMixedScopeForBothAgents() {
         let app = launchFixture(profile: "tracked-work")
 

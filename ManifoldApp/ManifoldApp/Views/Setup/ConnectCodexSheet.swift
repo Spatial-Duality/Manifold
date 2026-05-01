@@ -14,83 +14,82 @@ struct ConnectCodexSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(spacing: Spacing.s2) {
-                GradientAvatar(agent: .codex, size: .extraLarge)
-                Text("Connect Codex")
-                    .font(ManifoldType.heading)
-            }
-            .padding(.top, Spacing.s6)
+            SettingsSheetHeader(
+                title: "Connect Codex",
+                subtitle: "Add Manifold to Codex MCP configuration and verify the local bridge.",
+                systemImage: AgentMeta.systemImage(.codex),
+                accent: AgentMeta.color(.codex)
+            )
 
-            Spacer()
+            Divider()
 
-            VStack(alignment: .leading, spacing: 16) {
-                LiveCheckRow(
-                    label: "Codex app installed",
-                    status: store.integrationHealth.codex.codexAppInstalled,
-                    action: { openWebPage("https://openai.com/index/introducing-codex/") },
-                    actionLabel: "Install",
-                    onRefresh: { await store.integrationHealth.checkCodex() }
-                )
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.s4) {
+                    LiveCheckRow(
+                        label: "Codex app installed",
+                        status: store.integrationHealth.codex.codexAppInstalled,
+                        action: { openWebPage("https://openai.com/index/introducing-codex/") },
+                        actionLabel: "Install",
+                        onRefresh: { await store.integrationHealth.checkCodex() }
+                    )
 
-                LiveCheckRow(
-                    label: "Manifold added",
-                    status: store.integrationHealth.codex.mcpAdded,
-                    action: {
-                        adding = true
-                        addError = nil
-                        // Use ConfigWriter to add Manifold to Codex's MCP config.
-                        do {
-                            let writer = ConfigWriter(
-                                binaryPath: ManifoldStore.mcpBinaryPath,
-                                homeDir: FileManager.default.homeDirectoryForCurrentUser
-                            )
-                            try writer.installCodex()
-                            Task {
-                                await store.integrationHealth.checkCodex()
+                    LiveCheckRow(
+                        label: "Manifold added",
+                        status: store.integrationHealth.codex.mcpAdded,
+                        action: {
+                            adding = true
+                            addError = nil
+                            do {
+                                let writer = ConfigWriter(
+                                    binaryPath: ManifoldStore.mcpBinaryPath,
+                                    homeDir: FileManager.default.homeDirectoryForCurrentUser
+                                )
+                                try writer.installCodex()
+                                Task {
+                                    await store.integrationHealth.checkCodex()
+                                    adding = false
+                                }
+                            } catch {
+                                addError = error.localizedDescription
                                 adding = false
                             }
-                        } catch {
-                            addError = error.localizedDescription
-                            adding = false
-                        }
-                    },
-                    actionLabel: adding ? "Adding\u{2026}" : "Add to Codex",
-                    onRefresh: { await store.integrationHealth.checkCodex() }
-                )
+                        },
+                        actionLabel: adding ? "Adding\u{2026}" : "Add to Codex",
+                        onRefresh: { await store.integrationHealth.checkCodex() }
+                    )
 
-                if let addError {
-                    Text(addError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .padding(.leading, 36)
-                }
-
-                DisclosureGroup("Details") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        DetailLine("Binary", value: ManifoldStore.mcpBinaryPath)
-                        DetailLine("Config", value: "~/.codex/config.toml")
+                    if let addError {
+                        Label(addError, systemImage: "exclamationmark.triangle")
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(ManifoldPalette.attention)
                     }
+
+                    DisclosureGroup("Details") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            DetailLine("Binary", value: ManifoldStore.mcpBinaryPath)
+                            DetailLine("Config", value: "~/.codex/config.toml")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .padding(Spacing.s5)
+                .frame(maxWidth: 420, alignment: .leading)
             }
-            .frame(maxWidth: 380)
+            .background(ManifoldPalette.bg)
 
-            Spacer()
+            Divider()
 
-            // Footer — 2 buttons only (same as Claude)
-            HStack {
+            SettingsSheetFooter {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Spacer()
+
                 if store.integrationHealth.codex.mcpAdded.isPassingCheck {
                     Button("Done") { dismiss() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                 }
             }
-            .padding(20)
         }
         .frame(width: 460, height: 420)
         .task { await store.integrationHealth.checkCodex() }
