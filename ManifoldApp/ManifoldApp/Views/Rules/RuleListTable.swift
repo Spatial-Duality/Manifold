@@ -249,28 +249,22 @@ private struct RulesEmptyState: View {
     let filter: RulesModel.Filter
 
     var body: some View {
-        VStack(spacing: Spacing.s3) {
-            Image(systemName: filter.symbol)
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("No rules in \(filter.title.lowercased())")
-                .font(ManifoldType.bodyMedium)
-            Text(message)
-                .font(ManifoldType.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 360)
-        }
+        EmptyStateIllustration(
+            systemImage: filter.symbol,
+            title: "No rules in \(filter.title.lowercased())",
+            subtitle: message,
+            tint: ManifoldPalette.active,
+            style: .brandMark
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)
     }
 
     private var message: String {
         if filter == .privacy {
-            return "Create a Privacy Filter rule to block, redact, warn, or log content found by the OpenAI privacy filter before an agent sees it."
+            return "Create a Privacy Filter rule to block, redact, warn, or log content found by the privacy filter before an agent sees it."
         }
-        return "Create a rule using the + menu in the toolbar. Rules control what agents can read, write, or see."
+        return "Add a rule with the + button. Rules control what agents can read, write, or see — applied before content leaves Manifold."
     }
 }
 

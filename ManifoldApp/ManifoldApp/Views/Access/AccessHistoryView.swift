@@ -22,7 +22,9 @@ struct AccessHistoryView: View {
                     EmptyStateIllustration(
                         systemImage: "clock.arrow.circlepath",
                         title: "No past sessions yet",
-                        subtitle: "When you finish a session it lands here with the scope it used and the evidence it produced."
+                        subtitle: "When you finish a session it lands here with the scope it used and the evidence it produced.",
+                        tint: ManifoldPalette.preview,
+                        style: .activity
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.s8)

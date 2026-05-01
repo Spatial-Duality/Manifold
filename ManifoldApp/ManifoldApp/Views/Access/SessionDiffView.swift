@@ -36,7 +36,9 @@ struct SessionDiffView: View {
                     EmptyStateIllustration(
                         systemImage: "play.circle",
                         title: "No session running",
-                        subtitle: "Start a session to layer scope changes on top of defaults — the diff shows up here, live."
+                        subtitle: "Start a session to layer scope changes on top of defaults — the diff shows up here, live.",
+                        tint: ManifoldPalette.active,
+                        style: .brandMark
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.s8)

@@ -50,6 +50,7 @@ private struct WorkMainPane: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.s4) {
+                    WorkFirstRunCoachmark()
                     if let issue = workRuntimeIssue(store: store) {
                         WorkRuntimeIssueBanner(issue: issue, work: work)
                     }
@@ -62,6 +63,54 @@ private struct WorkMainPane: View {
             }
         }
         .accessibilityIdentifier("work.main")
+    }
+}
+
+/// One-shot welcome card shown on a fresh user's first visit to Work.
+/// Quietly explains the three regions (sessions, approvals, activity)
+/// and dismisses on first interaction or click. Auto-dismisses on the
+/// first user action so it doesn't outstay its welcome.
+private struct WorkFirstRunCoachmark: View {
+    @AppStorage("work.coachmark.dismissed") private var dismissed: Bool = false
+
+    var body: some View {
+        if !dismissed {
+            HStack(alignment: .top, spacing: Spacing.s3) {
+                BrandMark(placement: .inline, color: ManifoldPalette.brand)
+                    .frame(width: 22, height: 22)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Welcome to Work")
+                        .font(ManifoldType.bodyMedium)
+                        .foregroundStyle(ManifoldPalette.text)
+                    Text("Sessions land in the command strip above. Pending approvals and the activity ledger flow here. The inspector on the right shows whatever you've selected.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Spacing.s2)
+                Button {
+                    withAnimation(ManifoldMotion.landing) { dismissed = true }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss welcome")
+            }
+            .padding(Spacing.s3)
+            .background(
+                RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                    .fill(ManifoldPalette.brandSoft)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
+                    .strokeBorder(ManifoldPalette.brand.opacity(0.18), lineWidth: 0.5)
+            )
+            .transition(.opacity.combined(with: .move(edge: .top)))
+            .accessibilityIdentifier("work.coachmark")
+        }
     }
 }
 
