@@ -157,9 +157,14 @@ struct EmptyStateIllustration: View {
             }
         case .brandMark:
             ZStack {
+                // Saffron watermark — barely-there brand presence in
+                // empty surfaces. Far quieter than a full atmospheric
+                // background (which would cost Metal shader cycles for
+                // a surface the user mostly passes through). Reads as
+                // "Manifold's there, watching the empty room."
                 BrandMark(
                     placement: .display,
-                    color: ManifoldPalette.text2.opacity(0.16)
+                    color: ManifoldPalette.brand.opacity(0.10)
                 )
                 .frame(width: 116, height: 116)
                 Image(systemName: systemImage)

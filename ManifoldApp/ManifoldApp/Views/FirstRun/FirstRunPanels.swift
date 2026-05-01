@@ -11,54 +11,42 @@ import ManifoldKit
 struct ConceptPanel: View {
     let next: () -> Void
 
-    @State private var glow = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        VStack(spacing: Spacing.s6) {
-            Spacer()
+        // Full-bleed atmospheric backdrop carries the brand identity.
+        // Replaces the previous halo-glow circle behind a static mark —
+        // we now have proper layered atmosphere (breathing mesh + curl
+        // cloud + grain) doing the work the halo was approximating.
+        AtmosphericBackground {
+            VStack(spacing: Spacing.s6) {
+                Spacer()
 
-            ZStack {
-                if !reduceMotion {
-                    // Soft halo behind the mark. Tinted to the neutral text token
-                    // (not an agent color) so the brand reads as the brand;
-                    // agent colors come back in once the icon + palette land.
-                    Circle()
-                        .fill(ManifoldPalette.text2.opacity(0.18))
-                        .frame(width: 180, height: 180)
-                        .blur(radius: 32)
-                        .scaleEffect(glow ? 1.08 : 0.88)
-                        .opacity(glow ? 0.6 : 0.9)
-                        .animation(.easeInOut(duration: 3).repeatForever(autoreverses: true), value: glow)
-                        .onAppear { glow = true }
-                }
                 BrandMark(placement: .display, color: ManifoldPalette.text)
                     .frame(width: 140, height: 140)
+
+                VStack(spacing: Spacing.s3) {
+                    Text("Protect your next AI session")
+                        .font(ManifoldType.display)
+                        .foregroundStyle(ManifoldPalette.text)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("onboarding.concept.title")
+                    Text("Manifold governs the files and mail you choose to share here. It records what was exposed and changed, while staying honest about activity outside this boundary.")
+                        .font(ManifoldType.body)
+                        .foregroundStyle(ManifoldPalette.text.opacity(0.78))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 460)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Button("Continue", action: next)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding.concept.continue")
             }
-            .frame(height: 180)
-
-            VStack(spacing: Spacing.s3) {
-                Text("Protect your next AI session")
-                    .font(ManifoldType.display)
-                    .multilineTextAlignment(.center)
-                    .accessibilityIdentifier("onboarding.concept.title")
-                Text("Manifold governs the files and mail you choose to share here. It records what was exposed and changed, while staying honest about activity outside this boundary.")
-                    .font(ManifoldType.body)
-                    .foregroundStyle(ManifoldPalette.text2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 460)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-
-            Button("Continue", action: next)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("onboarding.concept.continue")
+            .padding(Spacing.s6)
         }
-        .padding(Spacing.s6)
         .accessibilityIdentifier("onboarding.panel.concept")
     }
 }

@@ -102,18 +102,25 @@ private struct StaticMarkLayer: View {
     let size: CGSize
 
     var body: some View {
-        VStack(spacing: 22) {
-            BrandMark(placement: .display, color: Tokens.ink)
-                .frame(width: 240, height: 240)
-            Text(wordmark)
-                .font(.system(size: 28, weight: .light))
-                .foregroundColor(Tokens.inkSoft)
-                .tracking(2)
-            Text(tagline)
-                .font(.system(size: 12, weight: .light))
-                .tracking(4)
-                .foregroundColor(Tokens.inkMute)
-                .opacity(0.8)
+        // Atmospheric saffron backdrop (breathing mesh + cloud + grain).
+        // Reduce-motion is honoured by the AtmosphericBackground itself —
+        // the cycles freeze at midpoint and the shader stack is skipped.
+        // Mark + wordmark + tagline sit on top in warm-charcoal.
+        AtmosphericBackground {
+            VStack(spacing: 22) {
+                BrandMark(placement: .display,
+                          color: ManifoldPalette.text)
+                    .frame(width: 240, height: 240)
+                Text(wordmark)
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(ManifoldPalette.text)
+                    .tracking(0.16 * 28)   // 16% letter-spacing
+                Text(tagline)
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(ManifoldPalette.text.opacity(0.65))
+                    .tracking(0.32 * 11)   // 32% letter-spacing
+                    .textCase(.uppercase)
+            }
         }
         .frame(width: size.width, height: size.height)
     }
