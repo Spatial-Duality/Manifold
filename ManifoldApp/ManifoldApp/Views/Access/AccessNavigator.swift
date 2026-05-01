@@ -24,7 +24,7 @@ struct AccessNavigator: View {
                         selection = .folders
                     }
                 } label: {
-                    Label("Add Folder", systemImage: "folder.badge.plus")
+                    Label("Add folder", systemImage: "folder.badge.plus")
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .accessibilityIdentifier("access.addFolder")
@@ -34,7 +34,7 @@ struct AccessNavigator: View {
                         selection = .files
                     }
                 } label: {
-                    Label("Add Files", systemImage: "doc.badge.plus")
+                    Label("Add files", systemImage: "doc.badge.plus")
                 }
                 .accessibilityIdentifier("access.addFiles")
             }

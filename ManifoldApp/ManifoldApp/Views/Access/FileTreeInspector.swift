@@ -400,7 +400,7 @@ private struct TreeRow: View {
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: node.path)])
                 }
-                Button("Copy Path") {
+                Button("Copy path") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(node.path, forType: .string)
                 }

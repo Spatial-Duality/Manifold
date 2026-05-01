@@ -33,7 +33,7 @@ struct AccessView: View {
             }
         }
         .background {
-            Button("Toggle Inspector") { isInspectorVisible.toggle() }
+            Button("Toggle inspector") { isInspectorVisible.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .opacity(0)
                 .accessibilityHidden(true)

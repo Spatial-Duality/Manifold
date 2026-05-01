@@ -366,7 +366,7 @@ struct FilesFlatView: View {
                 Button {
                     scopeFilter = .aiTouched
                 } label: {
-                    Label("AI-touched", systemImage: "sparkle")
+                    Label("Agent-touched", systemImage: "sparkle")
                 }
             } label: {
                 Label(scopeFilterLabel, systemImage: "line.3.horizontal.decrease.circle")
@@ -497,8 +497,8 @@ struct FilesFlatView: View {
                             // doing real work as a column glyph.
                             BrandMark(placement: .inline, color: ManifoldPalette.brand)
                                 .frame(width: 10, height: 10)
-                                .help("Manifold tracked an AI write to this file")
-                                .accessibilityLabel("AI-touched")
+                                .help("Manifold tracked an agent write to this file")
+                                .accessibilityLabel("Agent-touched")
                         }
                         if file.isDraftWorkspace {
                             Text("DRAFT")

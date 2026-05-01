@@ -153,7 +153,7 @@ struct SessionsSettingsPane: View {
             VStack(alignment: .leading, spacing: Spacing.section) {
                 Text("No saved sessions yet")
                     .font(ManifoldType.bodyMedium)
-                Text("Click Capture current scope in the toolbar to save the sources Claude or Codex can currently see as a named template you can re-run later.")
+                Text("Click Capture above to save the sources Claude or Codex can currently see as a named template you can re-run later.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

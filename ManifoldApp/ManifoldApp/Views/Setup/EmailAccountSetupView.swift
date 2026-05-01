@@ -272,7 +272,7 @@ struct EmailAccountSetupView: View {
                     return
                 }
                 guard let callbackURL else {
-                    errorMessage = "Microsoft sign-in did not return a callback."
+                    errorMessage = "Microsoft sign-in didn't complete. Try again or check your network connection."
                     isSaving = false
                     oauthSession = nil
                     return
@@ -305,7 +305,7 @@ struct EmailAccountSetupView: View {
         session.prefersEphemeralWebBrowserSession = false
         oauthSession = session
         if !session.start() {
-            errorMessage = "Microsoft sign-in could not be started."
+            errorMessage = "Couldn't start Microsoft sign-in. Try again."
             isSaving = false
             oauthSession = nil
         }

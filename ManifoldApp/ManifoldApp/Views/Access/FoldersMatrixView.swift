@@ -455,7 +455,7 @@ struct FoldersMatrixView: View {
                 Button {
                     Task { await bulkShare(agents: connectedAgents, inScope: true) }
                 } label: {
-                    Label("Share with Both", systemImage: "person.2.fill")
+                    Label("Share with both", systemImage: "person.2.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -464,7 +464,7 @@ struct FoldersMatrixView: View {
                 Button {
                     Task { await bulkShare(agents: connectedAgents, inScope: false) }
                 } label: {
-                    Label("Unshare from Both", systemImage: "person.2.slash")
+                    Label("Unshare from both", systemImage: "person.2.slash")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

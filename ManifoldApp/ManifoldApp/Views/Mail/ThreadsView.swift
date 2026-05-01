@@ -114,7 +114,7 @@ struct MailReviewView: View {
         }
         .background {
             // ⌥⌘0 toggles the inspector — matches the Files inspector chord.
-            Button("Toggle Mail Inspector") { isInspectorVisible.toggle() }
+            Button("Toggle mail inspector") { isInspectorVisible.toggle() }
                 .keyboardShortcut("0", modifiers: [.command, .option])
                 .opacity(0)
                 .accessibilityHidden(true)
@@ -554,7 +554,7 @@ private struct ThreadInspector: View {
                 ContentUnavailableView(
                     "No message selected",
                     systemImage: "sidebar.right",
-                    description: Text("Pick a backed-up message to inspect its metadata, safe excerpt, and visibility state.")
+                    description: Text("Pick a backed-up message to inspect its metadata, redacted preview, and visibility state.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 360)
             }

@@ -142,7 +142,7 @@ private struct WorkCommandStrip: View {
                     Label("Start blank", systemImage: "plus.rectangle")
                 }
             } label: {
-                Label("New Session", systemImage: "plus")
+                Label("New session", systemImage: "plus")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -180,7 +180,7 @@ private struct WorkCommandStrip: View {
             Button {
                 Task { await store.restartRuntimeHelper() }
             } label: {
-                Label("Restart Runtime", systemImage: "arrow.clockwise")
+                Label("Restart runtime", systemImage: "arrow.clockwise")
                     .symbolEffect(.rotate, value: store.isRuntimeConnected)
             }
             .controlSize(.small)
@@ -1645,7 +1645,7 @@ private struct WorkPreloadEditor: View {
             .toggleStyle(.switch)
             .accessibilityIdentifier("work.preload.fileMemory")
 
-            Text("Memory is still saved either way. Turn this on when the agent should query what happened with these files in earlier sessions.")
+            Text("Past activity is recorded regardless. Turn this on if the agent should be able to recall what happened with these files in earlier sessions.")
                 .font(ManifoldType.tiny)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1746,7 +1746,7 @@ private struct WorkPreloadEditor: View {
             if isLoadingEmails {
                 HStack(spacing: Spacing.s2) {
                     ProgressView().controlSize(.small)
-                    Text("Loading mail...")
+                    Text("Loading mail…")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                 }

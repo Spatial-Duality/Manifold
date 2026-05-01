@@ -72,7 +72,7 @@ struct PrivacySettingsPane: View {
                 PrivacyPresetsRow()
             }
         } header: {
-            Text("Auto-Settings")
+            Text("Auto-settings")
         } footer: {
             Text("Presets write global privacy settings and seed per-agent policies. Hand-tuned changes in Agents ▸ Privacy switch the preset to Custom.")
                 .font(ManifoldType.caption)
@@ -107,7 +107,7 @@ struct PrivacySettingsPane: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("No identities yet")
                             .font(ManifoldType.bodyMedium)
-                        Text("Add yourself so the privacy model knows what to treat as sensitive about *you* — not just anyone.")
+                        Text("Add yourself so Manifold can flag content sensitive to *you* specifically, not anyone.")
                             .font(ManifoldType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -122,7 +122,7 @@ struct PrivacySettingsPane: View {
                 Button {
                     showAddIdentity = true
                 } label: {
-                    Label("Add Identity", systemImage: "plus")
+                    Label("Add identity", systemImage: "plus")
                 }
                 .controlSize(.small)
                 .accessibilityIdentifier("settings.privacy.identities.add")
@@ -164,13 +164,13 @@ struct PrivacySettingsPane: View {
                 Button {
                     showAddAllowEntry = true
                 } label: {
-                    Label("Add Allowlist Entry", systemImage: "plus")
+                    Label("Add allowlist entry", systemImage: "plus")
                 }
                 .controlSize(.small)
                 .accessibilityIdentifier("settings.privacy.allowlist.add")
             }
         } header: {
-            Text("Org Allowlist")
+            Text("Org allowlist")
         } footer: {
             Text("Allowlist entries suppress contact-category findings (emails, URLs) from their domain. Secrets and identity matches are never suppressed.")
                 .font(ManifoldType.caption)
@@ -185,7 +185,7 @@ struct PrivacySettingsPane: View {
         Section {
             IndexStatusCard()
         } header: {
-            Text("Index Status")
+            Text("Index status")
         } footer: {
             Text("Content is scanned when folders or mailboxes change. Findings feed the approval queue and the My Identity suggestions list.")
                 .font(ManifoldType.caption)

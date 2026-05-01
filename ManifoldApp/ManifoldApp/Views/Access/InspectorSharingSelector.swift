@@ -69,7 +69,7 @@ struct InspectorSharingSelector: View {
 
     @ViewBuilder
     private var heroEmpty: some View {
-        Text("No AI connected")
+        Text("No agents connected")
             .font(.headline)
         Text("Connect Claude or Codex to start sharing this file.")
             .font(.callout)

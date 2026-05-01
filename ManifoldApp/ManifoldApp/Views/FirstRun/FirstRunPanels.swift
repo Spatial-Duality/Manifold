@@ -178,7 +178,7 @@ struct ScopeReviewPanel: View {
                 VStack(alignment: .leading, spacing: Spacing.s1) {
                     Text("Boundary")
                         .font(ManifoldType.captionMedium)
-                    Text("Manifold governs the access it mediates. Native app connectors, terminal access, and other local capabilities fall outside this boundary.")
+                    Text("Manifold governs file and mail access. Native app integrations, terminal access, and other local capabilities fall outside this boundary.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(ManifoldPalette.text2)
                         .fixedSize(horizontal: false, vertical: true)

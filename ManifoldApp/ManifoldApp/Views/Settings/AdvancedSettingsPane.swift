@@ -94,19 +94,19 @@ struct AdvancedSettingsPane: View {
 
             Section("Diagnostics") {
                 HStack {
-                    Button("Create Diagnostic Report…") {
+                    Button("Create diagnostic report…") {
                         diagnosticsPreviewPresented = true
                     }
                     .controlSize(.small)
                     .accessibilityIdentifier("diagnostics.createReport")
 
-                    Button("Reveal Diagnostics in Finder") {
+                    Button("Reveal diagnostics in Finder") {
                         store.diagnostics.revealDiagnosticsInFinder()
                     }
                     .controlSize(.small)
                     .accessibilityIdentifier("diagnostics.revealInFinder")
 
-                    Button("Delete Local Diagnostics", role: .destructive) {
+                    Button("Delete local diagnostics", role: .destructive) {
                         deleteConfirmationPresented = true
                     }
                     .controlSize(.small)
@@ -207,7 +207,7 @@ private struct DiagnosticReportPreviewSheet: View {
             Divider()
 
             SettingsSheetFooter {
-                Button("Save to File…", action: onSave)
+                Button("Save to file…", action: onSave)
                     .accessibilityIdentifier("diagnostics.saveToFile")
                 if canSend {
                     Button("Send to Spatial Duality", action: onSend)

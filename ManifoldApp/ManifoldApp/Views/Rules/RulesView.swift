@@ -307,7 +307,7 @@ private struct RulesToolbar: View {
                         await model.resetSeededRules()
                     }
                 } label: {
-                    Label("Restore Built-in Rules", systemImage: "arrow.clockwise")
+                    Label("Restore built-in rules", systemImage: "arrow.clockwise")
                 }
                 .disabled(isResettingSeeded)
                 .help("Re-enables built-in rules that were disabled and resyncs the catalog after an app update.")

@@ -55,9 +55,9 @@ public struct SharingControl: View {
     @ViewBuilder
     private var heroEmpty: some View {
         VStack(alignment: .leading, spacing: Spacing.standard) {
-            Text("No AI connected")
+            Text("No agents connected")
                 .font(.headline)
-            Text("Connect Claude or Codex to start sharing files. The selector here adapts to which AI you've activated, so you'll never see a greyed-out toggle.")
+            Text("Connect Claude or Codex to start sharing files.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

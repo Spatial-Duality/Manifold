@@ -38,7 +38,7 @@ struct WorkNavigator: View {
                     Label("Start blank", systemImage: "plus.rectangle")
                 }
             } label: {
-                Label("New Session", systemImage: "plus")
+                Label("New session", systemImage: "plus")
                     .labelStyle(.iconOnly)
             }
             .menuStyle(.borderlessButton)

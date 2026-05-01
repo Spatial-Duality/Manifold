@@ -66,11 +66,11 @@ struct GeneralSettingsPane: View {
                     }
                 }
             } header: {
-                Text("Updates & Diagnostics")
+                Text("Updates and diagnostics")
             } footer: {
                 VStack(alignment: .leading, spacing: Spacing.s2) {
                     Text("Diagnostic reports are kept on this Mac. Sending is manual — see the Advanced tab to preview, save, or send.")
-                    Text("All governed data stays on your Mac. Manifold records what Claude and Codex saw through Manifold, not everything they can do outside that path.")
+                    Text("All governed data stays on your Mac. Manifold records what Claude and Codex see through it. Activity outside Manifold is not tracked.")
                 }
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
@@ -115,7 +115,7 @@ private struct IdentityRow: View {
                 Text("Manifold")
                     .font(ManifoldType.display)
                     .foregroundStyle(ManifoldPalette.text)
-                Text("A local control layer for Claude and Codex through Manifold.")
+                Text("A local control layer for Claude and Codex.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
