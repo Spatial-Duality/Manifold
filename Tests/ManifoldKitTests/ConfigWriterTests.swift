@@ -437,6 +437,188 @@ struct ConfigWriterTests {
         #expect(beginCount == 1, "Three re-installs should still leave exactly one manifold block")
     }
 
+    // MARK: - Uninstall (R7)
+
+    @Test("Uninstall removes manifold from Claude Desktop while preserving other servers")
+    func uninstallClaudeDesktopPreservesOtherServers() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        // Install + add another server alongside.
+        let configDir = home.appendingPathComponent("Library/Application Support/Claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let initial: [String: Any] = [
+            "mcpServers": [
+                "manifold": ["command": "/old/manifold-mcp", "args": ["--agent", "cowork"]] as [String: Any],
+                "filesystem": ["command": "npx", "args": ["-y", "fs-server"]] as [String: Any],
+                "github": ["command": "npx"] as [String: Any],
+            ] as [String: Any],
+            "theme": "dark",
+        ]
+        let initialData = try JSONSerialization.data(withJSONObject: initial, options: [.prettyPrinted, .sortedKeys])
+        try initialData.write(to: configDir.appendingPathComponent("claude_desktop_config.json"))
+
+        let writer = ConfigWriter(binaryPath: "/new/manifold-mcp", homeDir: home)
+        try writer.uninstallClaudeDesktop()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("claude_desktop_config.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+
+        #expect(servers["manifold"] == nil, "Manifold removed")
+        #expect(servers["filesystem"] != nil, "Other servers preserved")
+        #expect(servers["github"] != nil, "Other servers preserved")
+        #expect(servers.count == 2, "Exactly the two non-manifold servers remain")
+        #expect(config["theme"] as? String == "dark", "Non-MCP keys preserved")
+    }
+
+    @Test("Uninstall removes the mcpServers key entirely if manifold was the only entry")
+    func uninstallClaudeDesktopRemovesEmptyMap() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent("Library/Application Support/Claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let initial: [String: Any] = [
+            "mcpServers": [
+                "manifold": ["command": "/old/manifold-mcp"] as [String: Any],
+            ] as [String: Any],
+            "theme": "dark",
+        ]
+        let data = try JSONSerialization.data(withJSONObject: initial, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configDir.appendingPathComponent("claude_desktop_config.json"))
+
+        let writer = ConfigWriter(binaryPath: "/new/manifold-mcp", homeDir: home)
+        try writer.uninstallClaudeDesktop()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("claude_desktop_config.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        #expect(config["mcpServers"] == nil, "Empty mcpServers map removed for tidiness")
+        #expect(config["theme"] as? String == "dark", "Other top-level keys preserved")
+    }
+
+    @Test("Uninstall is idempotent when manifold isn't installed")
+    func uninstallClaudeDesktopWhenAbsent() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent("Library/Application Support/Claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let initial: [String: Any] = [
+            "mcpServers": ["other": ["command": "x"] as [String: Any]] as [String: Any],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: initial, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configDir.appendingPathComponent("claude_desktop_config.json"))
+
+        let writer = ConfigWriter(binaryPath: "/x", homeDir: home)
+        try writer.uninstallClaudeDesktop() // No throw, no-op
+        try writer.uninstallClaudeDesktop() // Still no throw
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("claude_desktop_config.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+        #expect(servers["other"] != nil, "Untouched")
+    }
+
+    @Test("Uninstall is a no-op when the config file doesn't exist")
+    func uninstallClaudeDesktopNoFile() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+        let writer = ConfigWriter(binaryPath: "/x", homeDir: home)
+        try writer.uninstallClaudeDesktop() // Must not throw
+    }
+
+    @Test("Uninstall removes manifold from Claude Code while preserving other settings")
+    func uninstallClaudeCodePreservesPermissions() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let initial: [String: Any] = [
+            "permissions": ["allow": ["Read", "Bash"]] as [String: Any],
+            "mcpServers": [
+                "manifold": ["command": "/x"] as [String: Any],
+                "other-server": ["command": "y"] as [String: Any],
+            ] as [String: Any],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: initial, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configDir.appendingPathComponent("settings.json"))
+
+        let writer = ConfigWriter(binaryPath: "/x", homeDir: home)
+        try writer.uninstallClaudeCode()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("settings.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+
+        #expect(servers["manifold"] == nil)
+        #expect(servers["other-server"] != nil)
+        #expect(config["permissions"] != nil, "Non-MCP settings survive uninstall")
+    }
+
+    @Test("Uninstall removes manifold block from Codex TOML while preserving other sections")
+    func uninstallCodexPreservesOtherSections() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let codexDir = home.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        let initial = """
+        model = "gpt-5"
+
+        [mcp_servers.filesystem]
+        command = "npx"
+        args = ["-y", "fs-server"]
+
+        [mcp_servers.manifold]
+        command = "/old/manifold-mcp"
+        args = ["--agent", "codex"]
+
+        [mcp_servers.github]
+        command = "npx"
+        """
+        try initial.write(to: codexDir.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let writer = ConfigWriter(binaryPath: "/x", homeDir: home)
+        try writer.uninstallCodex()
+
+        let content = try String(contentsOf: codexDir.appendingPathComponent("config.toml"), encoding: .utf8)
+        #expect(!content.contains("[mcp_servers.manifold]"), "Manifold block removed")
+        #expect(content.contains("[mcp_servers.filesystem]"), "Other server block preserved")
+        #expect(content.contains("[mcp_servers.github]"), "Other server block preserved")
+        #expect(content.contains("model = \"gpt-5\""), "Top-level Codex config preserved")
+    }
+
+    @Test("Uninstall round-trip: install then uninstall returns to baseline")
+    func uninstallRoundTrip() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let configDir = home.appendingPathComponent("Library/Application Support/Claude")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let baseline: [String: Any] = [
+            "mcpServers": [
+                "filesystem": ["command": "npx"] as [String: Any],
+            ] as [String: Any],
+            "theme": "light",
+        ]
+        let baselineData = try JSONSerialization.data(withJSONObject: baseline, options: [.prettyPrinted, .sortedKeys])
+        try baselineData.write(to: configDir.appendingPathComponent("claude_desktop_config.json"))
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home)
+        try writer.installClaudeDesktop()
+        try writer.uninstallClaudeDesktop()
+
+        let result = try Data(contentsOf: configDir.appendingPathComponent("claude_desktop_config.json"))
+        let config = try JSONSerialization.jsonObject(with: result) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+
+        #expect(servers.count == 1, "Only the original filesystem server remains")
+        #expect(servers["filesystem"] != nil, "Original server preserved through round-trip")
+        #expect(config["theme"] as? String == "light", "Top-level keys preserved through round-trip")
+    }
+
     @Test("Re-install on an unchanged file does not modify mtime")
     func reinstallSkipsWriteWhenContentMatches() throws {
         let home = try makeTempHome()

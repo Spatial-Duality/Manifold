@@ -11,6 +11,14 @@ public final class ManifoldXPCClient: @unchecked Sendable {
         ManifoldRuntimeEnvironment.xpcServiceName()
     }
 
+    /// Posted on the main NotificationCenter when the underlying NSXPC
+    /// connection invalidates or is interrupted. Lets app-side state
+    /// react to disconnects in <100ms instead of waiting for the next
+    /// 5-second ping. The payload's `userInfo["connected"]` is `false`
+    /// today (we don't have a connect-event from the underlying API).
+    public static let connectionStateChangedNotification =
+        Notification.Name("manifold.xpc.connectionStateChanged")
+
     private let lock = NSLock()
     private var connection: NSXPCConnection?
 
@@ -139,7 +147,17 @@ public final class ManifoldXPCClient: @unchecked Sendable {
 
     private func resetConnection() {
         lock.lock()
-        defer { lock.unlock() }
         connection = nil
+        lock.unlock()
+        // Post on the main NotificationCenter so SwiftUI observers can
+        // react synchronously on the next main-thread tick. The XPC
+        // callbacks fire on a private queue, so we hop to main first.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: Self.connectionStateChangedNotification,
+                object: nil,
+                userInfo: ["connected": false]
+            )
+        }
     }
 }

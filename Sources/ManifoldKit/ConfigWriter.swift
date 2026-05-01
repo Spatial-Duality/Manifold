@@ -139,6 +139,109 @@ public struct ConfigWriter {
         logger.info("Wrote Claude Code config: \(configFile.path)")
     }
 
+    // MARK: - Uninstall
+
+    /// Removes the Manifold MCP entry from Claude Desktop's config while
+    /// preserving every other MCP server the user has configured. Idempotent:
+    /// safe to call when Manifold isn't installed (no-op).
+    public func uninstallClaudeDesktop() throws {
+        let configFile = homeDir
+            .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
+        try removeManifoldFromJSONConfig(at: configFile)
+    }
+
+    /// Removes the Manifold MCP entry from Claude Code's config while
+    /// preserving every other MCP server. Idempotent.
+    public func uninstallClaudeCode() throws {
+        let configFile = homeDir.appendingPathComponent(".claude/settings.json")
+        try removeManifoldFromJSONConfig(at: configFile)
+    }
+
+    /// Removes the Manifold MCP entry from Codex's TOML config while
+    /// preserving every other server block in the file. Idempotent.
+    public func uninstallCodex() throws {
+        let configFile = homeDir.appendingPathComponent(".codex/config.toml")
+        try removeManifoldFromCodexConfig(at: configFile)
+    }
+
+    /// Surgically removes the `manifold` server entry from a JSON config
+    /// file's `mcpServers` map, preserving every other entry. If the
+    /// resulting `mcpServers` map is empty the key is removed too,
+    /// keeping the file tidy. The file itself is preserved with any
+    /// non-MCP keys intact.
+    private func removeManifoldFromJSONConfig(at file: URL) throws {
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            // Nothing to remove. Idempotent.
+            return
+        }
+        guard let data = try? Data(contentsOf: file),
+              var config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Don't touch a file we can't parse — refuse rather than risk
+            // corrupting a hand-crafted config.
+            logger.warning("Skipping uninstall: could not parse \(file.path, privacy: .public)")
+            return
+        }
+        guard var mcpServers = config["mcpServers"] as? [String: Any],
+              mcpServers["manifold"] != nil else {
+            // Manifold wasn't there. Idempotent.
+            return
+        }
+        mcpServers.removeValue(forKey: "manifold")
+        if mcpServers.isEmpty {
+            config.removeValue(forKey: "mcpServers")
+        } else {
+            config["mcpServers"] = mcpServers
+        }
+        let outData = try JSONSerialization.data(
+            withJSONObject: config,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try outData.write(to: file, options: .atomic)
+        logger.info("Removed Manifold from \(file.path, privacy: .public)")
+    }
+
+    /// Surgically removes the `[mcp_servers.manifold]` (or legacy
+    /// `[mcp.manifold]`) block from a Codex TOML file, leaving every
+    /// other section intact. The file itself is preserved.
+    private func removeManifoldFromCodexConfig(at file: URL) throws {
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            return
+        }
+        guard let original = try? String(contentsOf: file, encoding: .utf8) else {
+            logger.warning("Skipping uninstall: could not read \(file.path, privacy: .public)")
+            return
+        }
+        var updated = original
+        let patterns = [
+            #"\n?\[mcp_servers\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
+            #"\n?\[mcp\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+            updated = regex.stringByReplacingMatches(
+                in: updated,
+                options: [],
+                range: range,
+                withTemplate: ""
+            )
+        }
+        // Collapse triple-or-more newlines back to a single blank line
+        // so the remaining file stays readable.
+        if let collapse = try? NSRegularExpression(pattern: #"\n{3,}"#) {
+            let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+            updated = collapse.stringByReplacingMatches(
+                in: updated,
+                options: [],
+                range: range,
+                withTemplate: "\n\n"
+            )
+        }
+        guard updated != original else { return }
+        try updated.write(to: file, atomically: true, encoding: .utf8)
+        logger.info("Removed Manifold from \(file.path, privacy: .public)")
+    }
+
     /// Writes the Manifold MCP entry to Codex's TOML config.
     public func installCodex() throws {
         let configDir = homeDir.appendingPathComponent(".codex")
