@@ -17,6 +17,36 @@ public struct ConfigWriter {
         ["--agent", agent.rawValue]
     }
 
+    /// Returns the Manifold MCP table from Codex TOML config, preserving TOML
+    /// arrays such as `args = ["--agent", "codex"]` inside the table body.
+    public static func manifoldCodexServerBlock(in content: String) -> String? {
+        guard let range = codexManifoldServerBlockRange(in: content) else { return nil }
+        return String(content[range])
+    }
+
+    /// Returns the configured `args` array from a Codex Manifold MCP table.
+    public static func manifoldCodexServerArguments(in block: String) -> [String]? {
+        let argsPattern = #"args\s*=\s*\[(.*?)\]"#
+        guard let regex = try? NSRegularExpression(pattern: argsPattern, options: [.dotMatchesLineSeparators]) else {
+            return nil
+        }
+        let range = NSRange(block.startIndex..<block.endIndex, in: block)
+        guard let match = regex.firstMatch(in: block, options: [], range: range),
+              let argsRange = Range(match.range(at: 1), in: block) else {
+            return nil
+        }
+
+        let argsBody = String(block[argsRange])
+        guard let stringRegex = try? NSRegularExpression(pattern: #""([^"]+)""#, options: []) else {
+            return nil
+        }
+        let argsBodyRange = NSRange(argsBody.startIndex..<argsBody.endIndex, in: argsBody)
+        return stringRegex.matches(in: argsBody, options: [], range: argsBodyRange).compactMap { match in
+            guard let range = Range(match.range(at: 1), in: argsBody) else { return nil }
+            return String(argsBody[range])
+        }
+    }
+
     /// Creates a config writer rooted at the current user's home directory.
     public init(binaryPath: String) {
         self.binaryPath = binaryPath
@@ -212,19 +242,8 @@ public struct ConfigWriter {
             return
         }
         var updated = original
-        let patterns = [
-            #"\n?\[mcp_servers\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
-            #"\n?\[mcp\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
-        ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
-            let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
-            updated = regex.stringByReplacingMatches(
-                in: updated,
-                options: [],
-                range: range,
-                withTemplate: ""
-            )
+        if let range = Self.codexManifoldServerBlockRange(in: updated) {
+            updated.removeSubrange(range)
         }
         // Collapse triple-or-more newlines back to a single blank line
         // so the remaining file stays readable.
@@ -268,24 +287,10 @@ public struct ConfigWriter {
 
     private func upsertCodexServerConfig(_ content: String, agent: TargetApp) -> String {
         let block = codexMCPServerBlock(agent: agent)
-        let patterns = [
-            #"\n?\[mcp_servers\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
-            #"\n?\[mcp\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
-        ]
-
         var updated = content
-        for pattern in patterns {
-            let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
-            let regex = try? NSRegularExpression(pattern: pattern, options: [])
-            updated = regex?.stringByReplacingMatches(
-                in: updated,
-                options: [],
-                range: range,
-                withTemplate: "\n" + block + "\n"
-            ) ?? updated
-        }
-
-        if updated == content {
+        if let range = Self.codexManifoldServerBlockRange(in: updated) {
+            updated.replaceSubrange(range, with: block + "\n")
+        } else {
             if !updated.isEmpty, !updated.hasSuffix("\n") {
                 updated += "\n"
             }
@@ -301,5 +306,62 @@ public struct ConfigWriter {
         command = "\(binaryPath)"
         args = ["\(Self.expectedArguments(for: agent)[0])", "\(Self.expectedArguments(for: agent)[1])"]
         """
+    }
+
+    private static func codexManifoldServerBlockRange(in content: String) -> Range<String.Index>? {
+        var lineStart = content.startIndex
+        while lineStart < content.endIndex {
+            let lineEnd = content[lineStart...].firstIndex(of: "\n") ?? content.endIndex
+            let line = content[lineStart..<lineEnd]
+                .trimmingCharacters(in: .whitespaces)
+
+            if isCodexManifoldHeader(line) {
+                var blockEnd = lineEnd < content.endIndex ? content.index(after: lineEnd) : content.endIndex
+                var nextLineStart = blockEnd
+                while nextLineStart < content.endIndex {
+                    let nextLineEnd = content[nextLineStart...].firstIndex(of: "\n") ?? content.endIndex
+                    let nextLine = content[nextLineStart..<nextLineEnd]
+                        .trimmingCharacters(in: .whitespaces)
+                    if tomlHeaderName(in: nextLine) != nil {
+                        break
+                    }
+                    blockEnd = nextLineEnd < content.endIndex ? content.index(after: nextLineEnd) : content.endIndex
+                    nextLineStart = blockEnd
+                }
+                return lineStart..<blockEnd
+            }
+
+            lineStart = lineEnd < content.endIndex ? content.index(after: lineEnd) : content.endIndex
+        }
+        return nil
+    }
+
+    private static func isCodexManifoldHeader(_ line: String) -> Bool {
+        let name = tomlHeaderName(in: line)
+        return name == "mcp_servers.manifold" || name == "mcp.manifold"
+    }
+
+    private static func tomlHeaderName(in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("[") else { return nil }
+
+        let nameStart: String.Index
+        let nameEnd: String.Index
+        let tailStart: String.Index
+        if trimmed.hasPrefix("[[") {
+            guard let closeRange = trimmed.range(of: "]]") else { return nil }
+            nameStart = trimmed.index(trimmed.startIndex, offsetBy: 2)
+            nameEnd = closeRange.lowerBound
+            tailStart = closeRange.upperBound
+        } else {
+            guard let closeIndex = trimmed.firstIndex(of: "]") else { return nil }
+            nameStart = trimmed.index(after: trimmed.startIndex)
+            nameEnd = closeIndex
+            tailStart = trimmed.index(after: closeIndex)
+        }
+
+        let tail = trimmed[tailStart...].trimmingCharacters(in: .whitespaces)
+        guard tail.isEmpty || tail.hasPrefix("#") else { return nil }
+        return trimmed[nameStart..<nameEnd].trimmingCharacters(in: .whitespaces)
     }
 }

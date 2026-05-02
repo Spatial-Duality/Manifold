@@ -333,6 +333,73 @@ struct ConfigWriterTests {
         #expect(content.contains("args = [\"--agent\", \"codex\"]"))
     }
 
+    @Test("Codex config block parser keeps args array inside manifold section")
+    func codexBlockParserKeepsArgsArray() throws {
+        let content = """
+        model = "gpt-5.5"
+
+        [mcp_servers.manifold]
+        command = "/Users/me/bin/manifold-mcp"
+        args = ["--agent", "codex"]
+
+        [mcp_servers.other]
+        command = "/usr/bin/other"
+        args = ["--flag"]
+        """
+
+        let block = try #require(ConfigWriter.manifoldCodexServerBlock(in: content))
+        #expect(block.contains(#"command = "/Users/me/bin/manifold-mcp""#))
+        #expect(block.contains(#"args = ["--agent", "codex"]"#))
+        #expect(ConfigWriter.manifoldCodexServerArguments(in: block) == ["--agent", "codex"])
+        #expect(!block.contains("[mcp_servers.other]"))
+    }
+
+    @Test("Codex args parser supports multiline TOML arrays")
+    func codexArgsParserSupportsMultilineArrays() throws {
+        let block = """
+        [mcp_servers.manifold]
+        command = "/Users/me/bin/manifold-mcp"
+        args = [
+          "--agent",
+          "codex",
+        ]
+        """
+
+        #expect(ConfigWriter.manifoldCodexServerArguments(in: block) == ["--agent", "codex"])
+    }
+
+    @Test("Codex repair replaces only manifold section when args array is present")
+    func codexRepairPreservesOtherSectionsAfterArgsArray() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let codexDir = home.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+
+        let existing = """
+        model = "gpt-5.5"
+
+        [mcp_servers.manifold]
+        command = "/old/manifold-mcp"
+        args = ["--agent", "cowork"]
+
+        [mcp_servers.other]
+        command = "/usr/bin/other"
+        args = ["--flag"]
+        """
+        try existing.write(to: codexDir.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let writer = ConfigWriter(binaryPath: "/new/manifold-mcp", homeDir: home)
+        try writer.installCodex()
+
+        let content = try String(contentsOf: codexDir.appendingPathComponent("config.toml"), encoding: .utf8)
+        #expect(content.contains(#"command = "/new/manifold-mcp""#))
+        #expect(content.contains(#"args = ["--agent", "codex"]"#))
+        #expect(!content.contains(#"command = "/old/manifold-mcp""#))
+        #expect(content.contains("[mcp_servers.other]"))
+        #expect(content.contains(#"args = ["--flag"]"#))
+    }
+
     // MARK: - installAll
 
     @Test("installAll configures all targets")

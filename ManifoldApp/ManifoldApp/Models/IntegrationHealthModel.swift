@@ -136,7 +136,7 @@ struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
         guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
             return .init(status: .error, detail: "Codex config exists but could not be read.")
         }
-        guard let block = codexServerBlock(in: contents) else {
+        guard let block = ConfigWriter.manifoldCodexServerBlock(in: contents) else {
             return .init(status: .notInstalled)
         }
 
@@ -149,10 +149,7 @@ struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
         }
 
         let expectedArgs = ConfigWriter.expectedArguments(for: agent)
-        let argsPattern = #"args\s*=\s*\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]"#
-        guard let firstArg = firstCapture(in: block, pattern: argsPattern, group: 1),
-              let secondArg = firstCapture(in: block, pattern: argsPattern, group: 2),
-              [firstArg, secondArg] == expectedArgs else {
+        guard ConfigWriter.manifoldCodexServerArguments(in: block) == expectedArgs else {
             return .init(
                 status: .error,
                 detail: "Codex Manifold config must include args \(expectedArgs.joined(separator: " "))."
@@ -179,23 +176,6 @@ struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
             )
         }
         return .init(status: .installed)
-    }
-
-    private func codexServerBlock(in contents: String) -> String? {
-        let patterns = [
-            #"\[mcp_servers\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
-            #"\[mcp\.manifold\]\n(?:[^\[]*(?:\n|$))*"#,
-        ]
-
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
-            let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
-            guard let match = regex.firstMatch(in: contents, options: [], range: range),
-                  let blockRange = Range(match.range, in: contents) else { continue }
-            return String(contents[blockRange])
-        }
-
-        return nil
     }
 
     private func firstCapture(in text: String, pattern: String, group: Int = 1) -> String? {
