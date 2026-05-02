@@ -151,7 +151,7 @@ struct PrivacyModelCatalog: Sendable, Hashable {
             version: "2026-04-23-\(snapshot.prefix(12))",
             snapshotSHA: snapshot,
             sourceRepository: PrivacyRuntimeDefaults.installedModelRepositoryURL,
-            note: "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs.",
+            note: "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · optimized for Apple Silicon Macs.",
             files: [
                 file(
                     "model.safetensors",

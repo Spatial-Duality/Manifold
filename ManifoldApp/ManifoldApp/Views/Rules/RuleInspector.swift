@@ -203,7 +203,7 @@ struct RuleInspector: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Suggested rule")
                     .font(ManifoldType.captionMedium)
-                Text("Suggested rules are managed by Manifold. They can be disabled, but not edited. Create a Mine rule to override.")
+                Text("Suggested rules are managed by Manifold. They can be disabled, but not edited. Add your own rule to override one.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

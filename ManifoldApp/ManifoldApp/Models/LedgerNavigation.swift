@@ -59,7 +59,7 @@ enum LedgerDestination: String, Hashable, CaseIterable, Identifiable {
         case .mail:
             return "Connect a mailbox to share mail with an agent. Subjects and senders are visible by default; message bodies require an explicit grant."
         case .rules:
-            return "Rules control what agents can read, write, or redact. Suggested rules block secrets out of the box; add Mine rules for anything else."
+            return "Rules control what agents can read, write, or redact. Suggested rules block secrets out of the box; add your own rules for anything else."
         }
     }
 }

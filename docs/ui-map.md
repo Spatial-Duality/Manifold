@@ -91,7 +91,7 @@ flowchart LR
     D --> F["MatchPreview"]
 ```
 
-Rules is the live governance surface. Suggested and Mine rules share one grammar across files, emails, privacy filters, and agent behavior. Rule changes affect the next runtime decision.
+Rules is the live governance surface. Suggested rules ship on by default, and user-created rules use the same grammar across files, emails, privacy filters, and agent behavior. Rule changes affect the next runtime decision.
 
 ## Supporting Surfaces
 

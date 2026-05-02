@@ -8,24 +8,19 @@ struct RulesNavigator: View {
 
     var body: some View {
         List(selection: filterSelection) {
-            Section("Scope") {
+            Section("Rules") {
                 rulesRow(.all)
+                rulesRow(.seeded)
+                rulesRow(.privacy)
+            }
+
+            Section("Applies To") {
                 ForEach(RulesModel.Filter.allCases.filter { filter in
                     if case .scope = filter { return true }
                     return false
                 }) { filter in
                     rulesRow(filter)
                 }
-            }
-
-            Section("Model") {
-                rulesRow(.privacy)
-            }
-
-            Section("Source") {
-                rulesRow(.seeded)
-                rulesRow(.userAuthored)
-                rulesRow(.suggested)
             }
         }
         .listStyle(.sidebar)
@@ -60,10 +55,6 @@ struct RulesNavigator: View {
             return store.rules.rules.filter { $0.scope == scope }.count
         case .seeded:
             return store.rules.rules.filter { $0.source == .seeded }.count
-        case .userAuthored:
-            return store.rules.rules.filter { [.user, .userOverride, .imported].contains($0.source) }.count
-        case .suggested:
-            return store.rules.rules.filter { $0.source == .suggested }.count
         }
     }
 }

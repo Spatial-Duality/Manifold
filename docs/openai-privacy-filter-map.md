@@ -202,7 +202,7 @@ The Settings card is presented as:
 
 ```text
 OpenAI Privacy Filter
-MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs
+MLX MXFP8 · 1.47 GB · optimized for Apple Silicon Macs
 Download / Resume / Cancel / Remove
 ```
 

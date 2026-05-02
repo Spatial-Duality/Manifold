@@ -1933,8 +1933,8 @@ public actor ManifoldBridge {
             selection: artifact?.selection
         )
 
-        // Filter mode gate — Off / Warn / Block per the Settings ▸ Privacy
-        // ▸ Sensitive Content Detection user preference. Composes after
+        // Filter mode gate — Off / Warn / Block derived from the Settings
+        // ▸ Privacy protection level. Composes after
         // rule eval and before privacy preflight so user choice can deny
         // even when rules and overrides allow.
         try await enforceFilterMode(
@@ -2159,7 +2159,7 @@ public actor ManifoldBridge {
             parts.append("\(findings.financialCount) financial value\(findings.financialCount == 1 ? "" : "s")")
         }
         let summary = parts.joined(separator: ", ")
-        return "File contains \(summary). Block mode is enabled — open Settings ▸ Privacy ▸ Sensitive Content Detection to override per-file or change the mode."
+        return "File contains \(summary). Block mode is enabled by the Privacy protection level. Open Settings ▸ Privacy or Rules to change how this is handled."
     }
 
     /// Applies unified RuleStore email rules to governed email reads after

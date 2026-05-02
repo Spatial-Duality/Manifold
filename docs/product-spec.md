@@ -117,7 +117,7 @@ A single rule grammar covers files, emails, and agent behavior.
 - **Window.** `always`, `session-only`, `until(date)`, or `expire-after(n)`.
 - **Source.** `seeded` (immutable system defaults), `user`, `user-override`, `suggested`, or `imported`.
 
-Precedence is two-phase: any matching deny wins over any matching allow (deny sweep), then first-match wins within the same action. Suggested rules pin to the top of their group. Recommended rules sit below Mine rules and promote to Mine on accept.
+Precedence is two-phase: any matching deny wins over any matching allow (deny sweep), then first-match wins within the same action. Suggested rules pin to the top of their group. User-created rules follow, then generated suggestions that still need explicit acceptance.
 
 Suggested denies that ship on by default include: `**/.env*`, `**/.ssh/**`, `**/*.pem`, `**/*.key`, `**/id_rsa*`, `**/.aws/credentials`, `**/.gnupg/**`, `**/.netrc`, `**/.npmrc`, `**/.git/config`, anything matching known token/key detector patterns, and mail matching password-reset or 2FA shields.
 

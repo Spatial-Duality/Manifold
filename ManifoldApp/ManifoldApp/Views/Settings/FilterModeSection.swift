@@ -1,9 +1,10 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// FilterModeSection — the Sensitive Content Detection block in the Privacy
-// Settings pane. Surfaces the Lane C filter-mode plumbing as a user-facing
-// preference: global default + optional per-agent override.
+// FilterModeSection — legacy file-scanning controls.
+//
+// This view is no longer mounted in Privacy Settings. The user-facing privacy
+// path is the OpenAI Privacy Filter protection level plus detailed Rules.
 //
 // Modes:
 //   off    Don't scan files for sensitive values
@@ -27,7 +28,7 @@ struct FilterModeSection: View {
         Section {
             content
         } header: {
-            Text("Sensitive Content Detection").font(ManifoldType.title)
+            Text("File Scanning Mode").font(ManifoldType.title)
         } footer: {
             Text("Choose how Manifold handles files containing flagged values like API keys, credentials, or contact info. Per-agent overrides let you keep one assistant on a stricter setting than the default.")
                 .font(ManifoldType.caption)

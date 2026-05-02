@@ -25,8 +25,6 @@ final class RulesModel {
         case privacy
         case scope(ManifoldKit.RuleScope)
         case seeded
-        case userAuthored
-        case suggested
 
         var id: String {
             switch self {
@@ -34,13 +32,11 @@ final class RulesModel {
             case .privacy: return "privacy"
             case .scope(let s): return "scope-\(s.rawValue)"
             case .seeded: return "seeded"
-            case .userAuthored: return "user"
-            case .suggested: return "suggested"
             }
         }
 
         static var allCases: [Filter] {
-            [.all, .privacy, .scope(.file), .scope(.email), .scope(.content), .scope(.agent), .seeded, .userAuthored, .suggested]
+            [.all, .seeded, .privacy, .scope(.file), .scope(.email), .scope(.content), .scope(.agent)]
         }
 
         var title: String {
@@ -50,10 +46,8 @@ final class RulesModel {
             case .scope(.file): return "Files"
             case .scope(.email): return "Emails"
             case .scope(.content): return "Files + Mail"
-            case .scope(.agent): return "Agent Behaviour"
-            case .seeded: return RuleSource.seeded.presentationLabel
-            case .userAuthored: return "Mine"
-            case .suggested: return RuleSource.suggested.presentationLabel
+            case .scope(.agent): return "Agent Behavior"
+            case .seeded: return "Suggested Rules"
             }
         }
 
@@ -66,8 +60,6 @@ final class RulesModel {
             case .scope(.content): return "doc.on.doc"
             case .scope(.agent): return "sparkles"
             case .seeded: return "checkmark.shield"
-            case .userAuthored: return "person.crop.circle"
-            case .suggested: return "wand.and.stars"
             }
         }
     }
@@ -107,10 +99,6 @@ final class RulesModel {
                 return rule.scope == s
             case .seeded:
                 return rule.source == .seeded
-            case .userAuthored:
-                return rule.source == .user || rule.source == .userOverride || rule.source == .imported
-            case .suggested:
-                return rule.source == .suggested
             }
         }
         let searched: [RuleRecord]
@@ -133,6 +121,7 @@ final class RulesModel {
                     rule.scope.displayName,
                     rule.source.rawValue,
                     agents,
+                    rule.source == .seeded ? "suggested default manifold" : "",
                     rule.isPrivacyFilterBacked ? "openai privacy filter privacy preflight model sensitive pii secret identity" : ""
                 ].joined(separator: " ").lowercased()
                 return needles.allSatisfy { haystack.contains($0) }
@@ -304,21 +293,6 @@ final class RulesModel {
             } catch {
                 rulesLogger.error("Preview failed: \(error.localizedDescription, privacy: .public)")
             }
-        }
-    }
-}
-
-// MARK: - Presentation labels
-
-extension RuleSource {
-    var presentationLabel: String {
-        switch self {
-        case .seeded:
-            return "Suggested"
-        case .user, .userOverride, .imported:
-            return "Mine"
-        case .suggested:
-            return "Recommended"
         }
     }
 }

@@ -5,7 +5,7 @@
 //
 // Five sections, top to bottom:
 //   1. Privacy Filter   — install/uninstall, effective filter, cache
-//   2. Auto-Settings     — Off / Balanced / Strict / Custom preset tiles
+//   2. Protection Level  — default handling for OpenAI Privacy Filter findings
 //   3. My Identity       — suggestion triage + accepted identity table
 //   4. Org Allowlist     — domains/addresses that suppress model findings
 //   5. Index Status      — queued/running/indexed counts + rescan trigger
@@ -26,7 +26,6 @@ struct PrivacySettingsPane: View {
         Form {
             modelSection
             presetsSection
-            FilterModeSection()
             identitySection
             allowlistSection
             indexStatusSection
@@ -72,9 +71,9 @@ struct PrivacySettingsPane: View {
                 PrivacyPresetsRow()
             }
         } header: {
-            Text("Auto-settings")
+            Text("Protection Level")
         } footer: {
-            Text("Presets write global privacy settings and seed per-agent policies. Hand-tuned changes in Agents ▸ Privacy switch the preset to Custom.")
+            Text("Sets how the OpenAI Privacy Filter handles findings before content is shared. Detailed rule examples and overrides live in Rules.")
                 .font(ManifoldType.caption)
                 .foregroundStyle(ManifoldPalette.text2)
         }
@@ -413,7 +412,7 @@ private struct PrivacyModelCard: View {
             let verification = status.verificationState?.displayName ?? "Verification unknown"
             return "Installed \(installed) · \(verification) · runs locally."
         }
-        return "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs."
+        return "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · optimized for Apple Silicon Macs."
     }
 
     private var installButtonTitle: String {
@@ -441,7 +440,12 @@ private struct PrivacyModelCard: View {
                     updated.installState = .installed
                     updated.modelVersion = updated.modelVersion ?? "rules-only-v1"
                 }
-                Task { await store.governance.updatePrivacySettings(updated) }
+                Task {
+                    await store.governance.updatePrivacySettings(updated)
+                    if !newValue {
+                        try? await store.runtime.setGlobalFilterMode(.off)
+                    }
+                }
             }
         )
     }
@@ -497,53 +501,63 @@ private struct PrivacySourceLinkRow: View {
 
 private struct PrivacyPresetsRow: View {
     @Environment(ManifoldStore.self) private var store
+    @State private var globalFilterMode: FilterMode?
+    @State private var modeError: String?
 
     var body: some View {
-        HStack(spacing: Spacing.s3) {
-            PresetCard(
-                title: "Off",
-                subtitle: "No filtering. Agents see content as-is.",
-                systemImage: "shield.slash",
-                accent: ManifoldPalette.text3,
-                isSelected: currentPreset == .off,
-                accessibilityIdentifier: "settings.privacy.preset.off",
-                action: { apply(.off) }
-            )
-            PresetCard(
-                title: "Balanced",
-                subtitle: "Warn on personal info. Ask before sharing secrets.",
-                systemImage: "shield.lefthalf.filled",
-                accent: ManifoldPalette.selection,
-                isSelected: currentPreset == .balanced,
-                accessibilityIdentifier: "settings.privacy.preset.balanced",
-                action: { apply(.balanced) }
-            )
-            PresetCard(
-                title: "Strict",
-                subtitle: "Redact all PII. Block secrets. Ask before code.",
-                systemImage: "shield.fill",
-                accent: ManifoldPalette.danger,
-                isSelected: currentPreset == .strict,
-                accessibilityIdentifier: "settings.privacy.preset.strict",
-                action: { apply(.strict) }
-            )
-            PresetCard(
-                title: "Custom",
-                subtitle: "Hand-tuned per category and agent.",
-                systemImage: "slider.horizontal.3",
-                accent: ManifoldPalette.claude,
-                isSelected: currentPreset == .custom,
-                accessibilityIdentifier: "settings.privacy.preset.custom",
-                action: { apply(.custom) }
-            )
+        VStack(alignment: .leading, spacing: Spacing.s3) {
+            Picker("Protection Level", selection: presetBinding) {
+                Text("Off").tag(PrivacyPreset.off)
+                Text("Balanced").tag(PrivacyPreset.balanced)
+                Text("Strict").tag(PrivacyPreset.strict)
+                Text("Custom").tag(PrivacyPreset.custom)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("settings.privacy.preset.picker")
+
+            Text(currentPreset.settingsDescription)
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("settings.privacy.preset.description")
+
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
+                Label("Manage detailed rules in Rules.", systemImage: "slider.horizontal.3")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(ManifoldPalette.text2)
+                Spacer(minLength: 0)
+                Button {
+                    presentMainLedger(destination: .rules)
+                } label: {
+                    Label("Open Rules", systemImage: "arrow.up.forward.app")
+                }
+                .controlSize(.small)
+                .accessibilityIdentifier("settings.privacy.openRules")
+            }
+
+            if let modeError {
+                Label(modeError, systemImage: "exclamationmark.triangle")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(ManifoldPalette.attention)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .task { await loadFilterMode() }
+    }
+
+    private var presetBinding: Binding<PrivacyPreset> {
+        Binding(
+            get: { currentPreset },
+            set: { apply($0) }
+        )
     }
 
     private var currentPreset: PrivacyPreset {
         PrivacyPreset.detect(
             settings: store.governance.privacySettings,
             claudePolicy: store.governance.claudePrivacyPolicy,
-            codexPolicy: store.governance.codexPrivacyPolicy
+            codexPolicy: store.governance.codexPrivacyPolicy,
+            filterMode: globalFilterMode
         )
     }
 
@@ -560,6 +574,26 @@ private struct PrivacyPresetsRow: View {
             await store.governance.updatePrivacySettings(newSettings)
             await store.governance.updatePrivacyPolicy(newClaude)
             await store.governance.updatePrivacyPolicy(newCodex)
+            do {
+                try await store.runtime.setGlobalFilterMode(preset.filterMode)
+                await MainActor.run {
+                    globalFilterMode = preset.filterMode
+                    modeError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    modeError = "Couldn't sync file scanning mode: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func loadFilterMode() async {
+        do {
+            globalFilterMode = try await store.runtime.globalFilterMode()
+            modeError = nil
+        } catch {
+            modeError = "Couldn't load file scanning mode: \(error.localizedDescription)"
         }
     }
 }
@@ -570,13 +604,20 @@ enum PrivacyPreset: Equatable {
     static func detect(
         settings: PrivacyPreflightSettings?,
         claudePolicy: AgentPrivacyPolicy?,
-        codexPolicy: AgentPrivacyPolicy?
+        codexPolicy: AgentPrivacyPolicy?,
+        filterMode: FilterMode? = nil
     ) -> PrivacyPreset {
         guard let settings else { return .custom }
-        if !settings.isEnabled { return .off }
+        if !settings.isEnabled {
+            return filterMode == nil || filterMode == .off ? .off : .custom
+        }
         guard let claude = claudePolicy, let codex = codexPolicy else { return .custom }
-        if matchesBalanced(claude) && matchesBalanced(codex) { return .balanced }
-        if matchesStrict(claude) && matchesStrict(codex) { return .strict }
+        if matchesBalanced(claude) && matchesBalanced(codex) && (filterMode == nil || filterMode == .warn) {
+            return .balanced
+        }
+        if matchesStrict(claude) && matchesStrict(codex) && (filterMode == nil || filterMode == .block) {
+            return .strict
+        }
         return .custom
     }
 
@@ -633,6 +674,32 @@ enum PrivacyPreset: Equatable {
         updated.secretHandling = secret
         updated.enabledCategories = Set(PrivacyCategory.allCases)
         return updated
+    }
+
+    var settingsDescription: String {
+        switch self {
+        case .off:
+            return "The OpenAI Privacy Filter is off. Agents receive content as shared."
+        case .balanced:
+            return "Warns on personal information and asks before sharing secrets."
+        case .strict:
+            return "Redacts personal information, blocks secrets, and asks before sharing code-like content."
+        case .custom:
+            return "Uses your current agent privacy settings. Rules is the place for detailed rule examples and overrides."
+        }
+    }
+
+    var filterMode: FilterMode {
+        switch self {
+        case .off:
+            return .off
+        case .balanced:
+            return .warn
+        case .strict:
+            return .block
+        case .custom:
+            return .warn
+        }
     }
 }
 

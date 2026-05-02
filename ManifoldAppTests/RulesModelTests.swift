@@ -7,18 +7,19 @@ import ManifoldKit
 
 @MainActor
 final class RulesModelTests: XCTestCase {
-    func testSourceFilterTitlesUsePresentationVocabulary() {
-        XCTAssertEqual(RulesModel.Filter.seeded.title, "Suggested")
-        XCTAssertEqual(RulesModel.Filter.userAuthored.title, "Mine")
-        XCTAssertEqual(RulesModel.Filter.suggested.title, "Recommended")
-    }
-
-    func testRuleSourcePresentationLabels() {
-        XCTAssertEqual(RuleSource.seeded.presentationLabel, "Suggested")
-        XCTAssertEqual(RuleSource.user.presentationLabel, "Mine")
-        XCTAssertEqual(RuleSource.userOverride.presentationLabel, "Mine")
-        XCTAssertEqual(RuleSource.imported.presentationLabel, "Mine")
-        XCTAssertEqual(RuleSource.suggested.presentationLabel, "Recommended")
+    func testRulesSidebarUsesSimplePresentationVocabulary() {
+        XCTAssertEqual(
+            RulesModel.Filter.allCases.map(\.title),
+            [
+                "All Rules",
+                "Suggested Rules",
+                "Privacy Filter",
+                "Files",
+                "Emails",
+                "Files + Mail",
+                "Agent Behavior"
+            ]
+        )
     }
 
     func testFixtureRuntimeStatusUsesOpenAIPrivacyFilterName() async throws {

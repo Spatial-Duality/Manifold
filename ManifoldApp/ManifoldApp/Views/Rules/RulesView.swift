@@ -252,7 +252,7 @@ private struct RulesToolbar: View {
                         RuleRecord.newUserEmailRule(name: "Metadata-only email rule", action: .downgrade)
                     }
                 }
-                Section("Agent behaviour templates") {
+                Section("Agent behavior templates") {
                     newRuleButton("Deny matching action", systemImage: "hand.raised", action: .deny) {
                         RuleRecord.newUserAgentRule(name: "Deny agent rule", action: .deny)
                     }
@@ -378,7 +378,7 @@ private struct RulesToolbar: View {
                 category: .secret,
                 action: .deny
             )
-        case .scope(.file), .all, .seeded, .userAuthored, .suggested:
+        case .scope(.file), .all, .seeded:
             return RuleRecord.newUserFileRule()
         }
     }
@@ -386,10 +386,10 @@ private struct RulesToolbar: View {
     private var blankRuleHelp: String {
         switch model.filter {
         case .scope(.email): return "Add a blank email rule"
-        case .scope(.agent): return "Add a blank agent behaviour rule"
+        case .scope(.agent): return "Add a blank agent behavior rule"
         case .scope(.content): return "Add a blank rule that covers files and email"
         case .privacy: return "Add a blank privacy filter rule"
-        case .scope(.file), .all, .seeded, .userAuthored, .suggested: return "Add a blank file rule"
+        case .scope(.file), .all, .seeded: return "Add a blank file rule"
         }
     }
 }

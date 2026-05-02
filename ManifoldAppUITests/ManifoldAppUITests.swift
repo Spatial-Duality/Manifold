@@ -194,6 +194,12 @@ class ManifoldUITestCase: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
+    func waitForLabelContaining(_ text: String, in element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
     func waitForNonExistence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "exists == false")
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
@@ -377,34 +383,33 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 
         XCTAssertTrue(element(in: app, id: "settings.privacy.model.enabled").exists)
         XCTAssertTrue(element(in: app, id: "settings.privacy.model.enabled").exists)
-        XCTAssertTrue(element(in: app, id: "settings.privacy.preset.custom").exists)
+        XCTAssertTrue(element(in: app, id: "settings.privacy.preset.picker").exists)
+        XCTAssertTrue(element(in: app, id: "settings.privacy.openRules").exists)
         XCTAssertTrue(element(in: app, id: "settings.privacy.suggestion.suggestion-primary-name").waitForExistence(timeout: 5))
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.indexed").exists)
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.failed").exists)
     }
 
-    func testPrivacySettingsPresetCardsApplyFixtureChanges() {
+    func testPrivacySettingsProtectionLevelPickerAppliesFixtureChanges() {
         let app = launchFixture(profile: "privacy")
 
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
         openSettings(in: app)
         clickSettingsTab("Privacy", contentID: "settings.privacy.model.enabled", in: app)
 
-        let strict = element(in: app, id: "settings.privacy.preset.strict")
-        let custom = element(in: app, id: "settings.privacy.preset.custom")
-        let off = element(in: app, id: "settings.privacy.preset.off")
+        let picker = element(in: app, id: "settings.privacy.preset.picker")
+        let description = element(in: app, id: "settings.privacy.preset.description")
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
 
-        XCTAssertTrue(strict.waitForExistence(timeout: 5))
-        strict.click()
-        XCTAssertTrue(waitForValue("Selected", in: strict, timeout: 5))
+        clickProtectionLevel("Strict", picker: picker, app: app)
+        XCTAssertTrue(waitForLabelContaining("Redacts personal information", in: description, timeout: 5))
 
-        XCTAssertTrue(custom.waitForExistence(timeout: 5))
-        custom.click()
-        XCTAssertTrue(waitForValue("Selected", in: custom, timeout: 5))
+        clickProtectionLevel("Custom", picker: picker, app: app)
+        XCTAssertTrue(waitForLabelContaining("Uses your current agent privacy settings", in: description, timeout: 5))
 
-        XCTAssertTrue(off.waitForExistence(timeout: 5))
-        off.click()
-        XCTAssertTrue(waitForValue("Selected", in: off, timeout: 5))
+        clickProtectionLevel("Off", picker: picker, app: app)
+        XCTAssertTrue(waitForLabelContaining("The OpenAI Privacy Filter is off", in: description, timeout: 5))
     }
 
     func testPrivacyWorkEvidenceRendersCurrentInspector() {
@@ -422,7 +427,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "work.inspector").waitForExistence(timeout: 8))
     }
 
-    func testRulesFixtureSupportsSearchInspectorAndEmptySuggestedState() {
+    func testRulesFixtureSupportsSearchInspectorAndEmptySuggestedRulesState() {
         let app = launchFixture(profile: "privacy")
 
         openLedgerSpace("rules", expectedSurface: "ledger.surface.rules", in: app)
@@ -436,7 +441,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "rules.inspector.name").waitForExistence(timeout: 5))
         XCTAssertTrue(element(in: app, id: "rules.inspector.action").exists)
 
-        element(in: app, id: "rules.sidebar.suggested").click()
+        element(in: app, id: "rules.sidebar.seeded").click()
         XCTAssertTrue(element(in: app, id: "rules.emptyState").waitForExistence(timeout: 5))
     }
 
@@ -456,11 +461,22 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         element(in: app, id: "rules.sidebar.privacy").click()
         XCTAssertTrue(app.staticTexts["Protect Secrets"].waitForExistence(timeout: 5))
 
-        element(in: app, id: "rules.sidebar.user").click()
-        XCTAssertTrue(app.staticTexts["Allow OpenAI mail"].waitForExistence(timeout: 5))
-
         element(in: app, id: "rules.sidebar.seeded").click()
         XCTAssertTrue(app.staticTexts["Protect Secrets"].waitForExistence(timeout: 5))
+    }
+
+    private func clickProtectionLevel(_ title: String, picker: XCUIElement, app: XCUIApplication) {
+        let segment = picker.descendants(matching: .any)[title]
+        if segment.waitForExistence(timeout: 2) {
+            app.activate()
+            segment.click()
+            return
+        }
+
+        let fallback = app.descendants(matching: .any)[title]
+        XCTAssertTrue(fallback.waitForExistence(timeout: 5), "Expected Protection Level segment \(title)")
+        app.activate()
+        fallback.click()
     }
 }
 

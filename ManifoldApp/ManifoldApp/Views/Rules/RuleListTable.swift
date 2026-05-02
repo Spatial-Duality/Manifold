@@ -13,7 +13,6 @@ struct RuleListTable: View {
     @Bindable var model: RulesModel
     @State private var columnCustomization: TableColumnCustomization<RuleRecord> = {
         var c = TableColumnCustomization<RuleRecord>()
-        c[visibility: "source"] = .hidden
         c[visibility: "hits"] = .hidden
         return c
     }()
@@ -112,12 +111,6 @@ struct RuleListTable: View {
             .width(100)
             .customizationID("agents")
 
-            TableColumn("Source") { rule in
-                SourcePill(source: rule.source)
-            }
-            .width(90)
-            .customizationID("source")
-
             TableColumn("Hits (30d)") { rule in
                 Text("\(rule.matchCount)")
                     .font(ManifoldType.numericCaption)
@@ -198,20 +191,6 @@ private struct AgentsChipRow: View {
     }
 }
 
-private struct SourcePill: View {
-    let source: RuleSource
-
-    var body: some View {
-        switch source {
-        case .seeded:       Pill(text: source.presentationLabel, variant: .seeded)
-        case .userOverride: Pill(text: source.presentationLabel, variant: .user)
-        case .user:         Pill(text: source.presentationLabel, variant: .user)
-        case .imported:     Pill(text: source.presentationLabel, variant: .user)
-        case .suggested:    Pill(text: source.presentationLabel, variant: .preview)
-        }
-    }
-}
-
 private struct RuleGatePill: View {
     let rule: RuleRecord
 
@@ -262,6 +241,9 @@ private struct RulesEmptyState: View {
     }
 
     private var message: String {
+        if filter == .seeded {
+            return "Suggested rules are default protections from Manifold. Restore them from the More menu if they were disabled or removed during an app update."
+        }
         if filter == .privacy {
             return "Create a Privacy Filter rule to block, redact, warn, or log content found by the privacy filter before an agent sees it."
         }
