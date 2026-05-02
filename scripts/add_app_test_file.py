@@ -7,10 +7,10 @@
 # Safe to re-run.
 #
 # Usage:
-#   python3 script/add_app_test_file.py <filename> <stable-uuid-prefix>
+#   python3 scripts/add_app_test_file.py <filename> <stable-uuid-prefix>
 #
 # Example:
-#   python3 script/add_app_test_file.py DiagnosticsModelTests.swift DIAG0M0DEL0TEST00
+#   python3 scripts/add_app_test_file.py DiagnosticsModelTests.swift DIAG0M0DEL0TEST00
 
 import re
 import sys

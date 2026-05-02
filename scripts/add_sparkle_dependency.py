@@ -7,7 +7,7 @@
 # PBXBuildFile in the Frameworks phase, and registers the product in the
 # Manifold target's packageProductDependencies. Safe to re-run.
 #
-# Usage: python3 script/add_sparkle_dependency.py
+# Usage: python3 scripts/add_sparkle_dependency.py
 
 import re
 from pathlib import Path

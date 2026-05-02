@@ -34,11 +34,13 @@ final class GovernanceModel {
     var pendingApprovals: [PendingApprovalRecord] = []
 
     private var client: (any RuntimeClientProtocol)?
+    private weak var diagnostics: DiagnosticsModel?
 
     init() {}
 
-    func configure(client: any RuntimeClientProtocol) {
+    func configure(client: any RuntimeClientProtocol, diagnostics: DiagnosticsModel? = nil) {
         self.client = client
+        self.diagnostics = diagnostics
     }
 
     func loadPolicies() async {
@@ -176,10 +178,13 @@ final class GovernanceModel {
 
     func installPrivacyRuntime(id: String = PrivacyRuntimeDefaults.mlxRuntimeID) async {
         guard let client else { return }
+        diagnostics?.record(.privacyModelInstallStateChanged(.installing))
         do {
             privacyRuntimeStatus = try await client.installPrivacyRuntime(id: id)
+            recordPrivacyRuntimeStatus()
             await loadPolicies()
         } catch {
+            diagnostics?.record(.privacyModelInstallStateChanged(.failed))
             logger.error("Failed to install OpenAI Privacy Filter model: \(error.localizedDescription)")
         }
     }
@@ -188,8 +193,10 @@ final class GovernanceModel {
         guard let client else { return }
         do {
             privacyRuntimeStatus = try await client.uninstallPrivacyRuntime(id: id)
+            diagnostics?.record(.privacyModelInstallStateChanged(.notInstalled))
             await loadPolicies()
         } catch {
+            diagnostics?.record(.privacyModelInstallStateChanged(.failed))
             logger.error("Failed to uninstall OpenAI Privacy Filter model: \(error.localizedDescription)")
         }
     }
@@ -222,6 +229,22 @@ final class GovernanceModel {
         privacyIdentitySuggestions = await suggestions ?? []
         privacyIndexStatus = await indexStatus
         privacyRecentIndex = await recentIndex ?? []
+    }
+
+    private func recordPrivacyRuntimeStatus() {
+        guard let status = privacyRuntimeStatus else { return }
+        let state: DiagnosticEvent.PrivacyModelInstallState
+        switch status.installState {
+        case .installed:
+            state = .installed
+        case .downloading, .verifying:
+            state = .installing
+        case .downloadRequired where status.lastError?.isEmpty == false:
+            state = .failed
+        case .notInstalled, .downloadRequired, .unavailable:
+            state = .notInstalled
+        }
+        diagnostics?.record(.privacyModelInstallStateChanged(state))
     }
 
     func acceptPrivacyIdentitySuggestion(id: String) async {

@@ -188,7 +188,7 @@ Expected result:
 - `Mail`: whether synthetic allowed/blocked message visibility matches policy
 - `Rules`: whether allow, deny, and privacy behavior matches the active rule set
 - `Settings > Privacy`: scanner state, discovered identities, allowlist, and index status
-- Synthetic loop report: `script/run_self_improvement_loop.sh` writes the command transcript to `.build/self-improvement/manifold-self-improvement-report.txt`
+- Synthetic loop report: `scripts/run_self_improvement_loop.sh` writes the command transcript to `.build/self-improvement/manifold-self-improvement-report.txt`
 
 ## Current Known Testing Risks
 

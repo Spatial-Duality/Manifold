@@ -21,6 +21,8 @@ struct DiagnosticEventTests {
                 == "runtimeUnexpectedExit")
         #expect(DiagnosticEvent.versionMismatchRestart(appVersion: "a", runtimeVersion: "b").name
                 == "versionMismatchRestart")
+        #expect(DiagnosticEvent.privacyModelInstallStateChanged(.installed).name
+                == "privacyModelInstallStateChanged")
         #expect(DiagnosticEvent.sparkleUpdateApplied(from: "0.4.0", to: "0.4.1").name
                 == "sparkleUpdateApplied")
     }
@@ -44,6 +46,10 @@ struct DiagnosticEventTests {
         ).payload
         #expect(exit.launchUUID == "uuid-1")
         #expect(exit.agentLastState == .running)
+
+        let privacy = DiagnosticEvent.privacyModelInstallStateChanged(.failed).payload
+        #expect(privacy.privacyState == .failed)
+        #expect(privacy.appVersion == nil)
     }
 
     @Test("Empty-payload events have empty payloads")

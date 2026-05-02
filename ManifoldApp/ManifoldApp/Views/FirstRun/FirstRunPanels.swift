@@ -224,10 +224,10 @@ struct HelpImprovePanel: View {
                 EmptyStateIllustration(
                     systemImage: "chart.bar.doc.horizontal",
                     title: "Help improve Manifold (optional)",
-                    subtitle: "Local diagnostics are kept on this Mac. Sending is manual — Manifold never uploads automatically and never sends governed data."
+                    subtitle: "Local diagnostics are kept on this Mac. Export is manual — Manifold never uploads automatically and never includes governed data."
                 )
                 VStack(alignment: .leading, spacing: Spacing.s2) {
-                    Toggle("Share diagnostic reports when I press Send", isOn: $diagnostics.diagnosticSharingEnabled)
+                    Toggle("Include anonymous ID in diagnostic exports", isOn: $diagnostics.diagnosticSharingEnabled)
                         .accessibilityIdentifier("onboarding.help.sharing")
                     Toggle("Check for app updates automatically", isOn: $diagnostics.updateChecksEnabled)
                         .accessibilityIdentifier("onboarding.help.updates")

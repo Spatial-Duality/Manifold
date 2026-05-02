@@ -12,9 +12,9 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 /// install ID, and the report builder. The recorder is the source of truth
 /// for events; this model coordinates the user-facing surface.
 ///
-/// Phase A scope: local-only. No network, no server. The `installID`
-/// lifecycle and report builder are wired now so Phase C only adds the
-/// transport layer.
+/// V1 scope: export-only. No network transport and no server endpoint are
+/// wired. The `installID` lifecycle and report builder exist so users can
+/// decide exactly what to save or attach when asking for support.
 @Observable
 @MainActor
 final class DiagnosticsModel {
@@ -44,8 +44,8 @@ final class DiagnosticsModel {
 
     // MARK: - Reports
 
-    /// Most-recent receipt ID returned from a manual send (Phase C). Persisted
-    /// across launches so the user can see "last sent: <id>" in Settings.
+    /// Reserved for a future transport receipt. V1 keeps this nil because
+    /// diagnostic reports are previewed and exported locally.
     private(set) var lastReceiptID: String?
 
     // MARK: - Dependencies
@@ -77,13 +77,11 @@ final class DiagnosticsModel {
 
     // MARK: - Public API
 
-    /// Whether the official build can transmit a report. Source builds with
-    /// no `ManifoldTelemetryEndpoint` set return false; the Settings UI
-    /// hides `Send to Spatial Duality` when this is false rather than
-    /// showing a dead button.
-    var canSendReports: Bool { endpoint != nil }
+    /// V1 is export-only. Keep the UI from exposing a dead network action even
+    /// if a developer experiments with a local Info.plist endpoint.
+    var canSendReports: Bool { false }
 
-    /// Reset the anonymous identifier. The next sent report uses a fresh ID.
+    /// Reset the anonymous identifier. The next exported report uses a fresh ID.
     /// The user-facing copy frames this as "as if you reinstalled."
     func resetInstallID() {
         clearInstallID()
@@ -98,7 +96,8 @@ final class DiagnosticsModel {
     }
 
     /// Build a report from the current local state. Pure — no I/O beyond
-    /// reading the on-disk JSONL files. Same shape that Phase C will POST.
+    /// reading the on-disk JSONL files. This is the exact JSON users can
+    /// preview and export.
     func buildReport() -> DiagnosticReportV1 {
         let records = recorder.readAllRecords()
         let rollups = Self.rollups(from: records)
@@ -217,7 +216,7 @@ final class DiagnosticsModel {
         }
 
         return .init(
-            runtimeConnected: false,    // resolved by caller before send if needed
+            runtimeConnected: false,    // resolved by caller before export if needed
             agentBootstrapped: outcome == .succeeded,
             lastRegistrationOutcome: outcome
         )

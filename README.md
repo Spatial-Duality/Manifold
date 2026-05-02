@@ -108,6 +108,7 @@ See [docs/architecture.md](docs/architecture.md) for the outsider-friendly syste
 - [docs/ui-map.md](docs/ui-map.md)
 - [docs/mcp-integration.md](docs/mcp-integration.md)
 - [docs/design-decisions.md](docs/design-decisions.md)
+- [docs/distribution-pipeline.md](docs/distribution-pipeline.md)
 
 ### Contribute To It
 

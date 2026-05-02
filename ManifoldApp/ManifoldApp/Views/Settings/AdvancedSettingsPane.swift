@@ -112,7 +112,7 @@ struct AdvancedSettingsPane: View {
                     .controlSize(.small)
                     .accessibilityIdentifier("diagnostics.delete")
                 }
-                Text("Reports describe app health and runtime registration outcomes. They never include file paths, prompts, email contents, or governed data.")
+                Text("Reports describe app health and runtime registration outcomes. You can preview and save the JSON; Manifold does not upload it. Reports never include file paths, prompts, email contents, or governed data.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -137,12 +137,7 @@ struct AdvancedSettingsPane: View {
         .sheet(isPresented: $diagnosticsPreviewPresented) {
             DiagnosticReportPreviewSheet(
                 json: store.diagnostics.reportPreviewJSON(),
-                canSend: store.diagnostics.canSendReports,
                 onSave: { saveSheetPresented = true },
-                onSend: {
-                    // Phase C wires the actual transport. For Phase A, the
-                    // button is hidden when canSend is false.
-                },
                 onClose: { diagnosticsPreviewPresented = false }
             )
             .frame(minWidth: 560, minHeight: 420)
@@ -172,16 +167,14 @@ struct AdvancedSettingsPane: View {
 
 private struct DiagnosticReportPreviewSheet: View {
     let json: String
-    let canSend: Bool
     let onSave: () -> Void
-    let onSend: () -> Void
     let onClose: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             SettingsSheetHeader(
                 title: "Diagnostic Report",
-                subtitle: "Preview the JSON that would be saved or sent. Nothing leaves your Mac unless you press Send.",
+                subtitle: "Preview the JSON that can be saved. Nothing leaves your Mac from this screen.",
                 systemImage: "doc.text.magnifyingglass",
                 accent: ManifoldPalette.selection
             )
@@ -209,11 +202,6 @@ private struct DiagnosticReportPreviewSheet: View {
             SettingsSheetFooter {
                 Button("Save to file…", action: onSave)
                     .accessibilityIdentifier("diagnostics.saveToFile")
-                if canSend {
-                    Button("Send to Spatial Duality", action: onSend)
-                        .keyboardShortcut(.defaultAction)
-                        .accessibilityIdentifier("diagnostics.send")
-                }
 
                 Button("Close", action: onClose)
                     .keyboardShortcut(.cancelAction)

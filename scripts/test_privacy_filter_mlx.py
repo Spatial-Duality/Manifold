@@ -8,9 +8,9 @@ Python standard library. Optional flags can download model repos with
 
 Examples:
 
-  python3 script/test_privacy_filter_mlx.py
-  python3 script/test_privacy_filter_mlx.py --download-dir /tmp/privacy-filter-mlx
-  python3 script/test_privacy_filter_mlx.py \\
+  python3 scripts/test_privacy_filter_mlx.py
+  python3 scripts/test_privacy_filter_mlx.py --download-dir /tmp/privacy-filter-mlx
+  python3 scripts/test_privacy_filter_mlx.py \\
       --local-model bf16=/tmp/privacy-filter-mlx/bf16 \\
       --local-model mxfp8=/tmp/privacy-filter-mlx/mxfp8
 """

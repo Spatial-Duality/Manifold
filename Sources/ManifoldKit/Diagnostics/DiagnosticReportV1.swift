@@ -18,7 +18,7 @@ public struct DiagnosticReportV1: Sendable, Codable, Equatable {
     public let platform: PlatformInfo
     public let consent: ConsentState
     /// Resettable anonymous install ID — present only when the user has
-    /// enabled diagnostic sharing. Server HMAC-hashes it before storage.
+    /// enabled diagnostic exports.
     public let installID: String?
     public let runtimeHealth: RuntimeHealth
     public let rollups: [Rollup]
@@ -199,8 +199,8 @@ extension DiagnosticReportV1 {
         "runtimeHealth", "rollups", "signatures", "metricKitPayloads"
     ]
 
-    /// Keys that must NEVER appear at any nesting level. Used by both the
-    /// app-side encoder test and the server-side validator.
+    /// Keys that must NEVER appear at any nesting level. Used by the
+    /// app-side encoder tests and any future ingest validator.
     public static let forbiddenKeys: Set<String> = [
         "path", "paths", "filename", "filenames",
         "prompt", "prompts",

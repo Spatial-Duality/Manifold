@@ -17,7 +17,7 @@
 # key first, so existing installs can verify updates that follow. Document
 # the procedure before you do it.
 #
-# Usage: bash script/sparkle_generate_keys.sh
+# Usage: bash scripts/sparkle_generate_keys.sh
 
 set -euo pipefail
 

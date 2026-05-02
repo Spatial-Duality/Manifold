@@ -105,9 +105,9 @@ final class DiagnosticsModelTests: XCTestCase {
         XCTAssertFalse(model.canSendReports)
     }
 
-    func testCanSendReportsTrueWithEndpoint() {
+    func testCanSendReportsFalseEvenWithEndpointInExportOnlyV1() {
         let model = makeModel(endpoint: URL(string: "https://telemetry.spatialduality.com/v1/reports"))
-        XCTAssertTrue(model.canSendReports)
+        XCTAssertFalse(model.canSendReports)
     }
 
     func testReportPreviewJSONExcludesForbiddenKeys() throws {
@@ -125,6 +125,25 @@ final class DiagnosticsModelTests: XCTestCase {
                 "Report preview leaked forbidden key: \(forbidden)"
             )
         }
+    }
+
+    func testReportRollsUpOnboardingAndPrivacyInstallEvents() throws {
+        let model = makeModel()
+        model.record(.onboardingCompleted)
+        model.record(.privacyModelInstallStateChanged(.installing))
+        model.record(.privacyModelInstallStateChanged(.installed))
+
+        let exp = expectation(description: "drain")
+        DispatchQueue.global().async { Thread.sleep(forTimeInterval: 0.15); exp.fulfill() }
+        wait(for: [exp], timeout: 1)
+
+        let report = model.buildReport()
+        XCTAssertTrue(report.rollups.contains {
+            $0.process == .app && $0.name == "onboardingCompleted" && $0.count == 1
+        })
+        XCTAssertTrue(report.rollups.contains {
+            $0.process == .app && $0.name == "privacyModelInstallStateChanged" && $0.count == 2
+        })
     }
 
     func testCheckAgentExitStateRecordsUnexpectedExitOnce() throws {

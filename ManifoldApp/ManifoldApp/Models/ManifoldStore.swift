@@ -118,7 +118,7 @@ final class ManifoldStore {
         storage.configure(client: runtime)
         mailAccounts.configure(client: runtime)
         mailReview.configure(mailAccounts: mailAccounts)
-        governance.configure(client: runtime)
+        governance.configure(client: runtime, diagnostics: diagnostics)
         rules.configure(client: runtime)
 
         integrationHealth.store = self

@@ -4,6 +4,16 @@ All notable changes to Manifold are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Distribution pipeline documentation for signed DMGs, Sparkle appcasts, Cloudflare Pages hosting, and export-only diagnostics.
+- Static `spatialduality-site` scaffold with opt-in website analytics and a Sparkle appcast path.
+- Appcast generation helper for versioned GitHub Release DMGs.
+
+### Changed
+
+- Release builds now read `MARKETING_VERSION` from `project.yml`, produce a signed/notarization-ready DMG path, and keep diagnostics export-only for v1.
+
 ### Added — Access redesign (Cowork-First UI, 2026-04-28)
 - Per-AI sharing chip stack across the entire access surface. Folders Matrix, Files Flat, and Mail Threads each render one chip per connected AI (filled when shared, hollow when hidden, agent-tinted on tap) — the same `AccessChipStack` component everywhere. Replaces the old single-agent dropdown in Mail.
 - Drag-and-drop folders or files from Finder onto the Folders or Files surface. Folders add immediately; files raise a confirmation dialog asking whether to add the whole containing folder or only that file. "Add only this file" scopes the parent for every connected AI and writes per-file deny overrides for the existing top-level siblings via the bulk override endpoint.

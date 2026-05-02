@@ -79,11 +79,20 @@ struct FirstRunFlow: View {
     }
 
     private func skip() {
-        store.hasCompletedOnboarding = true
+        completeOnboarding(openWork: false)
     }
 
     private func finish() {
+        completeOnboarding(openWork: true)
+    }
+
+    private func completeOnboarding(openWork: Bool) {
+        if !store.hasCompletedOnboarding {
+            store.diagnostics.record(.onboardingCompleted)
+        }
         store.hasCompletedOnboarding = true
-        NotificationCenter.default.post(name: .manifoldShowWork, object: nil)
+        if openWork {
+            NotificationCenter.default.post(name: .manifoldShowWork, object: nil)
+        }
     }
 }

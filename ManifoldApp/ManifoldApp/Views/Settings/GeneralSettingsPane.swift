@@ -52,7 +52,7 @@ struct GeneralSettingsPane: View {
 
             Section {
                 Toggle("Check for updates automatically", isOn: $diagnostics.updateChecksEnabled)
-                Toggle("Share diagnostic reports", isOn: $diagnostics.diagnosticSharingEnabled)
+                Toggle("Include anonymous ID in diagnostic exports", isOn: $diagnostics.diagnosticSharingEnabled)
                 if diagnostics.diagnosticSharingEnabled {
                     HStack {
                         Text("Anonymous identifier")
@@ -69,7 +69,7 @@ struct GeneralSettingsPane: View {
                 Text("Updates and diagnostics")
             } footer: {
                 VStack(alignment: .leading, spacing: Spacing.s2) {
-                    Text("Diagnostic reports are kept on this Mac. Sending is manual — see the Advanced tab to preview, save, or send.")
+                    Text("Diagnostic reports are kept on this Mac. Export is manual — see the Advanced tab to preview or save the JSON.")
                     Text("All governed data stays on your Mac. Manifold records what Claude and Codex see through it. Activity outside Manifold is not tracked.")
                 }
                 .font(ManifoldType.caption)

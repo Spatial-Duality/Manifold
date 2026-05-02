@@ -7,10 +7,10 @@
 # similar regular groups. Safe to re-run.
 #
 # Usage:
-#   python3 script/add_app_source_file.py <relpath-from-ManifoldApp/ManifoldApp> <group> <stable-uuid-prefix>
+#   python3 scripts/add_app_source_file.py <relpath-from-ManifoldApp/ManifoldApp> <group> <stable-uuid-prefix>
 #
 # Example:
-#   python3 script/add_app_source_file.py Models/DiagnosticsModel.swift Models DIAGM0DEL00000001
+#   python3 scripts/add_app_source_file.py Models/DiagnosticsModel.swift Models DIAGM0DEL00000001
 
 import re
 import sys

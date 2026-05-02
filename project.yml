@@ -35,10 +35,12 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
-        ENABLE_DEBUG_DYLIB: YES
+        ENABLE_DEBUG_DYLIB: NO
+        ENABLE_HARDENED_RUNTIME: YES
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        INFOPLIST_KEY_SUEnableAutomaticChecks: NO
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright 2026 Spatial Duality. All rights reserved."
         CODE_SIGN_STYLE: Automatic
@@ -48,22 +50,30 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
+      configs:
+        Debug:
+          ENABLE_DEBUG_DYLIB: YES
+          ENABLE_HARDENED_RUNTIME: NO
     postBuildScripts:
       - name: Bundle Launch Agent
         script: |
           set -euo pipefail
           cd "${SRCROOT}"
           config_name="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')"
-          swift build --product ManifoldAgent -c "$config_name" 2>&1
+          swift build --product ManifoldAgent --product manifold-mcp -c "$config_name" 2>&1
           launch_agents_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents"
           launch_services_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices"
+          resources_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
           helper_path="$launch_services_dir/ManifoldAgent"
-          mkdir -p "$launch_agents_dir" "$launch_services_dir"
+          mcp_path="$resources_dir/manifold-mcp"
+          mkdir -p "$launch_agents_dir" "$launch_services_dir" "$resources_dir"
           cp "${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist" "$launch_agents_dir/com.spatialduality.manifold.runtime.plist"
           cp "${SRCROOT}/.build/$config_name/ManifoldAgent" "$helper_path"
-          chmod +x "$helper_path"
+          cp "${SRCROOT}/.build/$config_name/manifold-mcp" "$mcp_path"
+          chmod +x "$helper_path" "$mcp_path"
           if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
             /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none --options runtime --generate-entitlement-der "$helper_path"
+            /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none --options runtime --generate-entitlement-der "$mcp_path"
           fi
         inputFiles:
           - $(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist
@@ -71,6 +81,7 @@ targets:
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist
           - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchServices/ManifoldAgent
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/manifold-mcp
 
   ManifoldAppTests:
     type: bundle.unit-test

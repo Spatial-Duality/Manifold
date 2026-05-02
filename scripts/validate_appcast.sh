@@ -18,7 +18,7 @@
 #      published feed's most-recent item, when --previous-feed is given.
 #
 # Usage:
-#   bash script/validate_appcast.sh <appcast.xml> [--skip-net] [--previous-feed URL]
+#   bash scripts/validate_appcast.sh <appcast.xml> [--skip-net] [--previous-feed URL]
 
 set -euo pipefail
 

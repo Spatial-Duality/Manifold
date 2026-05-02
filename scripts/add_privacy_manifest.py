@@ -6,7 +6,7 @@
 # PBXResourcesBuildPhase. If no Resources phase exists, create one and add it
 # to the target's buildPhases. Safe to re-run.
 #
-# Usage: python3 script/add_privacy_manifest.py [path/to/project.pbxproj]
+# Usage: python3 scripts/add_privacy_manifest.py [path/to/project.pbxproj]
 
 import re
 import sys
