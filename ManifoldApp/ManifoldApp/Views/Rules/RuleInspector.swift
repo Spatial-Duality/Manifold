@@ -342,7 +342,7 @@ private struct PrivacyFilterRuleBanner: View {
     private var title: String {
         guard let status else { return "Privacy filter rule" }
         if status.effectiveBackend == .mlx {
-            return "\(status.runtimeDisplayName ?? PrivacyRuntimeDefaults.displayName) rule"
+            return "\(PrivacyRuntimePresentation.displayName(status: status)) rule"
         }
         return "\(status.effectiveBackend.displayName) privacy rule"
     }

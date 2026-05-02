@@ -168,7 +168,7 @@ private struct RulesMetric: View {
 private func privacyBackendLabel(for status: PrivacyRuntimeStatus) -> String {
     switch status.effectiveBackend {
     case .mlx:
-        return status.runtimeDisplayName ?? PrivacyRuntimeDefaults.displayName
+        return PrivacyRuntimePresentation.displayName(status: status)
     default:
         return status.effectiveBackend.displayName
     }

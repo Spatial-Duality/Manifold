@@ -4,7 +4,7 @@
 // PrivacySettingsPane — the Privacy tab in the Settings window.
 //
 // Five sections, top to bottom:
-//   1. Scanner Model    — install/uninstall, effective scanner, cache
+//   1. Privacy Filter   — install/uninstall, effective filter, cache
 //   2. Auto-Settings     — Off / Balanced / Strict / Custom preset tiles
 //   3. My Identity       — suggestion triage + accepted identity table
 //   4. Org Allowlist     — domains/addresses that suppress model findings
@@ -48,7 +48,7 @@ struct PrivacySettingsPane: View {
         }
     }
 
-    // MARK: - 1. Scanner Model
+    // MARK: - 1. Privacy Filter
 
     @ViewBuilder
     private var modelSection: some View {
@@ -314,7 +314,7 @@ private struct PrivacyModelCard: View {
             Image(systemName: status.verificationState == .checksumVerified ? "checkmark.seal" : "shippingbox")
                 .foregroundStyle(status.verificationState == .failed ? ManifoldPalette.danger : ManifoldPalette.text2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(currentRuntime?.displayName ?? status.runtimeDisplayName ?? PrivacyRuntimeDefaults.displayName)
+                Text(PrivacyRuntimePresentation.displayName(status: status, runtime: currentRuntime))
                     .font(ManifoldType.captionMedium)
                 Text(runtimeDetail)
                     .font(ManifoldType.caption)
@@ -329,7 +329,7 @@ private struct PrivacyModelCard: View {
     private var sourceDisclosure: some View {
         VStack(alignment: .leading, spacing: Spacing.s2) {
             Divider()
-            PrivacySourceRow(label: "Developed by", value: currentRuntime?.publisher ?? PrivacyRuntimeDefaults.publisherName)
+            PrivacySourceRow(label: "Developed by", value: PrivacyRuntimePresentation.publisher(runtime: currentRuntime))
             PrivacySourceRow(label: "License", value: PrivacyRuntimeDefaults.licenseName)
             PrivacySourceLinkRow(
                 label: "Source",
@@ -339,7 +339,7 @@ private struct PrivacyModelCard: View {
             PrivacySourceLinkRow(
                 label: "Installed pack",
                 value: PrivacyRuntimeDefaults.installedModelRepositoryLabel,
-                urlString: currentRuntime?.sourceRepository ?? PrivacyRuntimeDefaults.installedModelRepositoryURL
+                urlString: PrivacyRuntimePresentation.installedPackURL(runtime: currentRuntime)
             )
         }
     }
@@ -413,7 +413,7 @@ private struct PrivacyModelCard: View {
             let verification = status.verificationState?.displayName ?? "Verification unknown"
             return "Installed \(installed) · \(verification) · runs locally."
         }
-        return currentRuntime?.note ?? "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs."
+        return "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs."
     }
 
     private var installButtonTitle: String {

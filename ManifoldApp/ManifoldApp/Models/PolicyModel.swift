@@ -381,3 +381,44 @@ final class GovernanceModel {
         (claudePolicy?.isPaused ?? false) || (codexPolicy?.isPaused ?? false)
     }
 }
+
+enum PrivacyRuntimePresentation {
+    static func displayName(
+        status: PrivacyRuntimeStatus?,
+        runtime: PrivacyRuntimeDescriptor? = nil
+    ) -> String {
+        if isOpenAIPrivacyFilter(status: status, runtime: runtime) {
+            return PrivacyRuntimeDefaults.displayName
+        }
+        if let displayName = runtime?.displayName, !displayName.isEmpty {
+            return displayName
+        }
+        if let displayName = status?.runtimeDisplayName, !displayName.isEmpty {
+            return displayName
+        }
+        return status?.effectiveBackend.displayName ?? PrivacyRuntimeDefaults.displayName
+    }
+
+    static func publisher(runtime: PrivacyRuntimeDescriptor?) -> String {
+        if runtime?.id == PrivacyRuntimeDefaults.mlxRuntimeID || runtime == nil {
+            return PrivacyRuntimeDefaults.publisherName
+        }
+        return runtime?.publisher ?? PrivacyRuntimeDefaults.publisherName
+    }
+
+    static func installedPackURL(runtime: PrivacyRuntimeDescriptor?) -> String {
+        if runtime?.id == PrivacyRuntimeDefaults.mlxRuntimeID || runtime == nil {
+            return PrivacyRuntimeDefaults.installedModelRepositoryURL
+        }
+        return runtime?.sourceRepository ?? PrivacyRuntimeDefaults.installedModelRepositoryURL
+    }
+
+    private static func isOpenAIPrivacyFilter(
+        status: PrivacyRuntimeStatus?,
+        runtime: PrivacyRuntimeDescriptor?
+    ) -> Bool {
+        status?.effectiveBackend == .mlx
+            || status?.runtimeID == PrivacyRuntimeDefaults.mlxRuntimeID
+            || runtime?.id == PrivacyRuntimeDefaults.mlxRuntimeID
+    }
+}

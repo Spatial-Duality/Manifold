@@ -34,6 +34,48 @@ final class RulesModelTests: XCTestCase {
         XCTAssertEqual(runtime.sourceRepository, PrivacyRuntimeDefaults.installedModelRepositoryURL)
     }
 
+    func testPrivacyRuntimePresentationNormalizesStaleOpenAIPrivacyFilterMetadata() {
+        let staleName = ["Fast", "Local", "Scanner"].joined(separator: " ")
+        let stalePublisher = ["MLX Community", "OpenAI"].joined(separator: " / ")
+        let staleRuntime = PrivacyRuntimeDescriptor(
+            id: PrivacyRuntimeDefaults.mlxRuntimeID,
+            displayName: staleName,
+            publisher: stalePublisher,
+            installedVersion: "2026-04-23-73372cab9eaf",
+            availableVersion: "2026-04-23-73372cab9eaf",
+            installState: .installed,
+            verificationState: .checksumVerified,
+            sourceRepository: PrivacyRuntimeDefaults.installedModelRepositoryURL,
+            note: "Verified MLX MXFP8 model pack installed."
+        )
+        let staleStatus = PrivacyRuntimeStatus(
+            featureEnabled: true,
+            selectedBackend: .mlx,
+            effectiveBackend: .mlx,
+            installState: .installed,
+            modelLoaded: true,
+            cacheEntryCount: 4,
+            lastError: nil,
+            storagePath: nil,
+            backends: [],
+            runtimeID: PrivacyRuntimeDefaults.mlxRuntimeID,
+            runtimeDisplayName: staleName,
+            installedVersion: "2026-04-23-73372cab9eaf",
+            availableVersion: "2026-04-23-73372cab9eaf",
+            verificationState: .checksumVerified
+        )
+
+        XCTAssertEqual(
+            PrivacyRuntimePresentation.displayName(status: staleStatus, runtime: staleRuntime),
+            PrivacyRuntimeDefaults.displayName
+        )
+        XCTAssertEqual(PrivacyRuntimePresentation.publisher(runtime: staleRuntime), PrivacyRuntimeDefaults.publisherName)
+        XCTAssertEqual(
+            PrivacyRuntimePresentation.installedPackURL(runtime: staleRuntime),
+            PrivacyRuntimeDefaults.installedModelRepositoryURL
+        )
+    }
+
     func testFilteredRulesPrioritizeSeededRulesWithinScope() async {
         let seededRule = makeRule(
             id: "rule-seeded-file",

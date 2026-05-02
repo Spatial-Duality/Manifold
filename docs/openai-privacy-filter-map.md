@@ -101,9 +101,9 @@ The source-controlled catalog pins the Hugging Face snapshot and file hashes bef
 | Version label | `2026-04-23-73372cab9eaf` |
 | Approximate size | `1.47 GB` |
 
-The downloader uses `URLSession`, staging directories, partial files, resume offsets, SHA-256 verification, and atomic promotion. A partial or checksum-failing pack never becomes the installed scanner.
+The downloader uses `URLSession`, staging directories, partial files, resume offsets, SHA-256 verification, and atomic promotion. A partial or checksum-failing pack never becomes the installed privacy filter.
 
-## Native Scanner Flow
+## Native Privacy Filter Flow
 
 ```mermaid
 sequenceDiagram
