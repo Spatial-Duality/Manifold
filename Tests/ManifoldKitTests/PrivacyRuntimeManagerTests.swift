@@ -28,7 +28,7 @@ struct PrivacyRuntimeManagerTests {
         PrivacyModelCatalog(
             runtimeID: PrivacyRuntimeDefaults.mlxRuntimeID,
             modelDirectoryName: "test-openai-privacy-filter-mxfp8",
-            displayName: "Fast Local Scanner",
+            displayName: PrivacyRuntimeDefaults.displayName,
             publisher: "Test",
             version: "test-snapshot",
             snapshotSHA: "test-snapshot-sha",
@@ -142,5 +142,20 @@ struct PrivacyRuntimeManagerTests {
         await #expect(throws: PrivacyRuntimeManagerError.self) {
             _ = try await manager.install(runtimeID: PrivacyRuntimeDefaults.mlxRuntimeID)
         }
+    }
+
+    @Test("Available runtime exposes OpenAI Privacy Filter metadata")
+    func availableRuntimeExposesOpenAIPrivacyFilterMetadata() async throws {
+        let storageURL = try makeStorage()
+        defer { cleanup(storageURL) }
+        let manager = PrivacyRuntimeManager(storageURL: storageURL, supportsMLX: true)
+
+        let descriptor = try #require(await manager.availableRuntimes().first)
+
+        #expect(descriptor.id == PrivacyRuntimeDefaults.mlxRuntimeID)
+        #expect(descriptor.displayName == PrivacyRuntimeDefaults.displayName)
+        #expect(descriptor.publisher == PrivacyRuntimeDefaults.publisherName)
+        #expect(descriptor.sourceRepository == PrivacyRuntimeDefaults.installedModelRepositoryURL)
+        #expect(descriptor.installState == .downloadRequired)
     }
 }

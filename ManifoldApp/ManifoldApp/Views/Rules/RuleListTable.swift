@@ -43,12 +43,13 @@ struct RuleListTable: View {
             TableColumn("Status") { rule in
                 Toggle("", isOn: Binding(
                     get: { rule.enabled },
-                    set: { _ in Task { await model.toggleEnabled(id: rule.id) } }
+                    set: { enabled in
+                        Task { await model.setEnabled(id: rule.id, enabled: enabled) }
+                    }
                 ))
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .labelsHidden()
-                .disabled(rule.source == .seeded && !rule.enabled)
                 .accessibilityLabel(rule.enabled ? "Enabled" : "Disabled")
             }
             .width(44)
@@ -139,14 +140,14 @@ struct RuleListTable: View {
     @ViewBuilder
     private func contextMenu(for rule: RuleRecord) -> some View {
         Button(rule.enabled ? "Disable" : "Enable") {
-            Task { await model.toggleEnabled(id: rule.id) }
+            Task { await model.setEnabled(id: rule.id, enabled: !rule.enabled) }
         }
         if rule.source.isMutable {
             Button("Delete", role: .destructive) {
                 Task { await model.delete(id: rule.id) }
             }
         } else {
-            Text("Seeded — disable to mute")
+            Text("Suggested rules are managed by Manifold. Disable to mute.")
         }
     }
 }
@@ -202,11 +203,11 @@ private struct SourcePill: View {
 
     var body: some View {
         switch source {
-        case .seeded:       Pill(text: "Seeded", variant: .seeded)
-        case .userOverride: Pill(text: "Override", variant: .attention)
-        case .user:         Pill(text: "Custom", variant: .user)
-        case .imported:     Pill(text: "Imported", variant: .neutral)
-        case .suggested:    Pill(text: "Suggested", variant: .preview)
+        case .seeded:       Pill(text: source.presentationLabel, variant: .seeded)
+        case .userOverride: Pill(text: source.presentationLabel, variant: .user)
+        case .user:         Pill(text: source.presentationLabel, variant: .user)
+        case .imported:     Pill(text: source.presentationLabel, variant: .user)
+        case .suggested:    Pill(text: source.presentationLabel, variant: .preview)
         }
     }
 }

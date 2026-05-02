@@ -13,7 +13,7 @@ private let rulesLogger = Logger(subsystem: "com.spatialduality.manifold", categ
 ///
 /// The model is deliberately thin — it owns selection + filter state and delegates all
 /// persistence to the runtime client. Views read `rules` / `selectedRule` / `preview`
-/// directly and call `addRule`, `toggleEnabled`, etc.
+/// directly and call `addRule`, `setEnabled`, etc.
 @Observable
 @MainActor
 final class RulesModel {
@@ -51,9 +51,9 @@ final class RulesModel {
             case .scope(.email): return "Emails"
             case .scope(.content): return "Files + Mail"
             case .scope(.agent): return "Agent Behaviour"
-            case .seeded: return "Built-in"
+            case .seeded: return RuleSource.seeded.presentationLabel
             case .userAuthored: return "Mine"
-            case .suggested: return "Suggested"
+            case .suggested: return RuleSource.suggested.presentationLabel
             }
         }
 
@@ -65,7 +65,7 @@ final class RulesModel {
             case .scope(.email): return "envelope"
             case .scope(.content): return "doc.on.doc"
             case .scope(.agent): return "sparkles"
-            case .seeded: return "lock.shield"
+            case .seeded: return "checkmark.shield"
             case .userAuthored: return "person.crop.circle"
             case .suggested: return "wand.and.stars"
             }
@@ -220,7 +220,7 @@ final class RulesModel {
     func deleteSelected() async {
         guard let id = selectedRuleID, let rule = rules.first(where: { $0.id == id }) else { return }
         guard rule.source.isMutable else {
-            errorMessage = "Seeded rules can't be deleted. Disable it or create an override instead."
+            errorMessage = "Suggested rules are managed by Manifold. You can disable them, but not delete them."
             return
         }
         await delete(id: id)
@@ -239,12 +239,17 @@ final class RulesModel {
     }
 
     func toggleEnabled(id: String) async {
-        guard let client, let rule = rules.first(where: { $0.id == id }) else { return }
+        guard let rule = rules.first(where: { $0.id == id }) else { return }
+        await setEnabled(id: id, enabled: !rule.enabled)
+    }
+
+    func setEnabled(id: String, enabled: Bool) async {
+        guard let client else { return }
         do {
-            try await client.setRuleEnabled(id: id, enabled: !rule.enabled)
+            try await client.setRuleEnabled(id: id, enabled: enabled)
             await load()
         } catch {
-            rulesLogger.error("Toggle failed: \(error.localizedDescription, privacy: .public)")
+            rulesLogger.error("Rule status update failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
         }
     }
@@ -299,6 +304,21 @@ final class RulesModel {
             } catch {
                 rulesLogger.error("Preview failed: \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+}
+
+// MARK: - Presentation labels
+
+extension RuleSource {
+    var presentationLabel: String {
+        switch self {
+        case .seeded:
+            return "Suggested"
+        case .user, .userOverride, .imported:
+            return "Mine"
+        case .suggested:
+            return "Recommended"
         }
     }
 }

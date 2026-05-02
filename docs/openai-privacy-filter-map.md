@@ -10,11 +10,17 @@ The active model-backed scanner is MLX MXFP8 only:
 
 - Runtime ID: `openai-privacy-filter-mlx-mxfp8`
 - Backend kind: `mlx`
+- User-facing name: OpenAI Privacy Filter
+- Upstream source: `github.com/openai/privacy-filter`
+- Upstream model page: `huggingface.co/openai/privacy-filter`
+- License: Apache 2.0
 - Source: `mlx-community/openai-privacy-filter-mxfp8`
 - Install location: `privacy/models/openai-privacy-filter-mxfp8`
 - Offline after install: yes
 - External user dependencies: none
 - Supported hardware: Apple Silicon Macs
+
+Manifold installs a pinned, checksum-verified MLX Community pack derived from OpenAI Privacy Filter. Attribution is text-only; this does not imply OpenAI endorsement of Manifold.
 
 Legacy stored backend values `core_ml` and `official_cli` decode to `mlx` so old settings do not crash. They are migration inputs only, not active runtime choices.
 
@@ -22,7 +28,7 @@ Legacy stored backend values `core_ml` and `official_cli` decode to `mlx` so old
 
 ```mermaid
 flowchart LR
-    User["User: Settings > Privacy"] --> Settings["Fast Local Scanner card"]
+    User["User: Settings > Privacy"] --> Settings["OpenAI Privacy Filter card"]
     Settings --> XPC["installPrivacyRuntime / privacyRuntimeStatus"]
     XPC --> Coordinator["PrivacyPreflightCoordinator"]
 
@@ -195,7 +201,7 @@ The index stores severity, matched categories, identity matches, allowlist match
 The Settings card is presented as:
 
 ```text
-Fast Local Scanner
+OpenAI Privacy Filter
 MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs
 Download / Resume / Cancel / Remove
 ```
@@ -209,7 +215,7 @@ Runtime status exposes:
 | `totalBytes` | Total expected bytes from the pinned catalog. |
 | `downloadProgress` | Fractional progress from `0.0` to `1.0`. |
 | `runtimeID` | `openai-privacy-filter-mlx-mxfp8`. |
-| `runtimeDisplayName` | `Fast Local Scanner`. |
+| `runtimeDisplayName` | `OpenAI Privacy Filter`. |
 | `installedVersion` | Installed pinned snapshot version. |
 | `verificationState` | Checksum verification state. |
 | `modelLoaded` | Whether the MLX backend has loaded the model in memory. |

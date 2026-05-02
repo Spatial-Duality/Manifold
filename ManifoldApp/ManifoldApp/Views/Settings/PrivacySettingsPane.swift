@@ -52,12 +52,12 @@ struct PrivacySettingsPane: View {
 
     @ViewBuilder
     private var modelSection: some View {
-        Section("Fast Local Scanner") {
+        Section(PrivacyRuntimeDefaults.displayName) {
             if let settings = store.governance.privacySettings,
                let status = store.governance.privacyRuntimeStatus {
                 PrivacyModelCard(settings: settings, status: status)
             } else {
-                ProgressView("Loading scanner model…")
+                ProgressView("Loading privacy model...")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -215,7 +215,7 @@ private struct PrivacyModelCard: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: Spacing.s2) {
-                        Text("Fast Local Scanner")
+                        Text(PrivacyRuntimeDefaults.displayName)
                             .font(ManifoldType.bodyMedium)
                         Pill(
                             text: status.installState.displayName,
@@ -237,6 +237,7 @@ private struct PrivacyModelCard: View {
             }
 
             runtimeSummary
+            sourceDisclosure
             if let progress = status.downloadProgress,
                status.installState == .downloading || status.installState == .verifying {
                 ProgressView(value: progress)
@@ -313,7 +314,7 @@ private struct PrivacyModelCard: View {
             Image(systemName: status.verificationState == .checksumVerified ? "checkmark.seal" : "shippingbox")
                 .foregroundStyle(status.verificationState == .failed ? ManifoldPalette.danger : ManifoldPalette.text2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(status.runtimeDisplayName ?? "Fast Local Scanner")
+                Text(currentRuntime?.displayName ?? status.runtimeDisplayName ?? PrivacyRuntimeDefaults.displayName)
                     .font(ManifoldType.captionMedium)
                 Text(runtimeDetail)
                     .font(ManifoldType.caption)
@@ -323,6 +324,32 @@ private struct PrivacyModelCard: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, Spacing.s1)
+    }
+
+    private var sourceDisclosure: some View {
+        VStack(alignment: .leading, spacing: Spacing.s2) {
+            Divider()
+            PrivacySourceRow(label: "Developed by", value: currentRuntime?.publisher ?? PrivacyRuntimeDefaults.publisherName)
+            PrivacySourceRow(label: "License", value: PrivacyRuntimeDefaults.licenseName)
+            PrivacySourceLinkRow(
+                label: "Source",
+                value: PrivacyRuntimeDefaults.upstreamGitHubLabel,
+                urlString: PrivacyRuntimeDefaults.upstreamGitHubURL
+            )
+            PrivacySourceLinkRow(
+                label: "Installed pack",
+                value: PrivacyRuntimeDefaults.installedModelRepositoryLabel,
+                urlString: currentRuntime?.sourceRepository ?? PrivacyRuntimeDefaults.installedModelRepositoryURL
+            )
+        }
+    }
+
+    private var currentRuntime: PrivacyRuntimeDescriptor? {
+        if let runtimeID = status.runtimeID,
+           let runtime = store.governance.privacyRuntimes.first(where: { $0.id == runtimeID }) {
+            return runtime
+        }
+        return store.governance.privacyRuntimes.first { $0.id == PrivacyRuntimeDefaults.mlxRuntimeID }
     }
 
     private var accentColor: Color {
@@ -362,15 +389,21 @@ private struct PrivacyModelCard: View {
         if status.installState == .unavailable {
             return "Privacy Preflight requires Apple Silicon."
         }
-        if settings.isEnabled {
-            return "Active scanner: \(status.effectiveBackend.displayName) · \(status.modelLoaded ? "Model loaded" : "Model unloaded")"
+        if status.installState == .downloading || status.installState == .verifying {
+            return "\(status.installState.displayName) the OpenAI Privacy Filter model pack."
         }
-        return "Privacy preflight is off. Agents see raw content."
+        if status.installState == .installed, settings.isEnabled {
+            return "Installed and on. Runs locally through Manifold before content is shared."
+        }
+        if status.installState == .installed {
+            return "Installed, but Privacy Preflight is off. Agents see raw content."
+        }
+        return "Download the OpenAI Privacy Filter model pack for local PII and secret detection."
     }
 
     private var runtimeDetail: String {
         if status.installState == .unavailable {
-            return "MLX MXFP8 scanning is unavailable on this Mac."
+            return "OpenAI Privacy Filter scanning is unavailable on this Mac."
         }
         if status.installState == .downloading || status.installState == .verifying {
             let progress = (status.downloadProgress ?? 0) * 100
@@ -378,9 +411,9 @@ private struct PrivacyModelCard: View {
         }
         if let installed = status.installedVersion {
             let verification = status.verificationState?.displayName ?? "Verification unknown"
-            return "MLX MXFP8 · Installed \(installed) · \(verification) · works offline."
+            return "Installed \(installed) · \(verification) · runs locally."
         }
-        return "MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs."
+        return currentRuntime?.note ?? "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs."
     }
 
     private var installButtonTitle: String {
@@ -411,6 +444,52 @@ private struct PrivacyModelCard: View {
                 Task { await store.governance.updatePrivacySettings(updated) }
             }
         )
+    }
+}
+
+private struct PrivacySourceRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
+            Text(label)
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 92, alignment: .leading)
+            Text(value)
+                .font(ManifoldType.captionMedium)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct PrivacySourceLinkRow: View {
+    let label: String
+    let value: String
+    let urlString: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
+            Text(label)
+                .font(ManifoldType.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 92, alignment: .leading)
+            if let url = URL(string: urlString) {
+                Link(value, destination: url)
+                    .font(ManifoldType.captionMedium)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text(value)
+                    .font(ManifoldType.captionMedium)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 

@@ -70,7 +70,7 @@ actor RulesOnlyPrivacyBackend: PrivacyBackend {
             modelVersion: modelVersion,
             available: true,
             loaded: true,
-            note: "Fast local heuristics for secrets and common identifiers."
+            note: "Local rules-only heuristics for secrets and common identifiers."
         )
     }
 

@@ -146,12 +146,12 @@ struct PrivacyModelCatalog: Sendable, Hashable {
         return PrivacyModelCatalog(
             runtimeID: PrivacyRuntimeDefaults.mlxRuntimeID,
             modelDirectoryName: "openai-privacy-filter-mxfp8",
-            displayName: "Fast Local Scanner",
-            publisher: "MLX Community / OpenAI",
+            displayName: PrivacyRuntimeDefaults.displayName,
+            publisher: PrivacyRuntimeDefaults.publisherName,
             version: "2026-04-23-\(snapshot.prefix(12))",
             snapshotSHA: snapshot,
-            sourceRepository: "https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8",
-            note: "MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs.",
+            sourceRepository: PrivacyRuntimeDefaults.installedModelRepositoryURL,
+            note: "OpenAI Privacy Filter · MLX MXFP8 · 1.47 GB · Recommended for Apple Silicon Macs.",
             files: [
                 file(
                     "model.safetensors",
@@ -255,7 +255,7 @@ actor PrivacyRuntimeManager {
                     verificationState: installed.verificationState,
                     installedVersion: installed.manifest.version,
                     sizeBytes: directorySize(installed.rootURL),
-                    note: "Verified MLX MXFP8 model pack is installed."
+                    note: "OpenAI Privacy Filter model pack is installed and checksum verified."
                 )
             ]
         }

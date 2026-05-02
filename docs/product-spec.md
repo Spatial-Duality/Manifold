@@ -117,9 +117,9 @@ A single rule grammar covers files, emails, and agent behavior.
 - **Window.** `always`, `session-only`, `until(date)`, or `expire-after(n)`.
 - **Source.** `seeded` (immutable system defaults), `user`, `user-override`, `suggested`, or `imported`.
 
-Precedence is two-phase: any matching deny wins over any matching allow (deny sweep), then first-match wins within the same action. Seeded rules pin to the top of their group. Suggestions sit below user rules and promote to user on accept.
+Precedence is two-phase: any matching deny wins over any matching allow (deny sweep), then first-match wins within the same action. Suggested rules pin to the top of their group. Recommended rules sit below Mine rules and promote to Mine on accept.
 
-Seeded denies that ship on by default include: `**/.env*`, `**/.ssh/**`, `**/*.pem`, `**/*.key`, `**/id_rsa*`, `**/.aws/credentials`, `**/.gnupg/**`, `**/.netrc`, `**/.npmrc`, `**/.git/config`, anything matching known token/key detector patterns, and mail matching password-reset or 2FA shields.
+Suggested denies that ship on by default include: `**/.env*`, `**/.ssh/**`, `**/*.pem`, `**/*.key`, `**/id_rsa*`, `**/.aws/credentials`, `**/.gnupg/**`, `**/.netrc`, `**/.npmrc`, `**/.git/config`, anything matching known token/key detector patterns, and mail matching password-reset or 2FA shields.
 
 ### Standing Access
 
@@ -164,7 +164,7 @@ Manifold helps agents understand prior work through user-owned history. It does 
 - File visibility by agent.
 - Email visibility by agent.
 - Unified rules across files, emails, and agent behavior — authored in Ledger ▸ Rules, live match preview shows what a rule would block right now.
-- Seeded secret denies are on by default and can only be shadowed through an explicit user-override-allow with a warning banner.
+- Suggested secret denies are on by default and can only be shadowed through an explicit user-override-allow with a warning banner.
 - Sensitivity rules and filters for email access.
 - Whether access recording stays lightweight or requires richer intent summaries.
 - When to start, review, promote, restore, or discard a Tracked Work Block.
@@ -182,7 +182,7 @@ The main window is a single ledger with five destinations:
 - **Access.** Managed sources, per-agent visibility, file browsing, session delta, and Version History.
 - **Mail.** Governed mailboxes, synced archive, visibility rules, sensitivity controls, and mail-session evidence.
 - **Requests.** Pending approvals — standing-write prompts, out-of-scope reads, and recent answers.
-- **Rules.** Live file, email, and agent-behavior rules authored against a unified `(scope, matcher, action, agents, window, source)` grammar. Seeded denies for secrets and credentials ship on by default. Every edit changes real runtime decisions.
+- **Rules.** Live file, email, and agent-behavior rules authored against a unified `(scope, matcher, action, agents, window, source)` grammar. Suggested denies for secrets and credentials ship on by default. Every edit changes real runtime decisions.
 
 Plus supporting surfaces:
 

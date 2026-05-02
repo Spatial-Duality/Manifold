@@ -17,4 +17,9 @@ struct PrivacyBackendKindTests {
         #expect(try decoder.decode(PrivacyBackendKind.self, from: Data(#""core_ml""#.utf8)) == .mlx)
         #expect(try decoder.decode(PrivacyBackendKind.self, from: Data(#""official_cli""#.utf8)) == .mlx)
     }
+
+    @Test("MLX backend display name is OpenAI Privacy Filter")
+    func mlxBackendDisplayNameIsOpenAIPrivacyFilter() {
+        #expect(PrivacyBackendKind.mlx.displayName == "OpenAI Privacy Filter")
+    }
 }

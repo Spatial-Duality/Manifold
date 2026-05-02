@@ -168,7 +168,7 @@ private struct RulesMetric: View {
 private func privacyBackendLabel(for status: PrivacyRuntimeStatus) -> String {
     switch status.effectiveBackend {
     case .mlx:
-        return status.runtimeDisplayName ?? "Fast Local Scanner"
+        return status.runtimeDisplayName ?? PrivacyRuntimeDefaults.displayName
     default:
         return status.effectiveBackend.displayName
     }
@@ -307,10 +307,10 @@ private struct RulesToolbar: View {
                         await model.resetSeededRules()
                     }
                 } label: {
-                    Label("Restore built-in rules", systemImage: "arrow.clockwise")
+                    Label("Restore suggested rules", systemImage: "arrow.clockwise")
                 }
                 .disabled(isResettingSeeded)
-                .help("Re-enables built-in rules that were disabled and resyncs the catalog after an app update.")
+                .help("Re-enables suggested rules that were disabled and resyncs the catalog after an app update.")
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .foregroundStyle(.secondary)

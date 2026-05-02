@@ -7,6 +7,33 @@ import ManifoldKit
 
 @MainActor
 final class RulesModelTests: XCTestCase {
+    func testSourceFilterTitlesUsePresentationVocabulary() {
+        XCTAssertEqual(RulesModel.Filter.seeded.title, "Suggested")
+        XCTAssertEqual(RulesModel.Filter.userAuthored.title, "Mine")
+        XCTAssertEqual(RulesModel.Filter.suggested.title, "Recommended")
+    }
+
+    func testRuleSourcePresentationLabels() {
+        XCTAssertEqual(RuleSource.seeded.presentationLabel, "Suggested")
+        XCTAssertEqual(RuleSource.user.presentationLabel, "Mine")
+        XCTAssertEqual(RuleSource.userOverride.presentationLabel, "Mine")
+        XCTAssertEqual(RuleSource.imported.presentationLabel, "Mine")
+        XCTAssertEqual(RuleSource.suggested.presentationLabel, "Recommended")
+    }
+
+    func testFixtureRuntimeStatusUsesOpenAIPrivacyFilterName() async throws {
+        let client = FixtureRuntimeClient(profile: .privacy)
+
+        let status = try await client.privacyRuntimeStatus()
+        let runtimes = try await client.listPrivacyRuntimes()
+        let runtime = try XCTUnwrap(runtimes.first)
+
+        XCTAssertEqual(status.runtimeDisplayName, PrivacyRuntimeDefaults.displayName)
+        XCTAssertEqual(runtime.displayName, PrivacyRuntimeDefaults.displayName)
+        XCTAssertEqual(runtime.publisher, PrivacyRuntimeDefaults.publisherName)
+        XCTAssertEqual(runtime.sourceRepository, PrivacyRuntimeDefaults.installedModelRepositoryURL)
+    }
+
     func testFilteredRulesPrioritizeSeededRulesWithinScope() async {
         let seededRule = makeRule(
             id: "rule-seeded-file",
@@ -180,10 +207,29 @@ final class RulesModelTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(model.rules.first).enabled)
     }
 
+    func testSetEnabledCanReenableDisabledSeededRule() async throws {
+        let rule = makeRule(
+            id: "rule-seeded-toggle",
+            name: "Suggested Secrets Guard",
+            scope: .file,
+            matcher: .pathGlob("**/.env"),
+            action: .deny,
+            source: .seeded,
+            enabled: false
+        )
+        let model = RulesModel()
+        model.configure(client: RulesRuntimeDouble(initialRules: [rule]))
+
+        await model.load()
+        await model.setEnabled(id: rule.id, enabled: true)
+
+        XCTAssertTrue(try XCTUnwrap(model.rules.first).enabled)
+    }
+
     func testDeleteSelectedRejectsSeededRules() async {
         let seededRule = makeRule(
             id: "rule-seeded-delete",
-            name: "Built-in Constitution Guard",
+            name: "Suggested Constitution Guard",
             scope: .file,
             matcher: .pathGlob("**/.env"),
             action: .deny,
@@ -196,7 +242,7 @@ final class RulesModelTests: XCTestCase {
         model.selectedRuleID = seededRule.id
         await model.deleteSelected()
 
-        XCTAssertEqual(model.errorMessage, "Seeded rules can't be deleted. Disable it or create an override instead.")
+        XCTAssertEqual(model.errorMessage, "Suggested rules are managed by Manifold. You can disable them, but not delete them.")
         XCTAssertEqual(model.rules.map(\.id), [seededRule.id])
     }
 

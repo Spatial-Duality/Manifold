@@ -817,7 +817,7 @@ public enum RuleValidationError: LocalizedError, Sendable, Equatable {
         case .matcherScopeMismatch(let e, let a):
             return "Rule scope is \(e.displayName) but the matcher touches \(a.map(\.displayName).joined(separator: ", "))."
         case .matcherEmpty: return "Rule needs at least one condition."
-        case .seededRuleImmutable: return "Seeded rules can't be edited directly — create an override instead."
+        case .seededRuleImmutable: return "Suggested rules are managed by Manifold. Create an override instead."
         case .invalidRegex(let s): return "Invalid regular expression: \(s)"
         }
     }

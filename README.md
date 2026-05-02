@@ -40,7 +40,8 @@ If that fits your setup, you can clone, build, and run the app locally today.
 - Drag a folder from Finder to add it as a source; drag a file and Manifold asks whether to add the whole folder or just that file (siblings denied via per-file overrides).
 - Mail surface mirrors Files: per-message chip stack, scrollable message excerpts in the inspector, and explicit export when readable `.eml` files are needed.
 - Sharing column on each folder reads as plain English — `Not shared`, `Shared with Claude`, `Partly shared · 1 of 2`, `Shared with all` — with a small dot when individual files inside have explicit allow/deny overrides.
-- Enforces a unified rule system across files, emails, and agent behavior, with seeded denies for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
+- Enforces a unified rule system across files, emails, and agent behavior, with Suggested rules for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
+- Runs OpenAI Privacy Filter locally for PII and secret detection. The model is Apache 2.0; Manifold installs a pinned, checksum-verified MLX Community pack derived from OpenAI Privacy Filter. See the [source](https://github.com/openai/privacy-filter), [model page](https://huggingface.co/openai/privacy-filter), and installed [MLX pack](https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8).
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
 - Keeps local version history and session context across sessions and across agents

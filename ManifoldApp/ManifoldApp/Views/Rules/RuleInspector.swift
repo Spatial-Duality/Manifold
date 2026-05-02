@@ -201,9 +201,9 @@ struct RuleInspector: View {
             Image(systemName: "lock.shield")
                 .foregroundStyle(ManifoldPalette.paused)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Seeded rule")
+                Text("Suggested rule")
                     .font(ManifoldType.captionMedium)
-                Text("Built-in rules can be toggled on/off but not edited. Create a user rule to override.")
+                Text("Suggested rules are managed by Manifold. They can be disabled, but not edited. Create a Mine rule to override.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -342,7 +342,7 @@ private struct PrivacyFilterRuleBanner: View {
     private var title: String {
         guard let status else { return "Privacy filter rule" }
         if status.effectiveBackend == .mlx {
-            return "\(status.runtimeDisplayName ?? "Fast Local Scanner") rule"
+            return "\(status.runtimeDisplayName ?? PrivacyRuntimeDefaults.displayName) rule"
         }
         return "\(status.effectiveBackend.displayName) privacy rule"
     }

@@ -5,6 +5,15 @@ import Foundation
 
 public enum PrivacyRuntimeDefaults {
     public static let mlxRuntimeID = "openai-privacy-filter-mlx-mxfp8"
+    public static let displayName = "OpenAI Privacy Filter"
+    public static let upstreamGitHubURL = "https://github.com/openai/privacy-filter"
+    public static let upstreamGitHubLabel = "github.com/openai/privacy-filter"
+    public static let upstreamHuggingFaceURL = "https://huggingface.co/openai/privacy-filter"
+    public static let upstreamHuggingFaceLabel = "huggingface.co/openai/privacy-filter"
+    public static let installedModelRepositoryURL = "https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8"
+    public static let installedModelRepositoryLabel = "mlx-community/openai-privacy-filter-mxfp8"
+    public static let publisherName = "OpenAI"
+    public static let licenseName = "Apache 2.0"
 }
 
 public enum PrivacyBackendKind: String, Sendable, Codable, CaseIterable {
@@ -14,7 +23,7 @@ public enum PrivacyBackendKind: String, Sendable, Codable, CaseIterable {
     public var displayName: String {
         switch self {
         case .rulesOnly: return "Rules only"
-        case .mlx: return "Fast Local Scanner"
+        case .mlx: return PrivacyRuntimeDefaults.displayName
         }
     }
 

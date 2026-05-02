@@ -86,7 +86,7 @@ struct RuleEngineTests {
         #expect(decision.matchedRuleID == "deny")
     }
 
-    @Test("Seeded rules fire before user rules of same action")
+    @Test("Seeded-source rules fire before user rules of same action")
     func seededBeatsUserWithinSameAction() {
         let seed = RuleRecord(
             id: "seed", name: "Seed warn",

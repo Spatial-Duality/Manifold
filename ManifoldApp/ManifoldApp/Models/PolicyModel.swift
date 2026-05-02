@@ -18,6 +18,7 @@ final class GovernanceModel {
     var claudePrivacyPolicy: AgentPrivacyPolicy?
     var codexPrivacyPolicy: AgentPrivacyPolicy?
     var privacyRuntimeStatus: PrivacyRuntimeStatus?
+    var privacyRuntimes: [PrivacyRuntimeDescriptor] = []
     var privacyIndexStatus: PrivacyIndexRuntimeStatus?
     var privacyIdentitySuggestions: [PrivacyIdentitySuggestion] = []
     var privacyIdentities: [PrivacyIdentityRecord] = []
@@ -60,6 +61,7 @@ final class GovernanceModel {
             privacySettings = bundle.settings
             claudePrivacyPolicy = bundle.claudePolicy
             codexPrivacyPolicy = bundle.codexPolicy
+            privacyRuntimes = bundle.runtimes
             privacyRuntimeStatus = try await client.privacyRuntimeStatus()
         } catch {
             logger.error("Failed to load privacy settings: \(error.localizedDescription)")
@@ -178,7 +180,7 @@ final class GovernanceModel {
             privacyRuntimeStatus = try await client.installPrivacyRuntime(id: id)
             await loadPolicies()
         } catch {
-            logger.error("Failed to install privacy scanner model: \(error.localizedDescription)")
+            logger.error("Failed to install OpenAI Privacy Filter model: \(error.localizedDescription)")
         }
     }
 
@@ -188,7 +190,7 @@ final class GovernanceModel {
             privacyRuntimeStatus = try await client.uninstallPrivacyRuntime(id: id)
             await loadPolicies()
         } catch {
-            logger.error("Failed to uninstall privacy scanner model: \(error.localizedDescription)")
+            logger.error("Failed to uninstall OpenAI Privacy Filter model: \(error.localizedDescription)")
         }
     }
 

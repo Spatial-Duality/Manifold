@@ -407,13 +407,13 @@ protocol RuntimeClientProtocol: Sendable {
     func listRules(scope: RuleScope?) async throws -> [RuleRecord]
     /// Inserts or updates a rule.
     func upsertRule(_ rule: RuleRecord) async throws
-    /// Deletes a user-authored rule. Seeded rules throw.
+    /// Deletes a user-authored rule. Manifold-managed rules throw.
     func deleteRule(id: String) async throws
     /// Toggles enabled state for a rule.
     func setRuleEnabled(id: String, enabled: Bool) async throws
     /// Replaces the ordering of rules within a scope.
     func reorderRules(scope: RuleScope, ids: [String]) async throws
-    /// Re-applies the seeded catalog (idempotent). Used by Settings > Rules > Reset seeded rules.
+    /// Re-applies the seeded catalog (idempotent). Used by Settings > Rules > Restore suggested rules.
     func resetSeededRules() async throws
     /// Live preview — "how many files/emails would match this rule right now?"
     func previewRuleMatches(rule: RuleRecord, agent: TargetApp) async throws -> RuleMatchPreview
@@ -1598,7 +1598,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             updated.installedVersion = runtime.availableVersion ?? "openai-privacy-filter-mlx-mxfp8"
             updated.installState = .installed
             updated.verificationState = .checksumVerified
-            updated.note = "Verified MLX MXFP8 model pack installed."
+            updated.note = "OpenAI Privacy Filter model pack is installed and checksum verified."
             return updated
         }
         state.privacyRuntimeStatus = PrivacyRuntimeStatus(
@@ -1630,7 +1630,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             updated.installedVersion = nil
             updated.installState = .notInstalled
             updated.verificationState = .notInstalled
-            updated.note = "Download required."
+            updated.note = "Download the OpenAI Privacy Filter model pack for local PII and secret detection."
             return updated
         }
         state.privacyRuntimeStatus = PrivacyRuntimeStatus(
@@ -2703,16 +2703,18 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         )
         let privacyRuntimes = [
             PrivacyRuntimeDescriptor(
-                id: "openai-privacy-filter-mlx-mxfp8",
-                displayName: "Fast Local Scanner",
-                publisher: "MLX Community / OpenAI",
+                id: PrivacyRuntimeDefaults.mlxRuntimeID,
+                displayName: PrivacyRuntimeDefaults.displayName,
+                publisher: PrivacyRuntimeDefaults.publisherName,
                 installedVersion: profile == .onboarding ? nil : "openai-privacy-filter-mlx-mxfp8",
                 availableVersion: "openai-privacy-filter-mlx-mxfp8",
                 sizeBytes: 1_473_063_803,
                 installState: privacySettings.installState,
                 verificationState: profile == .onboarding ? .notInstalled : .checksumVerified,
-                sourceRepository: "https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8",
-                note: profile == .onboarding ? "Download required." : "Verified MLX MXFP8 model pack installed."
+                sourceRepository: PrivacyRuntimeDefaults.installedModelRepositoryURL,
+                note: profile == .onboarding
+                    ? "Download the OpenAI Privacy Filter model pack for local PII and secret detection."
+                    : "OpenAI Privacy Filter model pack is installed and checksum verified."
             )
         ]
         let claudePrivacyPolicy = AgentPrivacyPolicy(agent: .cowork, textHandling: .redact, codeHandling: .ask, secretHandling: .block)
@@ -2727,11 +2729,11 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             lastError: nil,
             storagePath: privacySettings.storagePath,
             backends: [
-                PrivacyBackendStatus(kind: .rulesOnly, available: true, installed: privacySettings.installState == .installed, note: "Fast local heuristics."),
+                PrivacyBackendStatus(kind: .rulesOnly, available: true, installed: privacySettings.installState == .installed, note: "Local rules-only heuristics."),
                 PrivacyBackendStatus(kind: .mlx, available: privacySettings.installState == .installed, installed: privacySettings.installState == .installed, note: "MLX MXFP8 model pack."),
             ],
-            runtimeID: "openai-privacy-filter-mlx-mxfp8",
-            runtimeDisplayName: "Fast Local Scanner",
+            runtimeID: PrivacyRuntimeDefaults.mlxRuntimeID,
+            runtimeDisplayName: PrivacyRuntimeDefaults.displayName,
             installedVersion: privacyRuntimes[0].installedVersion,
             availableVersion: privacyRuntimes[0].availableVersion,
             verificationState: privacyRuntimes[0].verificationState
