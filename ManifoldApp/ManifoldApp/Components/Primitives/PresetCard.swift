@@ -64,6 +64,7 @@ struct PresetCard: View {
                         lineWidth: isSelected ? 1.5 : 0.5
                     )
             )
+            .contentShape(RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous))
             .animation(ManifoldMotion.effective(ManifoldMotion.state, reduceMotion: reduceMotion), value: isSelected)
         }
         .buttonStyle(.plain)
@@ -75,6 +76,7 @@ struct PresetCard: View {
         .modifier(HoverLift(isHovering: isHovering))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel("\(title). \(subtitle)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityIdentifier(accessibilityIdentifier ?? "preset.\(title.lowercased())")
     }
 }

@@ -383,6 +383,30 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.failed").exists)
     }
 
+    func testPrivacySettingsPresetCardsApplyFixtureChanges() {
+        let app = launchFixture(profile: "privacy")
+
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
+        openSettings(in: app)
+        clickSettingsTab("Privacy", contentID: "settings.privacy.model.enabled", in: app)
+
+        let strict = element(in: app, id: "settings.privacy.preset.strict")
+        let custom = element(in: app, id: "settings.privacy.preset.custom")
+        let off = element(in: app, id: "settings.privacy.preset.off")
+
+        XCTAssertTrue(strict.waitForExistence(timeout: 5))
+        strict.click()
+        XCTAssertTrue(waitForValue("Selected", in: strict, timeout: 5))
+
+        XCTAssertTrue(custom.waitForExistence(timeout: 5))
+        custom.click()
+        XCTAssertTrue(waitForValue("Selected", in: custom, timeout: 5))
+
+        XCTAssertTrue(off.waitForExistence(timeout: 5))
+        off.click()
+        XCTAssertTrue(waitForValue("Selected", in: off, timeout: 5))
+    }
+
     func testPrivacyWorkEvidenceRendersCurrentInspector() {
         let app = launchFixture(profile: "privacy")
 

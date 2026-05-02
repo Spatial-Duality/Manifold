@@ -269,6 +269,49 @@ final class ManifoldStoreTests: XCTestCase {
         )
     }
 
+    func testPrivacyPresetCustomRoundTripsThroughFixtureRuntime() async throws {
+        let runtime = FixtureRuntimeClient(profile: .privacy)
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .privacy))
+        let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
+
+        await store.governance.loadPolicies()
+
+        var settings = try XCTUnwrap(store.governance.privacySettings)
+        var claude = try XCTUnwrap(store.governance.claudePrivacyPolicy)
+        var codex = try XCTUnwrap(store.governance.codexPrivacyPolicy)
+        let (strictSettings, strictClaude, strictCodex) = PrivacyPreset.strict.apply(
+            to: &settings,
+            claude: claude,
+            codex: codex
+        )
+
+        await store.governance.updatePrivacySettings(strictSettings)
+        await store.governance.updatePrivacyPolicy(strictClaude)
+        await store.governance.updatePrivacyPolicy(strictCodex)
+
+        settings = try XCTUnwrap(store.governance.privacySettings)
+        claude = try XCTUnwrap(store.governance.claudePrivacyPolicy)
+        codex = try XCTUnwrap(store.governance.codexPrivacyPolicy)
+        let (customSettings, customClaude, customCodex) = PrivacyPreset.custom.apply(
+            to: &settings,
+            claude: claude,
+            codex: codex
+        )
+
+        await store.governance.updatePrivacySettings(customSettings)
+        await store.governance.updatePrivacyPolicy(customClaude)
+        await store.governance.updatePrivacyPolicy(customCodex)
+
+        XCTAssertEqual(
+            PrivacyPreset.detect(
+                settings: store.governance.privacySettings,
+                claudePolicy: store.governance.claudePrivacyPolicy,
+                codexPolicy: store.governance.codexPrivacyPolicy
+            ),
+            .custom
+        )
+    }
+
     func testFileVisibilityOverridesRoundTripThroughRuntime() async throws {
         let runtime = FixtureRuntimeClient(profile: .baseline)
         let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline))

@@ -241,7 +241,7 @@ private struct PrivacyModelCard: View {
             if let progress = status.downloadProgress,
                status.installState == .downloading || status.installState == .verifying {
                 ProgressView(value: progress)
-                    .accessibilityLabel("Privacy scanner download progress")
+                    .accessibilityLabel("Privacy filter download progress")
             }
 
             HStack(spacing: Spacing.s2) {
@@ -534,7 +534,7 @@ private struct PrivacyPresetsRow: View {
                 accent: ManifoldPalette.claude,
                 isSelected: currentPreset == .custom,
                 accessibilityIdentifier: "settings.privacy.preset.custom",
-                action: {}
+                action: { apply(.custom) }
             )
         }
     }
@@ -614,7 +614,10 @@ enum PrivacyPreset: Equatable {
                     Self.policy(claude, text: .redact, code: .redact, secret: .block),
                     Self.policy(codex,  text: .redact, code: .redact, secret: .block))
         case .custom:
-            return (settings, claude, codex)
+            settings.isEnabled = true
+            return (settings,
+                    Self.policy(claude, text: .redact, code: .ask, secret: .block),
+                    Self.policy(codex,  text: .redact, code: .ask, secret: .block))
         }
     }
 
