@@ -9,9 +9,8 @@
 #   - Public key:  prints to stdout — paste into the Manifold Xcode project
 #                  build setting `SPARKLE_PUBLIC_ED_KEY`.
 #   - Private key: stored in macOS Keychain by `generate_keys`, NOT in this
-#                  repo. Export it once with the printed `--export-key`
-#                  command and put it in the GitHub Actions secret named
-#                  `SPARKLE_ED_PRIVATE_KEY`.
+#                  repo. Export it only if you need to sign updates on
+#                  another Mac, then store it outside the repository.
 #
 # Run once. Rotating later means shipping a new app build with a new public
 # key first, so existing installs can verify updates that follow. Document
@@ -61,10 +60,10 @@ echo "   'A new EdDSA signing key has been generated' and the value below)."
 echo "2. Open Manifold.xcodeproj in Xcode."
 echo "3. Project -> Manifold target -> Build Settings -> search 'SPARKLE_PUBLIC_ED_KEY'."
 echo "4. Paste the public key into both Debug and Release."
-echo "5. Export the private key for CI:"
+echo "5. Export the private key only if another signing machine needs it:"
 echo "     $GENERATE_KEYS -x sparkle_private_key.pem"
-echo "6. Add the contents of sparkle_private_key.pem as a GitHub Actions"
-echo "   secret named SPARKLE_ED_PRIVATE_KEY for this repo."
-echo "7. Securely delete the local pem file after uploading to GitHub:"
+echo "6. Store sparkle_private_key.pem outside this repository. Prefer"
+echo "   the Keychain on this Mac for signing."
+echo "7. Securely delete the local pem file after moving it to secret storage:"
 echo "     rm sparkle_private_key.pem"
 echo "8. Commit the updated project.pbxproj."

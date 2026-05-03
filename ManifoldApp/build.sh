@@ -4,6 +4,10 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/tmp/clang-module-cache}"
+export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-/tmp/swiftpm-module-cache}"
+mkdir -p "$CLANG_MODULE_CACHE_PATH" "$SWIFTPM_MODULECACHE_OVERRIDE"
+
 VERSION="${MANIFOLD_VERSION:-$(awk -F: '
     /^[[:space:]]*MARKETING_VERSION[[:space:]]*:/ {
         value = $2
@@ -59,7 +63,7 @@ else
     XCODE_CONFIGURATION="Debug"
 fi
 
-DERIVED_DATA_PATH="$PROJECT_DIR/.deriveddata-release"
+DERIVED_DATA_PATH="${MANIFOLD_DERIVED_DATA_PATH:-/tmp/manifold-release-derived-data}"
 XCODE_APP_BUNDLE="$DERIVED_DATA_PATH/Build/Products/$XCODE_CONFIGURATION/Manifold.app"
 BUILD_OUTPUT_DIR="$PROJECT_DIR/ManifoldApp/build"
 
@@ -114,7 +118,27 @@ if [[ ! -x "$AGENT_BINARY_PATH" ]]; then
     exit 1
 fi
 
+set_plist_string() {
+    local key="$1"
+    local value="$2"
+    /usr/libexec/PlistBuddy -c "Set :$key $value" "$BUNDLE/Contents/Info.plist" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Add :$key string $value" "$BUNDLE/Contents/Info.plist"
+}
+
+set_plist_bool() {
+    local key="$1"
+    local value="$2"
+    /usr/libexec/PlistBuddy -c "Set :$key $value" "$BUNDLE/Contents/Info.plist" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Add :$key bool $value" "$BUNDLE/Contents/Info.plist"
+}
+
 if [[ "$CONFIG" == "release" ]]; then
+    set_plist_bool "SUEnableAutomaticChecks" "false"
+    if [[ -n "$SPARKLE_PUBLIC_ED_KEY" ]]; then
+        set_plist_string "SUFeedURL" "$SPARKLE_FEED_URL"
+        set_plist_string "SUPublicEDKey" "$SPARKLE_PUBLIC_ED_KEY"
+    fi
+
     if [[ "$REQUIRE_SIGNED_RELEASE" == "1" && -z "$APP_IDENTITY" ]]; then
         echo "error: MANIFOLD_CODESIGN_IDENTITY is required for release builds." >&2
         exit 1

@@ -3,8 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Pre-publish validation of a generated Sparkle appcast. Run this BEFORE
-# pushing to gh-pages — without it, the first broken Sparkle build is shipped
-# to every user.
+# publishing the appcast and update archive.
 #
 # Checks:
 #   1. The XML is well-formed.

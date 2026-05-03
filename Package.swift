@@ -20,15 +20,6 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.3"),
-        // R6: DocC plugin for generating public-API documentation across
-        // ManifoldKit / ManifoldRuntime / ManifoldXPC. Build-time only;
-        // no runtime dependency. Run from repo root:
-        //   swift package --allow-writing-to-directory ./docs \
-        //     generate-documentation \
-        //     --target ManifoldKit --target ManifoldRuntime --target ManifoldXPC \
-        //     --output-path ./docs --transform-for-static-hosting
-        // https://github.com/swiftlang/swift-docc-plugin
-        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
     ],
     targets: [
         .target(

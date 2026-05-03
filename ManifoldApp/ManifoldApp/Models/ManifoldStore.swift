@@ -114,11 +114,6 @@ final class ManifoldStore {
         rules = RulesModel()
         sessionWorkbench = SessionWorkbenchModel()
         diagnostics = DiagnosticsModel()
-        // Sparkle is only meaningful when the bundle has a feed URL and a
-        // public EdDSA key — i.e. an official build. In source builds where
-        // SPARKLE_PUBLIC_ED_KEY is empty, instantiating the controller would
-        // log a fault every time. Keep `updater` nil there; Help -> Check
-        // for Updates and the consent toggle no-op cleanly.
         // Sparkle is only meaningful when the bundle has a public EdDSA key
         // — i.e. an official build. In source builds where the key is empty
         // we skip the controller entirely; Help -> Check for Updates and the

@@ -6,6 +6,7 @@ PROJECT_FILE="$PROJECT_DIR/Manifold.xcodeproj/project.pbxproj"
 
 APP_PATH=""
 REQUIRE_SIGNED_APP=0
+REQUIRE_SPARKLE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -17,8 +18,12 @@ while [[ $# -gt 0 ]]; do
             REQUIRE_SIGNED_APP=1
             shift
             ;;
+        --require-sparkle)
+            REQUIRE_SPARKLE=1
+            shift
+            ;;
         *)
-            echo "usage: $0 [--app /path/to/Manifold.app] [--require-signed-app]" >&2
+            echo "usage: $0 [--app /path/to/Manifold.app] [--require-signed-app] [--require-sparkle]" >&2
             exit 2
             ;;
     esac
@@ -51,6 +56,14 @@ if [[ -n "$APP_PATH" ]]; then
     [[ -x "$APP_PATH/Contents/Library/LaunchServices/ManifoldAgent" ]] || fail "Bundled ManifoldAgent helper is missing."
     [[ -f "$APP_PATH/Contents/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist" ]] \
         || fail "Launch agent plist is missing from the app bundle."
+    if [[ "$REQUIRE_SPARKLE" == "1" ]]; then
+        FEED_URL="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)"
+        PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)"
+        AUTO_CHECKS="$(/usr/libexec/PlistBuddy -c 'Print :SUEnableAutomaticChecks' "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)"
+        [[ -n "$FEED_URL" ]] || fail "SUFeedURL is missing; Sparkle cannot find the appcast."
+        [[ -n "$PUBLIC_KEY" ]] || fail "SUPublicEDKey is missing; Sparkle cannot verify updates."
+        [[ "$AUTO_CHECKS" == "false" ]] || fail "SUEnableAutomaticChecks must default to false."
+    fi
 
     if /usr/bin/codesign -dvv "$APP_PATH" >/tmp/manifold-release-codesign.log 2>&1; then
         if /usr/bin/codesign --verify --deep --strict "$APP_PATH" >/tmp/manifold-release-verify.log 2>&1; then
