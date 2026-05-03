@@ -502,6 +502,7 @@ private struct PrivacySourceLinkRow: View {
 private struct PrivacyPresetsRow: View {
     @Environment(ManifoldStore.self) private var store
     @State private var globalFilterMode: FilterMode?
+    @State private var pendingPreset: PrivacyPreset?
     @State private var modeError: String?
 
     var body: some View {
@@ -513,12 +514,14 @@ private struct PrivacyPresetsRow: View {
                 Text("Custom").tag(PrivacyPreset.custom)
             }
             .pickerStyle(.segmented)
+            .accessibilityValue(currentPreset.title)
             .accessibilityIdentifier("settings.privacy.preset.picker")
 
             Text(currentPreset.settingsDescription)
                 .font(ManifoldType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(currentPreset.settingsDescription)
                 .accessibilityIdentifier("settings.privacy.preset.description")
 
             HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
@@ -553,7 +556,10 @@ private struct PrivacyPresetsRow: View {
     }
 
     private var currentPreset: PrivacyPreset {
-        PrivacyPreset.detect(
+        if let pendingPreset {
+            return pendingPreset
+        }
+        return PrivacyPreset.detect(
             settings: store.governance.privacySettings,
             claudePolicy: store.governance.claudePrivacyPolicy,
             codexPolicy: store.governance.codexPrivacyPolicy,
@@ -565,6 +571,7 @@ private struct PrivacyPresetsRow: View {
         guard var settings = store.governance.privacySettings,
               let claudePolicy = store.governance.claudePrivacyPolicy,
               let codexPolicy = store.governance.codexPrivacyPolicy else { return }
+        pendingPreset = preset
         let (newSettings, newClaude, newCodex) = preset.apply(
             to: &settings,
             claude: claudePolicy,
@@ -578,10 +585,12 @@ private struct PrivacyPresetsRow: View {
                 try await store.runtime.setGlobalFilterMode(preset.filterMode)
                 await MainActor.run {
                     globalFilterMode = preset.filterMode
+                    pendingPreset = nil
                     modeError = nil
                 }
             } catch {
                 await MainActor.run {
+                    pendingPreset = nil
                     modeError = "Couldn't sync file scanning mode: \(error.localizedDescription)"
                 }
             }
@@ -686,6 +695,15 @@ enum PrivacyPreset: Equatable {
             return "Redacts personal information, blocks secrets, and asks before sharing code-like content."
         case .custom:
             return "Uses your current agent privacy settings. Rules is the place for detailed rule examples and overrides."
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .balanced: return "Balanced"
+        case .strict: return "Strict"
+        case .custom: return "Custom"
         }
     }
 

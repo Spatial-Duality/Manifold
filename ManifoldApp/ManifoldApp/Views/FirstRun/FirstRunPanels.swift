@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// The three first-run panels. Each accepts navigation callbacks so the
+// First-run panels. Each accepts navigation callbacks so the
 // parent orchestrator can sequence them without each panel owning state
 // about the others.
 
@@ -89,6 +89,51 @@ struct DefaultsPanel: View {
             .padding(Spacing.s6)
         }
         .accessibilityIdentifier("onboarding.panel.defaults")
+    }
+}
+
+struct RuntimePanel: View {
+    @Environment(ManifoldStore.self) private var store
+    let enable: () -> Void
+    let back: () -> Void
+
+    var body: some View {
+        AtmosphericBackground(meshOnly: true) {
+            VStack(spacing: Spacing.s6) {
+                Spacer()
+                EmptyStateIllustration(
+                    systemImage: "lock.shield",
+                    title: "Enable the local runtime",
+                    subtitle: "ManifoldAgent runs locally on this Mac. It registers the MCP tools Claude and Codex use, enforces file and mail access, and stores the audit trail locally.",
+                    tint: ManifoldPalette.active
+                )
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    Label("Runs as a macOS background helper", systemImage: "desktopcomputer")
+                    Label("Controls Manifold MCP access", systemImage: "slider.horizontal.3")
+                    Label("Keeps governed data on this Mac", systemImage: "internaldrive")
+                }
+                .font(ManifoldType.caption)
+                .foregroundStyle(ManifoldPalette.text2)
+                .padding(Spacing.s4)
+                .background(
+                    RoundedRectangle(cornerRadius: Spacing.r5, style: .continuous)
+                        .fill(ManifoldPalette.surface2)
+                )
+
+                Spacer()
+                HStack(spacing: Spacing.s3) {
+                    Button("Back", action: back)
+                        .buttonStyle(.bordered)
+                    Button(store.runtimeEnabled ? "Continue" : "Enable runtime", action: enable)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("onboarding.runtime.enable")
+                }
+            }
+            .padding(Spacing.s6)
+        }
+        .accessibilityIdentifier("onboarding.panel.runtime")
     }
 }
 

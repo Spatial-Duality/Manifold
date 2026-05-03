@@ -47,6 +47,9 @@ final class ManifoldStore {
 
     var runtime: any RuntimeClientProtocol
     private let defaults: UserDefaults
+    private let canStartRuntimeServices: Bool
+    private let gatesRuntimeStartup: Bool
+    private var runtimeServicesStarted = false
 
     static let demoModeDefaultsKey = "manifold.demoMode"
     static let demoWarningDefaultsKey = "manifold.demoMode.showWarning"
@@ -97,9 +100,12 @@ final class ManifoldStore {
         runtime: any RuntimeClientProtocol = AppRuntimeClient(),
         integrationHealth: IntegrationHealthModel = IntegrationHealthModel(),
         startServices: Bool = true,
-        defaults: UserDefaults = AppTestEnvironment.userDefaults()
+        defaults: UserDefaults = AppTestEnvironment.userDefaults(),
+        gateRuntimeStartup: Bool? = nil
     ) {
         self.defaults = defaults
+        self.canStartRuntimeServices = startServices
+        self.gatesRuntimeStartup = gateRuntimeStartup ?? startServices
         self.runtime = runtime
         self.integrationHealth = integrationHealth
         isDemoModeEnabled = defaults.bool(forKey: Self.demoModeDefaultsKey)
@@ -107,7 +113,7 @@ final class ManifoldStore {
         session = SessionModel()
         activity = ActivityModel()
         storage = StorageModel()
-        setup = SetupModel()
+        setup = SetupModel(defaults: defaults)
         mailAccounts = MailAccountsModel()
         mailReview = MailReviewModel()
         governance = GovernanceModel()
@@ -129,32 +135,83 @@ final class ManifoldStore {
 
         integrationHealth.store = self
 
-        if startServices {
-            // Diagnostics: record launch + detect any unexpected exit of the
-            // previous agent run before we start the new one.
-            diagnostics.record(.appLaunch)
-            diagnostics.checkAgentExitState()
+        if shouldStartRuntimeServicesAtLaunch {
+            startRuntimeServicesIfNeeded(forceRefresh: true, startDefaultSession: true)
+        }
+    }
 
-            // R5: clean any pending Keychain credential entries left over
-            // from a previous app crash mid-IMAP-handoff. Idempotent.
-            // Stale entries older than 1 hour are deleted so the user's
-            // Keychain doesn't accumulate noise.
-            KeychainMailSecretStore().sweepStalePendingCredentials()
+    private var shouldStartRuntimeServicesAtLaunch: Bool {
+        guard canStartRuntimeServices, !isDemoModeEnabled else { return false }
+        guard gatesRuntimeStartup else { return true }
+        return setup.hasCompletedOnboarding && setup.runtimeEnabled
+    }
 
-            // Sparkle: thread the agent shutdown into the updater so the
-            // app/agent versions never go out of sync across an auto-update.
-            updater?.agentShutdown = { [weak self] in self?.unregisterAgent() }
+    func enableRuntime() {
+        setup.runtimeEnabled = true
+        startRuntimeServicesIfNeeded(forceRefresh: true, startDefaultSession: true)
+    }
 
-            syncInstalledMCPHelperIfNeeded()
-            registerAgent()
-            requestNotificationPermission()
-            startConnectionMonitor()
-            startUpdaterConsentBridge()
-            startXPCConnectionObserver()
+    private func startRuntimeServicesIfNeeded(
+        forceRefresh: Bool,
+        startDefaultSession: Bool = false
+    ) {
+        guard canStartRuntimeServices else {
+            if forceRefresh {
+                Task { await refreshAll(force: true) }
+            }
+            return
+        }
+        guard !isDemoModeEnabled else {
+            if forceRefresh {
+                Task {
+                    await refreshAll(force: true)
+                    await integrationHealth.checkAll()
+                }
+            }
+            return
+        }
+        guard !runtimeServicesStarted else {
+            if forceRefresh {
+                Task {
+                    await refreshAll(force: true)
+                    if startDefaultSession {
+                        await maybeStartDefaultSessionOnLaunch()
+                    }
+                    await integrationHealth.checkAll()
+                }
+            }
+            return
+        }
 
+        runtimeServicesStarted = true
+
+        // Diagnostics: record launch + detect any unexpected exit of the
+        // previous agent run before we start the new one.
+        diagnostics.record(.appLaunch)
+        diagnostics.checkAgentExitState()
+
+        // Clean stale pending Keychain credential entries left over from a
+        // previous crash mid-IMAP-handoff. This does not read mail account
+        // credentials and is safe before Mail has been opened.
+        KeychainMailSecretStore().sweepStalePendingCredentials()
+
+        syncInstalledMCPHelperIfNeeded()
+        registerAgent()
+        requestNotificationPermission()
+        startConnectionMonitor()
+        startXPCConnectionObserver()
+
+        // Sparkle: thread the agent shutdown into the updater so the app
+        // and agent versions never drift across an auto-update.
+        updater?.agentShutdown = { [weak self] in self?.unregisterAgent() }
+        startUpdaterConsentBridge()
+
+        if forceRefresh {
             Task {
                 await refreshAll(force: true)
-                await maybeStartDefaultSessionOnLaunch()
+                if startDefaultSession {
+                    await maybeStartDefaultSessionOnLaunch()
+                }
                 await integrationHealth.checkAll()
             }
         }
@@ -228,6 +285,9 @@ final class ManifoldStore {
         runtime = client
         integrationHealth.store = self
         configureModels(client: client)
+        if shouldStartRuntimeServicesAtLaunch {
+            startRuntimeServicesIfNeeded(forceRefresh: false, startDefaultSession: true)
+        }
         Task {
             await refreshAll(force: true)
             await integrationHealth.checkAll()
@@ -235,6 +295,20 @@ final class ManifoldStore {
     }
 
     func refreshAll(force: Bool = false) async {
+        guard !gatesRuntimeStartup || runtimeServicesStarted || isDemoModeEnabled else {
+            isRuntimeConnected = false
+            isConnected = false
+            connectedAgent = nil
+            connectedAgents = []
+            dataControlSummary = nil
+            if force, setup.runtimeEnabled {
+                lastError = "Local runtime is starting. Try again in a moment."
+            } else if !setup.runtimeEnabled {
+                lastError = nil
+            }
+            return
+        }
+
         let pingResult = await runtime.ping()
         isRuntimeConnected = pingResult.ok
         isConnected = pingResult.ok
@@ -313,7 +387,6 @@ final class ManifoldStore {
         await session.refreshGrantState()
         await storage.loadStorageStats()
         await storage.loadTrackedFiles()
-        await mailAccounts.loadAccounts()
         await rules.load()
     }
 
@@ -1132,6 +1205,19 @@ final class ManifoldStore {
     func restartRuntimeHelper() async {
         runtimeLaunchError = nil
         lastError = nil
+        setup.runtimeEnabled = true
+        guard canStartRuntimeServices else {
+            await refreshAll(force: true)
+            await integrationHealth.checkAll(force: true)
+            return
+        }
+        if gatesRuntimeStartup, !runtimeServicesStarted {
+            startRuntimeServicesIfNeeded(forceRefresh: false)
+            try? await Task.sleep(for: .seconds(1))
+            await refreshAll(force: true)
+            await integrationHealth.checkAll(force: true)
+            return
+        }
         unregisterAgent()
         registerAgent()
         try? await Task.sleep(for: .seconds(1))
@@ -1307,6 +1393,7 @@ final class ManifoldStore {
         get { setup.hasCompletedOnboarding }
         set { setup.hasCompletedOnboarding = newValue }
     }
+    var runtimeEnabled: Bool { setup.runtimeEnabled }
     var lastCompletedSession: Session? {
         get { session.lastCompletedSession }
         set { session.lastCompletedSession = newValue }

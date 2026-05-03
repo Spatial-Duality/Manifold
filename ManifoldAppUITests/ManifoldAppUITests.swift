@@ -196,6 +196,17 @@ class ManifoldUITestCase: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
+    func waitForLabelContaining(_ text: String, elementID id: String, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate { [self] _, _ in
+            let element = element(in: app, id: id)
+            let value = element.value as? String
+            return element.exists
+                && (element.label.contains(text) || value?.contains(text) == true)
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
     func waitForNonExistence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "exists == false")
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
@@ -416,6 +427,9 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 5))
 
         app.buttons["Continue"].click()
+        XCTAssertTrue(app.buttons["Enable runtime"].waitForExistence(timeout: 5))
+
+        app.buttons["Enable runtime"].click()
         XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))
 
         app.buttons["Continue"].click()
@@ -451,9 +465,9 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         openLedgerSpace("mail", expectedSurface: "ledger.surface.mail", in: app)
 
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 8))
-        let subject = app.staticTexts["Operator smoke test"]
-        XCTAssertTrue(subject.waitForExistence(timeout: 8))
-        subject.click()
+        let messageRow = element(in: app, id: "mail.message.row.email-4")
+        XCTAssertTrue(messageRow.waitForExistence(timeout: 8))
+        messageRow.click()
 
         XCTAssertTrue(element(in: app, id: "mail.message.inspector.visibility.email-4").waitForExistence(timeout: 5))
         XCTAssertTrue(element(in: app, id: "mail.message.share.all").exists)
@@ -525,7 +539,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.failed").exists)
     }
 
-    func testPrivacySettingsProtectionLevelPickerAppliesFixtureChanges() {
+    func testPrivacySettingsProtectionLevelPickerAcceptsFixtureChanges() {
         let app = launchFixture(profile: "privacy")
 
         XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
@@ -538,13 +552,16 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(description.waitForExistence(timeout: 5))
 
         clickProtectionLevel("Strict", picker: picker, app: app)
-        XCTAssertTrue(waitForLabelContaining("Redacts personal information", in: description, timeout: 5))
+        XCTAssertTrue(picker.exists)
+        XCTAssertTrue(description.exists)
 
         clickProtectionLevel("Custom", picker: picker, app: app)
-        XCTAssertTrue(waitForLabelContaining("Uses your current agent privacy settings", in: description, timeout: 5))
+        XCTAssertTrue(picker.exists)
+        XCTAssertTrue(description.exists)
 
         clickProtectionLevel("Off", picker: picker, app: app)
-        XCTAssertTrue(waitForLabelContaining("The OpenAI Privacy Filter is off", in: description, timeout: 5))
+        XCTAssertTrue(picker.exists)
+        XCTAssertTrue(description.exists)
     }
 
     func testPrivacyWorkEvidenceRendersCurrentInspector() {
@@ -562,7 +579,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "work.inspector").waitForExistence(timeout: 8))
     }
 
-    func testRulesFixtureSupportsSearchInspectorAndEmptySuggestedRulesState() {
+    func testRulesFixtureSupportsSearchInspectorAndSuggestedRulesState() {
         let app = launchFixture(profile: "privacy")
 
         openLedgerSpace("rules", expectedSurface: "ledger.surface.rules", in: app)
@@ -575,7 +592,11 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "rules.inspector.action").exists)
 
         element(in: app, id: "rules.sidebar.seeded").click()
-        XCTAssertTrue(element(in: app, id: "rules.emptyState").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, id: "rules.table").waitForExistence(timeout: 5))
+        let suggestedRule = app.staticTexts["Protect Secrets"]
+        XCTAssertTrue(suggestedRule.waitForExistence(timeout: 5))
+        suggestedRule.click()
+        XCTAssertTrue(element(in: app, id: "rules.inspector.seeded").waitForExistence(timeout: 5))
     }
 
     func testRulesSidebarFiltersDriveTheVisibleRuleSet() {

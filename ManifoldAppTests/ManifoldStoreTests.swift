@@ -22,6 +22,45 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertFalse(store.activity.activityEntries.isEmpty)
     }
 
+    func testRuntimeEnabledMigrationKeepsExistingUsersEnabled() {
+        let suiteName = "com.spatialduality.manifold.runtime-existing-test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(true, forKey: "manifold.onboarding.completed")
+
+        let store = ManifoldStore(startServices: false, defaults: defaults)
+
+        XCTAssertTrue(store.runtimeEnabled)
+        XCTAssertEqual(defaults.object(forKey: "manifold.runtime.enabled") as? Bool, true)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testRuntimeEnabledDefaultsOffForFreshUsers() {
+        let suiteName = "com.spatialduality.manifold.runtime-fresh-test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let store = ManifoldStore(startServices: false, defaults: defaults)
+
+        XCTAssertFalse(store.runtimeEnabled)
+        XCTAssertEqual(defaults.object(forKey: "manifold.runtime.enabled") as? Bool, false)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testRefreshAllLeavesMailAccountsUnloadedUntilMailIntent() async {
+        let runtime = FixtureRuntimeClient(profile: .trackedWork)
+        let integration = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork))
+        let store = ManifoldStore(runtime: runtime, integrationHealth: integration, startServices: false)
+
+        await store.refreshAll(force: true)
+
+        XCTAssertTrue(store.mailAccounts.accounts.isEmpty)
+
+        await store.mailAccounts.loadAccounts()
+
+        XCTAssertFalse(store.mailAccounts.accounts.isEmpty)
+    }
+
     func testDemoFixtureContainsCanonicalAnthropologieSurface() async throws {
         let runtime = DemoRuntimeClient.anthropologie()
 

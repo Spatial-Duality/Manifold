@@ -4,7 +4,7 @@
 // FirstRunFlow — lightweight three-panel onboarding.
 //
 // Panels: Concept (what Manifold is), Defaults (nothing is shared),
-// GuidedAdd (add your first folder). It is intentionally skippable so
+// Runtime (local helper), GuidedAdd (add your first folder). It is intentionally skippable so
 // users can reach the ledger quickly and configure deeper integrations
 // from the app itself. Shown only when no sources exist and the user
 // hasn't completed onboarding.
@@ -18,7 +18,7 @@ struct FirstRunFlow: View {
     @State private var selectedPaths: [String] = []
 
     enum Panel: Int, CaseIterable {
-        case concept, defaults, helpImprove, guidedAdd, scopeReview, connectAgent
+        case concept, defaults, runtime, helpImprove, guidedAdd, scopeReview, connectAgent
     }
 
     var body: some View {
@@ -28,6 +28,8 @@ struct FirstRunFlow: View {
                 ConceptPanel(next: advance, tryDemo: startDemo)
             case .defaults:
                 DefaultsPanel(next: advance, back: back)
+            case .runtime:
+                RuntimePanel(enable: enableRuntime, back: back)
             case .helpImprove:
                 HelpImprovePanel(
                     diagnostics: store.diagnostics,
@@ -81,6 +83,11 @@ struct FirstRunFlow: View {
             store.addSource(path: path)
         }
         panel = .scopeReview
+    }
+
+    private func enableRuntime() {
+        store.enableRuntime()
+        advance()
     }
 
     private func skip() {

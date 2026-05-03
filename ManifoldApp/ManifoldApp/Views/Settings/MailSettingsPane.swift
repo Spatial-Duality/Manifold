@@ -86,6 +86,9 @@ struct MailSettingsPane: View {
                 Text("Manifold will remove \(account.displayName), all locally stored mail, encrypted archive blobs, search indexes, sync state, and Keychain credentials. Agent access context is saved first as a plain text file.")
             }
         }
+        .task {
+            await store.mailAccounts.loadAccounts()
+        }
     }
 
     private var deletionConfirmationPresented: Binding<Bool> {

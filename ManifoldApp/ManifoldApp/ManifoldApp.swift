@@ -85,17 +85,6 @@ struct ManifoldApp: App {
             }
 
             CommandGroup(after: .toolbar) {
-                Button("Open Session Recap") {
-                    presentMainLedger(destination: .work)
-                }
-
-                Button("Restart Runtime Helper") {
-                    Task { await store.restartRuntimeHelper() }
-                }
-                .keyboardShortcut("r", modifiers: .command)
-            }
-
-            CommandMenu("View") {
                 ForEach(LedgerDestination.allCases) { destination in
                     Button("Open \(destination.title)") {
                         presentMainLedger(destination: destination)
@@ -121,6 +110,17 @@ struct ManifoldApp: App {
                     NotificationCenter.default.post(name: .manifoldToggleCurrentInspector, object: nil)
                 }
                 .keyboardShortcut("0", modifiers: [.command, .option])
+
+                Divider()
+
+                Button("Open Session Recap") {
+                    presentMainLedger(destination: .work)
+                }
+
+                Button("Restart Runtime Helper") {
+                    Task { await store.restartRuntimeHelper() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
             }
 
             CommandMenu("Find") {
@@ -194,6 +194,7 @@ struct ManifoldApp: App {
                 return ManifoldStore(
                     runtime: DemoRuntimeClient.anthropologie(),
                     integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .demo)),
+                    startServices: false,
                     defaults: defaults
                 )
             }
@@ -210,7 +211,7 @@ struct ManifoldApp: App {
             } catch {
                 preconditionFailure("Failed to prepare synthetic MCP/UI runtime: \(error)")
             }
-            let store = ManifoldStore()
+            let store = ManifoldStore(gateRuntimeStartup: false)
             store.setup.hasCompletedOnboarding = true
             return store
         }

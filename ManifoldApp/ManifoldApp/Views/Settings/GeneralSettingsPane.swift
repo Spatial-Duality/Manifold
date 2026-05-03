@@ -23,6 +23,32 @@ struct GeneralSettingsPane: View {
                 IdentityRow()
             }
 
+            Section("Local Runtime") {
+                LabeledContent("Status") {
+                    Text(runtimeStatusText)
+                        .foregroundStyle(runtimeStatusColor)
+                }
+                Text("ManifoldAgent runs locally, enables MCP access control for Claude and Codex, and stores governed data on this Mac.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Spacer()
+                    if store.runtimeEnabled {
+                        Button("Restart Runtime Helper") {
+                            Task { await store.restartRuntimeHelper() }
+                        }
+                        .controlSize(.small)
+                    } else {
+                        Button("Enable Local Runtime") {
+                            store.enableRuntime()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+
             Section {
                 SoftwareUpdateSettings(
                     updater: store.updater,
@@ -124,6 +150,18 @@ struct GeneralSettingsPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var runtimeStatusText: String {
+        if store.isDemoModeEnabled { return "Demo mode" }
+        if !store.runtimeEnabled { return "Off" }
+        return store.isRuntimeConnected ? "Running" : "Starting or disconnected"
+    }
+
+    private var runtimeStatusColor: Color {
+        if store.isDemoModeEnabled { return Color.secondary }
+        if !store.runtimeEnabled { return Color.secondary }
+        return store.isRuntimeConnected ? Color.green : Color.orange
     }
 }
 

@@ -27,10 +27,16 @@ enum SessionStartupMode: String, CaseIterable, Identifiable, Sendable {
 @MainActor
 final class SetupModel {
     private let defaults: UserDefaults
+    private static let onboardingCompletedKey = "manifold.onboarding.completed"
+    private static let runtimeEnabledKey = "manifold.runtime.enabled"
 
     // Onboarding
     var hasCompletedOnboarding: Bool {
-        didSet { defaults.set(hasCompletedOnboarding, forKey: "manifold.onboarding.completed") }
+        didSet { defaults.set(hasCompletedOnboarding, forKey: Self.onboardingCompletedKey) }
+    }
+
+    var runtimeEnabled: Bool {
+        didSet { defaults.set(runtimeEnabled, forKey: Self.runtimeEnabledKey) }
     }
 
     // Preferences
@@ -53,10 +59,20 @@ final class SetupModel {
         didSet { defaults.set(defaultSessionAgent.rawValue, forKey: "manifold.sessionStartup.agent") }
     }
 
-    init() {
-        let defaults = AppTestEnvironment.userDefaults()
+    init(defaults: UserDefaults = AppTestEnvironment.userDefaults()) {
         self.defaults = defaults
-        hasCompletedOnboarding = defaults.bool(forKey: "manifold.onboarding.completed")
+        let completedOnboarding = defaults.bool(forKey: Self.onboardingCompletedKey)
+        hasCompletedOnboarding = completedOnboarding
+        if let explicitRuntimeEnabled = defaults.object(forKey: Self.runtimeEnabledKey) as? Bool {
+            runtimeEnabled = explicitRuntimeEnabled
+        } else {
+            // Migration: users who already completed onboarding before this
+            // flag existed keep launch-time runtime startup. Fresh users get
+            // an explicit false so skipping onboarding does not auto-enable
+            // the helper on the next launch.
+            runtimeEnabled = completedOnboarding
+            defaults.set(completedOnboarding, forKey: Self.runtimeEnabledKey)
+        }
         launchAtLogin = defaults.bool(forKey: "manifold.launchAtLogin")
         notifyOnSessionEnd = defaults.object(forKey: "manifold.notify.sessionEnd") as? Bool ?? true
         notifyOnAccessDenied = defaults.object(forKey: "manifold.notify.accessDenied") as? Bool ?? true
