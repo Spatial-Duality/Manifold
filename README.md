@@ -6,7 +6,7 @@
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://swift.org/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-only-141413)](https://www.apple.com/mac/)
 
-The macOS app for doing real, non-code work with Claude and Codex Mac apps. Drafts, contracts, briefs, emails, meeting notes. File by file, message by message. With version history, an AI-usage audit log, and on-device PII redaction.
+Manifold is a native macOS permission layer for doing real work with Claude and Codex: drafts, contracts, briefs, emails, meeting notes. You choose the files and messages they can see. Manifold routes that access through a local runtime, records what crossed the boundary, and keeps versions you can roll back.
 
 Site: [spatialduality.com/manifold](https://spatialduality.com/manifold/).
 
@@ -25,14 +25,14 @@ Manifold is a native macOS app. Release builds are Developer ID signed, notarize
 
 ## Architecture
 
-Manifold is split into a SwiftUI app, a local XPC runtime, and thin MCP/CLI clients.
+Manifold is split into a SwiftUI app, a local XPC runtime, and thin MCP/CLI clients. Claude and Codex talk to `manifold-mcp`; the runtime verifies the caller, resolves policy, runs local privacy checks, and records the exposure before returning data.
 
 ```text
 SwiftUI app -> AppRuntimeClient -> ManifoldXPC -> ManifoldAgent -> ManifoldRuntime -> stores
 manifold-mcp / manifold-cli ----------------------^
 ```
 
-The app does not open the local stores directly. Runtime behavior goes through the XPC boundary.
+The app does not open the local stores directly. Runtime behavior goes through the XPC boundary. Manifold is not a global sandbox; it governs the traffic routed through its MCP server.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the longer one-page overview.
 
@@ -76,7 +76,7 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ## Native
 
-Swift, SwiftUI, sandboxed XPC. Apple Silicon. Apache 2.0. The Mac is the runtime.
+Swift, SwiftUI, XPC, `launchd`, Keychain, SQLite. Apple Silicon. Apache 2.0. The Mac is the runtime.
 
 ## License
 
