@@ -208,6 +208,10 @@ if [[ "$CONFIG" == "release" ]]; then
             --generate-entitlement-der \
             "$BUNDLE"
         /usr/bin/codesign --verify --deep --strict "$BUNDLE"
+    else
+        echo "Ad-hoc signing app bundle for local release build..."
+        /usr/bin/codesign --force --deep --sign - --timestamp=none "$BUNDLE"
+        /usr/bin/codesign --verify --deep --strict "$BUNDLE"
     fi
 
     if [[ "$REQUIRE_NOTARIZATION" == "1" && -z "$NOTARY_PROFILE" ]]; then
@@ -236,12 +240,7 @@ echo "Run: open \"$BUNDLE\""
 if [[ "$CONFIG" == "release" ]]; then
     DMG="$BUILD_OUTPUT_DIR/Manifold-v$VERSION.dmg"
     rm -f "$DMG"
-    hdiutil create \
-        -volname "Manifold" \
-        -srcfolder "$BUNDLE" \
-        -ov \
-        -format UDZO \
-        "$DMG"
+    bash "$PROJECT_DIR/scripts/create_dmg.sh" "$BUNDLE" "$DMG" "Manifold"
     if [[ -n "$APP_IDENTITY" ]]; then
         /usr/bin/codesign --force --sign "$APP_IDENTITY" --timestamp "$DMG"
         /usr/bin/codesign --verify --strict "$DMG"
