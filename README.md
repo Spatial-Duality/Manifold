@@ -2,6 +2,8 @@
 
 Native macOS app and local runtime for governing access to selected files and email through the Manifold runtime boundary.
 
+**Site:** [spatialduality.com/manifold](https://spatialduality.com/manifold/) — landing page, download, changelog. The site source lives in [Spatial-Duality/spatialduality-site](https://github.com/Spatial-Duality/spatialduality-site).
+
 ## Requirements
 
 - macOS 26.0 or later
