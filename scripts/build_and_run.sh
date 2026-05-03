@@ -10,7 +10,22 @@ CONFIGURATION="Debug"
 APP_NAME="Manifold"
 APP_BUNDLE="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+AGENT_BINARY="$APP_BUNDLE/Contents/Library/LaunchServices/${APP_NAME}Agent"
+MCP_BINARY="$APP_BUNDLE/Contents/Resources/manifold-mcp"
 TELEMETRY_SUBSYSTEM="com.spatialduality.manifold"
+
+sign_debug_bundle() {
+  if [[ -x "$AGENT_BINARY" ]]; then
+    /usr/bin/codesign --force --sign - --timestamp=none "$AGENT_BINARY"
+  fi
+
+  if [[ -x "$MCP_BINARY" ]]; then
+    /usr/bin/codesign --force --sign - --timestamp=none "$MCP_BINARY"
+  fi
+
+  /usr/bin/codesign --force --deep --sign - --timestamp=none "$APP_BUNDLE"
+  /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+}
 
 build_app() {
   env \
@@ -23,6 +38,7 @@ build_app() {
     -derivedDataPath "$DERIVED_DATA_PATH" \
     build \
     CODE_SIGNING_ALLOWED=NO
+  sign_debug_bundle
 }
 
 stop_running() {

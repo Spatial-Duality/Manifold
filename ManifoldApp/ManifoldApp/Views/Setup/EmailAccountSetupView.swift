@@ -21,6 +21,8 @@ struct EmailAccountSetupView: View {
     @State private var isSaving = false
     @State private var oauthSession: ASWebAuthenticationSession?
     @State private var trustAccepted = false
+    @State private var connectionDetailsExpanded: Bool
+    @State private var appliedOtherProvider: EmailProvider?
 
     init(provider: EmailProvider = .other, onSaved: @escaping () -> Void = {}) {
         self.provider = provider
@@ -29,97 +31,41 @@ struct EmailAccountSetupView: View {
         _displayName = State(initialValue: preset.displayName)
         _server = State(initialValue: preset.server)
         _portText = State(initialValue: "\(preset.port)")
+        _connectionDetailsExpanded = State(initialValue: provider == .other)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        Form {
+            accountSection
+            signInSection
+            helpSection
+            connectionDetailsSection
+            trustSection
 
-            Divider()
-
-            Form {
-                Section("Mailbox") {
-                    TextField("Display name", text: $displayName)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("settings.mail.account.displayName")
-                    TextField("Email address", text: $username)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("settings.mail.account.username")
-                }
-
-                Section("IMAP server") {
-                    if isOAuthProvider {
-                        LabeledContent("Server", value: server)
-                        LabeledContent("Port", value: portText)
-                    } else {
-                        TextField("Server", text: $server)
-                            .textFieldStyle(.roundedBorder)
-                            .accessibilityIdentifier("settings.mail.account.server")
-                        TextField("Port", text: $portText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 96)
-                            .accessibilityIdentifier("settings.mail.account.port")
-                    }
-                }
-
-                Section("Provider steps") {
-                    ForEach(providerProfile.setupInstructions.steps, id: \.self) { step in
-                        Text(step)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                if isOAuthProvider {
-                    Section("Microsoft sign-in") {
-                        if let oauthUnavailableMessage {
-                            Text(oauthUnavailableMessage)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text("Manifold opens Microsoft sign-in in your browser and stores the returned IMAP OAuth token in Keychain after validation.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                } else {
-                    Section("Credential") {
-                        SecureField(credentialPlaceholder, text: $password)
-                            .textFieldStyle(.roundedBorder)
-                            .accessibilityIdentifier("settings.mail.account.password")
-                    }
-                }
-
-                Section("Trust") {
-                    Text(providerProfile.setupInstructions.trustCopy)
+            if let errorMessage {
+                Section("Status") {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(guide.validationHelp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Toggle("I understand Manifold will only read and back up mail locally.", isOn: $trustAccepted)
-                        .toggleStyle(.checkbox)
-                        .accessibilityIdentifier("settings.mail.account.trustAccepted")
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .background(ManifoldPalette.bg)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Connect \(guide.displayLabel)")
+        .accessibilityIdentifier("settings.mail.account.header")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", role: .cancel) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
 
-            Divider()
-
-            SettingsSheetFooter {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-
+            ToolbarItem(placement: .confirmationAction) {
                 Button {
                     submit()
                 } label: {
@@ -127,49 +73,144 @@ struct EmailAccountSetupView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Text("Connect")
+                        Text(guide.primaryActionTitle)
                     }
                 }
-                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSubmit || isSaving)
                 .accessibilityIdentifier("settings.mail.account.connect")
             }
         }
-        .frame(width: 500, height: 640)
+        .onAppear {
+            applyOtherProviderHintIfNeeded()
+        }
+        .onChange(of: username) { _, _ in
+            applyOtherProviderHintIfNeeded()
+        }
+        .frame(width: 540, height: 640)
     }
 
-    private var header: some View {
-        SettingsSheetHeader(
-            title: "Connect \(provider.displayName)",
-            subtitle: providerProfile.setupInstructions.title,
-            systemImage: provider.systemImage,
-            accent: providerTint
-        )
-        .accessibilityIdentifier("settings.mail.account.header")
+    private var accountSection: some View {
+        Section("Account") {
+            TextField("Display name", text: $displayName)
+                .accessibilityIdentifier("settings.mail.account.displayName")
+            TextField("Email address", text: $username)
+                .accessibilityIdentifier("settings.mail.account.username")
+        }
+    }
+
+    @ViewBuilder
+    private var signInSection: some View {
+        if isOAuthProvider {
+            Section("Sign-in") {
+                if let oauthUnavailableMessage {
+                    Text(oauthUnavailableMessage)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(guide.validationHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Manifold opens Microsoft sign-in and stores the returned IMAP OAuth token in Keychain after validation.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button(guide.primaryActionTitle) {
+                        submit()
+                    }
+                    .disabled(!canSubmit || isSaving)
+                    .accessibilityIdentifier("settings.mail.account.oauth.signIn")
+                }
+            }
+        } else {
+            Section("Sign-in") {
+                SecureField(guide.credentialLabel, text: $password)
+                    .accessibilityIdentifier("settings.mail.account.password")
+            }
+        }
+    }
+
+    private var helpSection: some View {
+        Section("Help") {
+            ForEach(guide.steps, id: \.self) { step in
+                Text(step)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(guide.links) { link in
+                Link(link.title, destination: link.url)
+            }
+
+            DisclosureGroup("Common blockers") {
+                ForEach(guide.blockers, id: \.self) { blocker in
+                    Text(blocker)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityIdentifier("settings.mail.account.blockers")
+        }
+    }
+
+    private var connectionDetailsSection: some View {
+        Section("Connection Details") {
+            DisclosureGroup("IMAP", isExpanded: $connectionDetailsExpanded) {
+                if isOAuthProvider {
+                    LabeledContent("Server", value: server)
+                    LabeledContent("Port", value: portText)
+                } else {
+                    TextField("Server", text: $server)
+                        .accessibilityIdentifier("settings.mail.account.server")
+                    TextField("Port", text: $portText)
+                        .frame(width: 96)
+                        .accessibilityIdentifier("settings.mail.account.port")
+                }
+            }
+        }
+    }
+
+    private var trustSection: some View {
+        Section("Trust") {
+            Text("Manifold connects directly from this Mac, stores credentials in Keychain, and keeps the mail backup local.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("It will not send, delete, move, archive, or mark mail as read. AI access stays off until you explicitly grant it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("I understand this is a local, read-only backup.", isOn: $trustAccepted)
+                .toggleStyle(.checkbox)
+                .accessibilityIdentifier("settings.mail.account.trustAccepted")
+        }
+    }
+
+    private var effectiveProvider: EmailProvider {
+        if provider == .other,
+           let detected = MailProviderOnboardingGuide.detectedOtherProvider(emailAddress: username) {
+            return detected
+        }
+        return provider
+    }
+
+    private var guide: MailProviderOnboardingGuide {
+        MailProviderOnboardingGuide.guide(for: provider, emailAddress: username)
     }
 
     private var providerProfile: MailProviderProfile {
-        MailProviderCatalog.profile(for: provider)
-    }
-
-    private var credentialPlaceholder: String {
-        switch providerProfile.defaultAuthMethod {
-        case .appPasswordIMAP:
-            "App password"
-        case .oauthIMAPXOAUTH2:
-            "OAuth handled by provider sign-in"
-        case .manualPasswordIMAP:
-            "Password or app password"
-        }
+        MailProviderCatalog.profile(for: effectiveProvider)
     }
 
     private var isOAuthProvider: Bool {
         if case .oauthIMAPXOAUTH2 = providerProfile.defaultAuthMethod {
-            true
-        } else {
-            false
+            return true
         }
+        return false
     }
 
     private static let cachedAuthConfig = LocalAuthConfig.load()
@@ -196,17 +237,6 @@ struct EmailAccountSetupView: View {
         return password.trimmedForForm != nil
     }
 
-    private var providerTint: Color {
-        switch provider {
-        case .gmail:    return .red
-        case .outlook:  return .blue
-        case .icloud:   return .cyan
-        case .yahoo:    return .purple
-        case .fastmail: return .indigo
-        case .other:    return .secondary
-        }
-    }
-
     private func submit() {
         if isOAuthProvider {
             submitOAuth()
@@ -218,13 +248,14 @@ struct EmailAccountSetupView: View {
             return
         }
 
+        let providerToStore = effectiveProvider
         errorMessage = nil
         isSaving = true
 
         Task {
             let error = await store.mailAccounts.addIMAPAccount(
                 displayName: displayName.trimmedForForm ?? displayName,
-                provider: provider,
+                provider: providerToStore,
                 server: server.trimmedForForm ?? server,
                 port: port,
                 username: username.trimmedForForm ?? username,
@@ -281,7 +312,7 @@ struct EmailAccountSetupView: View {
                     let tokenSet = try await client.tokenSet(fromCallbackURL: callbackURL, matching: request)
                     let addError = await store.mailAccounts.addOAuthIMAPAccount(
                         displayName: displayName,
-                        provider: provider,
+                        provider: effectiveProvider,
                         server: server,
                         port: port,
                         username: username,
@@ -308,6 +339,30 @@ struct EmailAccountSetupView: View {
             errorMessage = "Couldn't start Microsoft sign-in. Try again."
             isSaving = false
             oauthSession = nil
+        }
+    }
+
+    private func applyOtherProviderHintIfNeeded() {
+        guard provider == .other else { return }
+
+        guard let detected = MailProviderOnboardingGuide.detectedOtherProvider(emailAddress: username),
+              let endpoint = MailProviderCatalog.profile(for: detected).imapEndpoint else {
+            if let previous = appliedOtherProvider,
+               let previousEndpoint = MailProviderCatalog.profile(for: previous).imapEndpoint,
+               server == previousEndpoint.host {
+                server = ""
+                portText = "993"
+                displayName = "Other IMAP"
+            }
+            appliedOtherProvider = nil
+            return
+        }
+
+        if appliedOtherProvider != detected || server.trimmedForForm == nil {
+            server = endpoint.host
+            portText = "\(endpoint.port)"
+            displayName = MailProviderCatalog.profile(for: detected).displayName
+            appliedOtherProvider = detected
         }
     }
 

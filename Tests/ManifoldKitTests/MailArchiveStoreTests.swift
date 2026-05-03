@@ -114,6 +114,29 @@ struct MailArchiveStoreTests {
         #expect(fileStored.contentID == dataStored.contentID)
         #expect(fileStored.objectURL == dataStored.objectURL)
     }
+
+    @Test("Removing an account archive deletes only that account directory")
+    func removeAccountArchiveDeletesOnlySelectedAccount() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+
+        let archive = try MailArchiveStore(rootURL: root)
+        let removed = try archive.storeMessage(
+            accountID: "account-remove",
+            plaintext: Data("Subject: Remove\r\n\r\nDelete this account.".utf8)
+        )
+        let kept = try archive.storeMessage(
+            accountID: "account-keep",
+            plaintext: Data("Subject: Keep\r\n\r\nKeep this account.".utf8)
+        )
+
+        #expect(try archive.removeAccountArchive(accountID: "account-remove"))
+        #expect(!FileManager.default.fileExists(atPath: removed.manifestURL.path))
+        #expect(!FileManager.default.fileExists(atPath: removed.objectURL.path))
+        #expect(FileManager.default.fileExists(atPath: kept.manifestURL.path))
+        #expect(FileManager.default.fileExists(atPath: kept.objectURL.path))
+        #expect(try archive.readObject(atManifestURL: kept.manifestURL) == Data("Subject: Keep\r\n\r\nKeep this account.".utf8))
+    }
 }
 
 private extension Data {

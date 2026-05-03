@@ -65,6 +65,10 @@ public enum MailPrivateTokenIndex: Sendable {
 
     static func termHMAC(accountID: String, normalizedToken: String) throws -> String {
         let key = try MailArchiveStore.accountDerivedKey(accountID: accountID, purpose: "mail-private-index")
+        return termHMAC(normalizedToken: normalizedToken, key: key)
+    }
+
+    static func termHMAC(normalizedToken: String, key: SymmetricKey) -> String {
         let payload = Data("v1:\(normalizedToken)".utf8)
         return Data(HMAC<SHA256>.authenticationCode(for: payload, using: key)).mailPrivateIndexHexString
     }

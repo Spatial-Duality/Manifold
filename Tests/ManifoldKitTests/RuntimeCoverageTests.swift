@@ -47,6 +47,67 @@ struct RuntimeCoverageTests {
         #expect(events[0].coverageState == .outsideCoverage)
     }
 
+    @Test("Mail account reset exports context and removes archive storage")
+    func mailAccountResetExportsContextAndRemovesArchiveStorage() async throws {
+        let (runtime, tempDir) = try makeRuntime()
+        defer { cleanup(tempDir) }
+
+        let account = try runtime.emailStore.addEmailAccount(
+            displayName: "Reset Mail",
+            providerType: EmailProvider.icloud.rawValue,
+            server: "imap.mail.me.com",
+            port: 993,
+            username: "person@icloud.com",
+            authType: "app_password"
+        )
+        let archive = try MailArchiveStore(rootURL: runtime.mailArchiveRoot)
+        let messageData = Data("Subject: Runtime Reset\r\n\r\nLocal mail body.".utf8)
+        let archived = try archive.storeMessage(accountID: account.accountID, plaintext: messageData)
+        try runtime.emailStore.recordMailBlob(archived)
+        try runtime.emailStore.upsertEmailMessage(
+            emailID: "runtime-reset-mail",
+            accountID: account.accountID,
+            mailbox: "INBOX",
+            sender: "Sender <sender@example.com>",
+            senderEmail: "sender@example.com",
+            senderDomain: "example.com",
+            recipients: "person@icloud.com",
+            subject: "Runtime Reset",
+            receivedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            emlPath: archived.manifestURL.path,
+            sizeBytes: messageData.count,
+            preview: "Local mail body.",
+            canonicalBlobCID: archived.contentID
+        )
+        try runtime.emailStore.recordMailAccessAuditEvent(
+            accountID: account.accountID,
+            emailID: "runtime-reset-mail",
+            agentID: TargetApp.codex.rawValue,
+            sessionID: "session-runtime",
+            accessKind: "search",
+            policyGrantID: "grant-runtime",
+            detailsRedacted: "query=reset"
+        )
+        let tempAccountRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ManifoldMailSync", isDirectory: true)
+            .appendingPathComponent(account.accountID, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempAccountRoot, withIntermediateDirectories: true)
+        try Data("staged".utf8).write(to: tempAccountRoot.appendingPathComponent("message.rfc822"))
+
+        let result = try await runtime.removeEmailAccountAndLocalData(accountID: account.accountID)
+
+        let history = try String(contentsOfFile: result.contextArchivePath, encoding: .utf8)
+        let accountArchiveRoot = runtime.mailArchiveRoot
+            .appendingPathComponent("v2/accounts", isDirectory: true)
+            .appendingPathComponent(account.accountID, isDirectory: true)
+        #expect(history.contains("access_kind=search"))
+        #expect(history.contains("details_redacted=query=reset"))
+        #expect(!history.contains("Local mail body."))
+        #expect(try runtime.emailStore.emailAccount(id: account.accountID)?.accountID == nil)
+        #expect(!FileManager.default.fileExists(atPath: accountArchiveRoot.path))
+        #expect(!FileManager.default.fileExists(atPath: tempAccountRoot.path))
+    }
+
     @Test("Connected snapshot reports manifold routed for a normal session gateway")
     func connectedSnapshotReportsNormalSessionGateway() async throws {
         let (runtime, tempDir) = try makeRuntime()

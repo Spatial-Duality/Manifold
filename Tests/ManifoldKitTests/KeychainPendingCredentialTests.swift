@@ -3,17 +3,16 @@
 
 import Testing
 import Foundation
+import Security
 @testable import ManifoldKit
 
 /// R5 — pending credential handoff.
 ///
 /// The contract: app writes to a `pending-{uuid}` Keychain slot, sends
 /// only the UUID over XPC, agent reads + rotates. These tests pin the
-/// Keychain account naming convention and the sweep behavior. They do
-/// NOT exercise the live login keychain (the `store(_:reference:)`
-/// path requires Keychain access entitlements that the test bundle may
-/// not have); they verify the reference construction and sweep query
-/// shape.
+/// Keychain account naming convention and query shape. They do NOT
+/// exercise the live login keychain because the test bundle may not
+/// have a usable interactive Keychain session.
 @Suite("Keychain pending credential handoff")
 struct KeychainPendingCredentialTests {
 
@@ -69,6 +68,33 @@ struct KeychainPendingCredentialTests {
         let a = KeychainMailSecretStore.pendingReference(pendingID: "alpha", kind: .appPassword)
         let b = KeychainMailSecretStore.pendingReference(pendingID: "beta", kind: .appPassword)
         #expect(a.keychainAccount != b.keychainAccount)
+    }
+
+    @Test("Canonical credential store query prefers the data protection keychain")
+    func canonicalStoreQueryUsesDataProtectionKeychain() {
+        let secret = Data("canonical-secret".utf8)
+        let ref = KeychainMailSecretStore.appPasswordReference(accountID: "account-1")
+
+        let query = KeychainMailSecretStore.dataProtectionStoreQuery(secret, reference: ref)
+
+        #expect(query[kSecAttrService as String] as? String == KeychainMailSecretStore.credentialService)
+        #expect(query[kSecAttrAccount as String] as? String == "mail-account:account-1:app-password")
+        #expect(query[kSecValueData as String] as? Data == secret)
+        #expect(query[kSecUseDataProtectionKeychain as String] as? Bool == true)
+    }
+
+    @Test("Pending handoff query uses the login keychain so the LaunchAgent can read it")
+    func pendingHandoffQueryUsesLoginKeychain() {
+        let secret = Data("pending-secret".utf8)
+        let ref = KeychainMailSecretStore.pendingReference(pendingID: "handoff-1", kind: .appPassword)
+
+        let query = KeychainMailSecretStore.loginStoreQuery(secret, reference: ref)
+
+        #expect(query[kSecAttrService as String] as? String == KeychainMailSecretStore.credentialService)
+        #expect(query[kSecAttrAccount as String] as? String == "mail-account:pending-handoff-1:app-password")
+        #expect(query[kSecValueData as String] as? Data == secret)
+        #expect(query[kSecUseDataProtectionKeychain as String] == nil)
+        #expect(query[kSecAttrAccess as String] == nil)
     }
 
     @Test("Sweep accepts a custom TTL and `now` for testability")

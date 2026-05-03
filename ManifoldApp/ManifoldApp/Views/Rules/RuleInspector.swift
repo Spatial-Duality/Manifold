@@ -15,6 +15,7 @@ struct RuleInspector: View {
     @Bindable var model: RulesModel
     @State private var draft: RuleRecord?
     @State private var validationError: String?
+    @State private var isConditionEditorExpanded = false
     @FocusState private var nameFocused: Bool
 
     var body: some View {
@@ -32,12 +33,12 @@ struct RuleInspector: View {
                     .onChange(of: rule.id) { _, _ in
                         draft = rule
                         validationError = nil
+                        isConditionEditorExpanded = false
                     }
             } else {
                 emptyState
             }
         }
-        .background(ManifoldPalette.surface2)
         .accessibilityIdentifier("rules.inspector")
     }
 
@@ -130,18 +131,20 @@ struct RuleInspector: View {
                     }
 
                     Section("Conditions") {
-                        RuleBuilder(
-                            scope: rule.scope,
-                            matcher: Binding(
-                                get: { draft?.matcher ?? rule.matcher },
-                                set: { newValue in
-                                    var d = draft ?? rule
-                                    d.matcher = newValue
-                                    draft = d
-                                }
-                            ),
-                            isEditable: rule.source.isMutable
-                        )
+                        DisclosureGroup("Advanced condition", isExpanded: $isConditionEditorExpanded) {
+                            RuleBuilder(
+                                scope: rule.scope,
+                                matcher: Binding(
+                                    get: { draft?.matcher ?? rule.matcher },
+                                    set: { newValue in
+                                        var d = draft ?? rule
+                                        d.matcher = newValue
+                                        draft = d
+                                    }
+                                ),
+                                isEditable: rule.source.isMutable
+                            )
+                        }
                     }
 
                     Section("Agents") {

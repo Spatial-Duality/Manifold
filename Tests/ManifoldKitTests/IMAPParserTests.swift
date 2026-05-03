@@ -133,40 +133,43 @@ struct IMAPParserTests {
 
     // MARK: - Sync Engine Mailbox Filtering
 
-    @Test("Sync engine filters iCloud mailboxes correctly")
-    func syncEngineMailboxFilter() {
-        // After list() returns parsed names, the sync engine filters:
-        //   $0.uppercased() == "INBOX"
-        //   || $0.uppercased() == "SENT"
-        //   || $0.uppercased().contains("SENT")
-        let iCloudMailboxes = ["INBOX", "Sent Messages", "Drafts", "Deleted Messages", "Junk", "Archive", "Notes"]
+    @Test("Sync engine prioritizes iCloud inbox before slow trash or junk folders")
+    func syncEngineMailboxPriority() {
+        let mailboxes = [
+            IMAPConnection.ListEntry(name: "Archive", delimiter: "/", flags: []),
+            IMAPConnection.ListEntry(name: "Deleted Messages", delimiter: "/", flags: ["\\Trash"]),
+            IMAPConnection.ListEntry(name: "INBOX", delimiter: "/", flags: ["\\Noinferiors"]),
+            IMAPConnection.ListEntry(name: "Junk", delimiter: "/", flags: []),
+            IMAPConnection.ListEntry(name: "Sent Messages", delimiter: "/", flags: ["\\Sent"]),
+        ]
 
-        let toSync = iCloudMailboxes.filter {
-            $0.uppercased() == "INBOX"
-            || $0.uppercased() == "SENT"
-            || $0.uppercased().contains("SENT")
-        }.prefix(3)
+        let sorted = mailboxes.sorted { lhs, rhs in
+            let lhsKey = EmailSyncEngine.mailboxSortKey(lhs)
+            let rhsKey = EmailSyncEngine.mailboxSortKey(rhs)
+            if lhsKey.priority != rhsKey.priority {
+                return lhsKey.priority < rhsKey.priority
+            }
+            return lhsKey.name < rhsKey.name
+        }.map(\.name)
 
-        let syncList = Array(toSync)
-        #expect(syncList.contains("INBOX"))
-        #expect(syncList.contains("Sent Messages"))
-        #expect(syncList.count == 2) // Only INBOX and "Sent Messages" match
+        #expect(sorted.prefix(3) == ["INBOX", "Sent Messages", "Archive"])
+        #expect(Array(sorted.suffix(2)) == ["Deleted Messages", "Junk"])
     }
 
-    @Test("Sync engine filters Gmail mailboxes correctly")
+    @Test("Sync engine skips redundant Gmail system views by flag and localized root")
     func syncEngineGmailFilter() {
-        let gmailMailboxes = ["INBOX", "[Gmail]", "[Gmail]/All Mail", "[Gmail]/Drafts", "[Gmail]/Sent Mail", "[Gmail]/Spam", "[Gmail]/Trash"]
+        let allMail = IMAPConnection.ListEntry(name: "[Google Mail]/All Mail", delimiter: "/", flags: ["\\All"])
+        let important = IMAPConnection.ListEntry(name: "[Google Mail]/Important", delimiter: "/", flags: ["\\Important"])
+        let starred = IMAPConnection.ListEntry(name: "[Google Mail]/Starred", delimiter: "/", flags: ["\\Flagged"])
+        let inbox = IMAPConnection.ListEntry(name: "INBOX", delimiter: "/", flags: ["\\HasNoChildren"])
+        let sent = IMAPConnection.ListEntry(name: "[Google Mail]/Sent Mail", delimiter: "/", flags: ["\\Sent"])
 
-        let toSync = gmailMailboxes.filter {
-            $0.uppercased() == "INBOX"
-            || $0.uppercased() == "SENT"
-            || $0.uppercased().contains("SENT")
-        }.prefix(3)
-
-        let syncList = Array(toSync)
-        #expect(syncList.contains("INBOX"))
-        #expect(syncList.contains("[Gmail]/Sent Mail"))
-        #expect(syncList.count == 2)
+        #expect(EmailSyncEngine.isRedundantMailbox(allMail, provider: .gmail))
+        #expect(EmailSyncEngine.isRedundantMailbox(important, provider: .gmail))
+        #expect(EmailSyncEngine.isRedundantMailbox(starred, provider: .gmail))
+        #expect(!EmailSyncEngine.isRedundantMailbox(inbox, provider: .gmail))
+        #expect(!EmailSyncEngine.isRedundantMailbox(sent, provider: .gmail))
+        #expect(!EmailSyncEngine.isRedundantMailbox(allMail, provider: .other))
     }
 
     // MARK: - SELECT Response Parsing

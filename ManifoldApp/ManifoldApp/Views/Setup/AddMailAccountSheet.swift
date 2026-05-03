@@ -4,113 +4,92 @@
 import SwiftUI
 import ManifoldKit
 
-/// Provider-first email account setup sheet.
 struct AddMailAccountSheet: View {
-    @Environment(ManifoldStore.self) var store
+    @Environment(ManifoldStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedProvider: EmailProvider?
 
     var body: some View {
-        VStack(spacing: 0) {
-            SettingsSheetHeader(
-                title: "Connect a mailbox",
-                subtitle: "Pick the account type Manifold should sync into its local mail backup.",
-                systemImage: "envelope.badge.shield.half.filled",
-                accent: ManifoldPalette.claude
-            )
+        NavigationStack {
+            List(MailOnboardingProvider.allCases) { provider in
+                NavigationLink(value: provider) {
+                    MailProviderRow(provider: provider)
+                }
+                .accessibilityIdentifier(provider.accessibilityIdentifier)
+            }
             .accessibilityIdentifier("settings.mail.addAccount.header")
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.s3) {
-                    Text("Provider")
-                        .font(ManifoldType.tiny)
-                        .textCase(.uppercase)
-                        .tracking(0.4)
-                        .foregroundStyle(ManifoldPalette.text2)
-
-                    providerButton(.gmail, icon: "envelope.fill", color: .red, label: "Gmail")
-                    providerButton(.outlook, icon: "envelope.fill", color: .blue, label: "Outlook / Microsoft 365")
-                    providerButton(.icloud, icon: "envelope.fill", color: .cyan, label: "iCloud Mail")
-                    providerButton(.yahoo, icon: "envelope.fill", color: .purple, label: "Yahoo Mail")
-                    providerButton(.fastmail, icon: "paperplane.fill", color: .indigo, label: "Fastmail")
-                    providerButton(.other, icon: "server.rack", color: .secondary, label: "Other IMAP Server")
-                }
-                .padding(Spacing.s5)
+            .navigationTitle("Connect a mailbox")
+            .safeAreaInset(edge: .bottom) {
+                Text("Manifold creates a local, read-only mail backup on this Mac.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
             }
-            .background(ManifoldPalette.bg)
-
-            Divider()
-
-            SettingsSheetFooter {
-                Button("Cancel") { dismiss() }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) {
+                        dismiss()
+                    }
                     .keyboardShortcut(.cancelAction)
-            }
-        }
-        .frame(width: 460, height: 440)
-        .sheet(item: $selectedProvider) { provider in
-            EmailAccountSetupView(provider: provider) {
-                selectedProvider = nil
-                dismiss()
-            }
-                .environment(store)
-        }
-    }
-
-    private func providerButton(_ provider: EmailProvider, icon: String, color: Color, label: String) -> some View {
-        Button {
-            selectedProvider = provider
-        } label: {
-            HStack(spacing: Spacing.section) {
-                SettingsSymbolTile(systemImage: icon, accent: color, size: 34)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(label)
-                        .font(ManifoldType.bodyMedium)
-                        .foregroundStyle(ManifoldPalette.text)
-                    Text(provider.detail)
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(ManifoldPalette.text2)
                 }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.tertiary)
-                    .imageScale(.small)
             }
-            .padding(Spacing.s3)
-            .background(ManifoldPalette.surface, in: RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
+            .navigationDestination(for: MailOnboardingProvider.self) { provider in
+                EmailAccountSetupView(provider: provider.emailProvider) {
+                    dismiss()
+                }
+                .environment(store)
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("settings.mail.provider.\(provider.rawValue)")
+        .frame(width: 520, height: 560)
     }
 }
 
-extension EmailProvider: @retroactive Identifiable {
-    public var id: String { rawValue }
+private struct MailProviderRow: View {
+    let provider: MailOnboardingProvider
+
+    var body: some View {
+        HStack(spacing: 12) {
+            MailProviderIcon(provider: provider)
+                .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(provider.guide.displayLabel)
+                Text(provider.guide.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }
 
-private extension EmailProvider {
-    var detail: String {
-        switch self {
-        case .gmail:
-            return "imap.gmail.com"
-        case .outlook:
-            return "Microsoft 365 and Outlook IMAP"
+private struct MailProviderIcon: View {
+    let provider: MailOnboardingProvider
+
+    var body: some View {
+        switch provider {
+        case .google:
+            Image("Google_\"G\"_logo")
+                .renderingMode(.original)
+                .resizable()
+                .scaledToFit()
+                .accessibilityIdentifier("settings.mail.provider.google.logo")
+        case .microsoft:
+            Image("microsoft")
+                .renderingMode(.original)
+                .resizable()
+                .scaledToFit()
+                .accessibilityIdentifier("settings.mail.provider.microsoft.logo")
         case .icloud:
-            return "iCloud Mail app-password flow"
-        case .yahoo:
-            return "Yahoo Mail IMAP"
-        case .fastmail:
-            return "Fastmail IMAP"
+            Image(systemName: "icloud.fill")
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings.mail.provider.icloud.logo")
         case .other:
-            return "Custom host, port, and credentials"
+            Image(systemName: "at")
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings.mail.provider.other.logo")
         }
     }
 }

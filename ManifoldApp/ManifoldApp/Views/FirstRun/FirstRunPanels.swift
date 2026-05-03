@@ -10,6 +10,7 @@ import ManifoldKit
 
 struct ConceptPanel: View {
     let next: () -> Void
+    let tryDemo: () -> Void
 
     var body: some View {
         // Full-bleed atmospheric backdrop carries the brand identity.
@@ -39,11 +40,18 @@ struct ConceptPanel: View {
 
                 Spacer()
 
-                Button("Continue", action: next)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("onboarding.concept.continue")
+                HStack(spacing: Spacing.s3) {
+                    Button("Try with demo data first", action: tryDemo)
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .accessibilityIdentifier("onboarding.concept.demo")
+
+                    Button("Continue", action: next)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("onboarding.concept.continue")
+                }
             }
             .padding(Spacing.s6)
         }

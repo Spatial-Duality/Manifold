@@ -68,8 +68,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 14)
-        #expect(try migrator.currentVersion() == 40)
+        #expect(applied == 15)
+        #expect(try migrator.currentVersion() == 41)
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'")).isEmpty))
         #expect(!((try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'")).isEmpty))
     }
@@ -81,14 +81,14 @@ struct DatabaseMigratorTests {
 
         let migrator = try DatabaseMigrator(db: db)
         let now = ISO8601DateFormatter.shared.string(from: Date())
-        for version in 1...40 {
+        for version in 1...41 {
             try db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 params: ["\(version)", now]
             )
         }
 
-        #expect(try migrator.currentVersion() == 40)
+        #expect(try migrator.currentVersion() == 41)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='rule_records'").isEmpty)
         #expect(try db.queryAll("SELECT name FROM sqlite_master WHERE type='table' AND name='file_visibility_overrides'").isEmpty)
         try db.execute("""
@@ -747,8 +747,8 @@ struct DatabaseMigratorTests {
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 7)
-        #expect(try migrator.currentVersion() == 40)
+        #expect(applied == 8)
+        #expect(try migrator.currentVersion() == 41)
         let settings = try #require(try db.queryAll("SELECT selected_backend, install_state, model_version, installed_at FROM privacy_preflight_settings").first)
         #expect(settings["selected_backend"] == "mlx")
         #expect(settings["install_state"] == "download_required")
@@ -847,10 +847,11 @@ struct DatabaseMigratorTests {
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["38"])
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["39"])
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["40"])
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["41"])
         let applied = try migrator.migrate()
 
-        #expect(applied == 6)
-        #expect(try migrator.currentVersion() == 40)
+        #expect(applied == 7)
+        #expect(try migrator.currentVersion() == 41)
 
         let liveOverride = try db.queryAll(
             "SELECT relative_path FROM file_visibility_overrides WHERE source_id = ?",
@@ -1004,11 +1005,12 @@ struct DatabaseMigratorTests {
 
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["39"])
         try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["40"])
+        try db.execute("DELETE FROM schema_migrations WHERE version = ?", params: ["41"])
 
         let applied = try migrator.migrate()
 
-        #expect(applied == 2)
-        #expect(try migrator.currentVersion() == 40)
+        #expect(applied == 3)
+        #expect(try migrator.currentVersion() == 41)
         #expect(try db.queryScalar("SELECT COUNT(*) FROM email_accounts WHERE account_id = 'legacy-mail'") == "0")
         #expect(try db.queryScalar("SELECT COUNT(*) FROM email_accounts WHERE account_id = 'v2-mail'") == "1")
         for table in [

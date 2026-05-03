@@ -1965,6 +1965,7 @@ public struct DatabaseMigrator {
             }
 
             if emailMessagesExist {
+                try deleteRowsIfTableExists(db, table: "shared_email_attachments")
                 try deleteRowsIfTableExists(db, table: "email_attachments")
                 try deleteRowsIfTableExists(db, table: "email_mailbox_membership")
                 try deleteRowsIfTableExists(db, table: "grant_emails")
@@ -2048,6 +2049,29 @@ public struct DatabaseMigrator {
             try db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_attachments_blob_cid
                 ON email_attachments(attachment_blob_cid)
+            """)
+        },
+
+        // v41: Attachment sharing is an explicit per-agent choice. Sharing
+        // an email grants metadata/body access only; attachment bytes require
+        // a matching row here and a still-shared parent email at read time.
+        Migration(version: 41, name: "per_agent_shared_email_attachments") { db in
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS shared_email_attachments (
+                    share_id TEXT PRIMARY KEY,
+                    agent TEXT NOT NULL,
+                    attachment_id TEXT NOT NULL REFERENCES email_attachments(attachment_id),
+                    shared_at TEXT NOT NULL,
+                    UNIQUE(agent, attachment_id)
+                )
+            """)
+            try db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shared_email_attachments_agent
+                ON shared_email_attachments(agent)
+            """)
+            try db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shared_email_attachments_attachment
+                ON shared_email_attachments(attachment_id)
             """)
         },
     ]

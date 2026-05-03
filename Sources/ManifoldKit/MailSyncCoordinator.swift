@@ -15,6 +15,7 @@ public actor MailSyncCoordinator {
     private let emailStore: EmailStore
     private let syncRunner: SyncRunner
     private var accountTasks: [String: Task<Void, Never>] = [:]
+    private var activeJobAccounts = Set<String>()
     private var stopped = false
     private let idleDelay: Duration
 
@@ -34,6 +35,14 @@ public actor MailSyncCoordinator {
 
     public func startRuntimeSync() async {
         stopped = false
+        do {
+            let recovered = try emailStore.requeueRunningMailSyncJobs()
+            if recovered > 0 {
+                mailSyncCoordinatorLogger.info("Recovered \(recovered) abandoned running mail sync jobs")
+            }
+        } catch {
+            mailSyncCoordinatorLogger.error("Failed to recover abandoned mail sync jobs: \(error.localizedDescription)")
+        }
         await registerEnabledAccounts(startWorkers: true)
     }
 
@@ -71,6 +80,15 @@ public actor MailSyncCoordinator {
     }
 
     @discardableResult
+    public func enqueueRecentPass(accountID: String) throws -> MailSyncJobRecord {
+        try emailStore.enqueueMailSyncJob(
+            accountID: accountID,
+            jobType: .recentPass,
+            priority: 900
+        )
+    }
+
+    @discardableResult
     public func enqueueHistoricalBackfill(accountID: String, mailboxName: String? = nil) throws -> MailSyncJobRecord {
         try emailStore.enqueueMailSyncJob(
             accountID: accountID,
@@ -84,6 +102,19 @@ public actor MailSyncCoordinator {
         try emailStore.mailSyncJobs(accountID: accountID, states: states)
     }
 
+    @discardableResult
+    public func recoverStaleRunningJobs(
+        accountID: String,
+        olderThan age: TimeInterval = 300
+    ) throws -> Int {
+        guard !activeJobAccounts.contains(accountID) else { return 0 }
+        return try emailStore.requeueRunningMailSyncJobs(
+            accountID: accountID,
+            updatedBefore: Date().addingTimeInterval(-age),
+            errorRedacted: "Recovered stale running job before manual sync"
+        )
+    }
+
     public func pause(accountID: String) async throws {
         try emailStore.setEmailAccountSyncEnabled(accountID: accountID, enabled: false)
         try emailStore.pauseMailSyncJobs(accountID: accountID)
@@ -95,7 +126,7 @@ public actor MailSyncCoordinator {
         try emailStore.setEmailAccountSyncEnabled(accountID: accountID, enabled: true)
         try emailStore.resumeMailSyncJobs(accountID: accountID)
         if try emailStore.mailSyncJobs(accountID: accountID, states: [.queued]).isEmpty {
-            _ = try enqueueIncrementalSync(accountID: accountID)
+            _ = try enqueueRecentPass(accountID: accountID)
         }
         if startWorker {
             register(accountID: accountID)
@@ -120,11 +151,16 @@ public actor MailSyncCoordinator {
             return nil
         }
 
+        activeJobAccounts.insert(job.accountID)
+        defer {
+            activeJobAccounts.remove(job.accountID)
+        }
         let result = await syncRunner(accountID, job)
         if result.isSuccess {
             try emailStore.updateMailSyncJobState(id: job.id, state: .succeeded)
             try scheduleFollowupJobs(after: job, result: result)
         } else {
+            try scheduleFollowupJobs(after: job, result: result)
             try emailStore.updateMailSyncJobState(
                 id: job.id,
                 state: .failed,
@@ -155,7 +191,7 @@ public actor MailSyncCoordinator {
         if states.isEmpty {
             return try enqueueInitialSync(accountID: accountID)
         }
-        return try enqueueIncrementalSync(accountID: accountID)
+        return try enqueueRecentPass(accountID: accountID)
     }
 
     private func register(accountID: String) {

@@ -3,8 +3,8 @@
 //
 // KbdLabel — keyboard hint pill ("⌘K", "↩", etc.).
 //
-// Used in command palette hints, footer rows, and inline next to menu
-// items. Reads as a typographic affordance, not a button.
+// Used in footer rows and inline next to menu items. Reads as a
+// typographic affordance, not a button.
 
 import SwiftUI
 

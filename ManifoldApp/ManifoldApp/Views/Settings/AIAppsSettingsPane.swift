@@ -34,7 +34,7 @@ struct AgentsSettingsPane: View {
             } header: {
                 Text("Agent Defaults")
             } footer: {
-                Text("Change a single app in its column, or use Both to apply one value to Claude and Codex. OpenAI Privacy Filter model settings live in Privacy.")
+                Text("Change Claude or Codex directly, or use Apply to both for one shared default. OpenAI Privacy Filter model settings live in Privacy.")
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
             }
@@ -149,141 +149,175 @@ struct AgentsSettingsPane: View {
     }
 }
 
-// MARK: - Agent defaults table
+// MARK: - Agent defaults forms
 
 private struct AgentPolicyTable: View {
     @Environment(ManifoldStore.self) var store
 
-    private let settingWidth: CGFloat = 170
-    private let valueWidth: CGFloat = 128
-    private let bothWidth: CGFloat = 112
-
     var body: some View {
-        Grid(alignment: .leading, horizontalSpacing: Spacing.s3, verticalSpacing: Spacing.s2) {
-            headerRow
-            Divider().gridCellColumns(4)
+        VStack(alignment: .leading, spacing: Spacing.s4) {
+            applyToBothMenu
 
-            groupRow("Recording")
-            GridRow {
-                settingCell("Recording level", help: recordingHelp)
-                recordingPicker(for: .cowork)
-                recordingPicker(for: .codex)
-                recordingBothMenu()
-            }
+            agentDefaults(for: .cowork)
+            agentDefaults(for: .codex)
 
-            if hasPrivacyPolicy {
-                Divider().gridCellColumns(4)
-                groupRow("Privacy Policy")
-                handlingRow(
-                    title: "Text content",
-                    keyPath: \.textHandling,
-                    accessibilitySuffix: "text"
-                )
-                handlingRow(
-                    title: "Code and diffs",
-                    keyPath: \.codeHandling,
-                    accessibilitySuffix: "code"
-                )
-                secretRow()
-
-                Divider().gridCellColumns(4)
-                groupRow("Categories")
-                ForEach(PrivacyCategory.allCases, id: \.self) { category in
-                    categoryRow(category)
-                }
-            } else {
-                Divider().gridCellColumns(4)
-                GridRow {
-                    settingCell("Privacy Policy")
-                    Text("Privacy settings unavailable")
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                        .gridCellColumns(3)
-                }
+            if !hasPrivacyPolicy {
+                Text("Privacy policy defaults are unavailable until policies finish loading.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, Spacing.s1)
-        .accessibilityIdentifier("settings.agents.policyTable")
+        .accessibilityIdentifier("settings.agents.policyForms")
     }
 
-    private var headerRow: some View {
-        GridRow {
-            Text("Setting")
+    private var applyToBothMenu: some View {
+        HStack(alignment: .center, spacing: Spacing.s2) {
+            Text("Shared changes")
                 .font(ManifoldType.captionMedium)
                 .foregroundStyle(.secondary)
-                .frame(width: settingWidth, alignment: .leading)
-            agentHeader(.cowork)
-            agentHeader(.codex)
-            Text("Both")
-                .font(ManifoldType.captionMedium)
-                .foregroundStyle(.secondary)
-                .frame(width: bothWidth, alignment: .leading)
-        }
-    }
-
-    private func agentHeader(_ agent: TargetApp) -> some View {
-        Label(AgentMeta.label(agent), systemImage: AgentMeta.systemImage(agent))
-            .font(ManifoldType.captionMedium)
-            .foregroundStyle(AgentMeta.color(agent))
-            .frame(width: valueWidth, alignment: .leading)
-    }
-
-    private func groupRow(_ title: String) -> some View {
-        GridRow {
-            Text(title)
-                .font(ManifoldType.tiny.weight(.semibold))
-                .foregroundStyle(ManifoldPalette.text2)
-                .textCase(.uppercase)
-                .gridCellColumns(4)
-        }
-    }
-
-    private func settingCell(_ title: String, help: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(ManifoldType.caption)
-            if let help {
-                Text(help)
-                    .font(ManifoldType.tiny)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(width: settingWidth, alignment: .leading)
-    }
-
-    private var recordingHelp: String {
-        if let common = commonRecordingLevel {
-            return common.guidance
-        }
-        return "Claude and Codex currently use different recording levels."
-    }
-
-    private func recordingPicker(for agent: TargetApp) -> some View {
-        Picker(AgentMeta.label(agent), selection: recordingBinding(for: agent)) {
-            ForEach(AccessRecordingLevel.allCases, id: \.self) { level in
-                Text(level.displayName).tag(level)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .controlSize(.small)
-        .frame(width: valueWidth, alignment: .leading)
-        .accessibilityIdentifier("settings.agents.recording.\(agent.rawValue)")
-    }
-
-    private func recordingBothMenu() -> some View {
-        valueMenu(title: commonRecordingLevel?.displayName ?? "Mixed", width: bothWidth) {
-            ForEach(AccessRecordingLevel.allCases, id: \.self) { level in
-                Button(level.displayName) {
-                    Task {
-                        await store.governance.updateAccessRecordingLevel(level, for: .cowork)
-                        await store.governance.updateAccessRecordingLevel(level, for: .codex)
+            Spacer()
+            Menu {
+                Section("Recording level") {
+                    ForEach(AccessRecordingLevel.allCases, id: \.self) { level in
+                        Button(level.displayName) {
+                            Task {
+                                await store.governance.updateAccessRecordingLevel(level, for: .cowork)
+                                await store.governance.updateAccessRecordingLevel(level, for: .codex)
+                            }
+                        }
                     }
+                }
+
+                if hasPrivacyPolicy {
+                    Menu("Text content") {
+                        privacyHandlingButtons { policy, mode in
+                            policy.textHandling = mode
+                        }
+                    }
+                    Menu("Code and diffs") {
+                        privacyHandlingButtons { policy, mode in
+                            policy.codeHandling = mode
+                        }
+                    }
+                    Menu("Secrets") {
+                        ForEach(PrivacySecretHandling.allCases, id: \.self) { mode in
+                            Button(mode.displayName) {
+                                updateBothPrivacyPolicies { $0.secretHandling = mode }
+                            }
+                        }
+                    }
+                    Menu("Categories") {
+                        Button("Turn all on") {
+                            updateBothPrivacyPolicies { policy in
+                                policy.enabledCategories = Set(PrivacyCategory.allCases)
+                            }
+                        }
+                        Button("Turn all off") {
+                            updateBothPrivacyPolicies { policy in
+                                policy.enabledCategories.removeAll()
+                            }
+                        }
+                        Divider()
+                        ForEach(PrivacyCategory.allCases, id: \.self) { category in
+                            Menu(category.displayName) {
+                                Button("On") {
+                                    updateCategory(category, enabled: true, forBoth: true)
+                                }
+                                Button("Off") {
+                                    updateCategory(category, enabled: false, forBoth: true)
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label("Apply to both…", systemImage: "person.2")
+            }
+            .menuStyle(.button)
+            .controlSize(.regular)
+            .accessibilityIdentifier("settings.agents.applyToBoth")
+        }
+    }
+
+    private func privacyHandlingButtons(
+        apply: @escaping (inout AgentPrivacyPolicy, PrivacyHandlingMode) -> Void
+    ) -> some View {
+        ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
+            Button(mode.displayName) {
+                updateBothPrivacyPolicies { policy in
+                    apply(&policy, mode)
                 }
             }
         }
-        .accessibilityIdentifier("settings.agents.recording.both")
+    }
+
+    private func agentDefaults(for agent: TargetApp) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: Spacing.s3) {
+                Picker("Recording level", selection: recordingBinding(for: agent)) {
+                    ForEach(AccessRecordingLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("settings.agents.recording.\(agent.rawValue)")
+
+                Text(recordingBinding(for: agent).wrappedValue.guidance)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if hasPrivacyPolicy {
+                    Divider()
+                    privacyDefaults(for: agent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label(AgentMeta.label(agent), systemImage: AgentMeta.systemImage(agent))
+                .font(ManifoldType.bodyMedium)
+                .foregroundStyle(AgentMeta.color(agent))
+        }
+    }
+
+    private func privacyDefaults(for agent: TargetApp) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s3) {
+            Picker("Text content", selection: handlingBinding(for: agent, keyPath: \.textHandling)) {
+                ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("settings.agents.privacy.text.\(agent.rawValue)")
+
+            Picker("Code and diffs", selection: handlingBinding(for: agent, keyPath: \.codeHandling)) {
+                ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("settings.agents.privacy.code.\(agent.rawValue)")
+
+            Picker("Secrets", selection: secretBinding(for: agent)) {
+                ForEach(PrivacySecretHandling.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("settings.agents.privacy.secrets.\(agent.rawValue)")
+
+            DisclosureGroup("Privacy categories") {
+                VStack(alignment: .leading, spacing: Spacing.s2) {
+                    ForEach(PrivacyCategory.allCases, id: \.self) { category in
+                        Toggle(category.displayName, isOn: categoryBinding(for: agent, category: category))
+                            .toggleStyle(.switch)
+                            .accessibilityIdentifier("settings.agents.privacy.category.\(category.rawValue).\(agent.rawValue)")
+                    }
+                }
+                .padding(.top, Spacing.s1)
+            }
+        }
     }
 
     private func recordingBinding(for agent: TargetApp) -> Binding<AccessRecordingLevel> {
@@ -301,51 +335,6 @@ private struct AgentPolicyTable: View {
         return claude == codex ? claude : nil
     }
 
-    @ViewBuilder
-    private func handlingRow(
-        title: String,
-        keyPath: WritableKeyPath<AgentPrivacyPolicy, PrivacyHandlingMode>,
-        accessibilitySuffix: String
-    ) -> some View {
-        GridRow {
-            settingCell(title)
-            handlingPicker(for: .cowork, keyPath: keyPath, accessibilitySuffix: accessibilitySuffix)
-            handlingPicker(for: .codex, keyPath: keyPath, accessibilitySuffix: accessibilitySuffix)
-            handlingBothMenu(keyPath: keyPath, accessibilitySuffix: accessibilitySuffix)
-        }
-    }
-
-    private func handlingPicker(
-        for agent: TargetApp,
-        keyPath: WritableKeyPath<AgentPrivacyPolicy, PrivacyHandlingMode>,
-        accessibilitySuffix: String
-    ) -> some View {
-        Picker(AgentMeta.label(agent), selection: handlingBinding(for: agent, keyPath: keyPath)) {
-            ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .controlSize(.small)
-        .frame(width: valueWidth, alignment: .leading)
-        .accessibilityIdentifier("settings.agents.privacy.\(accessibilitySuffix).\(agent.rawValue)")
-    }
-
-    private func handlingBothMenu(
-        keyPath: WritableKeyPath<AgentPrivacyPolicy, PrivacyHandlingMode>,
-        accessibilitySuffix: String
-    ) -> some View {
-        valueMenu(title: commonHandling(keyPath: keyPath)?.displayName ?? "Mixed", width: bothWidth) {
-            ForEach(PrivacyHandlingMode.allCases, id: \.self) { mode in
-                Button(mode.displayName) {
-                    updateBothPrivacyPolicies { $0[keyPath: keyPath] = mode }
-                }
-            }
-        }
-        .accessibilityIdentifier("settings.agents.privacy.\(accessibilitySuffix).both")
-    }
-
     private func handlingBinding(
         for agent: TargetApp,
         keyPath: WritableKeyPath<AgentPrivacyPolicy, PrivacyHandlingMode>
@@ -358,45 +347,6 @@ private struct AgentPolicyTable: View {
         )
     }
 
-    private func commonHandling(keyPath: WritableKeyPath<AgentPrivacyPolicy, PrivacyHandlingMode>) -> PrivacyHandlingMode? {
-        let claude = store.governance.privacyPolicy(for: .cowork)?[keyPath: keyPath]
-        let codex = store.governance.privacyPolicy(for: .codex)?[keyPath: keyPath]
-        return claude == codex ? claude : nil
-    }
-
-    private func secretRow() -> some View {
-        GridRow {
-            settingCell("Secrets")
-            secretPicker(for: .cowork)
-            secretPicker(for: .codex)
-            secretBothMenu()
-        }
-    }
-
-    private func secretPicker(for agent: TargetApp) -> some View {
-        Picker(AgentMeta.label(agent), selection: secretBinding(for: agent)) {
-            ForEach(PrivacySecretHandling.allCases, id: \.self) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .controlSize(.small)
-        .frame(width: valueWidth, alignment: .leading)
-        .accessibilityIdentifier("settings.agents.privacy.secrets.\(agent.rawValue)")
-    }
-
-    private func secretBothMenu() -> some View {
-        valueMenu(title: commonSecretHandling?.displayName ?? "Mixed", width: bothWidth) {
-            ForEach(PrivacySecretHandling.allCases, id: \.self) { mode in
-                Button(mode.displayName) {
-                    updateBothPrivacyPolicies { $0.secretHandling = mode }
-                }
-            }
-        }
-        .accessibilityIdentifier("settings.agents.privacy.secrets.both")
-    }
-
     private func secretBinding(for agent: TargetApp) -> Binding<PrivacySecretHandling> {
         Binding(
             get: { store.governance.privacyPolicy(for: agent)?.secretHandling ?? .warn },
@@ -406,42 +356,6 @@ private struct AgentPolicyTable: View {
         )
     }
 
-    private var commonSecretHandling: PrivacySecretHandling? {
-        let claude = store.governance.privacyPolicy(for: .cowork)?.secretHandling
-        let codex = store.governance.privacyPolicy(for: .codex)?.secretHandling
-        return claude == codex ? claude : nil
-    }
-
-    private func categoryRow(_ category: PrivacyCategory) -> some View {
-        GridRow {
-            settingCell(category.displayName)
-            categoryToggle(for: .cowork, category: category)
-            categoryToggle(for: .codex, category: category)
-            categoryBothMenu(category)
-        }
-    }
-
-    private func categoryToggle(for agent: TargetApp, category: PrivacyCategory) -> some View {
-        Toggle(AgentMeta.label(agent), isOn: categoryBinding(for: agent, category: category))
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .frame(width: valueWidth, alignment: .leading)
-            .accessibilityIdentifier("settings.agents.privacy.category.\(category.rawValue).\(agent.rawValue)")
-    }
-
-    private func categoryBothMenu(_ category: PrivacyCategory) -> some View {
-        valueMenu(title: categoryBothLabel(category), width: bothWidth) {
-            Button("On for Both") {
-                updateCategory(category, enabled: true, forBoth: true)
-            }
-            Button("Off for Both") {
-                updateCategory(category, enabled: false, forBoth: true)
-            }
-        }
-        .accessibilityIdentifier("settings.agents.privacy.category.\(category.rawValue).both")
-    }
-
     private func categoryBinding(for agent: TargetApp, category: PrivacyCategory) -> Binding<Bool> {
         Binding(
             get: { store.governance.privacyPolicy(for: agent)?.enabledCategories.contains(category) ?? false },
@@ -449,13 +363,6 @@ private struct AgentPolicyTable: View {
                 updateCategory(category, enabled: isEnabled, for: agent)
             }
         )
-    }
-
-    private func categoryBothLabel(_ category: PrivacyCategory) -> String {
-        let claude = store.governance.privacyPolicy(for: .cowork)?.enabledCategories.contains(category)
-        let codex = store.governance.privacyPolicy(for: .codex)?.enabledCategories.contains(category)
-        guard claude == codex, let value = claude else { return "Mixed" }
-        return value ? "On" : "Off"
     }
 
     private func updateCategory(_ category: PrivacyCategory, enabled: Bool, for agent: TargetApp) {
@@ -502,16 +409,4 @@ private struct AgentPolicyTable: View {
             && store.governance.privacyPolicy(for: .codex) != nil
     }
 
-    private func valueMenu<Content: View>(
-        title: String,
-        width: CGFloat,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        Menu(title) {
-            content()
-        }
-        .menuStyle(.button)
-        .controlSize(.small)
-        .frame(width: width, alignment: .leading)
-    }
 }

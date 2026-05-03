@@ -97,7 +97,7 @@ public enum XPCJSON {
 
     public static func object<T: Encodable>(from value: T) throws -> Any {
         let data = try JSONEncoder().encode(value)
-        return try JSONSerialization.jsonObject(with: data)
+        return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
     public static func decode<T: Decodable>(_ type: T.Type, from object: Any) throws -> T {

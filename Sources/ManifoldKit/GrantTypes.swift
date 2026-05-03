@@ -545,6 +545,20 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public var isDeletedOnServer: Bool { deletedOnServerAt != nil }
 }
 
+public struct EmailMessagePage: Sendable, Hashable, Codable {
+    public let messages: [EmailMessageRecord]
+    public let totalCount: Int
+    public let limit: Int
+    public let offset: Int
+
+    public init(messages: [EmailMessageRecord], totalCount: Int, limit: Int, offset: Int) {
+        self.messages = messages
+        self.totalCount = totalCount
+        self.limit = limit
+        self.offset = offset
+    }
+}
+
 public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable, Codable {
     public var id: String { attachmentID }
     public let attachmentID: String
@@ -555,6 +569,26 @@ public struct EmailAttachmentRecord: Sendable, Identifiable, Hashable, Codable {
     public let contentHash: String
     public let contentID: String?
     public let attachmentBlobCID: String?
+
+    public init(
+        attachmentID: String,
+        emailID: String,
+        filename: String,
+        mimeType: String,
+        sizeBytes: Int,
+        contentHash: String,
+        contentID: String? = nil,
+        attachmentBlobCID: String? = nil
+    ) {
+        self.attachmentID = attachmentID
+        self.emailID = emailID
+        self.filename = filename
+        self.mimeType = mimeType
+        self.sizeBytes = sizeBytes
+        self.contentHash = contentHash
+        self.contentID = contentID
+        self.attachmentBlobCID = attachmentBlobCID
+    }
 
     init?(row: [String: String]) {
         guard let attachmentID = row["attachment_id"],

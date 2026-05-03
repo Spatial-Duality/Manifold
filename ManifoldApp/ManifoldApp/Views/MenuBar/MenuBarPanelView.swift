@@ -21,7 +21,6 @@ import ManifoldKit
 
 struct MenuBarPanelView: View {
     @Environment(ManifoldStore.self) private var store
-    @Environment(CommandPaletteModel.self) private var commandPalette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum PanelState {
@@ -78,7 +77,7 @@ struct MenuBarPanelView: View {
             }
 
             Divider()
-            FooterActions(store: store, commandPalette: commandPalette, state: panelState)
+            FooterActions(store: store, state: panelState)
         }
         .frame(width: 360)
         .accessibilityIdentifier("menubar.panel")
@@ -651,23 +650,28 @@ private struct RecentSessionsBlock: View {
 
 private struct FooterActions: View {
     let store: ManifoldStore
-    let commandPalette: CommandPaletteModel
     let state: MenuBarPanelView.PanelState
 
     var body: some View {
         VStack(spacing: 0) {
             if state == .trackedEdit {
-                commandFooterItem(.openSessionRecap)
-                commandFooterItem(.finishTrackedEdit)
+                openSessionRecapFooterItem
+                FooterItem(icon: "checkmark.seal", label: "End Session", shortcut: "⇧⌘F") {
+                    Task { try? await store.finishActiveSession() }
+                }
                 FooterDivider()
             } else if state == .idle || state == .idleWithRecent {
-                commandFooterItem(.startSession)
-                commandFooterItem(.addFolder)
+                FooterItem(icon: "plus.rectangle.on.rectangle", label: "New Session", shortcut: "⌘N") {
+                    prepareSession()
+                }
+                FooterItem(icon: "folder.badge.plus", label: "Add Folder…", shortcut: "⇧⌘O") {
+                    store.addSourceFromPicker()
+                }
                 FooterDivider()
             }
 
             if state == .activeWithQueue {
-                commandFooterItem(.openSessionRecap)
+                openSessionRecapFooterItem
             }
 
             if !store.pendingRequests.isEmpty {
@@ -680,8 +684,13 @@ private struct FooterActions: View {
                 FooterDivider()
             }
 
-            commandFooterItem(.openManifold)
-            commandFooterItem(.settings)
+            FooterItem(icon: "macwindow", label: "Open Manifold", shortcut: nil) {
+                presentMainLedger()
+            }
+            FooterItem(icon: "gearshape", label: "Settings…", shortcut: "⌘,") {
+                presentMainLedger()
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
 
             if store.isRuntimeConnected {
                 FooterDivider()
@@ -720,16 +729,19 @@ private struct FooterActions: View {
             && store.governance.codexPolicy?.isPaused == true
     }
 
-    @ViewBuilder
-    private func commandFooterItem(_ id: ManifoldCommandID) -> some View {
-        if let command = commandPalette.command(id, for: store) {
-            FooterItem(
-                icon: command.icon,
-                label: command.title,
-                shortcut: command.shortcutLabel
-            ) {
-                Task { await command.action(store) }
-            }
+    private var openSessionRecapFooterItem: some View {
+        FooterItem(icon: "list.bullet.rectangle", label: "Open Session Recap", shortcut: nil) {
+            presentMainLedger(destination: .work)
+        }
+    }
+
+    private func prepareSession() {
+        presentMainLedger(destination: .work)
+        if store.sessionWorkbench.preload == nil {
+            store.beginSessionPreload(
+                agent: store.defaultSessionAgent,
+                baseMode: .buildOnDefault
+            )
         }
     }
 }

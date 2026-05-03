@@ -86,6 +86,19 @@ struct ReadOnlyIMAPSessionTests {
         #expect(high == 500)
     }
 
+    @Test("Recent pass does not skip failed UIDs when no historical backfill remains")
+    func recentPassUsesSafeWatermarkWhenAllCandidatesWereSelected() {
+        let high = EmailSyncEngine.nextHighWatermark(
+            previousLastUID: 100,
+            searchedUIDs: [104, 103, 102, 101],
+            savedUIDs: [104, 103, 101],
+            mode: .recentPass(limitPerMailbox: 1_000),
+            selectedUIDCount: 4,
+            candidateUIDCount: 4
+        )
+        #expect(high == 101)
+    }
+
     @Test("Historical backfill does not move incremental high watermark")
     func historicalBackfillPreservesIncrementalHighWatermark() {
         let high = EmailSyncEngine.nextHighWatermark(

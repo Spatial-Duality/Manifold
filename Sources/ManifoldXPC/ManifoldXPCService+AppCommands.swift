@@ -429,6 +429,33 @@ extension ManifoldXPCService {
         case "emailMessageCount":
             return ["count": try runtime.emailStore.emailMessageCount()]
 
+        case "mailSyncProgress":
+            let filterAccountID = payload["accountID"] as? String
+            let accounts = try runtime.emailStore.allEmailAccounts()
+                .filter { filterAccountID == nil || $0.accountID == filterAccountID }
+            let privacyStatus = try? await runtime.privacyIndexCoordinator.runtimeStatus()
+            let privacyIndexActive = (privacyStatus?.queuedJobs ?? 0) > 0
+                || (privacyStatus?.runningJobs ?? 0) > 0
+            let progress = try accounts.map { account in
+                let states = try runtime.emailStore.syncStates(accountID: account.accountID)
+                let jobs = try runtime.emailStore.mailSyncJobs(
+                    accountID: account.accountID,
+                    states: [.queued, .running, .failed],
+                    limit: 100
+                )
+                let syncedCount = try runtime.emailStore.emailMessageCount(
+                    accountID: account.accountID
+                )
+                return MailSyncProgressSnapshot.derive(
+                    account: account,
+                    states: states,
+                    jobs: jobs,
+                    syncedMessageCount: syncedCount,
+                    privacyIndexActive: privacyIndexActive
+                )
+            }
+            return ["progress": try XPCJSON.object(from: progress)]
+
         case "addIMAPAccount":
             // R5: cleartext password no longer crosses XPC. The app
             // writes to a `pending-{uuid}` Keychain slot and only sends
@@ -457,7 +484,7 @@ extension ManifoldXPCService {
                 throw NSError(
                     domain: "com.spatialduality.manifold.xpc",
                     code: 400,
-                    userInfo: [NSLocalizedDescriptionKey: "Pending credential not found in Keychain. The app may have failed to write it before the XPC call."]
+                    userInfo: [NSLocalizedDescriptionKey: "Pending credential not found in Keychain. Manifold staged the credential locally, but the runtime helper could not read the pending handoff item. Relaunch Manifold and try again."]
                 )
             }
             // Always sweep the pending entry by the time we leave this
@@ -540,7 +567,7 @@ extension ManifoldXPCService {
                 throw NSError(
                     domain: "com.spatialduality.manifold.xpc",
                     code: 400,
-                    userInfo: [NSLocalizedDescriptionKey: "Pending OAuth credential not found in Keychain."]
+                    userInfo: [NSLocalizedDescriptionKey: "Pending OAuth credential not found in Keychain. Manifold staged the token locally, but the runtime helper could not read the pending handoff item. Relaunch Manifold and try again."]
                 )
             }
             defer { secretStore.delete(reference: pendingRef) }
@@ -586,11 +613,8 @@ extension ManifoldXPCService {
             guard let accountID = payload["accountID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            try? await runtime.mailSyncCoordinator.pause(accountID: accountID)
-            await runtime.emailSyncEngine.unregister(accountID: accountID)
-            try runtime.emailStore.removeEmailAccount(id: accountID)
-            await runtime.privacyIndexCoordinator.bootstrap()
-            return ["ok": true]
+            let result = try await runtime.removeEmailAccountAndLocalData(accountID: accountID)
+            return ["ok": true, "result": try XPCJSON.object(from: result)]
 
         case "toggleEmailSync":
             guard let accountID = payload["accountID"] as? String,
@@ -610,7 +634,8 @@ extension ManifoldXPCService {
             guard let accountID = payload["accountID"] as? String else {
                 throw ManifoldXPCError.invalidPayload
             }
-            _ = try await runtime.mailSyncCoordinator.enqueueIncrementalSync(accountID: accountID)
+            _ = try await runtime.mailSyncCoordinator.recoverStaleRunningJobs(accountID: accountID)
+            _ = try await runtime.mailSyncCoordinator.enqueueRecentPass(accountID: accountID)
             let processed = try await runtime.mailSyncCoordinator.processNextJobWithResult(accountID: accountID)
             let result = processed?.result ?? SyncResult(
                 accountID: accountID,
@@ -619,8 +644,40 @@ extension ManifoldXPCService {
             await runtime.privacyIndexCoordinator.bootstrap()
             return ["result": try XPCJSON.object(from: result)]
 
+        case "mailSyncJobs":
+            let accountID = payload["accountID"] as? String
+            let stateRaws = payload["states"] as? [String]
+            let states = stateRaws?.compactMap(MailSyncJobState.init(rawValue:))
+            let limit = payload["limit"] as? Int ?? 500
+            return ["jobs": try XPCJSON.object(from: runtime.emailStore.mailSyncJobs(
+                accountID: accountID,
+                states: states,
+                limit: limit
+            ))]
+
         case "emailMessages":
             return ["messages": try XPCJSON.object(from: try emailMessages(payload: payload))]
+
+        case "emailMessagePage":
+            let tokens = try decodePayload([SearchToken].self, key: "tokens", from: payload, default: [])
+            let freeText = payload["freeText"] as? String ?? ""
+            let accountID = payload["accountID"] as? String
+            let mailbox = payload["mailbox"] as? String
+            let filter = try decodeOptionalPayload(QuickFilter.self, key: "filter", from: payload)
+            let sortKey = try decodeOptionalPayload(EmailSortKey.self, key: "sortKey", from: payload) ?? .date
+            let limit = payload["limit"] as? Int ?? 50
+            let offset = payload["offset"] as? Int ?? 0
+            let page = try runtime.emailStore.emailMessagePage(
+                tokens: tokens,
+                freeText: freeText,
+                accountID: accountID,
+                mailbox: mailbox,
+                filter: filter,
+                sortKey: sortKey,
+                limit: limit,
+                offset: offset
+            )
+            return ["page": try XPCJSON.object(from: page)]
 
         case "domainCounts":
             let counts = Dictionary(uniqueKeysWithValues: try runtime.emailStore.domainCounts().map { ($0.domain, $0.count) })
@@ -668,6 +725,43 @@ extension ManifoldXPCService {
             let emailIDs = payload["emailIDs"] as? [String] ?? []
             try runtime.emailStore.unshareEmails(emailIDs: emailIDs, for: agent)
             return ["ok": true]
+
+        case "emailAttachments":
+            guard let emailID = payload["emailID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["attachments": try XPCJSON.object(from: runtime.emailStore.emailAttachments(emailID: emailID))]
+
+        case "sharedEmailAttachmentIDs":
+            guard let emailID = payload["emailID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let agent = targetApp(from: payload) ?? .cowork
+            return ["ids": Array(try runtime.emailStore.sharedEmailAttachmentIDs(emailID: emailID, agent: agent)).sorted()]
+
+        case "shareEmailAttachments":
+            let agent = targetApp(from: payload) ?? .cowork
+            let attachmentIDs = payload["attachmentIDs"] as? [String] ?? []
+            try runtime.emailStore.shareEmailAttachments(attachmentIDs: attachmentIDs, for: agent)
+            return ["ok": true]
+
+        case "unshareEmailAttachments":
+            let agent = targetApp(from: payload) ?? .cowork
+            let attachmentIDs = payload["attachmentIDs"] as? [String] ?? []
+            try runtime.emailStore.unshareEmailAttachments(attachmentIDs: attachmentIDs, for: agent)
+            return ["ok": true]
+
+        case "openEmailExport":
+            guard let emailID = payload["emailID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["path": try openEmailExportPath(emailID: emailID)]
+
+        case "openEmailAttachment":
+            guard let attachmentID = payload["attachmentID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            return ["path": try openEmailAttachmentPath(attachmentID: attachmentID)]
 
         case "unshareAllEmails":
             try runtime.emailStore.unshareAllEmails()
@@ -1876,6 +1970,43 @@ extension ManifoldXPCService {
             return try runtime.emailStore.emailMessages(accountID: accountID, limit: payload["limit"] as? Int ?? 200)
         }
         return try runtime.emailStore.allEmailMessages(limit: payload["limit"] as? Int ?? 500)
+    }
+
+    private func openEmailExportPath(emailID: String) throws -> String {
+        try? TemporaryExportCleaner.cleanupExpired()
+        let archive = try MailArchiveStore(rootURL: EmailSyncEngine.mailArchiveRoot)
+        let exporter = MailExporter(emailStore: runtime.emailStore, archiveStore: archive)
+        let destination = TemporaryExportCleaner.temporaryExportRoot
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let result = try exporter.export(MailExportRequest(
+            scope: .messages([emailID]),
+            destinationPath: destination.path,
+            includeAttachments: false,
+            includeOriginalEML: true,
+            createFolderPerMessage: false,
+            temporary: true
+        ))
+        guard let emlPath = result.writtenPaths.first(where: { $0.lowercased().hasSuffix(".eml") }) else {
+            throw NSError(
+                domain: "com.spatialduality.manifold.xpc",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "No exported EML file was produced for \(emailID)."]
+            )
+        }
+        return emlPath
+    }
+
+    private func openEmailAttachmentPath(attachmentID: String) throws -> String {
+        try? TemporaryExportCleaner.cleanupExpired()
+        let archive = try MailArchiveStore(rootURL: EmailSyncEngine.mailArchiveRoot)
+        let exporter = MailExporter(emailStore: runtime.emailStore, archiveStore: archive)
+        let destination = TemporaryExportCleaner.temporaryExportRoot
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        return try exporter.exportAttachment(
+            attachmentID: attachmentID,
+            destinationPath: destination.path,
+            temporary: true
+        )
     }
 
     private func accessibleEmails(for grant: GrantRecord, limit: Int = 1_000) throws -> [EmailMessageRecord] {

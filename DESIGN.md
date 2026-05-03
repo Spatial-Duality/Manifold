@@ -73,89 +73,12 @@ Agent identity is communicated through content, not decoration:
 bar is content authority (what flows through Manifold). The curly braces are
 the trust boundary that scopes it. The bar between braces IS the product.
 
-Live in `brand/` (sibling to `docs/`). The folder is the canonical source;
-DESIGN.md references it.
-
-### Static variants
-
-| Variant | File | Use |
-|---------|------|-----|
-| Dark | `brand/mark-dark.svg` | Dark backgrounds; primary identity |
-| Light | `brand/mark-light.svg` | Light backgrounds (warm ink palette) |
-| Mono | `brand/mark-mono.svg` | Single-color contexts (favicon, embeds, social previews) |
-| Wordmark | `brand/wordmark-dark.svg` | Full lockup `{ \| } MANIFOLD` |
-| Compact logo (no halos) | `brand/logo-compact.html` | Sidebar, footer, secondary contexts |
-
-### Title sequence
-
-Animated reveal: particle morph between slot states (`{ \| }` ↔ `{ /files }` ↔
-`{ /emails }` ↔ `{ /history }`). The morph is structural, not decorative — each
-slot is a real Manifold scope, so the animation demonstrates the product.
-
-| Surface | Implementation | File |
-|---------|----------------|------|
-| In-app splash | SwiftUI `ManifoldTitleSequence` (port of iter-05) | `ManifoldApp/ManifoldApp/Views/TitleSequence.swift` |
-| Web hero | Canvas + additive blending, 280 particles | `brand/iter-06-canvas.html` |
-| Iteration history | Pass-by-pass review with honest reference comparisons | `brand/iteration-log.md` |
-| Pre-build research | Direction decisions, technical references | `brand/animation-research.md` |
-
-Both production variants ship. Each fits its render budget: SwiftUI is clean
-and inspectable for in-app; Canvas is more cinematic in motion for the first
-impression on web.
-
-`prefers-reduced-motion: reduce` automatically applies a static frame on web.
-The SwiftUI version respects scene activity (pauses when inactive).
-
-The SwiftUI implementation lives in the app target at
-`ManifoldApp/ManifoldApp/Views/TitleSequence.swift`. Use it like:
-
-```swift
-ManifoldTitleSequence(speed: 2.5)         // splash speed (~2.5s reveal)
-    .frame(width: 600, height: 400)
-```
-
-Or with custom configuration:
-
-```swift
-ManifoldTitleSequence(
-    speed: 1.0,
-    cycle: [.files, .bar, .emails, .bar, .history, .bar],
-    wordmark: "MANIFOLD",
-    tagline: "ACCESS, RECORDED."
-)
-```
-
-Currently available but not yet wired into any in-app surface. Natural homes:
-the About panel (replace `GradientAvatar`), the FirstRun welcome panel, or a
-dedicated splash on cold launch.
-
-**Status: deferred for the post-launch brand-identity sprint.** The polish
-pass (cinematic Apple-style timing, color-theme refinement, custom SF Symbols,
-icon design) is intentionally bundled into one push rather than landing in
-fragments. The current SwiftUI port is the functional baseline that sprint
-will iterate on. The four open decisions from `brand/iteration-log.md`
-(slot inventory, web hero loop, in-app reactive vs cosmetic, sound design)
-will be resolved together at that point.
-
-### Brand colors (NOT for UI)
-
-The mark and title sequence use specific brand colors. These do NOT appear in
-app UI. The macOS app uses Liquid Glass + system semantic colors exclusively
-(see "Colour" above). Brand uses these specific hex values.
-
-| Token | Hex | Use |
-|-------|-----|-----|
-| Brand ink (deep) | `#0A0907` | Brace gradient bottom |
-| Brand ink (mid) | `#15140F` | Brace gradient mid; bar fill |
-| Brand ink (top) | `#2C2A24` | Brace gradient top |
-| Brand warm halo | `#B86A1E` @ 0.18 | Halo behind mark; transit tint during morph |
-| Brand cold accent | cool cyan | 1% of particles in title sequence (atom mix) |
-
-Atom color mix ratio in the title sequence: **92% ink / 7% warm / 1% cold**.
-
-If brand hex values appear in SwiftUI UI code, that's a regression. Brand
-identity lives in the mark, the wordmark, and the title sequence — never in
-buttons, surfaces, or row tints.
+The app icon is the canonical visual mark. Source files live in `brand/Icon/`
+and the symbol used in-app lives at
+`ManifoldApp/ManifoldApp/Assets.xcassets/Symbols/Manifold Icon SF.symbolset/`.
+Brand identity is intentionally not duplicated in product UI — Liquid Glass
+and system semantic colors are the design system the app actually renders in
+(see "Colour" above).
 
 ## Liquid Glass
 
@@ -331,10 +254,6 @@ Base-4 scale. Defined in `Components/Spacing.swift`. No ad-hoc values.
 | 2026-04-11 | FilesView converted to SwiftUI Table | Sortable columns, native keyboard nav, click-to-sort |
 | 2026-04-11 | Typography weight by email volume | 100+ = body, 10-99 = callout, <10 = caption |
 | 2026-04-26 | Brand mark `{ \| }` is structural, not decorative | The bar between braces IS the product. Mark = product thesis as glyph. |
-| 2026-04-26 | Title sequence: SwiftUI iter-05 in-app, Canvas iter-06 web hero | Same identity, two render budgets. Both ship. |
-| 2026-04-26 | Brand colors are NOT UI colors | Brand uses specific hex (warm ink + #B86A1E halo); UI stays system semantic only. Regression if brand hex appears in SwiftUI UI. |
-| 2026-04-26 | Title-sequence morph slots match real Manifold scopes | `{ /files }` `{ /emails }` `{ /history }` — animation demonstrates the product, not decorates around it. |
-| 2026-04-28 | Title sequence final polish deferred to post-launch brand sprint | Pre-launch: SwiftUI port is in the app target as functional placeholder, not wired into any surface. Post-launch sprint bundles cinematic Apple-style title sequence, color theme refinement, custom SF Symbols, and icon design as one brand identity push. Resolves all 4 open decisions from `brand/iteration-log.md` (slot inventory, web hero loop behavior, in-app reactive vs cosmetic, sound design) by deferring them to this future sprint. |
 | 2026-04-28 | Per-AI selector is `AccessChipStack` (chip-only) in dense table rows; `AccessCheckboxStrip` (labelled + tri-state All) in inspector panes | Tables are space-constrained and consistent across Folders/Files/Mail; inspectors have room to label every state. One control language across the entire access surface, no surface-specific divergence. See [`docs/archive/design-iterations/13-access-redesign.md`](docs/archive/design-iterations/13-access-redesign.md). |
 | 2026-04-28 | Mail surface has no "target agent" picker; every connected AI renders inline | Files already showed all AIs at once; the dropdown was the Mail surface diverging from the rest of the product. Per-message chip stack matches Files exactly. |
 | 2026-04-28 | Folders Sharing column is plain-English source-level scope only | Conflating health (Removed/Offline) with sharing labels confused users. Health is whether the folder exists on disk; the Sharing column answers "what's shared with whom". Per-file overrides surface as a small dot beside the pill so the user knows there's extra detail without cluttering the headline label. |

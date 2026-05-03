@@ -123,6 +123,36 @@ public struct MailExporter {
         )
     }
 
+    @discardableResult
+    public func exportAttachment(
+        attachmentID: String,
+        destinationPath: String,
+        temporary: Bool = true
+    ) throws -> String {
+        guard !destinationPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MailExportError.invalidDestination(destinationPath)
+        }
+        guard let attachment = try emailStore.emailAttachment(id: attachmentID),
+              let message = try emailStore.emailMessage(id: attachment.emailID) else {
+            throw MailExportError.attachmentBlobUnavailable(attachmentID)
+        }
+        let destination = URL(fileURLWithPath: destinationPath, isDirectory: true)
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+        let messageData = try messageRFC822Data(message)
+        let data = try attachmentData(attachment, message: message, messageData: messageData)
+        let filename = Self.safeFilename(URL(fileURLWithPath: attachment.filename).lastPathComponent)
+        let fileURL = try uniqueFileURL(
+            in: destination,
+            baseName: URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent,
+            fileExtension: URL(fileURLWithPath: filename).pathExtension.nilIfEmpty
+        )
+        try data.write(to: fileURL, options: [.atomic])
+        if temporary {
+            try TemporaryExportCleaner.recordTemporaryExport(paths: [fileURL.path])
+        }
+        return fileURL.path
+    }
+
     private func resolveMessages(for scope: MailExportScope) throws -> [EmailMessageRecord] {
         let messages: [EmailMessageRecord]
         let dateRange: DateInterval?

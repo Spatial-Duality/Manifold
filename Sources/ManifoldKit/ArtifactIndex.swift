@@ -543,6 +543,45 @@ public actor ArtifactIndex {
         }
     }
 
+    @discardableResult
+    public func deleteMailArtifacts(accountID: String) throws -> Int {
+        let kinds = [ArtifactKind.email, .emailAttachment]
+        let placeholders = kinds.map { _ in "?" }.joined(separator: ",")
+        let kindParams = kinds.map { Optional($0.rawValue) }
+        let params = [accountID as String?] + kindParams
+        let artifactCount = try db.queryScalar("""
+            SELECT COUNT(*) FROM artifact_index
+            WHERE source_id = ? AND kind IN (\(placeholders))
+        """, params: params).flatMap(Int.init) ?? 0
+
+        try db.transaction {
+            try db.execute("""
+                DELETE FROM artifact_chunk_search
+                WHERE chunk_id IN (
+                    SELECT chunk_id FROM artifact_chunks
+                    WHERE source_id = ? AND kind IN (\(placeholders))
+                )
+            """, params: params)
+            try db.execute("""
+                DELETE FROM artifact_chunks
+                WHERE source_id = ? AND kind IN (\(placeholders))
+            """, params: params)
+            try db.execute("""
+                DELETE FROM artifact_search
+                WHERE artifact_id IN (
+                    SELECT artifact_id FROM artifact_index
+                    WHERE source_id = ? AND kind IN (\(placeholders))
+                )
+            """, params: params)
+            try db.execute("""
+                DELETE FROM artifact_index
+                WHERE source_id = ? AND kind IN (\(placeholders))
+            """, params: params)
+        }
+
+        return artifactCount
+    }
+
     private func deleteArtifacts(grantID: String, kinds: [ArtifactKind]) throws {
         guard !kinds.isEmpty else { return }
         let placeholders = kinds.map { _ in "?" }.joined(separator: ",")

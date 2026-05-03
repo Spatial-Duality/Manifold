@@ -141,6 +141,8 @@ struct MailAgentSourceServiceTests {
             messageIDs: [message.emailID],
             allowAttachmentRead: true
         )
+        try store.shareEmails(emailIDs: [message.emailID], for: .codex)
+        try store.shareEmailAttachments(attachmentIDs: [attachment.attachmentID], for: .codex)
         let file = try service.getAttachment(attachmentID: attachment.attachmentID, grant: attachmentGrant)
         #expect(file.data == Data("Attachment launch token 1234".utf8))
         #expect(file.untrustedText?.contains("<untrusted-mail-source") == true)
@@ -150,6 +152,35 @@ struct MailAgentSourceServiceTests {
         #expect(auditKinds.contains("search"))
         #expect(auditKinds.contains("bodyRead"))
         #expect(auditKinds.contains("attachmentRead"))
+    }
+
+    @Test("Attachment reads require parent email sharing and explicit attachment sharing")
+    func attachmentReadRequiresAttachmentShare() throws {
+        let (store, archive, service, _, tempDir) = try makeContext()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let (message, attachment) = try seedMessage(store: store, archive: archive)
+        let grant = MailAccessGrant(
+            agentID: "codex",
+            sessionID: "session-attachment-share",
+            accountIDs: [Self.accountID],
+            messageIDs: [message.emailID],
+            allowAttachmentRead: true
+        )
+
+        try store.shareEmails(emailIDs: [message.emailID], for: .codex)
+        #expect(throws: MailAgentSourceError.self) {
+            _ = try service.getAttachment(attachmentID: attachment.attachmentID, grant: grant)
+        }
+
+        try store.shareEmailAttachments(attachmentIDs: [attachment.attachmentID], for: .codex)
+        try store.unshareEmails(emailIDs: [message.emailID], for: .codex)
+        #expect(throws: MailAgentSourceError.self) {
+            _ = try service.getAttachment(attachmentID: attachment.attachmentID, grant: grant)
+        }
+
+        try store.shareEmails(emailIDs: [message.emailID], for: .codex)
+        let file = try service.getAttachment(attachmentID: attachment.attachmentID, grant: grant)
+        #expect(file.data == Data("Attachment launch token 1234".utf8))
     }
 
     @Test("Export requires an export grant scoped to requested messages")

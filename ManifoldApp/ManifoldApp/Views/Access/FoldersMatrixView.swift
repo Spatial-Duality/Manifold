@@ -5,7 +5,7 @@
 //
 // Columns are driven by the app's supported agents so access can be
 // configured before Claude or Codex connect. Beyond four, columns collapse
-// into a single Access column rendering an AccessChipStack per row.
+// into a single Access column rendering the same checkbox strip per row.
 // Cells are interactive: clicking a coverage dot toggles the source's
 // membership in that agent's default scope.
 
@@ -14,10 +14,10 @@ import ManifoldKit
 
 struct FoldersMatrixView: View {
     @Environment(ManifoldStore.self) private var store
-    @AppStorage("access.inspector.visible") private var inspectorVisible = true
+    @Binding private var inspectorVisible: Bool
 
+    @Binding private var searchText: String
     @State private var selectedIDs: Set<String> = []
-    @State private var searchText = ""
     @State private var sortOrder: [KeyPathComparator<SourceRecord>] = [
         KeyPathComparator(\SourceRecord.displayName)
     ]
@@ -31,6 +31,14 @@ struct FoldersMatrixView: View {
     /// explicit allow overrides on individual files reads as "Some files
     /// shared" instead of the misleading "Not shared".
     @State private var overridesByAgent: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
+
+    init(
+        searchText: Binding<String> = .constant(""),
+        inspectorVisible: Binding<Bool> = .constant(true)
+    ) {
+        _searchText = searchText
+        _inspectorVisible = inspectorVisible
+    }
 
     // MARK: - Derived
 
@@ -67,25 +75,19 @@ struct FoldersMatrixView: View {
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                toolbar
-                table
-                if !selectedIDs.isEmpty {
-                    bulkBar
-                }
-            }
-
-            if inspectorVisible {
-                Divider()
-                FileTreeInspector(source: selectedSource) {
-                    Task { await loadOverrides() }
-                }
-                    .frame(width: 320)
-                    .background(ManifoldPalette.surface2)
+        VStack(spacing: 0) {
+            toolbar
+            table
+            if !selectedIDs.isEmpty {
+                bulkBar
             }
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search folders")
+        .inspector(isPresented: $inspectorVisible) {
+            FileTreeInspector(source: selectedSource) {
+                Task { await loadOverrides() }
+            }
+            .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
+        }
         .task(id: connectedAgentsKey) {
             await loadDriftCounts()
             await loadOverrides()
@@ -149,7 +151,6 @@ struct FoldersMatrixView: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s3)
-        .background(.regularMaterial)
     }
 
     // MARK: - Table
@@ -252,8 +253,8 @@ struct FoldersMatrixView: View {
                 // Read live scope at click time. TableColumn cells on macOS
                 // occasionally lag the @Observable store; recomputing here
                 // avoids a stale no-op click. For a mixed row, the aggregate
-                // checkbox behaves like "clear sharing" because the row is
-                // already shared with at least one agent.
+                // checkbox behaves like "share with both," matching macOS
+                // mixed-checkbox convention.
                 Task {
                     let liveScoped = scopedAgents(for: source)
                     await setSourceScope(
@@ -273,8 +274,7 @@ struct FoldersMatrixView: View {
     static func aggregateScopeTarget(connectedAgents: [TargetApp], scopedAgents: Set<TargetApp>) -> Bool {
         let allScoped = !connectedAgents.isEmpty
             && connectedAgents.allSatisfy { scopedAgents.contains($0) }
-        let anyScoped = !scopedAgents.isEmpty
-        return !allScoped && !anyScoped
+        return !allScoped
     }
 
     private func agentColumn(for agent: TargetApp) -> TableColumn<SourceRecord, Never, some View, Text> {
@@ -399,7 +399,7 @@ struct FoldersMatrixView: View {
         if scoped.count == total {
             let text = total == 1
                 ? "Shared"
-                : (total == 2 ? "Shared with both" : "Shared with all")
+                : (total == 2 ? "Both agents" : "All agents")
             let names = connectedAgents.map(AgentMeta.label(_:)).joined(separator: " and ")
             return SharingLabel(
                 text: text,
@@ -413,7 +413,7 @@ struct FoldersMatrixView: View {
             .map(AgentMeta.label(_:))
         if scoped.count == 1, let only = scopedNames.first {
             return SharingLabel(
-                text: "Shared with \(only)",
+                text: "\(only) only",
                 variant: .scope,
                 help: "Only \(only) can see this folder."
             )
@@ -519,7 +519,6 @@ struct FoldersMatrixView: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
-        .background(.ultraThinMaterial)
         .overlay(Divider(), alignment: .top)
     }
 

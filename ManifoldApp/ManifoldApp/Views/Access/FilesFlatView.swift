@@ -13,15 +13,15 @@ import ManifoldKit
 
 struct FilesFlatView: View {
     @Environment(ManifoldStore.self) private var store
-    @AppStorage("access.inspector.visible") private var inspectorVisible = true
+    @Binding private var inspectorVisible: Bool
 
+    @Binding private var searchText: String
     @State private var files: [SourceFile] = []
     @State private var isLoading = false
     @State private var selectedFilePaths: Set<String> = []
     @State private var selectedHistory: [SnapshotRecord] = []
     @State private var fileOverridesByAgent: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
     @State private var scopeFilter: ScopeFilter = .all
-    @State private var searchText = ""
     @State private var quickLookURL: URL?
     @State private var aiTouchedPaths: Set<String> = []
     @AppStorage("access.smartViews") private var smartViewsJSON: String = "[]"
@@ -31,6 +31,14 @@ struct FilesFlatView: View {
         KeyPathComparator(\SourceFile.sourceName),
         KeyPathComparator(\SourceFile.relativePath),
     ]
+
+    init(
+        searchText: Binding<String> = .constant(""),
+        inspectorVisible: Binding<Bool> = .constant(true)
+    ) {
+        _searchText = searchText
+        _inspectorVisible = inspectorVisible
+    }
 
     enum ScopeFilter: Hashable, Codable {
         case all
@@ -217,52 +225,43 @@ struct FilesFlatView: View {
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                toolbar
-                table
-                if !selectedFilePaths.isEmpty {
-                    bulkBar
-                }
+        VStack(spacing: 0) {
+            toolbar
+            table
+            if !selectedFilePaths.isEmpty {
+                bulkBar
             }
-
-            if inspectorVisible {
-                Divider()
-                FileInspectorPane(
-                    file: selectedFile,
-                    selectionCount: selectedFilePaths.count,
-                    activity: selectedHistory,
-                    connectedAgents: connectedAgents,
-                    visibleAgents: selectedFile.map(visibleAgents(for:)) ?? [],
-                    explicitAgents: selectedFile.map(explicitOverrideAgents(for:)) ?? [],
-                    onToggleAgent: { agent, wasVisible in
-                        guard let file = selectedFile else { return }
-                        Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
-                    },
-                    onSetAllAgents: { inScope in
-                        guard let file = selectedFile else { return }
-                        Task {
-                            await bulkSetVisibility(
-                                agents: connectedAgents,
-                                decision: inScope ? .allow : .deny,
-                                files: [file]
-                            )
-                        }
-                    },
-                    onReset: {
-                        guard let file = selectedFile else { return }
-                        Task { await resetOverrides(for: file) }
+        }
+        .inspector(isPresented: $inspectorVisible) {
+            FileInspectorPane(
+                file: selectedFile,
+                selectionCount: selectedFilePaths.count,
+                activity: selectedHistory,
+                connectedAgents: connectedAgents,
+                visibleAgents: selectedFile.map(visibleAgents(for:)) ?? [],
+                explicitAgents: selectedFile.map(explicitOverrideAgents(for:)) ?? [],
+                onToggleAgent: { agent, wasVisible in
+                    guard let file = selectedFile else { return }
+                    Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
+                },
+                onSetAllAgents: { inScope in
+                    guard let file = selectedFile else { return }
+                    Task {
+                        await bulkSetVisibility(
+                            agents: connectedAgents,
+                            decision: inScope ? .allow : .deny,
+                            files: [file]
+                        )
                     }
-                )
-                .frame(width: 340)
-                .background(ManifoldPalette.surface2)
-            }
+                },
+                onReset: {
+                    guard let file = selectedFile else { return }
+                    Task { await resetOverrides(for: file) }
+                }
+            )
+            .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search name, path, or folder")
         .quickLookPreview($quickLookURL)
-        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
-            // searchable handles focus natively; kept for forward-compat.
-        }
         .manifoldFileDropTarget(store: store)
         .task(id: filesReloadKey) {
             await loadFilesProgressively()
@@ -385,7 +384,6 @@ struct FilesFlatView: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s3)
-        .background(.regularMaterial)
     }
 
     private var scopeFilterLabel: String {
@@ -463,23 +461,27 @@ struct FilesFlatView: View {
 
     private var table: some View {
         Table(of: SourceFile.self, selection: $selectedFilePaths, sortOrder: $sortOrder) {
-            // Compact chip-stack in the row, same component the Mail
-            // Share column uses. Labels were forcing the labeled strip
-            // wider than the column slot and visually overflowing into
-            // the Name column. The All / per-agent "Allow / Deny / Reset"
-            // controls remain available in the bulk bar (when rows are
-            // selected) and the file inspector.
             TableColumn("Access") { file in
-                AccessChipStack(
+                AccessCheckboxStrip(
                     agents: connectedAgents,
                     visibleAgents: visibleAgents(for: file),
+                    explicitOverrideAgents: explicitOverrideAgents(for: file),
                     accessibilityIDPrefix: accessIdentifierPrefix(for: file),
-                    onToggle: { agent, wasVisible in
+                    onToggleAgent: { agent, wasVisible in
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
+                    },
+                    onSetAll: { inScope in
+                        Task {
+                            await bulkSetVisibility(
+                                agents: connectedAgents,
+                                decision: inScope ? .allow : .deny,
+                                files: [file]
+                            )
+                        }
                     }
                 )
             }
-            .width(min: 56, ideal: max(56, CGFloat(connectedAgents.count) * 18 + 12), max: 140)
+            .width(min: 180, ideal: 220, max: 300)
 
             TableColumn("Name", value: \.name) { file in
                 Button {
@@ -726,7 +728,6 @@ struct FilesFlatView: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
-        .background(.ultraThinMaterial)
         .overlay(Divider(), alignment: .top)
     }
 

@@ -460,6 +460,30 @@ public struct SnapshotRecord: Sendable, Hashable, Identifiable, Codable {
     public let isDelete: Bool
     public let source: String
 
+    public init(
+        id: Int,
+        runID: String,
+        workspaceID: String,
+        timestamp: String,
+        filePath: String,
+        afterHash: String?,
+        beforeHash: String? = nil,
+        isBaseline: Bool = false,
+        isDelete: Bool = false,
+        source: String = "agent"
+    ) {
+        self.id = id
+        self.runID = runID
+        self.workspaceID = workspaceID
+        self.timestamp = timestamp
+        self.filePath = filePath
+        self.afterHash = afterHash
+        self.beforeHash = beforeHash
+        self.isBaseline = isBaseline
+        self.isDelete = isDelete
+        self.source = source
+    }
+
     init?(row: [String: String]) {
         guard let idStr = row["id"], let id = Int(idStr),
               let runID = row["run_id"],

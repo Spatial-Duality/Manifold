@@ -147,15 +147,13 @@ struct FileInspectorPane: View {
                 .font(ManifoldType.captionMedium)
                 .foregroundStyle(.secondary)
 
-            InspectorSharingSelector(
-                connectedAgents: connectedAgents,
+            AccessCheckboxStrip(
+                agents: connectedAgents,
                 visibleAgents: visible,
-                explicitAgents: explicitAgents,
+                explicitOverrideAgents: explicitAgents,
                 accessibilityIDPrefix: "access.inspector.file.\(file.sourceID.manifoldAccessIdentifierComponent).\(file.relativePath.manifoldAccessIdentifierComponent)",
-                onToggleAgent: { agent, wasVisible in
-                    onToggleAgent(agent, wasVisible)
-                },
-                onSetAllAgents: onSetAllAgents
+                onToggleAgent: onToggleAgent,
+                onSetAll: onSetAllAgents
             )
 
             Button("Reset to inherited", action: onReset)

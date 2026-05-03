@@ -5,15 +5,18 @@ import SwiftUI
 import ManifoldKit
 
 private enum MailNavigatorSelection: Hashable {
+    case section(MailSection)
     case account(String)
     case mailbox(accountID: String, name: String)
 }
 
 struct MailNavigator: View {
     @Environment(ManifoldStore.self) private var store
+    @Binding var section: MailSection
 
     var body: some View {
         List(selection: selection) {
+            sectionsSection
             accountsSection
             mailboxesSection
             quickFiltersSection
@@ -31,6 +34,9 @@ struct MailNavigator: View {
     private var selection: Binding<MailNavigatorSelection?> {
         Binding(
             get: {
+                if section == .history {
+                    return .section(.history)
+                }
                 if let accountID = store.mailReview.selectedAccountID,
                    let mailbox = store.mailReview.selectedMailboxName {
                     return .mailbox(accountID: accountID, name: mailbox)
@@ -38,18 +44,41 @@ struct MailNavigator: View {
                 if let accountID = store.mailReview.selectedAccountID {
                     return .account(accountID)
                 }
-                return nil
+                return .section(.review)
             },
             set: { newSelection in
                 guard let newSelection else { return }
                 switch newSelection {
+                case .section(let newSection):
+                    section = newSection
                 case .account(let accountID):
+                    section = .review
                     Task { await store.mailReview.selectAccount(accountID) }
                 case .mailbox(_, let name):
+                    section = .review
                     Task { await store.mailReview.selectMailbox(name) }
                 }
             }
         )
+    }
+
+    private var sectionsSection: some View {
+        Section("Mail") {
+            ForEach(MailSection.allCases) { item in
+                Button {
+                    section = item
+                } label: {
+                    MailSidebarLabel(
+                        title: item.title,
+                        subtitle: item.subtitle,
+                        systemImage: item.systemImage
+                    )
+                }
+                .buttonStyle(.plain)
+                .tag(MailNavigatorSelection.section(item))
+                .accessibilityIdentifier("mail.section.\(item.rawValue)")
+            }
+        }
     }
 
     @ViewBuilder
@@ -60,10 +89,18 @@ struct MailNavigator: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(store.mailAccounts.accounts) { account in
+                    let progress = store.mailAccounts.progress(for: account)
                     MailSidebarLabel(
                         title: account.displayName,
-                        subtitle: account.username ?? account.provider.displayName,
-                        systemImage: account.provider.systemImage
+                        subtitle: MailSyncProgressPresentation.accountSubtitle(
+                            progress: progress,
+                            account: account
+                        ),
+                        systemImage: account.provider.systemImage,
+                        isActive: progress?.stage.isActive ?? false,
+                        statusSystemImage: progress.map {
+                            MailSyncProgressPresentation.stageSymbol($0.stage)
+                        }
                     )
                     .tag(MailNavigatorSelection.account(account.accountID))
                     .accessibilityIdentifier("mail.account.\(account.accountID)")
@@ -75,18 +112,37 @@ struct MailNavigator: View {
     @ViewBuilder
     private var mailboxesSection: some View {
         Section("Mailboxes") {
-            if let accountID = store.mailReview.selectedAccountID {
-                let mailboxes = store.mailReview.mailboxes(for: accountID).filter(\.isSelectable)
+            if let accountID = store.mailReview.selectedAccountID,
+               let account = store.mailAccounts.accounts.first(where: { $0.accountID == accountID }) {
+                let mailboxes = store.mailReview.sidebarMailboxes(for: account)
+                let progress = store.mailAccounts.progress(for: accountID)
                 if mailboxes.isEmpty {
                     Text("No synced mailboxes")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(mailboxes) { mailbox in
+                        let syncState = store.mailAccounts.syncStates[accountID]?.first {
+                            $0.mailboxName == mailbox.mailboxName
+                        }
                         MailSidebarLabel(
-                            title: mailbox.mailboxName,
-                            subtitle: mailbox.folderType.rawValue.capitalized,
-                            systemImage: mailbox.folderType.systemImage
+                            title: mailbox.displayName,
+                            subtitle: MailSyncProgressPresentation.mailboxSubtitle(
+                                progress: progress,
+                                mailboxName: mailbox.mailboxName,
+                                syncState: syncState
+                            ),
+                            systemImage: mailbox.systemImage,
+                            trailingText: MailSyncProgressPresentation.mailboxCount(
+                                progress: progress,
+                                mailboxName: mailbox.mailboxName
+                            ),
+                            isActive: progress?.currentMailboxName == mailbox.mailboxName
+                                && (progress?.stage.isActive ?? false),
+                            statusSystemImage: syncState?.syncStatus == .error
+                                ? "exclamationmark.triangle"
+                                : nil
                         )
+                        .help(mailbox.helpText ?? mailbox.displayName)
                         .tag(MailNavigatorSelection.mailbox(accountID: accountID, name: mailbox.mailboxName))
                         .accessibilityIdentifier("mail.mailbox.\(accountID).\(mailbox.mailboxName.replacingOccurrences(of: " ", with: "-"))")
                     }
@@ -127,8 +183,11 @@ struct MailNavigator: View {
 
 private struct MailSidebarLabel: View {
     let title: String
-    let subtitle: String
+    let subtitle: String?
     let systemImage: String
+    var trailingText: String?
+    var isActive = false
+    var statusSystemImage: String?
 
     var body: some View {
         HStack(spacing: Spacing.s2) {
@@ -138,11 +197,29 @@ private struct MailSidebarLabel: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .lineLimit(1)
-                Text(subtitle)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: Spacing.s2)
+            if isActive {
+                ProgressView()
+                    .controlSize(.mini)
+            } else if let statusSystemImage {
+                Image(systemName: statusSystemImage)
                     .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            }
+            if let trailingText, !trailingText.isEmpty {
+                Text(trailingText)
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
+        .accessibilityElement(children: .combine)
     }
 }

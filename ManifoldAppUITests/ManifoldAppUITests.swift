@@ -7,6 +7,8 @@ import XCTest
 
 @MainActor
 class ManifoldUITestCase: XCTestCase {
+    private(set) var currentTestHome: String?
+
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
@@ -33,6 +35,7 @@ class ManifoldUITestCase: XCTestCase {
         app.launchEnvironment["MANIFOLD_TEST_RUNTIME_MODE"] = "fixture"
         app.launchEnvironment["MANIFOLD_FIXTURE_PROFILE"] = profile
         app.launchEnvironment["MANIFOLD_TEST_HOME"] = testHome
+        currentTestHome = testHome
         app.launch()
         app.activate()
         return app
@@ -51,6 +54,9 @@ class ManifoldUITestCase: XCTestCase {
         app.launchEnvironment["MANIFOLD_TEST_RUNTIME_MODE"] = "local"
         app.launchEnvironment["MANIFOLD_TEST_SCENARIO"] = scenario
         app.launchEnvironment["MANIFOLD_TEST_HOME"] = testHome
+        app.launchEnvironment["MANIFOLD_TEST_PROTECTED_STORAGE_KEY"] = testHome
+        app.launchEnvironment["MANIFOLD_TEST_ALLOW_UI_RUNNER_MCP"] = "1"
+        currentTestHome = testHome
         app.launch()
         app.activate()
         return app
@@ -139,20 +145,6 @@ class ManifoldUITestCase: XCTestCase {
         XCTAssertTrue(content.waitForExistence(timeout: 8), "Expected Settings content \(contentID)")
     }
 
-    func elementOrTextField(
-        in app: XCUIApplication,
-        id: String,
-        fallbackPlaceholder: String,
-        timeout: TimeInterval = 5
-    ) -> XCUIElement {
-        let identified = element(in: app, id: id)
-        if identified.waitForExistence(timeout: timeout) {
-            return identified
-        }
-        let fallback = app.textFields[fallbackPlaceholder]
-        return fallback.exists ? fallback : app.textFields.firstMatch
-    }
-
     nonisolated static func terminateExistingAppIfNeeded() {
         let applications = NSRunningApplication.runningApplications(withBundleIdentifier: "com.spatialduality.manifold")
         guard !applications.isEmpty else { return }
@@ -172,6 +164,10 @@ class ManifoldUITestCase: XCTestCase {
 
     func element(in app: XCUIApplication, id: String) -> XCUIElement {
         app.descendants(matching: .any)[id]
+    }
+
+    func firstElement(in app: XCUIApplication, matchingIdentifier predicate: NSPredicate) -> XCUIElement {
+        app.descendants(matching: .any).matching(predicate).firstMatch
     }
 
     func element(in app: XCUIApplication, labelContaining text: String) -> XCUIElement {
@@ -216,6 +212,196 @@ class ManifoldUITestCase: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         return root.path
+    }
+}
+
+struct MCPToolResult {
+    let text: String
+    let isError: Bool
+}
+
+final class MCPStdioClient: @unchecked Sendable {
+    private let process: Process
+    private let input: FileHandle
+    private let outputPipe = Pipe()
+    private let errorPipe = Pipe()
+    private let responseSemaphore = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var pendingLines: [[String: Any]] = []
+    private var buffer = Data()
+    private var nextID = 1
+    private var stderrBuffer = Data()
+
+    init(agent: String, testHome: String) throws {
+        let mcpURL = Self.bundledMCPURL()
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: mcpURL.path), "Expected bundled manifold-mcp at \(mcpURL.path)")
+
+        let inputPipe = Pipe()
+        process = Process()
+        process.executableURL = mcpURL
+        process.arguments = ["--agent", agent]
+        var environment = ProcessInfo.processInfo.environment
+        environment["MANIFOLD_TEST_HOME"] = testHome
+        environment["MANIFOLD_TEST_SCENARIO"] = "synthetic-mcp-ui"
+        environment["MANIFOLD_TEST_PROTECTED_STORAGE_KEY"] = testHome
+        environment["MANIFOLD_TEST_ALLOW_UI_RUNNER_MCP"] = "1"
+        process.environment = environment
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        input = inputPipe.fileHandleForWriting
+
+        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            self?.consumeOutput(handle.availableData)
+        }
+        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            self?.consumeError(handle.availableData)
+        }
+
+        try process.run()
+        _ = try request(
+            method: "initialize",
+            params: [
+                "protocolVersion": "2024-11-05",
+                "capabilities": [:] as [String: Any],
+                "clientInfo": ["name": "ManifoldAppUITests", "version": "1"] as [String: Any],
+            ],
+            timeout: 20
+        )
+        sendNotification(method: "notifications/initialized")
+    }
+
+    deinit {
+        close()
+    }
+
+    func close() {
+        outputPipe.fileHandleForReading.readabilityHandler = nil
+        errorPipe.fileHandleForReading.readabilityHandler = nil
+        try? input.close()
+        if process.isRunning {
+            process.terminate()
+        }
+    }
+
+    func callTool(_ name: String, arguments: [String: Any] = [:], timeout: TimeInterval = 20) throws -> MCPToolResult {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastResult: MCPToolResult?
+        repeat {
+            let response = try request(
+                method: "tools/call",
+                params: ["name": name, "arguments": arguments],
+                timeout: max(1, deadline.timeIntervalSinceNow)
+            )
+            let result = try Self.toolResult(from: response)
+            if !result.text.contains("Runtime connection not initialized") {
+                return result
+            }
+            lastResult = result
+            Thread.sleep(forTimeInterval: 0.5)
+        } while Date() < deadline
+        return lastResult ?? MCPToolResult(text: "No MCP response before timeout", isError: true)
+    }
+
+    private func request(method: String, params: [String: Any], timeout: TimeInterval) throws -> [String: Any] {
+        let id = nextID
+        nextID += 1
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        ]
+        try write(payload)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            if responseSemaphore.wait(timeout: .now() + min(remaining, 0.5)) == .success {
+                lock.lock()
+                if let index = pendingLines.firstIndex(where: { ($0["id"] as? Int) == id }) {
+                    let response = pendingLines.remove(at: index)
+                    lock.unlock()
+                    if let error = response["error"] as? [String: Any] {
+                        throw NSError(
+                            domain: "MCPStdioClient",
+                            code: error["code"] as? Int ?? -1,
+                            userInfo: [NSLocalizedDescriptionKey: error["message"] as? String ?? "MCP JSON-RPC error"]
+                        )
+                    }
+                    return response
+                }
+                lock.unlock()
+            }
+        }
+
+        throw NSError(
+            domain: "MCPStdioClient",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for \(method). stderr: \(stderrText)"]
+        )
+    }
+
+    private func sendNotification(method: String) {
+        try? write(["jsonrpc": "2.0", "method": method, "params": [:] as [String: Any]])
+    }
+
+    private func write(_ payload: [String: Any]) throws {
+        var data = try JSONSerialization.data(withJSONObject: payload)
+        data.append(UInt8(ascii: "\n"))
+        input.write(data)
+    }
+
+    private func consumeOutput(_ data: Data) {
+        guard !data.isEmpty else { return }
+        lock.lock()
+        buffer.append(data)
+        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+            let line = Data(buffer[..<newline])
+            buffer.removeSubrange(...newline)
+            guard !line.isEmpty,
+                  let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
+                continue
+            }
+            pendingLines.append(json)
+            responseSemaphore.signal()
+        }
+        lock.unlock()
+    }
+
+    private func consumeError(_ data: Data) {
+        guard !data.isEmpty else { return }
+        lock.lock()
+        stderrBuffer.append(data)
+        lock.unlock()
+    }
+
+    private var stderrText: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(data: stderrBuffer, encoding: .utf8) ?? ""
+    }
+
+    private static func toolResult(from response: [String: Any]) throws -> MCPToolResult {
+        guard let result = response["result"] as? [String: Any] else {
+            throw NSError(domain: "MCPStdioClient", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing MCP result"])
+        }
+        let content = result["content"] as? [[String: Any]] ?? []
+        let text = content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        return MCPToolResult(text: text, isError: result["isError"] as? Bool ?? false)
+    }
+
+    private static func bundledMCPURL() -> URL {
+        let testBundleURL = Bundle(for: MCPStdioClient.self).bundleURL
+        let productsURL = testBundleURL
+            .deletingLastPathComponent() // PlugIns
+            .deletingLastPathComponent() // Contents
+            .deletingLastPathComponent() // ManifoldAppUITests-Runner.app
+            .deletingLastPathComponent() // Debug
+        return productsURL
+            .appendingPathComponent("Manifold.app", isDirectory: true)
+            .appendingPathComponent("Contents/Resources/manifold-mcp", isDirectory: false)
     }
 }
 
@@ -274,41 +460,7 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "mail.message.share.agent.codex").exists)
     }
 
-    func testMailSettingsConnectMailboxFlowShowsProviderAndCredentialSteps() {
-        let app = launchFixture(profile: "tracked-work")
-
-        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
-        openSettings(in: app)
-        clickSettingsTab("Mail", contentID: "settings.mail.connectAccount", in: app)
-
-        let connectAccount = element(in: app, id: "settings.mail.connectAccount")
-        XCTAssertTrue(connectAccount.waitForExistence(timeout: 8))
-        connectAccount.click()
-
-        XCTAssertTrue(element(in: app, id: "settings.mail.addAccount.header").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "settings.mail.provider.fastmail").exists)
-
-        let gmailProvider = element(in: app, id: "settings.mail.provider.gmail")
-        XCTAssertTrue(gmailProvider.waitForExistence(timeout: 8))
-        gmailProvider.click()
-
-        XCTAssertTrue(element(in: app, id: "settings.mail.account.header").waitForExistence(timeout: 8))
-        XCTAssertTrue(element(in: app, id: "settings.mail.account.displayName").waitForExistence(timeout: 5))
-
-        let username = element(in: app, id: "settings.mail.account.username")
-        clearAndType(username, text: "ada.lovelace@example.test")
-
-        let password = element(in: app, id: "settings.mail.account.password")
-        XCTAssertTrue(password.waitForExistence(timeout: 5))
-        password.click()
-        password.typeText("sample-app-password-only")
-
-        XCTAssertTrue(element(in: app, id: "settings.mail.account.server").exists)
-        XCTAssertTrue(element(in: app, id: "settings.mail.account.port").exists)
-        XCTAssertTrue(element(in: app, id: "settings.mail.account.connect").isEnabled)
-    }
-
-    func testAccessFoldersCanClearMixedScopeForBothAgents() {
+    func testAccessFoldersCanSetMixedScopeForBothAgents() {
         let app = launchFixture(profile: "tracked-work")
 
         openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app)
@@ -319,9 +471,9 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 
         bothControl.click()
 
-        XCTAssertTrue(waitForValue("not shared", in: bothControl, timeout: 5))
-        XCTAssertTrue(waitForValue("not shared", in: element(in: app, id: "access.folder.src-claude.agent.cowork"), timeout: 5))
-        XCTAssertTrue(waitForValue("not shared", in: element(in: app, id: "access.folder.src-claude.agent.codex"), timeout: 5))
+        XCTAssertTrue(waitForValue("shared", in: bothControl, timeout: 5))
+        XCTAssertTrue(waitForValue("shared", in: element(in: app, id: "access.folder.src-claude.agent.cowork"), timeout: 5))
+        XCTAssertTrue(waitForValue("shared", in: element(in: app, id: "access.folder.src-claude.agent.codex"), timeout: 5))
     }
 
     func testAccessFilesCanToggleSingleFileForCodex() {
@@ -338,11 +490,11 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 
         let codexControl = element(in: app, id: "access.inspector.file.src-claude.marker-txt.agent.codex")
         XCTAssertTrue(codexControl.waitForExistence(timeout: 8))
-        XCTAssertTrue(waitForValue("off", in: codexControl, timeout: 5))
+        XCTAssertTrue(waitForValue("not shared", in: codexControl, timeout: 5))
 
         codexControl.click()
 
-        XCTAssertTrue(waitForValue("on", elementID: "access.inspector.file.src-claude.marker-txt.agent.codex", in: app, timeout: 5))
+        XCTAssertTrue(waitForValue("shared", elementID: "access.inspector.file.src-claude.marker-txt.agent.codex", in: app, timeout: 5))
     }
 
     func testApprovalsQueueCanResolveFixtureApproval() {
@@ -354,23 +506,6 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
         XCTAssertTrue(approvalRow.waitForExistence(timeout: 8))
         clickElement(in: app, id: "work.approval.approval-1.deny", fallbackButtonTitle: "Deny")
         XCTAssertTrue(waitForNonExistence(approvalRow, timeout: 8))
-    }
-
-    func testCommandPaletteOpensAndAcceptsSearchInput() {
-        let app = launchFixture(profile: "tracked-work")
-
-        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 8))
-        app.typeKey("k", modifierFlags: .command)
-
-        let palette = element(in: app, id: "commandPalette.sheet")
-        XCTAssertTrue(palette.waitForExistence(timeout: 8))
-
-        let searchField = elementOrTextField(in: app, id: "commandPalette.search", fallbackPlaceholder: "Search commands...")
-        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
-        searchField.click()
-        searchField.typeText("settings")
-
-        XCTAssertTrue(waitForValue("settings", in: searchField, timeout: 5))
     }
 
     func testPrivacySettingsFixtureShowsPaneAndIndexStatus() {
@@ -432,8 +567,6 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 
         openLedgerSpace("rules", expectedSurface: "ledger.surface.rules", in: app)
 
-        let searchField = elementOrTextField(in: app, id: "rules.toolbar.search", fallbackPlaceholder: "Search rules")
-        clearAndType(searchField, text: "OpenAI")
         let openAIRule = element(in: app, id: "rules.rowTitle.rule-email-openai")
         XCTAssertTrue(openAIRule.waitForExistence(timeout: 5))
         openAIRule.click()
@@ -481,6 +614,134 @@ final class ManifoldFixtureUITests: ManifoldUITestCase {
 }
 
 @MainActor
+final class ManifoldSharingMCPUITests: ManifoldUITestCase {
+    func testUISharingControlsMatchMCPAgentVisibility() throws {
+        let app = launchSyntheticMCPUI()
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 30))
+
+        let testHome = try XCTUnwrap(currentTestHome)
+        let codex = try MCPStdioClient(agent: "codex", testHome: testHome)
+        let claude = try MCPStdioClient(agent: "cowork", testHome: testHome)
+        addTeardownBlock {
+            codex.close()
+            claude.close()
+        }
+
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app, timeout: 30)
+
+        let claudeFolder = firstElement(
+            in: app,
+            matchingIdentifier: NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "access.folder.", ".agent.cowork")
+        )
+        XCTAssertTrue(claudeFolder.waitForExistence(timeout: 30))
+        XCTAssertTrue(waitForValue("shared", in: claudeFolder, timeout: 10))
+        claudeFolder.click()
+        XCTAssertTrue(waitForValue("not shared", in: claudeFolder, timeout: 10))
+
+        let bothFolder = firstElement(
+            in: app,
+            matchingIdentifier: NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "access.folder.", ".all")
+        )
+        XCTAssertTrue(waitForValue("partially shared", in: bothFolder, timeout: 10))
+
+        let codexStatus = try codex.callTool("get_status")
+        XCTAssertFalse(codexStatus.isError, codexStatus.text)
+
+        let codexFiles = try codex.callTool("list_files")
+        XCTAssertFalse(codexFiles.isError, codexFiles.text)
+        XCTAssertTrue(codexFiles.text.contains("Docs/ReleaseNotes.md"), codexFiles.text)
+
+        let codexRead = try codex.callTool("read_file", arguments: ["path": "Docs/ReleaseNotes.md"])
+        XCTAssertFalse(codexRead.isError, codexRead.text)
+        XCTAssertTrue(codexRead.text.contains("Team notes"), codexRead.text)
+
+        let claudeFiles = try claude.callTool("list_files")
+        XCTAssertTrue(claudeFiles.isError || !claudeFiles.text.contains("Docs/ReleaseNotes.md"), claudeFiles.text)
+
+        let claudeRead = try claude.callTool("read_file", arguments: ["path": "Docs/ReleaseNotes.md"])
+        XCTAssertTrue(claudeRead.isError || !claudeRead.text.contains("Team notes"), claudeRead.text)
+
+        let claudeSearch = try claude.callTool("search_files", arguments: ["query": "Team notes"])
+        XCTAssertFalse(claudeSearch.text.contains("Team notes"), claudeSearch.text)
+
+        let claudeStructured = try claude.callTool("search_structured", arguments: ["query": "Team notes", "limit": 5])
+        XCTAssertFalse(claudeStructured.text.contains("Team notes"), claudeStructured.text)
+
+        openLedgerSpace("mail", expectedSurface: "ledger.surface.mail", in: app, timeout: 30)
+        XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 30))
+
+        let codexOnlyMessage = element(in: app, id: "mail.message.row.runtime-email-codex-semicolon")
+        XCTAssertTrue(codexOnlyMessage.waitForExistence(timeout: 30))
+        codexOnlyMessage.click()
+
+        let mailBoth = element(in: app, id: "mail.message.share.all")
+        let mailClaude = element(in: app, id: "mail.message.share.agent.cowork")
+        let mailCodex = element(in: app, id: "mail.message.share.agent.codex")
+        XCTAssertTrue(mailBoth.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue("partially shared", in: mailBoth, timeout: 10))
+        XCTAssertTrue(waitForValue("not shared", in: mailClaude, timeout: 10))
+        XCTAssertTrue(waitForValue("shared", in: mailCodex, timeout: 10))
+
+        let claudeEmailBefore = try claude.callTool("list_emails")
+        XCTAssertFalse(claudeEmailBefore.text.contains("runtime-email-codex-semicolon"), claudeEmailBefore.text)
+
+        mailBoth.click()
+        XCTAssertTrue(waitForValue("shared", in: mailBoth, timeout: 10))
+        XCTAssertTrue(waitForValue("shared", in: mailClaude, timeout: 10))
+        XCTAssertTrue(waitForValue("shared", in: mailCodex, timeout: 10))
+
+        codex.close()
+        claude.close()
+        let codexAfterMailShare = try MCPStdioClient(agent: "codex", testHome: testHome)
+        let claudeAfterMailShare = try MCPStdioClient(agent: "cowork", testHome: testHome)
+        addTeardownBlock {
+            codexAfterMailShare.close()
+            claudeAfterMailShare.close()
+        }
+
+        let codexEmails = try waitForMCPTool(codexAfterMailShare, "list_emails") {
+            !$0.isError && $0.text.contains("runtime-email-codex-semicolon")
+        }
+        XCTAssertTrue(codexEmails.text.contains("runtime-email-codex-semicolon"), codexEmails.text)
+
+        let claudeEmails = try waitForMCPTool(claudeAfterMailShare, "list_emails") {
+            !$0.isError && $0.text.contains("runtime-email-codex-semicolon")
+        }
+        XCTAssertTrue(claudeEmails.text.contains("runtime-email-codex-semicolon"), claudeEmails.text)
+
+        let claudeReadEmail = try claudeAfterMailShare.callTool("read_email", arguments: ["id": "runtime-email-codex-semicolon"])
+        XCTAssertFalse(claudeReadEmail.isError, claudeReadEmail.text)
+        XCTAssertTrue(claudeReadEmail.text.contains("EASTER_EGG_SEMICOLON_ALLOWED"), claudeReadEmail.text)
+
+        let claudeEmailSearch = try claudeAfterMailShare.callTool("search_emails", arguments: ["query": "missing semicolon"])
+        XCTAssertFalse(claudeEmailSearch.isError, claudeEmailSearch.text)
+        XCTAssertTrue(claudeEmailSearch.text.contains("runtime-email-codex-semicolon"), claudeEmailSearch.text)
+
+        let historySection = element(in: app, id: "mail.section.history")
+        XCTAssertTrue(historySection.waitForExistence(timeout: 10))
+        historySection.click()
+        XCTAssertTrue(element(in: app, id: "mail.history").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Codex found the missing semicolon"].waitForExistence(timeout: 10))
+    }
+
+    private func waitForMCPTool(
+        _ client: MCPStdioClient,
+        _ name: String,
+        arguments: [String: Any] = [:],
+        timeout: TimeInterval = 10,
+        until predicate: (MCPToolResult) -> Bool
+    ) throws -> MCPToolResult {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = try client.callTool(name, arguments: arguments)
+        while !predicate(last), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.5)
+            last = try client.callTool(name, arguments: arguments)
+        }
+        return last
+    }
+}
+
+@MainActor
 final class ManifoldSyntheticMCPUITests: ManifoldUITestCase {
     func testSyntheticScenarioBootsAndShowsPrivacyApproval() {
         let app = launchSyntheticMCPUI()
@@ -504,21 +765,6 @@ final class ManifoldSyntheticMCPUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "mail.review.table").waitForExistence(timeout: 15))
         let subject = app.staticTexts["Privacy review needed"]
         XCTAssertTrue(subject.waitForExistence(timeout: 15))
-
-        let searchField = elementOrTextField(
-            in: app,
-            id: "mail.searchField",
-            fallbackPlaceholder: "Search sender, subject, or preview",
-            timeout: 8
-        )
-        clearAndType(searchField, text: "tea party")
-        XCTAssertTrue(app.staticTexts["Model garden tea party"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Codex found the missing semicolon"].exists)
-        clearAndType(searchField, text: "semicolon")
-        XCTAssertTrue(app.staticTexts["Codex found the missing semicolon"].waitForExistence(timeout: 5))
-        searchField.click()
-        searchField.typeKey("a", modifierFlags: .command)
-        searchField.typeKey(.delete, modifierFlags: [])
 
         subject.click()
 

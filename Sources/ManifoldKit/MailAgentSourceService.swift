@@ -162,6 +162,11 @@ public struct LocalMailAgentSourceService: MailAgentSourceService {
         guard grantAllows(message, grant: grant) else {
             try deny(grant: grant, accountID: message.accountID, emailID: message.emailID, kind: "attachmentRead")
         }
+        guard let agent = TargetApp(rawValue: grant.agentID),
+              try emailStore.isEmailShared(emailID: message.emailID, agent: agent),
+              try emailStore.isEmailAttachmentShared(attachmentID: attachment.attachmentID, agent: agent) else {
+            try deny(grant: grant, accountID: message.accountID, emailID: message.emailID, kind: "attachmentRead")
+        }
         let data = try attachmentData(attachment, message: message)
         try audit(
             grant: grant,

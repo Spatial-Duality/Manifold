@@ -269,7 +269,7 @@ private struct TreeRow: View {
         resolvedVisibilityState(for: node)
     }
 
-    private var checkboxState: TriStateCheckbox.State {
+    private var checkboxState: TreeAccessCheckbox.State {
         switch visibilityState.effective {
         case .allowed:
             return .on
@@ -307,27 +307,23 @@ private struct TreeRow: View {
                     .padding(.leading, CGFloat(depth) * 12)
                     .opacity(depth > 0 ? 0.5 : 0)
 
-                TriStateCheckbox(
-                    state: Binding(
-                        get: { checkboxState },
-                        set: { newValue in
-                            guard canOverride else { return }
-                            if node.relativePath.isEmpty {
-                                Task { await onSetSourceScope(newValue != .off) }
-                                return
-                            }
-                            switch newValue {
-                            case .on, .mixed:
-                                Task { await onAllow(node) }
-                            case .off:
-                                Task { await onHide(node) }
-                            }
-                        }
-                    ),
-                    override: hasExplicitOverride,
-                    color: ManifoldPalette.agent(agent),
-                    size: 14
-                )
+                TreeAccessCheckbox(
+                    state: checkboxState,
+                    hasExplicitOverride: hasExplicitOverride,
+                    color: ManifoldPalette.agent(agent)
+                ) {
+                    guard canOverride else { return }
+                    if node.relativePath.isEmpty {
+                        Task { await onSetSourceScope(checkboxState != .on) }
+                        return
+                    }
+                    switch checkboxState {
+                    case .on:
+                        Task { await onHide(node) }
+                    case .off, .mixed:
+                        Task { await onAllow(node) }
+                    }
+                }
                 .disabled(!canOverride)
 
                 if node.isDirectory {
@@ -488,6 +484,69 @@ private struct TreeRow: View {
             return VisibilityState(effective: .allowed, origin: .defaultScope)
         case .inheritedHidden:
             return VisibilityState(effective: .hidden, origin: .defaultScope)
+        }
+    }
+}
+
+private struct TreeAccessCheckbox: View {
+    enum State {
+        case off
+        case on
+        case mixed
+    }
+
+    let state: State
+    let hasExplicitOverride: Bool
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(state == .off ? Color.secondary : color)
+                    .frame(width: 28, height: 24)
+
+                if hasExplicitOverride {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 5, height: 5)
+                        .offset(x: -4, y: -3)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(helpText)
+        .accessibilityLabel(helpText)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAddTraits(.isToggle)
+    }
+
+    private var symbolName: String {
+        switch state {
+        case .on: "checkmark.square.fill"
+        case .off: "square"
+        case .mixed: "minus.square.fill"
+        }
+    }
+
+    private var helpText: String {
+        let suffix = hasExplicitOverride ? " Explicit override." : ""
+        return switch state {
+        case .on: "Shared. Click to hide.\(suffix)"
+        case .off: "Hidden. Click to share.\(suffix)"
+        case .mixed: "Partially shared. Click to share.\(suffix)"
+        }
+    }
+
+    private var accessibilityValue: String {
+        switch state {
+        case .on: "shared"
+        case .off: "hidden"
+        case .mixed: "partially shared"
         }
     }
 }

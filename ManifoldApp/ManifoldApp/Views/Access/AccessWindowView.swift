@@ -13,10 +13,17 @@ import ManifoldKit
 struct AccessView: View {
     @Environment(ManifoldStore.self) private var store
     @Binding private var selectedSection: AccessSection
-    @AppStorage("access.inspector.visible") private var isInspectorVisible = true
+    @Binding private var searchText: String
+    @Binding private var inspectorVisible: Bool
 
-    init(selectedSection: Binding<AccessSection> = .constant(.folders)) {
+    init(
+        selectedSection: Binding<AccessSection> = .constant(.folders),
+        searchText: Binding<String> = .constant(""),
+        inspectorVisible: Binding<Bool> = .constant(true)
+    ) {
         _selectedSection = selectedSection
+        _searchText = searchText
+        _inspectorVisible = inspectorVisible
     }
 
     var body: some View {
@@ -25,27 +32,14 @@ struct AccessView: View {
                 EmptyFoldersView()
             } else {
                 switch selectedSection {
-                case .folders: FoldersMatrixView()
-                case .files:   FilesFlatView()
-                case .session: SessionDiffView()
-                case .history: AccessHistoryView()
+                case .folders: FoldersMatrixView(searchText: $searchText, inspectorVisible: $inspectorVisible)
+                case .files:   FilesFlatView(searchText: $searchText, inspectorVisible: $inspectorVisible)
+                case .session: SessionDiffView(searchText: $searchText)
+                case .history: AccessHistoryView(searchText: $searchText)
                 }
             }
         }
-        .background {
-            Button("Toggle inspector") { isInspectorVisible.toggle() }
-                .keyboardShortcut("i", modifiers: [.command, .option])
-                .opacity(0)
-                .accessibilityHidden(true)
-        }
         .task { await store.refreshAll(force: false) }
-        .onReceive(NotificationCenter.default.publisher(for: .manifoldFocusCurrentSearch)) { _ in
-            guard selectedSection != .files else { return }
-            selectedSection = .files
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .manifoldFocusCurrentSearch, object: nil)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldCycleCurrentSubtab)) { notification in
             guard let delta = notification.object as? Int else { return }
             cycleTab(by: delta)

@@ -10,6 +10,11 @@ import ManifoldKit
 
 struct SessionDiffView: View {
     @Environment(ManifoldStore.self) private var store
+    @Binding private var searchText: String
+
+    init(searchText: Binding<String> = .constant("")) {
+        _searchText = searchText
+    }
 
     var body: some View {
         ScrollView {
@@ -19,19 +24,19 @@ struct SessionDiffView: View {
 
                     DiffSection(
                         label: "Added in this session",
-                        count: session.additions.count,
+                        count: filtered(session.additions).count,
                         color: ManifoldPalette.active,
-                        items: session.additions
+                        items: filtered(session.additions)
                     )
 
                     DiffSection(
                         label: "Removed in this session",
-                        count: session.removals.count,
+                        count: filtered(session.removals).count,
                         color: ManifoldPalette.attention,
-                        items: session.removals
+                        items: filtered(session.removals)
                     )
 
-                    InheritedSection(store: store, session: session)
+                    InheritedSection(store: store, session: session, searchText: searchText)
                 } else {
                     EmptyStateIllustration(
                         systemImage: "play.circle",
@@ -45,6 +50,15 @@ struct SessionDiffView: View {
                 }
             }
             .padding(Spacing.s4)
+        }
+    }
+
+    private func filtered(_ changes: [SessionScopeChange]) -> [SessionScopeChange] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return changes }
+        return changes.filter { change in
+            "\(change.displayName)\n\(change.path)"
+                .localizedCaseInsensitiveContains(trimmed)
         }
     }
 }
@@ -105,21 +119,31 @@ private struct DiffSection: View {
 private struct InheritedSection: View {
     let store: ManifoldStore
     let session: SessionRecord
+    let searchText: String
+
+    private var visibleSources: [SourceRecord] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return store.sources }
+        return store.sources.filter { source in
+            "\(source.displayName)\n\(source.originalRootPath)"
+                .localizedCaseInsensitiveContains(trimmed)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s2) {
             HStack(spacing: Spacing.s2) {
                 Circle().fill(ManifoldPalette.claude).frame(width: 8, height: 8)
                 Text("Inherited from default").font(ManifoldType.bodyMedium)
-                Text("\(store.sources.count)")
+                Text("\(visibleSources.count)")
                     .font(ManifoldType.numericCaption)
                     .foregroundStyle(.secondary)
                 Spacer()
             }
-            if store.sources.isEmpty {
+            if visibleSources.isEmpty {
                 Text("No default sources.").font(ManifoldType.caption).foregroundStyle(.tertiary).padding(.leading, 18)
             } else {
-                ForEach(store.sources) { source in
+                ForEach(visibleSources) { source in
                     HStack(spacing: Spacing.s2) {
                         FileTypeIcon(filename: source.displayName, isFolder: true, size: 12)
                         Text(source.displayName).font(ManifoldType.body)

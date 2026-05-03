@@ -23,6 +23,23 @@ enum ProtectedStorageError: LocalizedError {
     }
 }
 
+private final class ProtectedStorageKeyCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+
+    func set(_ data: Data?) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+}
+
 /// Encrypts high-sensitivity local Manifold content at rest using a shared
 /// symmetric key stored in the macOS Keychain when available.
 public enum ProtectedStorageCrypto: Sendable {
@@ -30,6 +47,7 @@ public enum ProtectedStorageCrypto: Sendable {
     private static let account = "local-store-key-v1"
     private static let magic = Data([0x4D, 0x4E, 0x46, 0x31]) // "MNF1"
     private static let keyLength = 32
+    private static let keyCache = ProtectedStorageKeyCache()
 
     public static func encrypt(_ plaintext: Data) throws -> Data {
         let key = try storageKey()
@@ -56,7 +74,16 @@ public enum ProtectedStorageCrypto: Sendable {
     }
 
     private static func storageKey() throws -> SymmetricKey {
+        if let testKey = testStorageKey() {
+            return testKey
+        }
+
+        if let cached = keyCache.get(), cached.count == keyLength {
+            return SymmetricKey(data: cached)
+        }
+
         if let existing = retrieveKeyData(), existing.count == keyLength {
+            keyCache.set(existing)
             return SymmetricKey(data: existing)
         }
 
@@ -70,7 +97,17 @@ public enum ProtectedStorageCrypto: Sendable {
         guard storeKeyData(keyData) else {
             throw ProtectedStorageError.missingKeyMaterial
         }
+        keyCache.set(keyData)
         return SymmetricKey(data: keyData)
+    }
+
+    private static func testStorageKey() -> SymmetricKey? {
+        let environment = ProcessInfo.processInfo.environment
+        guard let seed = environment["MANIFOLD_TEST_PROTECTED_STORAGE_KEY"], !seed.isEmpty else {
+            return nil
+        }
+        let digest = SHA256.hash(data: Data(seed.utf8))
+        return SymmetricKey(data: Data(digest))
     }
 
     private static func retrieveKeyData() -> Data? {
@@ -121,6 +158,7 @@ public enum ProtectedStorageCrypto: Sendable {
 
     @discardableResult
     private static func deleteKeyData() -> Bool {
+        keyCache.set(nil)
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

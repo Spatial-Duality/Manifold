@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // AppRootView — wrapper that presents either the FirstRunFlow or
-// the LedgerView, plus command palette presentation.
+// the LedgerView.
 //
 // Keeping this separate from ManifoldApp lets the @State sheet flags
 // live inside the window (SwiftUI-idiomatic) instead of polluting the
@@ -16,6 +16,7 @@ extension Notification.Name {
     static let manifoldShowLedgerDestination = Notification.Name("manifold.showLedgerDestination")
     static let manifoldFocusCurrentSearch = Notification.Name("manifold.focusCurrentSearch")
     static let manifoldCycleCurrentSubtab = Notification.Name("manifold.cycleCurrentSubtab")
+    static let manifoldToggleCurrentInspector = Notification.Name("manifold.toggleCurrentInspector")
     static let manifoldPauseAllFromIntent = Notification.Name("manifoldPauseAllFromIntent")
     static let manifoldStartSessionFromIntent = Notification.Name("manifoldStartSessionFromIntent")
     static let manifoldOpenSettingsDiagnostics = Notification.Name("manifold.openSettingsDiagnostics")
@@ -23,7 +24,6 @@ extension Notification.Name {
 
 struct AppRootView: View {
     @Environment(ManifoldStore.self) private var store
-    @Environment(CommandPaletteModel.self) private var commandPalette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasLoadedInitialSummary = false
     @State private var splashFinished = false
@@ -58,12 +58,6 @@ struct AppRootView: View {
                 LedgerView()
             }
         }
-        .sheet(isPresented: Binding(
-            get: { commandPalette.isPresented },
-            set: { commandPalette.isPresented = $0 }
-        )) {
-            CommandPaletteView()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .manifoldShowWork)) { _ in
             presentMainLedger(destination: .work)
         }
@@ -82,7 +76,6 @@ struct AppRootView: View {
         .task {
             guard !hasLoadedInitialSummary else { return }
             hasLoadedInitialSummary = true
-            commandPalette.bind(to: store)
             await store.loadSummary()
         }
     }

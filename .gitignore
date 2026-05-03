@@ -28,6 +28,7 @@ script/__pycache__/
 /AGENTS.md
 /TODOS.md
 /LAUNCH.md
+/claude-design-input/
 .mcp.json
 .mcp.json.disabled
 ManifoldLocalAuthConfig.plist

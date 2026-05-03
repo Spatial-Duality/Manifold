@@ -9,10 +9,25 @@ import ManifoldKit
 
 struct AccessHistoryView: View {
     @Environment(ManifoldStore.self) private var store
+    @Binding private var searchText: String
     @State private var previewEntry: SessionHistoryEntry?
 
+    init(searchText: Binding<String> = .constant("")) {
+        _searchText = searchText
+    }
+
     private var entries: [SessionHistoryEntry] {
-        store.recentSessionEntries
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return store.recentSessionEntries }
+        return store.recentSessionEntries.filter { entry in
+            [
+                entry.name,
+                entry.displayLastRun,
+                entry.displayDuration,
+            ]
+            .joined(separator: "\n")
+            .localizedCaseInsensitiveContains(trimmed)
+        }
     }
 
     var body: some View {

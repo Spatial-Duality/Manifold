@@ -12,6 +12,8 @@ public enum ManifoldRuntimeEnvironment {
     public static let launchAgentPlistURLKey = "MANIFOLD_LAUNCH_AGENT_PLIST_URL"
     public static let testHomeKey = "MANIFOLD_TEST_HOME"
     public static let testScenarioKey = "MANIFOLD_TEST_SCENARIO"
+    public static let protectedStorageTestKey = "MANIFOLD_TEST_PROTECTED_STORAGE_KEY"
+    public static let allowUITestRunnerMCPKey = "MANIFOLD_TEST_ALLOW_UI_RUNNER_MCP"
 
     public static func string(
         for key: String,
@@ -90,6 +92,8 @@ public enum ManifoldRuntimeEnvironment {
             appSupportRootURLKey,
             launchAgentPlistURLKey,
             testHomeKey,
+            protectedStorageTestKey,
+            allowUITestRunnerMCPKey,
         ] {
             if let value = string(for: key, env: env) {
                 forwarded[key] = value

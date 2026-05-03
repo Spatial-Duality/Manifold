@@ -79,35 +79,33 @@ public struct EmailStore: Sendable {
         ])
     }
 
-    public func emailMessages(accountID: String, limit: Int = 500) throws -> [EmailMessageRecord] {
+    public func emailMessages(accountID: String, limit: Int = 500, offset: Int = 0) throws -> [EmailMessageRecord] {
         let rows = try db.queryAll(
-            "SELECT * FROM email_messages WHERE account_id = ? ORDER BY received_at DESC LIMIT ?",
-            params: [accountID, "\(limit)"]
+            """
+            SELECT em.* FROM email_messages em
+            WHERE em.account_id = ?
+            ORDER BY em.received_at DESC, em.email_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            params: [accountID, "\(max(0, limit))", "\(max(0, offset))"]
         )
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
 
-    public func emailMessages(accountID: String, mailbox: String, limit: Int = 500) throws -> [EmailMessageRecord] {
-        let membershipCount = try db.queryScalar(
-            "SELECT COUNT(*) FROM email_mailbox_membership WHERE account_id = ? AND mailbox = ?",
-            params: [accountID, mailbox]
-        ).flatMap(Int.init) ?? 0
-
-        let rows: [[String: String]]
-        if membershipCount > 0 {
-            rows = try db.queryAll("""
-                SELECT DISTINCT em.* FROM email_messages em
-                JOIN email_mailbox_membership emm ON em.email_id = emm.email_id
-                WHERE emm.account_id = ? AND emm.mailbox = ?
-                ORDER BY em.received_at DESC
-                LIMIT ?
-            """, params: [accountID, mailbox, "\(limit)"])
-        } else {
-            rows = try db.queryAll(
-                "SELECT * FROM email_messages WHERE account_id = ? AND mailbox = ? ORDER BY received_at DESC LIMIT ?",
-                params: [accountID, mailbox, "\(limit)"]
-            )
-        }
+    public func emailMessages(accountID: String, mailbox: String, limit: Int = 500, offset: Int = 0) throws -> [EmailMessageRecord] {
+        let rows = try db.queryAll("""
+            SELECT DISTINCT em.* FROM email_messages em
+            WHERE em.account_id = ?
+              AND (
+                    em.email_id IN (
+                        SELECT email_id FROM email_mailbox_membership
+                        WHERE account_id = em.account_id AND mailbox = ?
+                    )
+                    OR em.mailbox = ?
+              )
+            ORDER BY em.received_at DESC, em.email_id DESC
+            LIMIT ? OFFSET ?
+        """, params: [accountID, mailbox, mailbox, "\(max(0, limit))", "\(max(0, offset))"])
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
 
@@ -154,10 +152,14 @@ public struct EmailStore: Sendable {
         }
     }
 
-    public func allEmailMessages(limit: Int = 1000) throws -> [EmailMessageRecord] {
+    public func allEmailMessages(limit: Int = 1000, offset: Int = 0) throws -> [EmailMessageRecord] {
         let rows = try db.queryAll(
-            "SELECT * FROM email_messages ORDER BY received_at DESC LIMIT ?",
-            params: ["\(limit)"]
+            """
+            SELECT em.* FROM email_messages em
+            ORDER BY em.received_at DESC, em.email_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            params: ["\(max(0, limit))", "\(max(0, offset))"]
         )
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
@@ -194,6 +196,10 @@ public struct EmailStore: Sendable {
 
         let rows = try db.queryAll(query, params: params)
         return rows.compactMap { EmailAttachmentRecord(row: $0) }
+    }
+
+    public func emailAttachments(emailID: String) throws -> [EmailAttachmentRecord] {
+        try emailAttachments(emailIDs: [emailID])
     }
 
     public func emailAttachment(id: String) throws -> EmailAttachmentRecord? {
@@ -303,12 +309,13 @@ public struct EmailStore: Sendable {
     ) throws {
         var terms: [String: (fieldMask: Int, count: Int, firstPosition: Int)] = [:]
         var position = 0
+        let hmacKey = try MailArchiveStore.accountDerivedKey(accountID: accountID, purpose: "mail-private-index")
 
         for field in MailPrivateTokenField.allCases {
             guard let text = fields[field], !text.isEmpty else { continue }
             for token in MailPrivateTokenIndex.normalizedTokenSequence(text) {
                 position += 1
-                let termHMAC = try MailPrivateTokenIndex.termHMAC(accountID: accountID, normalizedToken: token)
+                let termHMAC = MailPrivateTokenIndex.termHMAC(normalizedToken: token, key: hmacKey)
                 if let existing = terms[termHMAC] {
                     terms[termHMAC] = (
                         fieldMask: existing.fieldMask | field.rawValue,
@@ -467,45 +474,206 @@ public struct EmailStore: Sendable {
         return rows.compactMap { EmailAccountRecord(row: $0) }
     }
 
+    public func writeAccountRemovalHistory(
+        accountID: String,
+        destinationRoot: URL,
+        fileManager: FileManager = .default
+    ) throws -> MailAccountRemovalResult {
+        let account = try emailAccount(id: accountID)
+        let removedAt = ISO8601DateFormatter.shared.string(from: Date())
+        let fileName = "\(Self.safeHistoryFileComponent(removedAt))-\(Self.safeHistoryFileComponent(accountID))-mail-reset.txt"
+        try fileManager.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+        let fileURL = destinationRoot.appendingPathComponent(fileName, isDirectory: false)
+
+        let messageCount = try countRows(
+            "SELECT COUNT(*) FROM email_messages WHERE account_id = ? OR account = ?",
+            params: [accountID, accountID]
+        )
+        let attachmentCount = try countRows(
+            """
+            SELECT COUNT(*) FROM email_attachments
+            WHERE email_id IN (
+                SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+            )
+            """,
+            params: [accountID, accountID]
+        )
+        let blobRecordCount = try countRows(
+            "SELECT COUNT(*) FROM mail_blobs WHERE account_id = ?",
+            params: [accountID]
+        )
+
+        let auditRows = try removalHistoryRows("""
+            SELECT created_at, agent_id, session_id, access_kind, email_id, policy_grant_id, details_redacted
+            FROM mail_access_audit_events
+            WHERE account_id = ?
+               OR email_id IN (SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?)
+            ORDER BY created_at ASC, id ASC
+        """, params: [accountID, accountID, accountID])
+        let sharedRows = try removalHistoryRows("""
+            SELECT se.shared_at, se.agent, se.email_id, se.label, em.mailbox, em.sender_domain, em.received_at
+            FROM shared_emails se
+            JOIN email_messages em ON em.email_id = se.email_id
+            WHERE em.account_id = ? OR em.account = ?
+            ORDER BY se.shared_at ASC, se.agent ASC, se.email_id ASC
+        """, params: [accountID, accountID])
+        let grantRows = try removalHistoryRows("""
+            SELECT ge.grant_id, ge.email_id, ge.materialized_path, em.mailbox, em.sender_domain, em.received_at
+            FROM grant_emails ge
+            JOIN email_messages em ON em.email_id = ge.email_id
+            WHERE em.account_id = ? OR em.account = ?
+            ORDER BY ge.grant_id ASC, ge.email_id ASC
+        """, params: [accountID, accountID])
+        let revealRows = try removalHistoryRows("""
+            SELECT tr.created_at, tr.agent, tr.reveal_id, tr.work_block_id, tr.email_id, em.mailbox, em.sender_domain
+            FROM temporary_reveals tr
+            JOIN email_messages em ON em.email_id = tr.email_id
+            WHERE em.account_id = ? OR em.account = ?
+            ORDER BY tr.created_at ASC, tr.agent ASC, tr.email_id ASC
+        """, params: [accountID, accountID])
+        let presetRows = try removalHistoryRows("""
+            SELECT ape.preset_id, ap.name, ap.target_app, ape.email_id, em.mailbox, em.sender_domain
+            FROM access_preset_emails ape
+            LEFT JOIN access_presets ap ON ap.preset_id = ape.preset_id
+            JOIN email_messages em ON em.email_id = ape.email_id
+            WHERE em.account_id = ? OR em.account = ?
+            ORDER BY ape.preset_id ASC, ape.email_id ASC
+        """, params: [accountID, accountID])
+
+        let contents = Self.removalHistoryText(
+            accountID: accountID,
+            account: account,
+            removedAt: removedAt,
+            messageCount: messageCount,
+            attachmentCount: attachmentCount,
+            blobRecordCount: blobRecordCount,
+            auditRows: auditRows,
+            sharedRows: sharedRows,
+            grantRows: grantRows,
+            revealRows: revealRows,
+            presetRows: presetRows
+        )
+        try LocalFileProtection.writeOwnerOnly(Data(contents.utf8), to: fileURL)
+
+        return MailAccountRemovalResult(
+            accountID: accountID,
+            displayName: account?.displayName ?? accountID,
+            providerType: account?.providerType,
+            username: account?.username,
+            removedAt: removedAt,
+            messageCount: messageCount,
+            attachmentCount: attachmentCount,
+            blobRecordCount: blobRecordCount,
+            accessAuditEventCount: auditRows.count,
+            sharedReferenceCount: sharedRows.count,
+            grantReferenceCount: grantRows.count,
+            temporaryRevealCount: revealRows.count,
+            accessPresetReferenceCount: presetRows.count,
+            contextArchivePath: fileURL.path
+        )
+    }
+
     public func removeEmailAccount(id: String) throws {
         let account = try emailAccount(id: id)
         try db.transaction {
             try db.execute("""
-                DELETE FROM email_attachments WHERE email_id IN (
-                    SELECT email_id FROM email_messages WHERE account_id = ?
+                DELETE FROM privacy_detected_spans
+                WHERE content_id IN (
+                    SELECT content_id FROM privacy_content_index
+                    WHERE email_id IN (
+                        SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                    )
+                    OR attachment_id IN (
+                        SELECT attachment_id FROM email_attachments
+                        WHERE email_id IN (
+                            SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                        )
+                    )
                 )
-            """, params: [id])
+            """, params: [id, id, id, id])
+            try db.execute("""
+                DELETE FROM privacy_index_jobs
+                WHERE content_id IN (
+                    SELECT content_id FROM privacy_content_index
+                    WHERE email_id IN (
+                        SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                    )
+                    OR attachment_id IN (
+                        SELECT attachment_id FROM email_attachments
+                        WHERE email_id IN (
+                            SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                        )
+                    )
+                )
+            """, params: [id, id, id, id])
+            try db.execute("""
+                DELETE FROM privacy_content_index
+                WHERE email_id IN (
+                    SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                )
+                OR attachment_id IN (
+                    SELECT attachment_id FROM email_attachments
+                    WHERE email_id IN (
+                        SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                    )
+                )
+            """, params: [id, id, id, id])
+            try db.execute("""
+                DELETE FROM shared_email_attachments WHERE attachment_id IN (
+                    SELECT attachment_id FROM email_attachments
+                    WHERE email_id IN (
+                        SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                    )
+                )
+            """, params: [id, id])
+            try db.execute("""
+                DELETE FROM email_attachments WHERE email_id IN (
+                    SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                )
+            """, params: [id, id])
             try db.execute("""
                 DELETE FROM shared_emails WHERE email_id IN (
-                    SELECT email_id FROM email_messages WHERE account_id = ?
+                    SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
                 )
-            """, params: [id])
+            """, params: [id, id])
             try db.execute("""
                 DELETE FROM grant_emails WHERE email_id IN (
-                    SELECT email_id FROM email_messages WHERE account_id = ?
+                    SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
                 )
-            """, params: [id])
+            """, params: [id, id])
+            try db.execute("""
+                DELETE FROM access_preset_emails WHERE email_id IN (
+                    SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                )
+            """, params: [id, id])
             // temporary_reveals usually expire with their work block, but
             // removing an account is a permanent action and any reveals
             // for orphaned email IDs would never resolve to a real
             // message again. Drop them in the same transaction.
             try db.execute("""
                 DELETE FROM temporary_reveals WHERE email_id IN (
-                    SELECT email_id FROM email_messages WHERE account_id = ?
+                    SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
                 )
-            """, params: [id])
+            """, params: [id, id])
+            try db.execute("""
+                DELETE FROM mail_access_audit_events
+                WHERE account_id = ?
+                   OR email_id IN (
+                       SELECT email_id FROM email_messages WHERE account_id = ? OR account = ?
+                   )
+            """, params: [id, id, id])
             // Clean FTS5 entries before deleting rows (content-synced table requires manual sync)
             try db.execute("""
                 INSERT INTO email_fts(email_fts, rowid, email_id, body_text)
                 SELECT 'delete', rowid, email_id, COALESCE(body_text, '')
-                FROM email_messages WHERE account_id = ? AND body_text IS NOT NULL
-            """, params: [id])
+                FROM email_messages
+                WHERE (account_id = ? OR account = ?) AND body_text IS NOT NULL
+            """, params: [id, id])
             try db.execute("DELETE FROM email_mailbox_membership WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_messages WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_messages WHERE account = ?", params: [id])
             try db.execute("DELETE FROM mail_private_terms WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM mail_sync_jobs WHERE account_id = ?", params: [id])
-            try db.execute("DELETE FROM mail_access_audit_events WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM mail_blobs WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM imap_mailboxes WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_sync_state WHERE account_id = ?", params: [id])
@@ -757,6 +925,43 @@ public struct EmailStore: Sendable {
             accountID,
             MailSyncJobState.paused.rawValue,
         ])
+    }
+
+    @discardableResult
+    public func requeueRunningMailSyncJobs(
+        accountID: String? = nil,
+        updatedBefore cutoff: Date? = nil,
+        errorRedacted: String = "Recovered abandoned running job after runtime restart"
+    ) throws -> Int {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        var whereParts = ["state = ?"]
+        var params: [String?] = [
+            MailSyncJobState.queued.rawValue,
+            now,
+            "recovered_running",
+            errorRedacted,
+            MailSyncJobState.running.rawValue,
+        ]
+
+        if let accountID {
+            whereParts.append("account_id = ?")
+            params.append(accountID)
+        }
+        if let cutoff {
+            whereParts.append("updated_at <= ?")
+            params.append(ISO8601DateFormatter.shared.string(from: cutoff))
+        }
+
+        try db.execute("""
+            UPDATE mail_sync_jobs
+            SET state = ?,
+                job_type = CASE WHEN job_type = 'incremental' THEN 'recentPass' ELSE job_type END,
+                updated_at = ?,
+                error_code = ?,
+                error_redacted = ?
+            WHERE \(whereParts.joined(separator: " AND "))
+        """, params: params)
+        return try db.queryScalar("SELECT changes()").flatMap(Int.init) ?? 0
     }
 
     private func existingActiveMailSyncJob(
@@ -1222,6 +1427,59 @@ public struct EmailStore: Sendable {
         return Set(rows.compactMap { $0["email_id"] })
     }
 
+    // MARK: - Shared Email Attachments (persistent, per-agent, grant-independent)
+
+    @discardableResult
+    public func shareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) throws -> Int {
+        guard !attachmentIDs.isEmpty else { return 0 }
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        var count = 0
+        for attachmentID in attachmentIDs {
+            let shareID = "email-attachment-share-\(UUID().uuidString.prefix(8).lowercased())"
+            try db.execute("""
+                INSERT OR IGNORE INTO shared_email_attachments (share_id, agent, attachment_id, shared_at)
+                VALUES (?, ?, ?, ?)
+            """, params: [shareID, agent.rawValue, attachmentID, now])
+            count += 1
+        }
+        return count
+    }
+
+    public func unshareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) throws {
+        guard !attachmentIDs.isEmpty else { return }
+        let placeholders = attachmentIDs.map { _ in "?" }.joined(separator: ",")
+        try db.execute(
+            "DELETE FROM shared_email_attachments WHERE agent = ? AND attachment_id IN (\(placeholders))",
+            params: [agent.rawValue] + attachmentIDs
+        )
+    }
+
+    public func sharedEmailAttachmentIDs(agent: TargetApp) throws -> Set<String> {
+        let rows = try db.queryAll(
+            "SELECT attachment_id FROM shared_email_attachments WHERE agent = ?",
+            params: [agent.rawValue]
+        )
+        return Set(rows.compactMap { $0["attachment_id"] })
+    }
+
+    public func sharedEmailAttachmentIDs(emailID: String, agent: TargetApp) throws -> Set<String> {
+        let rows = try db.queryAll("""
+            SELECT sea.attachment_id
+            FROM shared_email_attachments sea
+            JOIN email_attachments ea ON ea.attachment_id = sea.attachment_id
+            WHERE sea.agent = ? AND ea.email_id = ?
+        """, params: [agent.rawValue, emailID])
+        return Set(rows.compactMap { $0["attachment_id"] })
+    }
+
+    public func isEmailAttachmentShared(attachmentID: String, agent: TargetApp) throws -> Bool {
+        let result = try db.queryScalar(
+            "SELECT COUNT(*) FROM shared_email_attachments WHERE agent = ? AND attachment_id = ?",
+            params: [agent.rawValue, attachmentID]
+        )
+        return (result.flatMap { Int($0) } ?? 0) > 0
+    }
+
     // MARK: - Smart Mailboxes
 
     @discardableResult
@@ -1302,6 +1560,92 @@ public struct EmailStore: Sendable {
         sortKey: EmailSortKey = .date,
         limit: Int = 500
     ) throws -> [EmailMessageRecord] {
+        try emailMessagePage(
+            tokens: tokens,
+            freeText: freeText,
+            accountID: accountID,
+            mailbox: mailbox,
+            filter: filter,
+            sortKey: sortKey,
+            limit: limit,
+            offset: 0
+        ).messages
+    }
+
+    public func emailMessagePage(
+        tokens: [SearchToken] = [],
+        freeText: String = "",
+        accountID: String? = nil,
+        mailbox: String? = nil,
+        filter: QuickFilter? = nil,
+        sortKey: EmailSortKey = .date,
+        limit: Int,
+        offset: Int
+    ) throws -> EmailMessagePage {
+        let normalizedLimit = max(0, limit)
+        let normalizedOffset = max(0, offset)
+        let search = try emailSearchConditionSQL(
+            tokens: tokens,
+            freeText: freeText,
+            accountID: accountID,
+            mailbox: mailbox,
+            filter: filter,
+            resultLimitHint: normalizedLimit
+        )
+        let total = try db.queryScalar("""
+            SELECT COUNT(DISTINCT em.email_id)
+            FROM email_messages em
+            \(search.whereClause)
+        """, params: search.params).flatMap(Int.init) ?? 0
+
+        var pageParams = search.params
+        pageParams.append("\(normalizedLimit)")
+        pageParams.append("\(normalizedOffset)")
+        let rows = try db.queryAll("""
+            SELECT DISTINCT em.* FROM email_messages em
+            \(search.whereClause)
+            ORDER BY \(orderSQL(for: sortKey))
+            LIMIT ? OFFSET ?
+        """, params: pageParams)
+
+        return EmailMessagePage(
+            messages: rows.compactMap { EmailMessageRecord(row: $0) },
+            totalCount: total,
+            limit: normalizedLimit,
+            offset: normalizedOffset
+        )
+    }
+
+    public func emailMessageCount(
+        tokens: [SearchToken] = [],
+        freeText: String = "",
+        accountID: String? = nil,
+        mailbox: String? = nil,
+        filter: QuickFilter? = nil
+    ) throws -> Int {
+        let search = try emailSearchConditionSQL(
+            tokens: tokens,
+            freeText: freeText,
+            accountID: accountID,
+            mailbox: mailbox,
+            filter: filter,
+            resultLimitHint: 500
+        )
+        return try db.queryScalar("""
+            SELECT COUNT(DISTINCT em.email_id)
+            FROM email_messages em
+            \(search.whereClause)
+        """, params: search.params).flatMap(Int.init) ?? 0
+    }
+
+    private func emailSearchConditionSQL(
+        tokens: [SearchToken],
+        freeText: String,
+        accountID: String?,
+        mailbox: String?,
+        filter: QuickFilter?,
+        resultLimitHint: Int
+    ) throws -> (whereClause: String, params: [String?]) {
         // Convert all inputs to RuleConditions for unified handling
         let bodyTokens = tokens.filter { $0.type == .body }
         var conditions = conditionsFromTokens(tokens.filter { $0.type != .body })
@@ -1326,15 +1670,19 @@ public struct EmailStore: Sendable {
         }
         if let mailbox {
             extraSQL.append("""
-                em.email_id IN (
-                    SELECT email_id FROM email_mailbox_membership
-                    WHERE account_id = em.account_id AND mailbox = ?
+                (
+                    em.email_id IN (
+                        SELECT email_id FROM email_mailbox_membership
+                        WHERE account_id = em.account_id AND mailbox = ?
+                    )
+                    OR em.mailbox = ?
                 )
             """)
             extraParams.append(mailbox)
+            extraParams.append(mailbox)
         }
 
-        let privateIndexLimit = min(max(limit * 4, 500), 5_000)
+        let privateIndexLimit = min(max(resultLimitHint * 4, 500), 5_000)
         if !bodyTokens.isEmpty {
             let bodyQuery = bodyTokens.map(\.value).joined(separator: " ")
             var bodySQL = [
@@ -1399,16 +1747,7 @@ public struct EmailStore: Sendable {
         allParams.append(contentsOf: extraParams)
 
         let whereClause = allConditionParts.isEmpty ? "" : "WHERE " + allConditionParts.joined(separator: " AND ")
-        let orderClause = orderSQL(for: sortKey)
-        allParams.append("\(limit)")
-
-        let rows = try db.queryAll("""
-            SELECT em.* FROM email_messages em
-            \(whereClause)
-            ORDER BY \(orderClause)
-            LIMIT ?
-        """, params: allParams)
-        return rows.compactMap { EmailMessageRecord(row: $0) }
+        return (whereClause, allParams)
     }
 
     // MARK: - Unified Condition Builder (private)
@@ -1617,13 +1956,106 @@ public struct EmailStore: Sendable {
         }
     }
 
+    private func countRows(_ sql: String, params: [String?] = []) throws -> Int {
+        try db.queryScalar(sql, params: params).flatMap(Int.init) ?? 0
+    }
+
+    private func removalHistoryRows(_ sql: String, params: [String?] = []) throws -> [[String: String]] {
+        try db.queryAll(sql, params: params).map { row in
+            row.mapValues(Self.singleLineHistoryValue)
+        }
+    }
+
+    private static func removalHistoryText(
+        accountID: String,
+        account: EmailAccountRecord?,
+        removedAt: String,
+        messageCount: Int,
+        attachmentCount: Int,
+        blobRecordCount: Int,
+        auditRows: [[String: String]],
+        sharedRows: [[String: String]],
+        grantRows: [[String: String]],
+        revealRows: [[String: String]],
+        presetRows: [[String: String]]
+    ) -> String {
+        var lines: [String] = [
+            "Manifold Mail Account Removal History",
+            "Generated: \(removedAt)",
+            "",
+            "This file preserves agent access context only. Local email message bodies, attachments, encrypted mail archive blobs, sync state, search indexes, and Keychain credentials are removed by the reset.",
+            "",
+            "Account",
+            "account_id: \(accountID)",
+            "display_name: \(singleLineHistoryValue(account?.displayName ?? accountID))",
+            "provider_type: \(singleLineHistoryValue(account?.providerType ?? ""))",
+            "username: \(singleLineHistoryValue(account?.username ?? ""))",
+            "server: \(singleLineHistoryValue(account?.server ?? ""))",
+            "",
+            "Removed Local Mail Counts",
+            "messages: \(messageCount)",
+            "attachments: \(attachmentCount)",
+            "encrypted_blob_records: \(blobRecordCount)",
+            "",
+        ]
+
+        appendSection("Agent Mail Access Audit Events", rows: auditRows, to: &lines)
+        appendSection("Standing Shared Email References", rows: sharedRows, to: &lines)
+        appendSection("Session Grant Email References", rows: grantRows, to: &lines)
+        appendSection("Temporary Reveal References", rows: revealRows, to: &lines)
+        appendSection("Saved Template Email References", rows: presetRows, to: &lines)
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    private static func appendSection(
+        _ title: String,
+        rows: [[String: String]],
+        to lines: inout [String]
+    ) {
+        lines.append(title)
+        lines.append("count: \(rows.count)")
+        if rows.isEmpty {
+            lines.append("- none")
+        } else {
+            for row in rows {
+                let rendered = row.keys.sorted().map { key in
+                    "\(key)=\(singleLineHistoryValue(row[key] ?? ""))"
+                }.joined(separator: "; ")
+                lines.append("- \(rendered)")
+            }
+        }
+        lines.append("")
+    }
+
+    private static func safeHistoryFileComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.unicodeScalars.map { scalar -> String in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }
+        let candidate = scalars.joined().trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+        return candidate.isEmpty ? "mail-account" : candidate
+    }
+
+    private static func singleLineHistoryValue(_ value: String) -> String {
+        let collapsed = value
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if collapsed.count <= 1_000 {
+            return collapsed
+        }
+        return "\(collapsed.prefix(1_000))..."
+    }
+
     /// Generate ORDER BY SQL for a sort key.
     private func orderSQL(for sortKey: EmailSortKey) -> String {
         switch sortKey {
-        case .date: return "em.received_at DESC"
-        case .sender: return "em.sender_email ASC, em.received_at DESC"
-        case .subject: return "em.subject ASC, em.received_at DESC"
-        case .size: return "em.size_bytes DESC, em.received_at DESC"
+        case .date: return "em.received_at DESC, em.email_id DESC"
+        case .sender: return "em.sender_email ASC, em.received_at DESC, em.email_id DESC"
+        case .subject: return "em.subject ASC, em.received_at DESC, em.email_id DESC"
+        case .size: return "em.size_bytes DESC, em.received_at DESC, em.email_id DESC"
         }
     }
 }

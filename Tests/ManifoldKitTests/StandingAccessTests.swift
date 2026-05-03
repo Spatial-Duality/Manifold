@@ -327,7 +327,7 @@ struct StandingAccessTests {
                 EmailDomainRule(agent: .codex, domain: "anthropic.test", action: .allow)
             ],
             contactRules: [
-                EmailContactRule(agent: .codex, name: "Sam Altman", email: "sam@openai.test", action: .block)
+                EmailContactRule(agent: .codex, name: "Sable Alman", email: "sable@openai.test", action: .block)
             ],
             keywordRules: [
                 EmailKeywordRule(
@@ -399,8 +399,8 @@ struct StandingAccessTests {
         try createEmail(
             harness: h,
             id: "email-blocked-contact",
-            sender: "Sam Altman <sam@openai.test>",
-            senderEmail: "sam@openai.test",
+            sender: "Sable Alman <sable@openai.test>",
+            senderEmail: "sable@openai.test",
             senderDomain: "openai.test",
             subject: "Direct note that should not pass contact rules",
             body: "DO_NOT_LEAK_BLOCKED_CONTACT contact block should outrank domain allow."
@@ -946,7 +946,7 @@ struct StandingAccessTests {
                 "phonebook@openai.test",
                 "openai.test",
                 "Phonebook entry for deterministic evals",
-                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Call Sam Altman at +1 (415) 555-0102 about account OPENAI-BATCH-0002."
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Call Sable Alman at +1 (415) 555-0102 about account OPENAI-BATCH-0002."
             ),
             (
                 "openai-privacy-batch-address-03",
@@ -978,7 +978,7 @@ struct StandingAccessTests {
                 "calendar@anthropic.test",
                 "anthropic.test",
                 "Constitutional karaoke calendar",
-                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Meet Dario Amodei on May 2, 2026 with ledger ANTHROPIC-BATCH-0006."
+                "OPENAI_PRIVACY_FILTER_EASTER_EGG_BATCH Meet Mario Amodei on May 2, 2026 with ledger ANTHROPIC-BATCH-0006."
             ),
             (
                 "openai-privacy-batch-account-07",

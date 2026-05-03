@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import XCTest
+import AppKit
 import ManifoldKit
 @testable import Manifold
 
@@ -19,6 +20,44 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertTrue(store.isCodexConnected)
         XCTAssertEqual(store.activeSession?.agents, [.codex])
         XCTAssertFalse(store.activity.activityEntries.isEmpty)
+    }
+
+    func testDemoFixtureContainsCanonicalAnthropologieSurface() async throws {
+        let runtime = DemoRuntimeClient.anthropologie()
+
+        let activity = try await runtime.recentActivity(limit: 50)
+        let rules = try await runtime.listRules(scope: nil)
+        let accounts = try await runtime.listEmailAccounts()
+        let claudeShared = try await runtime.sharedEmailIDs(agent: .cowork)
+        let codexShared = try await runtime.sharedEmailIDs(agent: .codex)
+
+        XCTAssertEqual(activity.count, 13)
+        XCTAssertTrue(rules.contains { $0.name == "racing/* never shared" })
+        XCTAssertEqual(Set(accounts.map(\.displayName)), ["iCloud", "Gmail", "Microsoft 365"])
+        XCTAssertEqual(claudeShared.count, 3)
+        XCTAssertEqual(codexShared.count, 3)
+
+        let haystack = [
+            activity.map { [$0.filePath, $0.metadata].compactMap { $0 }.joined(separator: " ") }.joined(separator: "\n"),
+            rules.map(\.name).joined(separator: "\n"),
+            accounts.map { "\($0.displayName) \($0.username ?? "")" }.joined(separator: "\n"),
+        ].joined(separator: "\n")
+        for forbidden in ["Dario Amodei", "Daniela Amodei", "Boris Cherny", "Mark Chen", "Tim Cook", "Sam Altman"] {
+            XCTAssertFalse(haystack.contains(forbidden), "Demo data leaked forbidden real-name string: \(forbidden)")
+        }
+    }
+
+    func testDemoWarningDefaultsOnWhenDemoModeIsEnabled() {
+        let suiteName = "com.spatialduality.manifold.demo-mode-test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = ManifoldStore(startServices: false, defaults: defaults)
+
+        store.setDemoModeEnabled(true)
+
+        XCTAssertTrue(store.isDemoModeEnabled)
+        XCTAssertTrue(store.showDemoWarning)
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     func testRefreshAllLoadsPendingApprovalsFromTrackedWorkFixture() async throws {
@@ -83,11 +122,11 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertFalse(store.sources.contains(where: \.isRemoved))
     }
 
-    func testAggregateFolderCheckboxClearsPartiallySharedSource() {
+    func testAggregateFolderCheckboxSharesPartiallySharedSource() {
         let agents: [TargetApp] = [.cowork, .codex]
 
         XCTAssertTrue(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: []))
-        XCTAssertFalse(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: [.cowork]))
+        XCTAssertTrue(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: [.cowork]))
         XCTAssertFalse(FoldersMatrixView.aggregateScopeTarget(connectedAgents: agents, scopedAgents: [.cowork, .codex]))
     }
 
@@ -139,6 +178,98 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertEqual(store.mailReview.selectedMailboxName, "INBOX")
         XCTAssertEqual(store.mailReview.threadRows.count, 2)
         XCTAssertEqual(try XCTUnwrap(store.mailReview.threadRows.first).threadKey, "thread-frontier-sync@anthropic.test")
+    }
+
+    func testMailSidebarCollapsesGmailSpecialUseAliases() throws {
+        let account = EmailAccountRecord(
+            accountID: "gmail-account",
+            displayName: "Gmail",
+            providerType: EmailProvider.gmail.rawValue
+        )
+        let mailReview = MailReviewModel()
+        mailReview.mailboxesByAccountID[account.accountID] = [
+            try mailboxRecord(accountID: account.accountID, name: "INBOX", sortOrder: 0),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/Sent Mail", flags: ["\\Sent"], sortOrder: 1),
+            try mailboxRecord(accountID: account.accountID, name: "Sent", sortOrder: 2),
+            try mailboxRecord(accountID: account.accountID, name: "Sent Messages", sortOrder: 3),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/Drafts", flags: ["\\Drafts"], sortOrder: 4),
+            try mailboxRecord(accountID: account.accountID, name: "Drafts", sortOrder: 5),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/Starred", flags: ["\\Flagged"], sortOrder: 6),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/All Mail", flags: ["\\All"], sortOrder: 7),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/Spam", flags: ["\\Junk"], sortOrder: 8),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/Trash", flags: ["\\Trash"], sortOrder: 9),
+            try mailboxRecord(accountID: account.accountID, name: "Deleted Messages", sortOrder: 10),
+            try mailboxRecord(accountID: account.accountID, name: "Trash", sortOrder: 11),
+            try mailboxRecord(accountID: account.accountID, name: "[Google Mail]/Important", flags: ["\\Important"], sortOrder: 12),
+            try mailboxRecord(accountID: account.accountID, name: "Notes", sortOrder: 13),
+        ]
+
+        let rows = mailReview.sidebarMailboxes(for: account)
+
+        XCTAssertEqual(rows.map(\.displayName), ["Inbox", "Sent", "Drafts", "Junk", "Trash", "Notes"])
+        XCTAssertEqual(rows.first(where: { $0.displayName == "Sent" })?.mailboxName, "[Google Mail]/Sent Mail")
+        XCTAssertFalse(rows.contains { $0.mailboxName == "[Google Mail]/All Mail" })
+        XCTAssertFalse(rows.contains { $0.mailboxName == "[Google Mail]/Starred" })
+        XCTAssertFalse(rows.contains { $0.mailboxName == "[Google Mail]/Important" })
+    }
+
+    func testMailSidebarCollapsesGenericSpecialUseDuplicates() throws {
+        let account = EmailAccountRecord(
+            accountID: "icloud-account",
+            displayName: "iCloud",
+            providerType: EmailProvider.icloud.rawValue
+        )
+        let mailReview = MailReviewModel()
+        mailReview.mailboxesByAccountID[account.accountID] = [
+            try mailboxRecord(accountID: account.accountID, name: "INBOX", sortOrder: 0),
+            try mailboxRecord(accountID: account.accountID, name: "Sent Messages", flags: ["\\Sent"], sortOrder: 1),
+            try mailboxRecord(accountID: account.accountID, name: "Sent", sortOrder: 2),
+            try mailboxRecord(accountID: account.accountID, name: "Deleted Messages", flags: ["\\Trash"], sortOrder: 3),
+            try mailboxRecord(accountID: account.accountID, name: "Trash", sortOrder: 4),
+            try mailboxRecord(accountID: account.accountID, name: "Projects", sortOrder: 5),
+        ]
+
+        let rows = mailReview.sidebarMailboxes(for: account)
+
+        XCTAssertEqual(rows.map(\.displayName), ["Inbox", "Sent", "Trash", "Projects"])
+        XCTAssertEqual(rows.first(where: { $0.displayName == "Sent" })?.mailboxName, "Sent Messages")
+        XCTAssertEqual(rows.first(where: { $0.displayName == "Trash" })?.mailboxName, "Deleted Messages")
+    }
+
+    func testMailReviewSearchTextFiltersFixtureMessages() async throws {
+        let runtime = FixtureRuntimeClient(profile: .syntheticMCPUI)
+        let mailAccounts = MailAccountsModel()
+        mailAccounts.configure(client: runtime)
+        let mailReview = MailReviewModel()
+        mailReview.configure(mailAccounts: mailAccounts)
+
+        await mailReview.prepare(force: true)
+
+        mailReview.searchText = "tea party"
+        await mailReview.retry()
+        XCTAssertEqual(mailReview.messages.map(\.subject), ["Model garden tea party"])
+
+        mailReview.searchText = "semicolon"
+        await mailReview.retry()
+        XCTAssertEqual(mailReview.messages.map(\.subject), ["Codex found the missing semicolon"])
+    }
+
+    private func mailboxRecord(
+        accountID: String,
+        name: String,
+        flags: [String] = [],
+        sortOrder: Int
+    ) throws -> IMAPMailboxRecord {
+        let flagsData = try JSONSerialization.data(withJSONObject: flags)
+        let flagsJSON = String(data: flagsData, encoding: .utf8) ?? "[]"
+        return try XCTUnwrap(IMAPMailboxRecord(row: [
+            "account_id": accountID,
+            "mailbox_name": name,
+            "delimiter": "/",
+            "flags": flagsJSON,
+            "is_selectable": "1",
+            "sort_order": "\(sortOrder)",
+        ]))
     }
 
     func testMailAccountsModelLoadsMailboxMessagesThroughProtocolExistential() async {
@@ -376,91 +507,189 @@ final class ManifoldStoreTests: XCTestCase {
         let cleared = await store.fileVisibilityOverrides(agent: .cowork)
         XCTAssertTrue(cleared.isEmpty)
     }
+
+    func testRulesSearchTextFiltersFixtureRules() async {
+        let rules = RulesModel()
+        rules.configure(client: FixtureRuntimeClient(profile: .privacy))
+
+        await rules.load()
+
+        rules.searchText = "digests"
+        XCTAssertEqual(rules.filteredRules.map(\.id), ["rule-email-openai"])
+
+        rules.searchText = "secret"
+        XCTAssertEqual(rules.filteredRules.map(\.id), ["rule-seeded-secret"])
+    }
 }
 
 @MainActor
-final class CommandPaletteModelTests: XCTestCase {
-    func testBindingBuildsPrimaryCommands() {
-        let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .baseline),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline)),
-            startServices: false
+final class MailProviderOnboardingGuideTests: XCTestCase {
+    func testTopLevelProviderSurfaceIsFourNativeChoices() {
+        XCTAssertEqual(MailOnboardingProvider.allCases.map(\.accessibilityIdentifier), [
+            "settings.mail.provider.google",
+            "settings.mail.provider.microsoft",
+            "settings.mail.provider.icloud",
+            "settings.mail.provider.other",
+        ])
+        XCTAssertEqual(MailOnboardingProvider.allCases.map(\.emailProvider), [.gmail, .outlook, .icloud, .other])
+        XCTAssertFalse(MailOnboardingProvider.allCases.contains { $0.emailProvider == .fastmail })
+        XCTAssertFalse(MailOnboardingProvider.allCases.contains { $0.emailProvider == .yahoo })
+    }
+
+    func testTopLevelProviderGuidesHaveRequiredCopyAndLinks() {
+        for provider in MailOnboardingProvider.allCases {
+            let guide = provider.guide
+
+            XCTAssertFalse(guide.displayLabel.isEmpty)
+            XCTAssertFalse(guide.detail.isEmpty)
+            XCTAssertFalse(guide.credentialLabel.isEmpty)
+            XCTAssertFalse(guide.steps.isEmpty)
+            XCTAssertFalse(guide.links.isEmpty)
+            XCTAssertFalse(guide.validationHelp.isEmpty)
+            XCTAssertFalse(guide.primaryActionTitle.isEmpty)
+        }
+    }
+
+    func testProviderGuidesDescribeExpectedCredentialFlows() {
+        let google = MailProviderOnboardingGuide.guide(for: .gmail)
+        XCTAssertEqual(google.credentialLabel, "Google app password")
+        XCTAssertTrue(google.steps.contains { $0.contains("2-Step Verification") })
+        XCTAssertTrue(google.links.contains { $0.title == "Open Google App Passwords" })
+
+        let microsoft = MailProviderOnboardingGuide.guide(for: .outlook)
+        XCTAssertEqual(microsoft.credentialLabel, "Microsoft sign-in")
+        XCTAssertEqual(microsoft.primaryActionTitle, "Sign in with Microsoft")
+        XCTAssertTrue(microsoft.blockers.contains { $0.contains("administrator consent") })
+
+        let iCloud = MailProviderOnboardingGuide.guide(for: .icloud)
+        XCTAssertEqual(iCloud.credentialLabel, "Apple app-specific password")
+        XCTAssertTrue(iCloud.steps.contains { $0.contains("app-specific password") })
+        XCTAssertTrue(iCloud.links.contains { $0.title.contains("Apple App-Specific Passwords") })
+
+        let other = MailProviderOnboardingGuide.guide(for: .other)
+        XCTAssertEqual(other.credentialLabel, "Password or app password")
+        XCTAssertTrue(other.steps.contains { $0.contains("IMAP host") })
+    }
+
+    func testProviderLogoAssetsAreAvailableToTheAppBundle() {
+        XCTAssertNotNil(NSImage(named: "Google_\"G\"_logo"))
+        XCTAssertNotNil(NSImage(named: "microsoft"))
+    }
+
+    func testOtherGuideDetectsYahooAndFastmail() {
+        let yahoo = MailProviderOnboardingGuide.guide(for: .other, emailAddress: "person@yahoo.com")
+        XCTAssertEqual(yahoo.resolvedProvider, .yahoo)
+        XCTAssertEqual(yahoo.credentialLabel, "Yahoo app password")
+        XCTAssertTrue(yahoo.links.contains { $0.title.contains("Yahoo") })
+
+        let fastmail = MailProviderOnboardingGuide.guide(for: .other, emailAddress: "person@fastmail.com")
+        XCTAssertEqual(fastmail.resolvedProvider, .fastmail)
+        XCTAssertEqual(fastmail.credentialLabel, "Fastmail app password")
+        XCTAssertTrue(fastmail.links.contains { $0.title.contains("Fastmail") })
+    }
+
+    func testMailSyncProgressPresentationBuildsAccountSidebarCopy() {
+        let progress = mailProgress(stage: .archivingOlderMail, syncedMessageCount: 12_430)
+        let subtitle = MailSyncProgressPresentation.accountSubtitle(
+            progress: progress,
+            account: mailAccount()
         )
-        let commandCenter = CommandPaletteModel()
 
-        commandCenter.bind(to: store)
+        XCTAssertEqual(subtitle, "12,430 synced · Archiving older mail")
+    }
 
+    func testMailSyncProgressPresentationDoesNotReportZeroMailboxErrorsForAccountFailure() {
+        let progress = mailProgress(stage: .needsAttention, failedMailboxCount: 0)
+        let subtitle = MailSyncProgressPresentation.accountSubtitle(
+            progress: progress,
+            account: mailAccount()
+        )
+
+        XCTAssertEqual(subtitle, "Needs attention · Sync error")
+    }
+
+    func testMailSyncProgressPresentationBuildsMailboxCountAndStatus() {
+        let progress = mailProgress(
+            stage: .syncingRecentMail,
+            mailboxSyncedCounts: ["INBOX": 842],
+            currentMailboxName: "INBOX"
+        )
+        let state = SyncStateRecord(
+            accountID: "account-1",
+            mailboxName: "INBOX",
+            messageCount: 842
+        )
+
+        XCTAssertEqual(MailSyncProgressPresentation.mailboxCount(progress: progress, mailboxName: "INBOX"), "842")
         XCTAssertEqual(
-            commandCenter.filteredCommands().map(\.title),
-            [
-                "Open Work",
-                "Open Access",
-                "Open Mail",
-                "Open Rules",
-                "New Session",
-                "Open Session Recap",
-                "Add Folder…",
-                "Restart Runtime Helper",
-                "Settings…",
-                "Open Manifold",
-            ]
+            MailSyncProgressPresentation.mailboxSubtitle(
+                progress: progress,
+                mailboxName: "INBOX",
+                syncState: state
+            ),
+            "Syncing recent mail"
         )
     }
 
-    func testFilteringCommandsUsesSearchText() {
-        let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .baseline),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline)),
-            startServices: false
+    func testMailSyncProgressPresentationBuildsSelectedToolbarStatus() {
+        let progress = mailProgress(
+            stage: .archivingOlderMail,
+            mailboxSyncedCounts: ["INBOX": 842]
         )
-        let commandCenter = CommandPaletteModel()
-        commandCenter.bind(to: store)
 
-        commandCenter.searchText = "settings"
+        let status = MailSyncProgressPresentation.toolbarStatus(
+            account: mailAccount(),
+            mailboxDisplayName: "Inbox",
+            mailboxName: "INBOX",
+            progress: progress
+        )
 
-        XCTAssertEqual(commandCenter.filteredCommands().map(\.title), ["Settings…"])
+        XCTAssertEqual(status, "Gmail · Inbox · 842 messages · Archiving older mail")
     }
 
-    func testBindingSameStoreTwiceDoesNotDuplicateCommands() {
-        let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .baseline),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .baseline)),
-            startServices: false
-        )
-        let commandCenter = CommandPaletteModel()
+    func testMailSyncProgressPresentationOrdersActivityByAttentionThenActiveWork() {
+        let ordered = MailSyncProgressPresentation.orderedForActivity([
+            mailProgress(accountID: "up-to-date", displayName: "Up To Date", stage: .upToDate, syncedMessageCount: 20),
+            mailProgress(accountID: "active", displayName: "Active", stage: .syncingRecentMail, syncedMessageCount: 10, runningJobCount: 1),
+            mailProgress(accountID: "error", displayName: "Error", stage: .needsAttention, syncedMessageCount: 5, failedMailboxCount: 1),
+            mailProgress(accountID: "ready", displayName: "Ready", stage: .recentMailReady, syncedMessageCount: 30),
+        ])
 
-        commandCenter.bind(to: store)
-        commandCenter.bind(to: store)
+        XCTAssertEqual(ordered.map(\.accountID), ["error", "active", "ready", "up-to-date"])
+    }
 
-        XCTAssertEqual(
-            commandCenter.filteredCommands().map(\.title),
-            [
-                "Open Work",
-                "Open Access",
-                "Open Mail",
-                "Open Rules",
-                "New Session",
-                "Open Session Recap",
-                "Add Folder…",
-                "Restart Runtime Helper",
-                "Settings…",
-                "Open Manifold",
-            ]
+    private func mailAccount() -> EmailAccountRecord {
+        EmailAccountRecord(
+            accountID: "account-1",
+            displayName: "Gmail",
+            providerType: EmailProvider.gmail.rawValue
         )
     }
 
-    func testTrackedSessionAddsFinishTrackedEditCommand() async {
-        let store = ManifoldStore(
-            runtime: FixtureRuntimeClient(profile: .trackedWork),
-            integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .trackedWork)),
-            startServices: false
+    private func mailProgress(
+        accountID: String = "account-1",
+        displayName: String = "Gmail",
+        stage: MailSyncProgressStage,
+        syncedMessageCount: Int = 842,
+        mailboxSyncedCounts: [String: Int] = ["INBOX": 842],
+        runningJobCount: Int = 0,
+        queuedBackfillCount: Int = 0,
+        failedMailboxCount: Int = 0,
+        currentMailboxName: String? = nil
+    ) -> MailSyncProgressSnapshot {
+        MailSyncProgressSnapshot(
+            accountID: accountID,
+            displayName: displayName,
+            provider: .gmail,
+            syncedMessageCount: syncedMessageCount,
+            mailboxSyncedCounts: mailboxSyncedCounts,
+            stage: stage,
+            runningJobCount: runningJobCount,
+            queuedBackfillCount: queuedBackfillCount,
+            failedMailboxCount: failedMailboxCount,
+            currentMailboxName: currentMailboxName,
+            lastUpdatedAt: "2026-05-02T10:05:00Z"
         )
-        let commandCenter = CommandPaletteModel()
-
-        await store.refreshAll(force: true)
-        commandCenter.bind(to: store)
-
-        XCTAssertTrue(commandCenter.filteredCommands().contains(where: { $0.id == .finishTrackedEdit }))
     }
 }
 

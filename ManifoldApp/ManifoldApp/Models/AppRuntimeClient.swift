@@ -274,6 +274,7 @@ protocol RuntimeClientProtocol: Sendable {
     func listEmailAccounts() async throws -> [EmailAccountRecord]
     func syncStates(accountID: String) async throws -> [SyncStateRecord]
     func emailMessageCount() async throws -> Int
+    func mailSyncProgress(accountID: String?) async throws -> [MailSyncProgressSnapshot]
     func addIMAPAccount(
         displayName: String,
         provider: EmailProvider,
@@ -290,10 +291,21 @@ protocol RuntimeClientProtocol: Sendable {
         username: String,
         tokenSet: MicrosoftOAuthTokenSet
     ) async throws -> EmailAccountRecord
-    func removeEmailAccount(id: String) async throws
+    func removeEmailAccount(id: String) async throws -> MailAccountRemovalResult
     func toggleEmailSync(accountID: String, enabled: Bool) async throws
     func syncEmailNow(accountID: String) async throws -> SyncResult
+    func mailSyncJobs(accountID: String?, states: [MailSyncJobState]?, limit: Int) async throws -> [MailSyncJobRecord]
     func emailMessages(accountID: String?, mailbox: String?, ids: [String]?, limit: Int) async throws -> [EmailMessageRecord]
+    func emailMessagePage(
+        tokens: [SearchToken],
+        freeText: String,
+        accountID: String?,
+        mailbox: String?,
+        filter: QuickFilter?,
+        sortKey: EmailSortKey,
+        limit: Int,
+        offset: Int
+    ) async throws -> EmailMessagePage
     func domainCounts() async throws -> [String: Int]
     func unreadCountAll() async throws -> Int
     func unreadCount(accountID: String, mailbox: String?) async throws -> Int
@@ -303,6 +315,12 @@ protocol RuntimeClientProtocol: Sendable {
     func sharedEmails(agent: TargetApp, limit: Int) async throws -> [EmailMessageRecord]
     func shareEmails(emailIDs: [String], for agent: TargetApp) async throws
     func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws
+    func emailAttachments(emailID: String) async throws -> [EmailAttachmentRecord]
+    func sharedEmailAttachmentIDs(agent: TargetApp, emailID: String) async throws -> Set<String>
+    func shareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws
+    func unshareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws
+    func openEmailExport(emailID: String) async throws -> String
+    func openEmailAttachment(attachmentID: String) async throws -> String
     func unshareAllEmails() async throws
     func updateEmailReadState(emailID: String, isRead: Bool) async throws
     func updateEmailFlagState(emailID: String, isFlagged: Bool, flagColor: String?) async throws
@@ -619,12 +637,17 @@ extension RuntimeClientProtocol {
     func listEmailAccounts() async throws -> [EmailAccountRecord] { [] }
     func syncStates(accountID: String) async throws -> [SyncStateRecord] { [] }
     func emailMessageCount() async throws -> Int { 0 }
+    func mailSyncProgress(accountID: String? = nil) async throws -> [MailSyncProgressSnapshot] { [] }
     func addIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, password: String) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addIMAPAccount") }
     func addOAuthIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, tokenSet: MicrosoftOAuthTokenSet) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addOAuthIMAPAccount") }
-    func removeEmailAccount(id: String) async throws { throw RuntimeClientStubError.unimplemented("removeEmailAccount") }
+    func removeEmailAccount(id: String) async throws -> MailAccountRemovalResult { throw RuntimeClientStubError.unimplemented("removeEmailAccount") }
     func toggleEmailSync(accountID: String, enabled: Bool) async throws { throw RuntimeClientStubError.unimplemented("toggleEmailSync") }
     func syncEmailNow(accountID: String) async throws -> SyncResult { throw RuntimeClientStubError.unimplemented("syncEmailNow") }
+    func mailSyncJobs(accountID: String? = nil, states: [MailSyncJobState]? = nil, limit: Int = 500) async throws -> [MailSyncJobRecord] { [] }
     func emailMessages(accountID: String? = nil, mailbox: String? = nil, ids: [String]? = nil, limit: Int = 500) async throws -> [EmailMessageRecord] { [] }
+    func emailMessagePage(tokens: [SearchToken], freeText: String, accountID: String?, mailbox: String?, filter: QuickFilter?, sortKey: EmailSortKey, limit: Int, offset: Int) async throws -> EmailMessagePage {
+        EmailMessagePage(messages: [], totalCount: 0, limit: limit, offset: offset)
+    }
     func domainCounts() async throws -> [String: Int] { [:] }
     func unreadCountAll() async throws -> Int { 0 }
     func unreadCount(accountID: String, mailbox: String? = nil) async throws -> Int { 0 }
@@ -634,6 +657,12 @@ extension RuntimeClientProtocol {
     func sharedEmails(agent: TargetApp, limit: Int = 500) async throws -> [EmailMessageRecord] { [] }
     func shareEmails(emailIDs: [String], for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("shareEmails") }
     func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("unshareEmails") }
+    func emailAttachments(emailID: String) async throws -> [EmailAttachmentRecord] { [] }
+    func sharedEmailAttachmentIDs(agent: TargetApp, emailID: String) async throws -> Set<String> { [] }
+    func shareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("shareEmailAttachments") }
+    func unshareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws { throw RuntimeClientStubError.unimplemented("unshareEmailAttachments") }
+    func openEmailExport(emailID: String) async throws -> String { throw RuntimeClientStubError.unimplemented("openEmailExport") }
+    func openEmailAttachment(attachmentID: String) async throws -> String { throw RuntimeClientStubError.unimplemented("openEmailAttachment") }
     func sharedEmailCount() async throws -> Int { try await sharedEmailCount(agent: .cowork) }
     func sharedEmailIDs() async throws -> Set<String> { try await sharedEmailIDs(agent: .cowork) }
     func sharedEmails(limit: Int = 500) async throws -> [EmailMessageRecord] { try await sharedEmails(agent: .cowork, limit: limit) }
@@ -669,6 +698,7 @@ extension RuntimeClientProtocol {
 enum AppFixtureProfile: String, Sendable {
     case onboarding
     case baseline
+    case demo
     case emailRules = "email-rules"
     case trackedWork = "tracked-work"
     case privacy
@@ -904,6 +934,10 @@ enum SyntheticMCPUITestBootstrap {
             explicitSelection: true,
             noteCaptureMode: .basic
         )
+        try await grantStore.replaceGrantFileScopes(
+            grantID: grant.grantID,
+            scopes: [FileSelectionScope(sourceID: sourceID, relativePath: "", isDirectory: true)]
+        )
         _ = try await workBlockStore.startBlock(agent: .codex, grantID: grant.grantID, sourceIDs: [sourceID])
 
         var codexPolicy = try await policyStore.policy(for: .codex)
@@ -912,6 +946,8 @@ enum SyntheticMCPUITestBootstrap {
 
         var coworkPolicy = try await policyStore.policy(for: .cowork)
         coworkPolicy.allowedSourceIDs.insert(sourceID)
+        coworkPolicy.allowedEmailDomains.removeAll()
+        coworkPolicy.defaultEmailPolicy = .blockUnlessAllowed
         try await policyStore.updatePolicy(coworkPolicy)
 
         let account = try emailStore.addEmailAccount(
@@ -1399,7 +1435,10 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         var emails: [EmailMessageRecord]
         var imapMailboxes: [String: [IMAPMailboxRecord]]
         var sharedEmailIDsByAgent: [TargetApp: Set<String>]
+        var sharedEmailAttachmentIDsByAgent: [TargetApp: Set<String>]
         var fileVisibilityOverrides: [TargetApp: [FileVisibilityOverrideRecord]]
+        var snapshotsByPath: [String: [SnapshotRecord]]
+        var snapshotDataByHash: [String: Data]
         var rules: [RuleRecord]
         var seededRules: [RuleRecord]
     }
@@ -2075,6 +2114,18 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     func listEmailAccounts() async throws -> [EmailAccountRecord] { state.mailAccounts }
     func syncStates(accountID: String) async throws -> [SyncStateRecord] { state.syncStates[accountID] ?? [] }
     func emailMessageCount() async throws -> Int { state.emails.count }
+    func mailSyncProgress(accountID: String? = nil) async throws -> [MailSyncProgressSnapshot] {
+        state.mailAccounts
+            .filter { accountID == nil || $0.accountID == accountID }
+            .map { account in
+                MailSyncProgressSnapshot.derive(
+                    account: account,
+                    states: state.syncStates[account.accountID] ?? [],
+                    jobs: [],
+                    syncedMessageCount: state.emails.filter { $0.accountID == account.accountID }.count
+                )
+            }
+    }
     func syncEmailNow(accountID: String) async throws -> SyncResult {
         let now = ISO8601DateFormatter.shared.string(from: Date())
         state.syncStates[accountID] = (state.syncStates[accountID] ?? []).map { existing in
@@ -2099,6 +2150,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] {
         state.imapMailboxes[accountID] ?? []
     }
+    func mailSyncJobs(accountID: String? = nil, states: [MailSyncJobState]? = nil, limit: Int = 500) async throws -> [MailSyncJobRecord] {
+        []
+    }
     func sharedEmailCount(agent: TargetApp) async throws -> Int {
         state.sharedEmailIDsByAgent[agent, default: []].count
     }
@@ -2119,20 +2173,59 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         }
         return Array(filtered.sorted(by: { $0.receivedAt > $1.receivedAt }).prefix(limit))
     }
-    func searchEmailMessages(tokens: [SearchToken], freeText: String, accountID: String?, mailbox: String?, filter: QuickFilter?, sortKey: EmailSortKey, limit: Int) async throws -> [EmailMessageRecord] {
+    func emailMessagePage(
+        tokens: [SearchToken],
+        freeText: String,
+        accountID: String?,
+        mailbox: String?,
+        filter: QuickFilter?,
+        sortKey: EmailSortKey,
+        limit: Int,
+        offset: Int
+    ) async throws -> EmailMessagePage {
         let term = freeText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = try await emailMessages(accountID: accountID, mailbox: mailbox, ids: nil, limit: limit)
-        let filteredByQuickFilter = base.filter { email in
-            guard let filter else { return true }
-            return fixtureMatches(email: email, filter: filter)
+        let tokenTerms = tokens.map(\.value).filter { !$0.isEmpty }.map { $0.lowercased() }
+        var filtered = state.emails.filter { email in
+            (accountID == nil || email.accountID == accountID)
+                && (mailbox == nil || email.mailbox == mailbox)
+                && (filter == nil || fixtureMatches(email: email, filter: filter!))
         }
-        let filtered = term.isEmpty ? filteredByQuickFilter : filteredByQuickFilter.filter { email in
-            [email.sender, email.subject, email.preview ?? "", email.bodyText ?? ""]
-                .joined(separator: "\n")
-                .lowercased()
-                .contains(term)
+        if !term.isEmpty {
+            filtered = filtered.filter { email in
+                [email.sender, email.subject, email.preview ?? "", email.bodyText ?? ""]
+                    .joined(separator: "\n")
+                    .lowercased()
+                    .contains(term)
+            }
         }
-        return Array(filtered.prefix(limit))
+        if !tokenTerms.isEmpty {
+            filtered = filtered.filter { email in
+                let haystack = [email.sender, email.subject, email.preview ?? "", email.bodyText ?? ""]
+                    .joined(separator: "\n")
+                    .lowercased()
+                return tokenTerms.allSatisfy { haystack.contains($0) }
+            }
+        }
+        let sorted = fixtureSortEmails(filtered, by: sortKey)
+        let page = sorted.dropFirst(max(0, offset)).prefix(max(0, limit))
+        return EmailMessagePage(
+            messages: Array(page),
+            totalCount: sorted.count,
+            limit: max(0, limit),
+            offset: max(0, offset)
+        )
+    }
+    func searchEmailMessages(tokens: [SearchToken], freeText: String, accountID: String?, mailbox: String?, filter: QuickFilter?, sortKey: EmailSortKey, limit: Int) async throws -> [EmailMessageRecord] {
+        try await emailMessagePage(
+            tokens: tokens,
+            freeText: freeText,
+            accountID: accountID,
+            mailbox: mailbox,
+            filter: filter,
+            sortKey: sortKey,
+            limit: limit,
+            offset: 0
+        ).messages
     }
     func shareEmails(emailIDs: [String], for agent: TargetApp) async throws {
         for emailID in emailIDs {
@@ -2148,8 +2241,69 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         state.sharedEmailIDsByAgent.removeAll()
     }
 
+    func emailAttachments(emailID: String) async throws -> [EmailAttachmentRecord] {
+        guard let email = state.emails.first(where: { $0.emailID == emailID }), email.attachmentCount > 0 else {
+            return []
+        }
+        return (1...email.attachmentCount).map { index in
+            EmailAttachmentRecord(
+                attachmentID: "\(emailID)-attachment-\(index)",
+                emailID: emailID,
+                filename: index == 1 ? "review-notes.pdf" : "attachment-\(index).txt",
+                mimeType: index == 1 ? "application/pdf" : "text/plain",
+                sizeBytes: index == 1 ? 184_320 : 12_288,
+                contentHash: "fixture-\(emailID)-\(index)"
+            )
+        }
+    }
+
+    func sharedEmailAttachmentIDs(agent: TargetApp, emailID: String) async throws -> Set<String> {
+        let attachmentIDs = Set((try await emailAttachments(emailID: emailID)).map(\.attachmentID))
+        return state.sharedEmailAttachmentIDsByAgent[agent, default: []].intersection(attachmentIDs)
+    }
+
+    func shareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws {
+        for attachmentID in attachmentIDs {
+            state.sharedEmailAttachmentIDsByAgent[agent, default: []].insert(attachmentID)
+        }
+    }
+
+    func unshareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws {
+        for attachmentID in attachmentIDs {
+            state.sharedEmailAttachmentIDsByAgent[agent, default: []].remove(attachmentID)
+        }
+    }
+
+    func openEmailExport(emailID: String) async throws -> String {
+        throw RuntimeClientStubError.unimplemented("openEmailExport")
+    }
+
+    func openEmailAttachment(attachmentID: String) async throws -> String {
+        throw RuntimeClientStubError.unimplemented("openEmailAttachment")
+    }
+
     func fileVisibilityOverrides(agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] {
         state.fileVisibilityOverrides[agent] ?? []
+    }
+
+    func fileHistory(filePath: String) async throws -> [SnapshotRecord] {
+        state.snapshotsByPath[filePath] ?? []
+    }
+
+    func fileHistoryContext(filePath: String, limit: Int = 20) async throws -> FileHistoryContext {
+        let snapshots = Array((state.snapshotsByPath[filePath] ?? []).prefix(limit))
+        let activity = state.activityEntries.filter { $0.filePath == filePath }
+        return FileHistoryContext(
+            filePath: filePath,
+            snapshots: snapshots,
+            relatedActivity: activity,
+            recentExposures: [],
+            relatedSessionIDs: Array(Set(activity.compactMap(\.sessionID))).sorted()
+        )
+    }
+
+    func snapshotData(hash: String) async throws -> Data? {
+        state.snapshotDataByHash[hash]
     }
 
     func setFileVisibilityOverride(
@@ -2382,6 +2536,10 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     }
 
     private static func makeState(profile: AppFixtureProfile) -> FixtureState {
+        if profile == .demo {
+            return Self.makeDemoState()
+        }
+
         let now = ISO8601DateFormatter.shared.string(from: Date())
         let isSyntheticMCPUI = profile == .syntheticMCPUI
         let isPrivacyProfile = profile == .privacy || isSyntheticMCPUI
@@ -2405,7 +2563,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
         let claudeRules = EmailRuleSet(
             agent: .cowork,
             domainRules: [EmailDomainRule(agent: .cowork, domain: "anthropic.test", action: .allow)],
-            contactRules: [EmailContactRule(agent: .cowork, name: "Daniela Amodei", email: "daniela@anthropic.test", action: .block)],
+            contactRules: [EmailContactRule(agent: .cowork, name: "Donatella Amodei", email: "donatella@anthropologie.test", action: .block)],
             keywordRules: [EmailKeywordRule(agent: .cowork, pattern: "constitution", matchLocation: .subjectAndBody, action: .block, isRegex: false)],
             defaultPolicy: .allowUnlessBlocked,
             emailSensitivity: .moderate
@@ -2557,9 +2715,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 emailID: "email-1",
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Dario Amodei <dario@anthropic.test>",
-                senderEmail: "dario@anthropic.test",
-                senderDomain: "anthropic.test",
+                sender: "Mario Amodei <mario@anthropologie.test>",
+                senderEmail: "mario@anthropologie.test",
+                senderDomain: "anthropologie.test",
                 recipients: "policy@manifold.test",
                 subject: "Frontier safety sync",
                 receivedAt: boardRootDate,
@@ -2575,8 +2733,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 emailID: "email-2",
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Mark Chen <mark@openai.test>",
-                senderEmail: "mark@openai.test",
+                sender: "Marc Chenille <marc@openai.test>",
+                senderEmail: "marc@openai.test",
                 senderDomain: "openai.test",
                 recipients: "policy@manifold.test",
                 subject: "Re: Frontier safety sync",
@@ -2593,9 +2751,9 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 emailID: "email-3",
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Daniela Amodei <daniela@anthropic.test>",
-                senderEmail: "daniela@anthropic.test",
-                senderDomain: "anthropic.test",
+                sender: "Donatella Amodei <donatella@anthropologie.test>",
+                senderEmail: "donatella@anthropologie.test",
+                senderDomain: "anthropologie.test",
                 recipients: "policy@manifold.test",
                 subject: "Re: Frontier safety sync",
                 receivedAt: boardLatestDate,
@@ -2612,7 +2770,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 emailID: privacyEmailID,
                 accountID: "account-1",
                 mailbox: "INBOX",
-                sender: "Greg Brockman <greg@openai.test>",
+                sender: "Greg Brackman <greg@openai.test>",
                 senderEmail: "greg@openai.test",
                 senderDomain: "openai.test",
                 recipients: "policy@manifold.test",
@@ -2629,8 +2787,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 emailID: "email-5",
                 accountID: "account-1",
                 mailbox: "Archive",
-                sender: "Fidji Simo <fidji@openai.test>",
-                senderEmail: "fidji@openai.test",
+                sender: "Fiji Simmer <fiji@openai.test>",
+                senderEmail: "fiji@openai.test",
                 senderDomain: "openai.test",
                 recipients: "policy@manifold.test",
                 subject: "Quarterly governance review",
@@ -3134,10 +3292,328 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 .cowork: ["email-1"],
                 .codex: codexSharedEmailIDs,
             ],
+            sharedEmailAttachmentIDsByAgent: [:],
             fileVisibilityOverrides: [:],
+            snapshotsByPath: [:],
+            snapshotDataByHash: [:],
             rules: rules,
             seededRules: seededRules
         )
+    }
+
+    private static func makeDemoState() -> FixtureState {
+        let now = "2026-05-01T17:00:00Z"
+        let base = "/Users/demo/Anthropologie"
+        let sourceProduct = SourceRecord(sourceID: "demo-product", displayName: "product", originalRootPath: "\(base)/product", status: "idle", createdAt: now, updatedAt: now)
+        let sourceCode = SourceRecord(sourceID: "demo-code", displayName: "code", originalRootPath: "\(base)/code", status: "idle", createdAt: now, updatedAt: now)
+        let sourceNotes = SourceRecord(sourceID: "demo-notes", displayName: "notes", originalRootPath: "\(base)/notes", status: "idle", createdAt: now, updatedAt: now)
+        let sourceInvoices = SourceRecord(sourceID: "demo-invoices", displayName: "invoices", originalRootPath: "\(base)/invoices", status: "idle", createdAt: now, updatedAt: now)
+        let sourceRacing = SourceRecord(sourceID: "demo-racing", displayName: "racing", originalRootPath: "\(base)/racing", status: "idle", createdAt: now, updatedAt: now)
+        let sourceLegal = SourceRecord(sourceID: "demo-legal", displayName: "legal", originalRootPath: "\(base)/legal", status: "idle", createdAt: now, updatedAt: now)
+        let sources = [sourceProduct, sourceCode, sourceNotes, sourceInvoices, sourceRacing, sourceLegal]
+
+        let claudeRules = EmailRuleSet(
+            agent: .cowork,
+            domainRules: [EmailDomainRule(agent: .cowork, domain: "anthropologie.test", action: .allow)],
+            contactRules: [EmailContactRule(agent: .cowork, name: "Donatella Amodei", email: "donatella@anthropologie.test", action: .allow)],
+            keywordRules: [EmailKeywordRule(agent: .cowork, pattern: "verification code", matchLocation: .subjectAndBody, action: .block, isRegex: false)],
+            defaultPolicy: .blockUnlessAllowed,
+            emailSensitivity: .strict
+        )
+        let codexRules = EmailRuleSet(
+            agent: .codex,
+            domainRules: [EmailDomainRule(agent: .codex, domain: "github.test", action: .allow), EmailDomainRule(agent: .codex, domain: "stripe.test", action: .allow)],
+            contactRules: [EmailContactRule(agent: .codex, name: "Boris Cherrybomb", email: "boris@anthropologie.org", action: .allow)],
+            keywordRules: [EmailKeywordRule(agent: .codex, pattern: "auth.ts", matchLocation: .subjectAndBody, action: .allow, isRegex: false)],
+            defaultPolicy: .blockUnlessAllowed,
+            emailSensitivity: .strict
+        )
+        let claudePolicy = AgentAccessPolicy(agent: .cowork, allowedSourceIDs: ["demo-product", "demo-code", "demo-notes"], allowedEmailDomains: ["anthropologie.test"], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
+        let codexPolicy = AgentAccessPolicy(agent: .codex, allowedSourceIDs: ["demo-code", "demo-notes", "demo-invoices"], allowedEmailDomains: ["github.test", "stripe.test"], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
+        let claudeGovernance = AgentEmailGovernanceSummary(agent: .cowork, enabledShieldCount: claudeRules.shields.filter(\.isEnabled).count, domainRuleCount: claudeRules.domainRules.count, contactRuleCount: claudeRules.contactRules.count, keywordRuleCount: claudeRules.keywordRules.count, defaultPolicy: claudeRules.defaultPolicy, emailSensitivity: claudeRules.emailSensitivity)
+        let codexGovernance = AgentEmailGovernanceSummary(agent: .codex, enabledShieldCount: codexRules.shields.filter(\.isEnabled).count, domainRuleCount: codexRules.domainRules.count, contactRuleCount: codexRules.contactRules.count, keywordRuleCount: codexRules.keywordRules.count, defaultPolicy: codexRules.defaultPolicy, emailSensitivity: codexRules.emailSensitivity)
+
+        let privacySettings = PrivacyPreflightSettings(isEnabled: true, selectedBackend: .mlx, installState: .installed, modelVersion: "openai-privacy-filter-mxfp8", storagePath: "\(base)/.manifold-demo/privacy", installedAt: now)
+        let privacyRuntimes = [
+            PrivacyRuntimeDescriptor(
+                id: PrivacyRuntimeDefaults.mlxRuntimeID,
+                displayName: "OpenAI Privacy Filter",
+                publisher: "OpenAI",
+                installedVersion: "openai-privacy-filter-mxfp8",
+                availableVersion: "openai-privacy-filter-mxfp8",
+                installState: .installed,
+                verificationState: .checksumVerified,
+                note: "Apache 2.0, MLX. Pinned hash a8f3...c2e9."
+            )
+        ]
+        let privacyRuntimeStatus = PrivacyRuntimeStatus(
+            featureEnabled: true,
+            selectedBackend: .mlx,
+            effectiveBackend: .mlx,
+            installState: .installed,
+            modelLoaded: true,
+            cacheEntryCount: 12,
+            lastError: nil,
+            storagePath: privacySettings.storagePath,
+            backends: [
+                PrivacyBackendStatus(kind: .rulesOnly, available: true, installed: true, note: "Seeded deny rules active."),
+                PrivacyBackendStatus(kind: .mlx, available: true, installed: true, note: "Pinned hash a8f3...c2e9."),
+            ],
+            runtimeID: PrivacyRuntimeDefaults.mlxRuntimeID,
+            runtimeDisplayName: "OpenAI Privacy Filter",
+            installedVersion: "openai-privacy-filter-mxfp8",
+            availableVersion: "openai-privacy-filter-mxfp8",
+            verificationState: .checksumVerified
+        )
+        let claudePrivacyPolicy = AgentPrivacyPolicy(agent: .cowork, textHandling: .redact, codeHandling: .ask, secretHandling: .block, updatedAt: now)
+        let codexPrivacyPolicy = AgentPrivacyPolicy(agent: .codex, textHandling: .redact, codeHandling: .ask, secretHandling: .block, updatedAt: now)
+
+        let coverages = [
+            AgentCoverageSnapshot(agent: TargetApp.cowork.rawValue, coverageState: .manifoldRouted, verificationStatus: .verified, hostBundleIdentifier: "com.anthropic.claudefordesktop", reason: "Demo Mode synthetic data"),
+            AgentCoverageSnapshot(agent: TargetApp.codex.rawValue, coverageState: .trackedWorkspace, verificationStatus: .verified, hostBundleIdentifier: "com.openai.codex", reason: "Demo Mode synthetic data"),
+        ]
+        let coverageEvents = [
+            CoverageEvent(id: "demo-coverage-auth", agent: TargetApp.codex.rawValue, coverageState: .trackedWorkspace, eventType: "tracked_work", message: "Tracked Work Block #142 opened for auth.ts.", resourcePath: "\(base)/code/src/auth.ts", timestamp: "2026-05-01T10:03:00Z", metadata: nil)
+        ]
+
+        let activity: [AuditEntry] = [
+            demoActivity(1, "2026-05-01T09:14:00Z", .cowork, "read", "\(base)/product/q3-roadmap.md (v4)", #"{"rule":"product/* shared with Claude"}"#),
+            demoActivity(2, "2026-05-01T09:16:00Z", .cowork, "read", "\(base)/product/customer-proposal.docx (v3)", #"{"rule":"product/* shared with Claude"}"#),
+            demoActivity(3, "2026-05-01T09:22:00Z", .cowork, "read", "\(base)/notes/interviews/user-12-call.md", #"{"rule":"notes/* shared with all"}"#),
+            demoActivity(4, "2026-05-01T10:02:00Z", .codex, "read", "\(base)/code/src/auth.ts (v8)", #"{"rule":"code/* shared with both"}"#),
+            demoActivity(5, "2026-05-01T10:03:00Z", .codex, "proposed_edit", "\(base)/code/src/auth.ts -> v9", #"{"tracked_work_block":"142","reviewer":"Boris Cherrybomb"}"#, grantID: "grant-demo-142"),
+            demoActivity(6, "2026-05-01T10:47:00Z", .cowork, "denied_read", "\(base)/code/.env", #"{"rule":"deny **/.env"}"#),
+            demoActivity(7, "2026-05-01T11:03:00Z", .codex, "denied_read", "\(base)/legal/cap-table-2026.docx", #"{"rule":"legal/* never shared"}"#),
+            demoActivity(8, "2026-05-01T11:15:00Z", .cowork, AuditAction.sensitivityWarning.rawValue, "Re: Q1 board update", #"{"privacy_summary":"cap-table figures + 1 phone number","privacy_outcome":"redacted"}"#),
+            demoActivity(9, "2026-05-01T11:30:00Z", .cowork, "context_reused", "Anthropologie - Q3 roadmap (Mario)", #"{"summary":"12 files, 3 email threads"}"#),
+            demoActivity(10, "2026-05-01T13:22:00Z", .cowork, "denied_read", "\(base)/.ssh/id_ed25519", #"{"rule":"deny **/.ssh/**"}"#),
+            demoActivity(11, "2026-05-01T14:41:00Z", .cowork, AuditAction.sensitivityWarning.rawValue, "Your verification code is 847291", #"{"privacy_summary":"2FA pattern matched","privacy_outcome":"blocked"}"#),
+            demoActivity(12, "2026-05-01T14:51:00Z", .cowork, "read", "\(base)/notes/team/2026-04-30-coffee-tasting.md", #"{"note":"OpenAI set the table with eval cupcakes."}"#),
+            demoActivity(13, "2026-05-01T16:02:00Z", .codex, "read", "\(base)/notes/meetings/demis-call-summary.md", #"{"note":"Demi Hassabit suggested we explore boutique merchandise."}"#),
+        ]
+
+        let accounts = [
+            EmailAccountRecord(accountID: "demo-icloud", displayName: "iCloud", providerType: EmailProvider.icloud.rawValue, server: "imap.mail.me.test", username: "mario@anthropologie.test", authType: "demo", syncEnabled: true, createdAt: now, updatedAt: now),
+            EmailAccountRecord(accountID: "demo-gmail", displayName: "Gmail", providerType: EmailProvider.gmail.rawValue, server: "imap.gmail.test", username: "mario.kart@gmail.test", authType: "demo", syncEnabled: true, createdAt: now, updatedAt: now),
+            EmailAccountRecord(accountID: "demo-m365", displayName: "Microsoft 365", providerType: EmailProvider.outlook.rawValue, server: "outlook.office365.test", username: "ceo@anthropologie.org", authType: "demo", syncEnabled: true, createdAt: now, updatedAt: now),
+        ]
+        let emails = demoEmails()
+        let imapMailboxes = Dictionary(uniqueKeysWithValues: accounts.map { account in
+            (account.accountID, [
+                IMAPMailboxRecord(row: ["account_id": account.accountID, "mailbox_name": "INBOX", "delimiter": "/", "flags": "[\"\\\\Inbox\"]", "is_selectable": "1", "sort_order": "0"]),
+                IMAPMailboxRecord(row: ["account_id": account.accountID, "mailbox_name": "Archive", "delimiter": "/", "flags": "[\"\\\\Archive\"]", "is_selectable": "1", "sort_order": "1"]),
+            ].compactMap { $0 })
+        })
+        let syncStates = Dictionary(uniqueKeysWithValues: accounts.map { account in
+            (account.accountID, [SyncStateRecord(accountID: account.accountID, mailboxName: "INBOX", lastSyncAt: now, messageCount: emails.filter { $0.accountID == account.accountID }.count, syncStatus: .idle)])
+        })
+
+        let activeGrant = GrantRecord(
+            grantID: "grant-demo-142",
+            targetApp: TargetApp.codex.rawValue,
+            profileID: "profile-demo-auth-review",
+            status: GrantStatus.active.rawValue,
+            startedAt: "2026-05-01T10:03:00Z",
+            materializationRoot: "/tmp/manifold-demo/codex",
+            emailSensitivity: EmailSensitivityLevel.strict.rawValue,
+            summaryFraming: "Tracked Work Block #142 on auth.ts v8 -> v9",
+            explicitSelection: false,
+            noteCaptureMode: SessionNoteCaptureMode.basic.rawValue,
+            requestDetailLevel: AccessRecordingLevel.detailed.rawValue,
+            memoryAccessEnabled: true
+        )
+        let activeWorkBlock = WorkBlockRecord(id: "142", agent: .codex, grantID: activeGrant.grantID, sourceIDs: ["demo-code"], startedAt: "2026-05-01T10:03:00Z", status: .reviewing, modifiedFileCount: 1, newFileCount: 0)
+        let sessions = [
+            Session(id: "session-demo-roadmap", agent: TargetApp.cowork.rawValue, startTime: "2026-05-01T09:10:00Z", endTime: "2026-05-01T11:35:00Z", actionCount: 7, readCount: 5, writeCount: 0, searchCount: 2),
+            Session(id: "session-demo-auth", agent: TargetApp.codex.rawValue, startTime: "2026-05-01T10:00:00Z", endTime: "2026-05-01T10:24:00Z", actionCount: 4, readCount: 2, writeCount: 1, searchCount: 1),
+        ]
+        let sessionEvents = [
+            "session-demo-auth": [
+                SessionEvent(id: 14201, timestamp: "2026-05-01T10:02:00Z", action: AuditAction.fileRead.rawValue, agent: TargetApp.codex.rawValue, filePath: "\(base)/code/src/auth.ts", metadata: #"{"version":"v8"}"#),
+                SessionEvent(id: 14202, timestamp: "2026-05-01T10:03:00Z", action: "proposed_edit", agent: TargetApp.codex.rawValue, filePath: "\(base)/code/src/auth.ts", metadata: #"{"tracked_work_block":"142"}"#),
+            ]
+        ]
+
+        let seededRules = demoSeededRules(now: now)
+        let userRules = demoUserRules(now: now)
+        let snapshots = demoSnapshots(base: base)
+        let snapshotData = demoSnapshotData()
+        let memorySettings = MemorySettings(amnesiacMode: true, derivedRetentionDays: 90, updatedAt: now)
+        let memoryItems = [
+            MemoryItem(memoryID: "mem-anthropologie-pricing-rationale-q2", kind: .summary, title: "Pricing rationale", body: "Claude can retain product pricing rationale for product/* across 7 tracked versions. Expires 2026-08-01.", contributingSourceIDs: ["demo-product"], contributingGrantIDs: ["grant-demo-pricing"], createdSessionID: "session-demo-roadmap", expiresAt: 1_785_542_400, createdAt: 1_714_560_000, updatedAt: 1_714_650_000),
+            MemoryItem(memoryID: "mem-anthropologie-auth-refactor-decisions", kind: .routine, title: "Auth refactor decisions", body: "Codex can use code/* refactor notes during the active session. Amnesiac mode is active.", contributingSourceIDs: ["demo-code"], contributingGrantIDs: ["grant-demo-142"], createdSessionID: "session-demo-auth", createdAt: 1_714_563_000, updatedAt: 1_714_563_800),
+        ]
+
+        return FixtureState(
+            sources: sources,
+            claudePolicy: claudePolicy,
+            codexPolicy: codexPolicy,
+            claudeGovernance: claudeGovernance,
+            codexGovernance: codexGovernance,
+            privacySettings: privacySettings,
+            privacyRuntimes: privacyRuntimes,
+            claudePrivacyPolicy: claudePrivacyPolicy,
+            codexPrivacyPolicy: codexPrivacyPolicy,
+            privacyRuntimeStatus: privacyRuntimeStatus,
+            privacyIdentitySuggestions: [],
+            privacyIdentities: [
+                PrivacyIdentityRecord(id: "demo-identity-email", kind: .email, displayName: "Mario's demo email", value: "mario@anthropologie.test"),
+                PrivacyIdentityRecord(id: "demo-identity-phone", kind: .phone, displayName: "Demo board phone", value: "+1 555 0100"),
+            ],
+            privacyOrgAllowEntries: [PrivacyOrgAllowEntry(id: "demo-allow-anthropologie", kind: .senderDomain, pattern: "anthropologie.test", matchMode: .domainSuffix)],
+            privacyIndexRecords: [],
+            coverages: coverages,
+            coverageEvents: coverageEvents,
+            activeWorkBlock: activeWorkBlock,
+            sessionAccessMode: .defaultSession,
+            connectedAgents: [TargetApp.cowork.rawValue, TargetApp.codex.rawValue],
+            activityEntries: activity,
+            sessions: sessions,
+            sessionEvents: sessionEvents,
+            ledgerEntries: [],
+            ledgerVerification: LedgerVerificationResult(verified: true, checkedEntries: 0, firstBrokenEntryID: nil, message: "Demo ledger chain verified."),
+            toolCostReport: ToolCostReport(totalCalls: 0, totalOutputBytes: 0, averageDurationMS: 0, callsByTool: [:], recent: []),
+            memorySettings: memorySettings,
+            memoryItems: memoryItems,
+            skills: [],
+            execRuns: [
+                ExecRunRecord(runID: "demo-saved-session-roadmap", status: ExecRunStatus.completed.rawValue, reason: "Saved demo session replay.", suggestedAlternative: nil, outputPreview: "Claude reused Anthropologie - Q3 roadmap (Mario).", createdAt: 1_714_560_000),
+                ExecRunRecord(runID: "demo-saved-session-auth", status: ExecRunStatus.completed.rawValue, reason: "Saved demo session replay.", suggestedAlternative: nil, outputPreview: "Codex opened Tracked Work Block #142 for auth.ts.", createdAt: 1_714_563_000),
+            ],
+            capabilityHandles: [],
+            graphNodes: [],
+            fabricationFindings: [],
+            activeGrant: activeGrant,
+            activeGrantSources: [GrantSourceRecord(grantID: activeGrant.grantID, sourceID: "demo-code", mountName: "code")],
+            activeGrantEmailIDs: ["demo-m365-github", "demo-m365-stripe", "demo-m365-boris"],
+            pendingApprovals: [
+                PendingApprovalRecord(id: "approval-demo-142", connectionID: "demo-codex", agent: TargetApp.codex.rawValue, path: "\(base)/code/src/auth.ts", action: "write", kind: "tracked_work", sourceID: "demo-code", mountName: "code", relativePath: "src/auth.ts", contextJSON: #"{"comment":"Respectfully: this regresses the v6 null check. Suggest restoring v6's guard, then layering the bearer path on top.","controls":["promote","discard","restore-to-v6"]}"#, requestedAt: 1_714_563_780, status: "pending")
+            ],
+            emailRuleSets: [.cowork: claudeRules, .codex: codexRules],
+            emailRuleSummaries: [
+                .cowork: EmailRuleActivitySummary(agent: .cowork, shieldBlockedCounts: ["2FA": 1, "PII": 1], recentShieldMatches: [], domainRuleHits: [.init(ruleID: claudeRules.domainRules[0].id, count: 3)], contactRuleHits: [.init(ruleID: claudeRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: claudeRules.keywordRules[0].id, count: 1)]),
+                .codex: EmailRuleActivitySummary(agent: .codex, shieldBlockedCounts: ["financial": 1], recentShieldMatches: [], domainRuleHits: [.init(ruleID: codexRules.domainRules[0].id, count: 1)], contactRuleHits: [.init(ruleID: codexRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: codexRules.keywordRules[0].id, count: 2)]),
+            ],
+            domainCounts: ["anthropologie.test": 4, "gmail.test": 1, "github.test": 1, "stripe.test": 1, "oldmotors.test": 1],
+            trackedFiles: [
+                "\(base)/product/customer-proposal.docx",
+                "\(base)/product/pricing-decisions.md",
+                "\(base)/code/src/auth.ts",
+                "\(base)/invoices/2026-Q1-customer-summary.csv",
+                "\(base)/notes/meetings/2026-05-01-pricing-review.md",
+                "\(base)/racing/kart-47-tire-compound-analysis.md",
+                "\(base)/legal/cap-table-2026.docx",
+            ],
+            storageUsed: 384_512,
+            mailAccounts: accounts,
+            syncStates: syncStates,
+            emails: emails,
+            imapMailboxes: imapMailboxes,
+            sharedEmailIDsByAgent: [
+                .cowork: ["demo-icloud-roadmap", "demo-icloud-pricing", "demo-gmail-interview"],
+                .codex: ["demo-m365-github", "demo-m365-stripe", "demo-m365-boris"],
+            ],
+            sharedEmailAttachmentIDsByAgent: [:],
+            fileVisibilityOverrides: [
+                .cowork: [
+                    FileVisibilityOverrideRecord(agent: .cowork, sourceID: "demo-code", relativePath: ".env", isDirectory: false, decision: .deny),
+                    FileVisibilityOverrideRecord(agent: .cowork, sourceID: "demo-notes", relativePath: "meetings/2026-05-01-pricing-review.md", isDirectory: false, decision: .allow),
+                ],
+                .codex: [
+                    FileVisibilityOverrideRecord(agent: .codex, sourceID: "demo-code", relativePath: ".env", isDirectory: false, decision: .deny),
+                    FileVisibilityOverrideRecord(agent: .codex, sourceID: "demo-notes", relativePath: "meetings/2026-05-01-pricing-review.md", isDirectory: false, decision: .deny),
+                ],
+            ],
+            snapshotsByPath: snapshots,
+            snapshotDataByHash: snapshotData,
+            rules: seededRules + userRules,
+            seededRules: seededRules
+        )
+    }
+
+    private static func demoActivity(_ id: Int, _ timestamp: String, _ agent: TargetApp, _ action: String, _ path: String, _ metadata: String, grantID: String? = nil) -> AuditEntry {
+        AuditEntry(id: id, timestamp: timestamp, agent: agent.rawValue, action: action, filePath: path, metadata: metadata, sessionID: agent == .codex ? "session-demo-auth" : "session-demo-roadmap", grantID: grantID)
+    }
+
+    private static func demoEmails() -> [EmailMessageRecord] {
+        [
+            demoEmail("demo-icloud-roadmap", "demo-icloud", "Donatella Amodei <donatella@anthropologie.test>", "donatella@anthropologie.test", "anthropologie.test", "Re: Q3 roadmap - happy to look at this", "2026-05-01T08:42:00Z", "Claude can see this thread. The linen launch and model roadmap still need separate headings."),
+            demoEmail("demo-icloud-pricing", "demo-icloud", "Tom Brownie <tom@anthropologie.test>", "tom@anthropologie.test", "anthropologie.test", "Pricing review notes", "2026-05-01T08:21:00Z", "Claude shared. Token pricing and scarf pricing both need one clean table."),
+            demoEmail("demo-icloud-dentist", "demo-icloud", "Dentist <frontdesk@dentist.test>", "frontdesk@dentist.test", "dentist.test", "Personal: dentist appointment moved", "2026-05-01T07:55:00Z", "Not shared with any AI."),
+            demoEmail("demo-icloud-clothing", "demo-icloud", "Anthropologie Orders <noreply@anthropologie-clothing.test>", "noreply@anthropologie-clothing.test", "anthropologie-clothing.test", "Your order has shipped", "2026-05-01T07:18:00Z", "The linen jacket shipped. Both AI chips are denied."),
+            demoEmail("demo-gmail-interview", "demo-gmail", "Calendar <calendar@gmail.test>", "calendar@gmail.test", "gmail.test", "Customer interview #14 confirmed - Tuesday 2pm", "2026-05-01T09:01:00Z", "Shared with Claude for research prep."),
+            demoEmail("demo-gmail-kart", "demo-gmail", "Vintage Kart Forum <vintage-kart@oldmotors.test>", "vintage-kart@oldmotors.test", "oldmotors.test", "New tire compounds for the 2026 season - exclusive forum drop", "2026-05-01T09:04:00Z", "Not shared. Mario's secret hobby."),
+            demoEmail("demo-gmail-board", "demo-gmail", "Investor Updates <investors@capital.test>", "investors@capital.test", "capital.test", "Re: Q1 board update", "2026-05-01T09:12:00Z", "PII redacted: cap-table figures and one phone number."),
+            demoEmail("demo-gmail-2fa", "demo-gmail", "Security Codes <noreply@2fa.test>", "noreply@2fa.test", "2fa.test", "Your verification code is 847291", "2026-05-01T09:16:00Z", "Redacted by privacy filter before any AI could see it."),
+            demoEmail("demo-m365-github", "demo-m365", "GitHub <support@github.test>", "support@github.test", "github.test", "[github] PR #142 needs review - auth.ts refactor", "2026-05-01T10:01:00Z", "Shared with Codex. Tracked Work Block #142 is in review."),
+            demoEmail("demo-m365-stripe", "demo-m365", "Stripe <accounts@stripe.test>", "accounts@stripe.test", "stripe.test", "Stripe webhook event delivery failures", "2026-05-01T10:11:00Z", "Shared with Codex for billing.ts checks."),
+            demoEmail("demo-m365-boris", "demo-m365", "Boris Cherrybomb <boris@anthropologie.org>", "boris@anthropologie.org", "anthropologie.org", "Re: auth.ts edge case (long)", "2026-05-01T10:19:00Z", "Respectfully: this regresses the v6 null check."),
+            demoEmail("demo-m365-openai", "demo-m365", "Sam Altmore <sam@openai.test>", "sam@openai.test", "openai.test", "Friendly nudge re: AGI working group", "2026-05-01T12:04:00Z", "Not shared with any AI."),
+            demoEmail("demo-m365-demi", "demo-m365", "Demi Hassabit <demi@deepmind.test>", "demi@deepmind.test", "deepmind.test", "Catching up - saw your kart photos", "2026-05-01T13:48:00Z", "Not shared. Non-AI things."),
+            demoEmail("demo-m365-mustafa", "demo-m365", "Mustafa Sailmán <mustafa@microsoft.test>", "mustafa@microsoft.test", "microsoft.test", "Re: linen line - collaboration?", "2026-05-01T15:12:00Z", "Forwarded to Tom Brownie."),
+        ]
+    }
+
+    private static func demoEmail(_ id: String, _ account: String, _ sender: String, _ senderEmail: String, _ domain: String, _ subject: String, _ receivedAt: String, _ preview: String) -> EmailMessageRecord {
+        EmailMessageRecord(emailID: id, accountID: account, mailbox: "INBOX", sender: sender, senderEmail: senderEmail, senderDomain: domain, recipients: "Mario Amodei <mario@anthropologie.test>", subject: subject, receivedAt: receivedAt, sizeBytes: 2_048, preview: preview, isRead: id.contains("2fa") == false, messageIDHeader: "<\(id)@demo.manifold.test>", bodyText: preview)
+    }
+
+    private static func demoSeededRules(now: String) -> [RuleRecord] {
+        [
+            RuleRecord(id: "demo-seeded-env", name: "deny **/.env", explanation: "Seeded deny: environment files are never shared.", scope: .file, matcher: .pathGlob("**/.env"), action: .deny, source: .seeded, orderIndex: 0, createdAt: now, updatedAt: now, matchCount: 1),
+            RuleRecord(id: "demo-seeded-ssh", name: "deny **/.ssh/**", explanation: "Seeded deny: SSH keys are never shared.", scope: .file, matcher: .pathGlob("**/.ssh/**"), action: .deny, source: .seeded, orderIndex: 1, createdAt: now, updatedAt: now, matchCount: 1),
+            RuleRecord(id: "demo-seeded-private-key", name: "deny **/private_key*", explanation: "Seeded deny: private keys are never shared.", scope: .file, matcher: .pathGlob("**/private_key*"), action: .deny, source: .seeded, orderIndex: 2, createdAt: now, updatedAt: now),
+            RuleRecord(id: "demo-seeded-credentials", name: "deny **/credentials.json", explanation: "Seeded deny: credentials.json is never shared.", scope: .file, matcher: .pathGlob("**/credentials.json"), action: .deny, source: .seeded, orderIndex: 3, createdAt: now, updatedAt: now),
+        ]
+    }
+
+    private static func demoUserRules(now: String) -> [RuleRecord] {
+        [
+            RuleRecord(id: "demo-rule-legal", name: "legal/* never shared with any AI", explanation: "Legal records stay outside every session.", scope: .file, matcher: .pathGlob("legal/**"), action: .deny, source: .user, orderIndex: 10, createdAt: now, updatedAt: now, matchCount: 1),
+            RuleRecord(id: "demo-rule-product", name: "product/* shared with Claude, hidden from Codex", explanation: "Roadmap and proposal work is Claude-only.", scope: .file, matcher: .pathGlob("product/**"), action: .allow, agents: [.cowork], source: .user, orderIndex: 11, createdAt: now, updatedAt: now, matchCount: 3),
+            RuleRecord(id: "demo-rule-code", name: "code/* shared with both", explanation: "Code is visible to both agents except explicit overrides like .env.", scope: .file, matcher: .pathGlob("code/**"), action: .allow, agents: [.cowork, .codex], source: .user, orderIndex: 12, createdAt: now, updatedAt: now, matchCount: 4),
+            RuleRecord(id: "demo-rule-racing", name: "racing/* never shared", explanation: "Mario's hobby files stay private.", scope: .file, matcher: .pathGlob("racing/**"), action: .deny, source: .user, orderIndex: 13, createdAt: now, updatedAt: now),
+            RuleRecord(id: "demo-rule-pricing-review", name: "notes/meetings/2026-05-01-pricing-review.md shared with Claude only", explanation: "Active override: this file is visible to Claude and hidden from Codex.", scope: .file, matcher: .pathGlob("notes/meetings/2026-05-01-pricing-review.md"), action: .allow, agents: [.cowork], source: .user, orderIndex: 14, createdAt: now, updatedAt: now, lastMatchedAt: "2026-05-01T11:30:00Z", matchCount: 1),
+        ]
+    }
+
+    private static func demoSnapshots(base: String) -> [String: [SnapshotRecord]] {
+        Dictionary(uniqueKeysWithValues: [
+            ("\(base)/product/customer-proposal.docx", demoSnapshotRecords(path: "\(base)/product/customer-proposal.docx", prefix: "customer-proposal", count: 3, startID: 301)),
+            ("\(base)/product/pricing-decisions.md", demoSnapshotRecords(path: "\(base)/product/pricing-decisions.md", prefix: "pricing-decisions", count: 7, startID: 401)),
+            ("\(base)/code/src/auth.ts", demoSnapshotRecords(path: "\(base)/code/src/auth.ts", prefix: "auth", count: 8, startID: 501)),
+        ])
+    }
+
+    private static func demoSnapshotRecords(path: String, prefix: String, count: Int, startID: Int) -> [SnapshotRecord] {
+        (1...count).map { version in
+            SnapshotRecord(
+                id: startID + version,
+                runID: "demo-\(prefix)-v\(version)",
+                workspaceID: "demo-workspace",
+                timestamp: "2026-04-\(String(format: "%02d", 24 + version))T10:00:00Z",
+                filePath: path,
+                afterHash: "demo-\(prefix)-v\(version)",
+                beforeHash: version == 1 ? nil : "demo-\(prefix)-v\(version - 1)",
+                isBaseline: version == 1,
+                source: version % 2 == 0 ? "agent" : "user"
+            )
+        }
+    }
+
+    private static func demoSnapshotData() -> [String: Data] {
+        var result: [String: Data] = [:]
+        for version in 1...3 {
+            result["demo-customer-proposal-v\(version)"] = Data("Customer proposal v\(version)\n\(version == 2 ? "Sharper Tuesday version - the good one." : "Marketing language draft.")\n".utf8)
+        }
+        for version in 1...7 {
+            result["demo-pricing-decisions-v\(version)"] = Data("# Pricing decisions v\(version)\n\(version == 5 ? "Abandoned tiered model." : version == 7 ? "Returned to flat pricing." : "Intermediate token and scarf pricing notes.")\n".utf8)
+        }
+        for version in 1...8 {
+            result["demo-auth-v\(version)"] = Data("export function authenticateV\(version)(token?: string) {\n  if (!token) { return null }\n  return verifyBearerToken(token)\n}\n".utf8)
+        }
+        result["demo-auth-v9"] = Data("export function authenticate(token?: string) {\n  const user = verifyBearerToken(token!)\n  return issueSession(user)\n}\n".utf8)
+        return result
     }
 
     private func fixtureMatches(email: EmailMessageRecord, filter: QuickFilter) -> Bool {
@@ -3162,10 +3638,54 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             return date >= weekAgo
         }
     }
+
+    private func fixtureSortEmails(_ emails: [EmailMessageRecord], by sortKey: EmailSortKey) -> [EmailMessageRecord] {
+        switch sortKey {
+        case .date:
+            return emails.sorted { lhs, rhs in
+                if lhs.receivedAt != rhs.receivedAt { return lhs.receivedAt > rhs.receivedAt }
+                return lhs.emailID > rhs.emailID
+            }
+        case .sender:
+            return emails.sorted { lhs, rhs in
+                let lhsSender = lhs.senderEmail ?? lhs.sender
+                let rhsSender = rhs.senderEmail ?? rhs.sender
+                if lhsSender != rhsSender { return lhsSender < rhsSender }
+                if lhs.receivedAt != rhs.receivedAt { return lhs.receivedAt > rhs.receivedAt }
+                return lhs.emailID > rhs.emailID
+            }
+        case .subject:
+            return emails.sorted { lhs, rhs in
+                if lhs.subject != rhs.subject { return lhs.subject < rhs.subject }
+                if lhs.receivedAt != rhs.receivedAt { return lhs.receivedAt > rhs.receivedAt }
+                return lhs.emailID > rhs.emailID
+            }
+        case .size:
+            return emails.sorted { lhs, rhs in
+                if lhs.sizeBytes != rhs.sizeBytes { return lhs.sizeBytes > rhs.sizeBytes }
+                if lhs.receivedAt != rhs.receivedAt { return lhs.receivedAt > rhs.receivedAt }
+                return lhs.emailID > rhs.emailID
+            }
+        }
+    }
 }
 
 final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
     let xpc = ManifoldXPCClient()
+
+    private static var pendingCredentialTrustedApplicationPaths: [String] {
+        var paths: [String] = []
+        if let appExecutable = Bundle.main.executableURL?.path {
+            paths.append(appExecutable)
+        }
+
+        let helper = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Library/LaunchServices/ManifoldAgent")
+        if FileManager.default.isExecutableFile(atPath: helper.path) {
+            paths.append(helper.path)
+        }
+        return paths
+    }
 
     func ping() async -> RuntimePingResult {
         do {
@@ -3690,6 +4210,19 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         try await command(name: "emailMessageCount", field: "count", as: Int.self)
     }
 
+    func mailSyncProgress(accountID: String? = nil) async throws -> [MailSyncProgressSnapshot] {
+        var payload: [String: Any] = [:]
+        if let accountID {
+            payload["accountID"] = accountID
+        }
+        return try await command(
+            name: "mailSyncProgress",
+            payload: payload,
+            field: "progress",
+            as: [MailSyncProgressSnapshot].self
+        )
+    }
+
     func addIMAPAccount(
         displayName: String,
         provider: EmailProvider,
@@ -3699,10 +4232,10 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         password: String
     ) async throws -> EmailAccountRecord {
         // R5: cleartext password no longer crosses XPC. We stage the
-        // password in Keychain at a `pending-{uuid}` slot and send only
-        // the UUID over IPC. The agent reads from Keychain, validates
-        // the IMAP login, then rotates the entry to its canonical
-        // location on success or deletes it on failure.
+        // password in the login Keychain at a `pending-{uuid}` slot and
+        // send only the UUID over IPC. The agent reads from Keychain,
+        // validates the IMAP login, then rotates the entry to its
+        // canonical location on success or deletes it on failure.
         let pendingID = UUID().uuidString
         let kind: MailCredentialKind = (
             provider == .gmail || provider == .yahoo || provider == .icloud || provider == .fastmail
@@ -3710,7 +4243,11 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         let pendingRef = KeychainMailSecretStore.pendingReference(pendingID: pendingID, kind: kind)
         let secretStore = KeychainMailSecretStore()
         guard let credentialData = password.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
-              secretStore.store(credentialData, reference: pendingRef) else {
+              secretStore.storePendingHandoff(
+                credentialData,
+                reference: pendingRef,
+                trustedApplicationPaths: Self.pendingCredentialTrustedApplicationPaths
+              ) else {
             throw NSError(
                 domain: "com.spatialduality.manifold.app",
                 code: 500,
@@ -3753,7 +4290,11 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         let pendingRef = KeychainMailSecretStore.pendingReference(pendingID: pendingID, kind: .oauthTokenSet)
         let secretStore = KeychainMailSecretStore()
         let tokenSetData = try JSONEncoder().encode(tokenSet)
-        guard secretStore.store(tokenSetData, reference: pendingRef) else {
+        guard secretStore.storePendingHandoff(
+            tokenSetData,
+            reference: pendingRef,
+            trustedApplicationPaths: Self.pendingCredentialTrustedApplicationPaths
+        ) else {
             throw NSError(
                 domain: "com.spatialduality.manifold.app",
                 code: 500,
@@ -3780,8 +4321,13 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         }
     }
 
-    func removeEmailAccount(id: String) async throws {
-        _ = try await xpc.command(name: "removeEmailAccount", payload: ["accountID": id])
+    func removeEmailAccount(id: String) async throws -> MailAccountRemovalResult {
+        try await command(
+            name: "removeEmailAccount",
+            payload: ["accountID": id],
+            field: "result",
+            as: MailAccountRemovalResult.self
+        )
     }
 
     func toggleEmailSync(accountID: String, enabled: Bool) async throws {
@@ -3792,12 +4338,42 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         try await command(name: "syncEmailNow", payload: ["accountID": accountID], field: "result", as: SyncResult.self)
     }
 
+    func mailSyncJobs(accountID: String? = nil, states: [MailSyncJobState]? = nil, limit: Int = 500) async throws -> [MailSyncJobRecord] {
+        var payload: [String: Any] = ["limit": limit]
+        if let accountID { payload["accountID"] = accountID }
+        if let states { payload["states"] = states.map(\.rawValue) }
+        return try await command(name: "mailSyncJobs", payload: payload, field: "jobs", as: [MailSyncJobRecord].self)
+    }
+
     func emailMessages(accountID: String? = nil, mailbox: String? = nil, ids: [String]? = nil, limit: Int = 500) async throws -> [EmailMessageRecord] {
         var payload: [String: Any] = ["limit": limit]
         if let accountID { payload["accountID"] = accountID }
         if let mailbox { payload["mailbox"] = mailbox }
         if let ids { payload["ids"] = ids }
         return try await command(name: "emailMessages", payload: payload, field: "messages", as: [EmailMessageRecord].self)
+    }
+
+    func emailMessagePage(
+        tokens: [SearchToken],
+        freeText: String,
+        accountID: String?,
+        mailbox: String?,
+        filter: QuickFilter?,
+        sortKey: EmailSortKey,
+        limit: Int,
+        offset: Int
+    ) async throws -> EmailMessagePage {
+        var payload: [String: Any] = [
+            "tokens": try XPCJSON.object(from: tokens),
+            "freeText": freeText,
+            "sortKey": try XPCJSON.object(from: sortKey),
+            "limit": limit,
+            "offset": offset,
+        ]
+        if let accountID { payload["accountID"] = accountID }
+        if let mailbox { payload["mailbox"] = mailbox }
+        if let filter { payload["filter"] = try XPCJSON.object(from: filter) }
+        return try await command(name: "emailMessagePage", payload: payload, field: "page", as: EmailMessagePage.self)
     }
 
     func domainCounts() async throws -> [String: Int] {
@@ -3841,6 +4417,56 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
 
     func unshareEmails(emailIDs: [String], for agent: TargetApp) async throws {
         _ = try await xpc.command(name: "unshareEmails", payload: ["agent": agent.rawValue, "emailIDs": emailIDs])
+    }
+
+    func emailAttachments(emailID: String) async throws -> [EmailAttachmentRecord] {
+        try await command(
+            name: "emailAttachments",
+            payload: ["emailID": emailID],
+            field: "attachments",
+            as: [EmailAttachmentRecord].self
+        )
+    }
+
+    func sharedEmailAttachmentIDs(agent: TargetApp, emailID: String) async throws -> Set<String> {
+        Set(try await command(
+            name: "sharedEmailAttachmentIDs",
+            payload: ["agent": agent.rawValue, "emailID": emailID],
+            field: "ids",
+            as: [String].self
+        ))
+    }
+
+    func shareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws {
+        _ = try await xpc.command(
+            name: "shareEmailAttachments",
+            payload: ["agent": agent.rawValue, "attachmentIDs": attachmentIDs]
+        )
+    }
+
+    func unshareEmailAttachments(attachmentIDs: [String], for agent: TargetApp) async throws {
+        _ = try await xpc.command(
+            name: "unshareEmailAttachments",
+            payload: ["agent": agent.rawValue, "attachmentIDs": attachmentIDs]
+        )
+    }
+
+    func openEmailExport(emailID: String) async throws -> String {
+        try await command(
+            name: "openEmailExport",
+            payload: ["emailID": emailID],
+            field: "path",
+            as: String.self
+        )
+    }
+
+    func openEmailAttachment(attachmentID: String) async throws -> String {
+        try await command(
+            name: "openEmailAttachment",
+            payload: ["attachmentID": attachmentID],
+            field: "path",
+            as: String.self
+        )
     }
 
     func unshareAllEmails() async throws {

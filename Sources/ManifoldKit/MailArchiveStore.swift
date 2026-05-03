@@ -62,6 +62,23 @@ private struct MailBlobManifest: Codable, Sendable, Equatable {
     var createdAt: String
 }
 
+private final class MailArchiveRootKeyCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+
+    func set(_ data: Data?) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+}
+
 /// Archive v2 stores canonical mail objects as account-local, keyed-content
 /// addressed, authenticated encrypted blobs. Readable `.eml` files are only
 /// produced by explicit export code; sync writes `.mblob` plus `.mmanifest`.
@@ -74,6 +91,7 @@ public struct MailArchiveStore {
     private static let rootKeyLength = 32
     private static let keychainService = "com.manifold.mail.archive-key"
     private static let keychainAccount = "archive-root:local-v2"
+    private static let rootKeyCache = MailArchiveRootKeyCache()
 
     private let rootURL: URL
     private let fileManager: FileManager
@@ -277,6 +295,16 @@ public struct MailArchiveStore {
         return try Self.decryptBlob(payload, manifest: manifest, key: encryptionKey(accountID: accountID))
     }
 
+    @discardableResult
+    public func removeAccountArchive(accountID: String) throws -> Bool {
+        let accountURL = try accountRootURL(accountID: accountID)
+        guard fileManager.fileExists(atPath: accountURL.path) else {
+            return false
+        }
+        try fileManager.removeItem(at: accountURL)
+        return true
+    }
+
     public static func isArchiveV2Path(_ url: URL) -> Bool {
         url.pathExtension == "mmanifest" && url.pathComponents.contains("MailArchive")
     }
@@ -333,6 +361,23 @@ public struct MailArchiveStore {
             .appendingPathComponent(accountID)
             .appendingPathComponent("staging")
             .appendingPathComponent(jobID)
+    }
+
+    private func accountRootURL(accountID: String) throws -> URL {
+        guard !accountID.isEmpty,
+              !accountID.contains("/"),
+              !accountID.contains("\\"),
+              accountID != ".",
+              accountID != ".." else {
+            throw MailArchiveStoreError.invalidPath
+        }
+
+        let accountsRoot = rootURL.appendingPathComponent("v2/accounts").standardizedFileURL
+        let accountURL = accountsRoot.appendingPathComponent(accountID, isDirectory: true).standardizedFileURL
+        guard accountURL.path.hasPrefix(accountsRoot.path + "/") else {
+            throw MailArchiveStoreError.invalidPath
+        }
+        return accountURL
     }
 
     private func promote(_ stagedURL: URL, to finalURL: URL) throws {
@@ -734,8 +779,13 @@ public struct MailArchiveStore {
     }
 
     private static func archiveRootKey() throws -> SymmetricKey {
+        if let cached = rootKeyCache.get(), cached.count == rootKeyLength {
+            return SymmetricKey(data: cached)
+        }
+
         if let existing = retrieveRootKeyData() {
             if existing.count == rootKeyLength {
+                rootKeyCache.set(existing)
                 return SymmetricKey(data: existing)
             }
             deleteRootKeyData()
@@ -749,8 +799,10 @@ public struct MailArchiveStore {
         let data = Data(bytes)
         try storeRootKeyData(data)
         if let stored = retrieveRootKeyData(), stored.count == rootKeyLength {
+            rootKeyCache.set(stored)
             return SymmetricKey(data: stored)
         }
+        rootKeyCache.set(data)
         return SymmetricKey(data: data)
     }
 
@@ -806,6 +858,7 @@ public struct MailArchiveStore {
     }
 
     private static func deleteRootKeyData() {
+        rootKeyCache.set(nil)
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,

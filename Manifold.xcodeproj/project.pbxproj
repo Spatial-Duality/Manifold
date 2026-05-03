@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		004EF9A5AA1121DDB0CCE1DF /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = 4D2FD3A168147341D2B2B3D4 /* ManifoldXPC */; };
-		016A645B83DCA9156959A87D /* InspectorSharingSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */; };
 		0260E84BE9451B7342295D1A /* SessionPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2C3550A7F5EE69EDB1285F /* SessionPrimitives.swift */; };
 		045A18D0B9D5EC53F16E88C0 /* AgentCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB438FF3647437EBED8BF70D /* AgentCard.swift */; };
 		06AD192F8FFDDB7368A084C4 /* RulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2C1DAD87B51654605600ED6 /* RulesView.swift */; };
@@ -40,6 +39,7 @@
 		516D5E047E71B26F39DE8C1A /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = C2910946E949A8F592980971 /* ManifoldXPC */; };
 		518EF078E6F82F743E959890 /* StorageSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 009EA04550A7634D95791F57 /* StorageSettingsPane.swift */; };
 		527808D9447CEA98E82AEB55 /* IntegrationHealthModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FF9F7B8DBA9337056A84D8 /* IntegrationHealthModelTests.swift */; };
+		53E3C91E1FD8BD5B508B1B43 /* DemoRuntimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FAFD75E570878028BCF3646 /* DemoRuntimeClient.swift */; };
 		54607D222485209827037042 /* FileDropTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4E1FB8E42726300FDD5A00 /* FileDropTarget.swift */; };
 		57B8BBA1ED763E7479DD595F /* AdvancedSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80E07891B5469129BFFFBFDD /* AdvancedSettingsPane.swift */; };
 		58DA505771335E7D8FA3C52B /* PathLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8504BD8549930002957BEF /* PathLabel.swift */; };
@@ -49,7 +49,7 @@
 		65AFE46C2EA1DF1F8D3147BD /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1C90FBF4EC81DE6EDD67C671 /* PrivacyInfo.xcprivacy */; };
 		69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050CA6EEFB11452C92977C1 /* DiffView.swift */; };
 		6B632DF1154B821ECFB35927 /* InspectorContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 262241B9FB8C4EC6B26D9918 /* InspectorContext.swift */; };
-		6D091E5697C9D3A78045EDAB /* SegmentedToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFDC8760CA4A77FC8C7A925 /* SegmentedToggle.swift */; };
+		6BFEA2400A1F1A44296867C3 /* AccessCheckboxStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3522FAE170EB47882FDDF8F /* AccessCheckboxStrip.swift */; };
 		6D71BE279EF690665F976F6A /* ReloadDriftSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2987E80B33CD3C1556A9C7C /* ReloadDriftSheet.swift */; };
 		6D8499A82DBBA5C1FC009EA9 /* ManifoldKit in Frameworks */ = {isa = PBXBuildFile; productRef = 59CA05998C5293BB2C2FB2E7 /* ManifoldKit */; };
 		6E592096E933DF72477EFEE1 /* AgentStatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */; };
@@ -89,7 +89,6 @@
 		A74EAF479C858C31957B4FD8 /* ManifoldStore+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBE5F2FDDEE571A03B2FA9F3 /* ManifoldStore+Commands.swift */; };
 		A7FC5B97EF5D8D320241880B /* FileInspectorPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595F5C846507541ACA85E20B /* FileInspectorPane.swift */; };
 		A7FFB3506438D4768C1DD841 /* UpdaterModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267E3062C4687EA400B4CA6F /* UpdaterModel.swift */; };
-		A902EB021766D2774379F029 /* TriStateCheckbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC96EAAAF71AC585F896D52 /* TriStateCheckbox.swift */; };
 		AB73A856DCC2BE53D2783481 /* EmailSelectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23760AEA487279BB56652F47 /* EmailSelectionModel.swift */; };
 		AC07102B386DB0CB25D8E322 /* ManifoldStore+ConnectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE1B7673EC17DF38814F2D4 /* ManifoldStore+ConnectionState.swift */; };
 		AF88EFD4981DFD77F09A9C99 /* LiveCheckRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12E49541D0A150EF71C98FA /* LiveCheckRow.swift */; };
@@ -121,7 +120,6 @@
 		D6914168C731E755087000C6 /* InspectorContextProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21370F952F6C83332969F820 /* InspectorContextProviderTests.swift */; };
 		D87630AB8C3F4543A734FD02 /* AtmosphericBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D7A3DF542AE6F27162951B /* AtmosphericBackground.swift */; };
 		D977A7B159B62A7D507B3C52 /* ActivityEventPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B569EAE1A09FA2280FF1CD9 /* ActivityEventPresentation.swift */; };
-		DB83D5D4F1443A77649FD60D /* CommandCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A3B6369A695CC497AC4BFCA /* CommandCenter.swift */; };
 		DD0E814909A12F268657D2BA /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43BA689161AF82B93E21E11 /* FileNode.swift */; };
 		DE0BBB760DA37FFA9A965F55 /* RuntimeStatusSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7ED0FAC0CC5575150B7D13C /* RuntimeStatusSnapshotTests.swift */; };
 		DEA95A050062DE2579A1F77C /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7C615557944B55EE371C2D /* AboutView.swift */; };
@@ -133,10 +131,8 @@
 		E505F0349C209B2C41EE77E6 /* RuleInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BFC0D540BFCD85B2F8D3CE /* RuleInspector.swift */; };
 		E5E0C0630A050CEA7BED8AB8 /* StatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A51646FD4553B0768C3E88 /* StatusBar.swift */; };
 		E73ACFFE5B23740791F71E88 /* IntegrationHealthModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7981C30F5FF4898B4C65B0 /* IntegrationHealthModel.swift */; };
-		E76D4FA3F9FD8EF99F6F4C62 /* AccessChipStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCCF34DB1CE80E481C55382 /* AccessChipStack.swift */; };
 		E9E298E427A7AA2F6835D58A /* SessionsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */; };
 		EB3874B6B5D6745667AA989A /* MailSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8049B04016C58516B4B28E34 /* MailSettingsPane.swift */; };
-		ED09CFB966DA76055A8DE450 /* SharingControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8CE67FA56A5963A5AE6FB2 /* SharingControl.swift */; };
 		EDB5C5B83399E55B3E524DCC /* WorkModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8E4E39B96F337AFE711560 /* WorkModel.swift */; };
 		EEC5E06B942FC7FB102B405E /* DomainPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20C4114B01F2F0D7E024DD0 /* DomainPreset.swift */; };
 		EEEAACBFC93AEBE5F5ED34F9 /* BrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984F3F50906AC7AACDEF41EB /* BrandMark.swift */; };
@@ -144,8 +140,6 @@
 		F106EA06BC7844C1498C2662 /* EmptyFoldersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E25C1DC01DAEDD49918C3A1 /* EmptyFoldersView.swift */; };
 		F4125183FEADD113134BF557 /* AddMailAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C7CCA257A2A52565A9E8CD3 /* AddMailAccountSheet.swift */; };
 		F48BFA707ED9C7C1A50ED50F /* AccessWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E63B2BEA3FFA00887C8B62FD /* AccessWindowView.swift */; };
-		F496E3C747AACEAA8385D551 /* LiquidGlassMaterial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72A919EAD58F60A93FA58F48 /* LiquidGlassMaterial.swift */; };
-		F711EC11A62C0798BB1112B6 /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11AF6365CF4386C43F2463FD /* CommandPaletteView.swift */; };
 		F729926E60AF336AC6C6F0E2 /* GradientAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 664794E534D54BE964BC7CFF /* GradientAvatar.swift */; };
 		F7982EE1D1DA30013BE0677C /* ClaudeRelauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 978C2B7B76C981259BCA1651 /* ClaudeRelauncher.swift */; };
 		FAFAAE3DA495E40CCF818859 /* WorkNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEE1B7E46E4D838E5DD65A81 /* WorkNavigator.swift */; };
@@ -179,7 +173,6 @@
 		07D674EC5D561D8FB5323CE9 /* PrivacyDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyDiffView.swift; sourceTree = "<group>"; };
 		0B8E4E39B96F337AFE711560 /* WorkModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkModel.swift; sourceTree = "<group>"; };
 		0E25C1DC01DAEDD49918C3A1 /* EmptyFoldersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyFoldersView.swift; sourceTree = "<group>"; };
-		11AF6365CF4386C43F2463FD /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
 		11B9947B6951D0CCEAC92D04 /* AppRuntimeClient+AccessRedesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRuntimeClient+AccessRedesign.swift"; sourceTree = "<group>"; };
 		12D2331C5DCB60B7F4F57912 /* ConnectClaudeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectClaudeSheet.swift; sourceTree = "<group>"; };
 		134F1EB5D50773A5809E0E27 /* PrivacySettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacySettingsPane.swift; sourceTree = "<group>"; };
@@ -209,7 +202,6 @@
 		4D54697975287E64B2E0BE35 /* ManifoldStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStoreTests.swift; sourceTree = "<group>"; };
 		4E50FA851604BE30695DFD21 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
 		4FE9AE4B50EB41439D440FED /* ManifoldIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldIntents.swift; sourceTree = "<group>"; };
-		51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorSharingSelector.swift; sourceTree = "<group>"; };
 		549CBBBB207F1B4B91F9BE55 /* FileTreeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeInspector.swift; sourceTree = "<group>"; };
 		564B55046AEBA3B1643FE2FE /* Manifold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manifold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		571405EF8AB67DEA07F1F219 /* Manifold.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manifold.entitlements; sourceTree = "<group>"; };
@@ -227,9 +219,8 @@
 		6887F8452E06D8FB1F5BF979 /* TitleSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleSequence.swift; sourceTree = "<group>"; };
 		6C08176722B33E1378DFF696 /* RuleBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleBuilder.swift; sourceTree = "<group>"; };
 		6CE0A56225C445AF1538A55E /* SparklineBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineBar.swift; sourceTree = "<group>"; };
-		6EC96EAAAF71AC585F896D52 /* TriStateCheckbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriStateCheckbox.swift; sourceTree = "<group>"; };
 		6F762E94653BA267336BB76A /* KbdLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KbdLabel.swift; sourceTree = "<group>"; };
-		72A919EAD58F60A93FA58F48 /* LiquidGlassMaterial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlassMaterial.swift; sourceTree = "<group>"; };
+		6FAFD75E570878028BCF3646 /* DemoRuntimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoRuntimeClient.swift; sourceTree = "<group>"; };
 		742EBFBC5D4E2292D710908B /* WorkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkView.swift; sourceTree = "<group>"; };
 		76613F3C74A0440934F46E63 /* ManifoldApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldApp.swift; sourceTree = "<group>"; };
 		79022746F9505B00E5F5CA94 /* ConnectCodexSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectCodexSheet.swift; sourceTree = "<group>"; };
@@ -238,7 +229,6 @@
 		8049B04016C58516B4B28E34 /* MailSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailSettingsPane.swift; sourceTree = "<group>"; };
 		80E07891B5469129BFFFBFDD /* AdvancedSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedSettingsPane.swift; sourceTree = "<group>"; };
 		83794677BF621BEDB36F8287 /* TimeLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeLabel.swift; sourceTree = "<group>"; };
-		8A3B6369A695CC497AC4BFCA /* CommandCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenter.swift; sourceTree = "<group>"; };
 		90A51646FD4553B0768C3E88 /* StatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBar.swift; sourceTree = "<group>"; };
 		936284577C217445D9730BEA /* LedgerNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerNavigation.swift; sourceTree = "<group>"; };
 		978C2B7B76C981259BCA1651 /* ClaudeRelauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeRelauncher.swift; sourceTree = "<group>"; };
@@ -290,11 +280,10 @@
 		D16F4BF0F58ACF058AB1474A /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
 		D2FF9F7B8DBA9337056A84D8 /* IntegrationHealthModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationHealthModelTests.swift; sourceTree = "<group>"; };
 		D30CED43DE12014ACE650E04 /* ConnectionEventTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEventTracker.swift; sourceTree = "<group>"; };
+		D3522FAE170EB47882FDDF8F /* AccessCheckboxStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessCheckboxStrip.swift; sourceTree = "<group>"; };
 		D8AE09401722214A631873C3 /* PrivacyApprovalButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyApprovalButtons.swift; sourceTree = "<group>"; };
 		D9DA60175465C785B7AA4D9F /* AppRuntimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeClient.swift; sourceTree = "<group>"; };
-		DA8CE67FA56A5963A5AE6FB2 /* SharingControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingControl.swift; sourceTree = "<group>"; };
 		DBE5F2FDDEE571A03B2FA9F3 /* ManifoldStore+Commands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifoldStore+Commands.swift"; sourceTree = "<group>"; };
-		DDCCF34DB1CE80E481C55382 /* AccessChipStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessChipStack.swift; sourceTree = "<group>"; };
 		DFE1B7673EC17DF38814F2D4 /* ManifoldStore+ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifoldStore+ConnectionState.swift"; sourceTree = "<group>"; };
 		E065C3AD01FCDCAE769F0759 /* MatchPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchPreview.swift; sourceTree = "<group>"; };
 		E5FE8619BDD7794230A00E99 /* SharingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingState.swift; sourceTree = "<group>"; };
@@ -313,7 +302,6 @@
 		F7ED0FAC0CC5575150B7D13C /* RuntimeStatusSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStatusSnapshotTests.swift; sourceTree = "<group>"; };
 		FB68B0854C6DD4AA29058275 /* SetupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupModel.swift; sourceTree = "<group>"; };
 		FFC08963D57CF6ECE7A0E297 /* RuntimeIssue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeIssue.swift; sourceTree = "<group>"; };
-		FFFDC8760CA4A77FC8C7A925 /* SegmentedToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentedToggle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -430,9 +418,7 @@
 				C954B211BE478AB70CCDC861 /* FilesFlatView.swift */,
 				549CBBBB207F1B4B91F9BE55 /* FileTreeInspector.swift */,
 				0095F0998503E87F97508D06 /* FoldersMatrixView.swift */,
-				51D105F22DD24DF3B6D8B8A6 /* InspectorSharingSelector.swift */,
 				5D518E521BF7064410F259E4 /* SessionDiffView.swift */,
-				DA8CE67FA56A5963A5AE6FB2 /* SharingControl.swift */,
 			);
 			path = Access;
 			sourceTree = "<group>";
@@ -467,7 +453,7 @@
 		721CC8674024D3ECA3951607 /* Primitives */ = {
 			isa = PBXGroup;
 			children = (
-				DDCCF34DB1CE80E481C55382 /* AccessChipStack.swift */,
+				D3522FAE170EB47882FDDF8F /* AccessCheckboxStrip.swift */,
 				EB438FF3647437EBED8BF70D /* AgentCard.swift */,
 				ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */,
 				97FF52A70464D80386C328E6 /* ApprovalResolution.swift */,
@@ -481,7 +467,6 @@
 				2EB6201733D6CF2A55D93970 /* FileTypeIcon.swift */,
 				664794E534D54BE964BC7CFF /* GradientAvatar.swift */,
 				6F762E94653BA267336BB76A /* KbdLabel.swift */,
-				72A919EAD58F60A93FA58F48 /* LiquidGlassMaterial.swift */,
 				A9CD474D151602E6ABECB50B /* MenuBarBrandIcon.swift */,
 				CE8504BD8549930002957BEF /* PathLabel.swift */,
 				ACE0BFDF787B5C2CB0D3B87C /* Pill.swift */,
@@ -490,10 +475,8 @@
 				07D674EC5D561D8FB5323CE9 /* PrivacyDiffView.swift */,
 				1D88BA89EB19AFFFFD84CDF1 /* PrivacySeverityBar.swift */,
 				4E50FA851604BE30695DFD21 /* QuickLookPreview.swift */,
-				FFFDC8760CA4A77FC8C7A925 /* SegmentedToggle.swift */,
 				5813EE1521D4B8443BA33982 /* SessionChip.swift */,
 				6CE0A56225C445AF1538A55E /* SparklineBar.swift */,
-				6EC96EAAAF71AC585F896D52 /* TriStateCheckbox.swift */,
 			);
 			path = Primitives;
 			sourceTree = "<group>";
@@ -532,7 +515,6 @@
 			isa = PBXGroup;
 			children = (
 				4A7C615557944B55EE371C2D /* AboutView.swift */,
-				11AF6365CF4386C43F2463FD /* CommandPaletteView.swift */,
 				B10B54AE03CE3C69CAF56E27 /* LedgerWindowView.swift */,
 				B18AB9C065F0670DC385345A /* RootWindowContent.swift */,
 				6887F8452E06D8FB1F5BF979 /* TitleSequence.swift */,
@@ -624,8 +606,8 @@
 				D9DA60175465C785B7AA4D9F /* AppRuntimeClient.swift */,
 				11B9947B6951D0CCEAC92D04 /* AppRuntimeClient+AccessRedesign.swift */,
 				978C2B7B76C981259BCA1651 /* ClaudeRelauncher.swift */,
-				8A3B6369A695CC497AC4BFCA /* CommandCenter.swift */,
 				D30CED43DE12014ACE650E04 /* ConnectionEventTracker.swift */,
+				6FAFD75E570878028BCF3646 /* DemoRuntimeClient.swift */,
 				C1F0A7830F64DC492FDEA4F8 /* DiagnosticsModel.swift */,
 				A20C4114B01F2F0D7E024DD0 /* DomainPreset.swift */,
 				18233197B24B119F64466148 /* EmailAccountModel.swift */,
@@ -786,6 +768,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		3C737C8CF544A60588263AE2 /* Bundle Launch Agent */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -801,10 +784,11 @@
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.spatialduality.manifold.runtime.plist",
 				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchServices/ManifoldAgent",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/manifold-mcp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\ncd \"${SRCROOT}\"\nconfig_name=\"$(printf '%s' \"${CONFIGURATION:-Debug}\" | tr '[:upper:]' '[:lower:]')\"\nswift build --product ManifoldAgent -c \"$config_name\" 2>&1\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nhelper_path=\"$launch_services_dir/ManifoldAgent\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${SRCROOT}/.build/$config_name/ManifoldAgent\" \"$helper_path\"\nchmod +x \"$helper_path\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none --options runtime --generate-entitlement-der \"$helper_path\"\nfi\n";
+			shellScript = "set -euo pipefail\ncd \"${SRCROOT}\"\nconfig_name=\"$(printf '%s' \"${CONFIGURATION:-Debug}\" | tr '[:upper:]' '[:lower:]')\"\nswift build --product ManifoldAgent -c \"$config_name\" 2>&1\nswift build --product manifold-mcp -c \"$config_name\" 2>&1\nlaunch_agents_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nlaunch_services_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices\"\nresources_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Resources\"\nhelper_path=\"$launch_services_dir/ManifoldAgent\"\nmcp_path=\"$resources_dir/manifold-mcp\"\nmkdir -p \"$launch_agents_dir\" \"$launch_services_dir\" \"$resources_dir\"\ncp \"${SRCROOT}/Resources/com.spatialduality.manifold.runtime.plist\" \"$launch_agents_dir/com.spatialduality.manifold.runtime.plist\"\ncp \"${SRCROOT}/.build/$config_name/ManifoldAgent\" \"$helper_path\"\ncp \"${SRCROOT}/.build/$config_name/manifold-mcp\" \"$mcp_path\"\nchmod +x \"$helper_path\" \"$mcp_path\"\nsigning_identity=\"\"\nsigning_options=\"\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  signing_identity=\"${EXPANDED_CODE_SIGN_IDENTITY}\"\n  if [ \"${ENABLE_HARDENED_RUNTIME:-NO}\" = \"YES\" ]; then\n    signing_options=\"--options runtime\"\n  fi\nelif [ \"${CONFIGURATION:-Debug}\" = \"Debug\" ]; then\n  signing_identity=\"-\"\nfi\nif [ -n \"$signing_identity\" ]; then\n  /usr/bin/codesign --force --sign \"$signing_identity\" --timestamp=none $signing_options --generate-entitlement-der \"$helper_path\"\n  /usr/bin/codesign --force --sign \"$signing_identity\" --timestamp=none $signing_options --generate-entitlement-der \"$mcp_path\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -815,7 +799,7 @@
 			files = (
 				7A64D0DAA91C30E1B28468A3 /* AIAppsSettingsPane.swift in Sources */,
 				DEA95A050062DE2579A1F77C /* AboutView.swift in Sources */,
-				E76D4FA3F9FD8EF99F6F4C62 /* AccessChipStack.swift in Sources */,
+				6BFEA2400A1F1A44296867C3 /* AccessCheckboxStrip.swift in Sources */,
 				593A44BDA7921F432BE891F6 /* AccessHistoryView.swift in Sources */,
 				F0957F35E632AD6870949211 /* AccessNavigator.swift in Sources */,
 				F48BFA707ED9C7C1A50ED50F /* AccessWindowView.swift in Sources */,
@@ -834,14 +818,13 @@
 				EEEAACBFC93AEBE5F5ED34F9 /* BrandMark.swift in Sources */,
 				78C694F935FF22E93BE2F227 /* CategoryChip.swift in Sources */,
 				F7982EE1D1DA30013BE0677C /* ClaudeRelauncher.swift in Sources */,
-				DB83D5D4F1443A77649FD60D /* CommandCenter.swift in Sources */,
-				F711EC11A62C0798BB1112B6 /* CommandPaletteView.swift in Sources */,
 				C07539145FD00F66E2A60B46 /* CommitLadder.swift in Sources */,
 				B17DF85E58BDC0310D9C917D /* ConnectAgentPanel.swift in Sources */,
 				75BF198A602A21AB8290604B /* ConnectClaudeSheet.swift in Sources */,
 				BAD8C5E020409EBE19EA8D79 /* ConnectCodexSheet.swift in Sources */,
 				FCBB42EF3BD92787F93DEF3C /* ConnectionEventTracker.swift in Sources */,
 				218BE8A10CE8D32EB01BA2B1 /* ConnectionEventsStrip.swift in Sources */,
+				53E3C91E1FD8BD5B508B1B43 /* DemoRuntimeClient.swift in Sources */,
 				E1F10D141CEB8D20DBD324CE /* DesignTokens.swift in Sources */,
 				2D82A68AB952723DD9D6FBCC /* DiagnosticsModel.swift in Sources */,
 				69D9C84177C2F38BE473AB6D /* DiffView.swift in Sources */,
@@ -869,13 +852,11 @@
 				152085B000FDA2B89960DC53 /* HistoryModel.swift in Sources */,
 				6B632DF1154B821ECFB35927 /* InspectorContext.swift in Sources */,
 				7EA82BC996CD720116AF780C /* InspectorContextProvider.swift in Sources */,
-				016A645B83DCA9156959A87D /* InspectorSharingSelector.swift in Sources */,
 				85E8CF294C5A22AEABFF1A37 /* IntegratedToolbar.swift in Sources */,
 				E73ACFFE5B23740791F71E88 /* IntegrationHealthModel.swift in Sources */,
 				2763FEB342221B07FBB4C18E /* KbdLabel.swift in Sources */,
 				84752E5D19526EADE4FB21DC /* LedgerNavigation.swift in Sources */,
 				85AC80AD512A343002808D4D /* LedgerWindowView.swift in Sources */,
-				F496E3C747AACEAA8385D551 /* LiquidGlassMaterial.swift in Sources */,
 				AF88EFD4981DFD77F09A9C99 /* LiveCheckRow.swift in Sources */,
 				CE2E96C80D591D1D868284E6 /* MailNavigator.swift in Sources */,
 				EB3874B6B5D6745667AA989A /* MailSettingsPane.swift in Sources */,
@@ -909,7 +890,6 @@
 				E13D23AD28C2F8CD06EB113E /* RulesNavigator.swift in Sources */,
 				06AD192F8FFDDB7368A084C4 /* RulesView.swift in Sources */,
 				BCE4470E55E41EE6F741864C /* RuntimeIssue.swift in Sources */,
-				6D091E5697C9D3A78045EDAB /* SegmentedToggle.swift in Sources */,
 				1F69A3306AEE8A8E59FB8E2E /* SessionChip.swift in Sources */,
 				C4AB84C693EA1083A102C63B /* SessionDiffView.swift in Sources */,
 				841965F5D9E60BE45FD9A022 /* SessionModel.swift in Sources */,
@@ -918,7 +898,6 @@
 				E9E298E427A7AA2F6835D58A /* SessionsSettingsPane.swift in Sources */,
 				8B276B4DB9AE3C9EA9F0FFCA /* SettingsView.swift in Sources */,
 				B68F43799D17150AE093B5CC /* SetupModel.swift in Sources */,
-				ED09CFB966DA76055A8DE450 /* SharingControl.swift in Sources */,
 				81BF7B5E4D3BE68C54385120 /* SharingState.swift in Sources */,
 				FEB648A37EF55BFFCACED9A6 /* SpaceSwitcher.swift in Sources */,
 				7CE4BAD9EE7A986871DDC8C5 /* Spacing.swift in Sources */,
@@ -929,7 +908,6 @@
 				7FDF600CA3FF07C78A1D794E /* ThreadsView.swift in Sources */,
 				17F701EEBA3AA625259D7306 /* TimeLabel.swift in Sources */,
 				B5B5755EC34FBB0286432FC9 /* TitleSequence.swift in Sources */,
-				A902EB021766D2774379F029 /* TriStateCheckbox.swift in Sources */,
 				C9B138E737AA002A841EA2E8 /* UnifiedLedgerSidebar.swift in Sources */,
 				A7FFB3506438D4768C1DD841 /* UpdaterModel.swift in Sources */,
 				EDB5C5B83399E55B3E524DCC /* WorkModel.swift in Sources */,

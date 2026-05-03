@@ -63,7 +63,7 @@ struct ConnectionEventsStrip: View {
             : "\(agent) disconnected"
     }
 
-    nonisolated(unsafe) private static let timestampFormatter: DateFormatter = {
+    private static let timestampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .none
         f.timeStyle = .short

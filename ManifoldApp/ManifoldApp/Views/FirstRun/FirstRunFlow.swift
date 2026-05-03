@@ -25,7 +25,7 @@ struct FirstRunFlow: View {
         VStack(spacing: 0) {
             switch panel {
             case .concept:
-                ConceptPanel(next: advance)
+                ConceptPanel(next: advance, tryDemo: startDemo)
             case .defaults:
                 DefaultsPanel(next: advance, back: back)
             case .helpImprove:
@@ -83,6 +83,11 @@ struct FirstRunFlow: View {
     }
 
     private func finish() {
+        completeOnboarding(openWork: true)
+    }
+
+    private func startDemo() {
+        store.setDemoModeEnabled(true)
         completeOnboarding(openWork: true)
     }
 

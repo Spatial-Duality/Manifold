@@ -15,27 +15,22 @@ import ManifoldKit
 
 struct RulesView: View {
     @Environment(ManifoldStore.self) private var store
-    @AppStorage("rules.inspectorVisible") private var inspectorVisible = true
+    @Binding var inspectorVisible: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                RulesToolbar(model: store.rules, inspectorVisible: $inspectorVisible)
-                Divider()
-                RulesPolicyHeader(
-                    model: store.rules,
-                    privacyStatus: store.governance.privacyRuntimeStatus
-                )
-                Divider()
-                RuleListTable(model: store.rules)
-            }
-
-            if inspectorVisible {
-                Divider()
-                RuleInspector(model: store.rules)
-                    .frame(width: 360)
-                    .background(.regularMaterial)
-            }
+        VStack(spacing: 0) {
+            RulesToolbar(model: store.rules, inspectorVisible: $inspectorVisible)
+            Divider()
+            RulesPolicyHeader(
+                model: store.rules,
+                privacyStatus: store.governance.privacyRuntimeStatus
+            )
+            Divider()
+            RuleListTable(model: store.rules)
+        }
+        .inspector(isPresented: $inspectorVisible) {
+            RuleInspector(model: store.rules)
+                .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
         }
         .task {
             if store.rules.rules.isEmpty {
@@ -89,7 +84,6 @@ private struct RulesPolicyHeader: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
-        .background(.thinMaterial)
         .accessibilityIdentifier("rules.enforcementBanner")
     }
 
@@ -183,14 +177,6 @@ private struct RulesToolbar: View {
 
     var body: some View {
         HStack(spacing: Spacing.s2) {
-            Button {
-                addBlankRule()
-            } label: {
-                Label("New Rule", systemImage: "plus")
-            }
-            .help(blankRuleHelp)
-            .accessibilityIdentifier("rules.toolbar.newRule")
-
             Menu {
                 Section("Privacy filter templates") {
                     newRuleButton("Block secrets", systemImage: "hand.raised", action: .deny) {
@@ -260,17 +246,23 @@ private struct RulesToolbar: View {
                         RuleRecord.newUserAgentRule(name: "Warn on agent rule", action: .warn)
                     }
                 }
+
+                Section("Advanced") {
+                    Button {
+                        addBlankRule()
+                    } label: {
+                        Label("Advanced custom rule…", systemImage: "slider.horizontal.3")
+                    }
+                    .help(blankRuleHelp)
+                }
             } label: {
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                Label("New Rule", systemImage: "plus")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .help("Start from a template")
-            .accessibilityLabel("New rule from template")
-            .accessibilityIdentifier("rules.toolbar.newRuleTemplates")
+            .accessibilityIdentifier("rules.toolbar.newRule")
 
             Divider().frame(height: 16)
 
@@ -283,11 +275,6 @@ private struct RulesToolbar: View {
             }
 
             Spacer()
-
-            TextField("Search rules", text: $model.searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
-                .accessibilityIdentifier("rules.toolbar.search")
 
             Button {
                 withAnimation(ManifoldMotion.micro) { inspectorVisible.toggle() }
@@ -322,7 +309,7 @@ private struct RulesToolbar: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
-        .background(.regularMaterial)
+        .controlSize(.small)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("rules.toolbar")
     }

@@ -13,6 +13,9 @@ final class MailReviewModel {
     var activeQuickFilter: QuickFilter?
     var searchText: String = ""
     var messages: [EmailMessageRecord] = []
+    var pageSize: Int = 25
+    var pageIndex: Int = 0
+    var totalMessageCount: Int = 0
     var sharedEmailIDsByAgent: [TargetApp: Set<String>] = [:]
     var connectedAgents: [TargetApp] = []
     var expandedThreadKeys: Set<String> = []
@@ -45,6 +48,16 @@ final class MailReviewModel {
         return selectedThread.latestMessage
     }
 
+    var pageOffset: Int { pageIndex * pageSize }
+
+    var maxPageIndex: Int {
+        guard pageSize > 0, totalMessageCount > 0 else { return 0 }
+        return max(0, (totalMessageCount - 1) / pageSize)
+    }
+
+    var canPageBackward: Bool { pageIndex > 0 }
+    var canPageForward: Bool { pageIndex < maxPageIndex }
+
     func configure(mailAccounts: MailAccountsModel) {
         self.mailAccounts = mailAccounts
     }
@@ -62,12 +75,25 @@ final class MailReviewModel {
         }
 
         await ensureMailboxesLoaded(for: accounts.map(\.accountID), force: force)
-        selectedAccountID = resolvedAccountID(from: accounts)
+        let nextAccountID = resolvedAccountID(from: accounts)
+        if selectedAccountID != nextAccountID {
+            pageIndex = 0
+        }
+        selectedAccountID = nextAccountID
 
         if let accountID = selectedAccountID {
-            let selectableMailboxes = selectableMailboxes(for: accountID)
-            if force || selectedMailboxName == nil || !selectableMailboxes.contains(where: { $0.mailboxName == selectedMailboxName }) {
-                selectedMailboxName = defaultMailboxName(from: selectableMailboxes)
+            let defaultCandidates: [IMAPMailboxRecord]
+            if let selectedAccount = accounts.first(where: { $0.accountID == accountID }) {
+                defaultCandidates = sidebarMailboxes(for: selectedAccount).map(\.mailbox)
+            } else {
+                defaultCandidates = selectableMailboxes(for: accountID)
+            }
+            if force || selectedMailboxName == nil || !defaultCandidates.contains(where: { $0.mailboxName == selectedMailboxName }) {
+                let nextMailbox = defaultMailboxName(from: defaultCandidates)
+                if selectedMailboxName != nextMailbox {
+                    pageIndex = 0
+                }
+                selectedMailboxName = nextMailbox
             }
         }
 
@@ -89,6 +115,43 @@ final class MailReviewModel {
         await reloadVisibleMessages()
     }
 
+    func applyStoredPaging(pageSize storedPageSize: Int, pageIndex storedPageIndex: Int) async {
+        let normalizedSize = Self.normalizedPageSize(storedPageSize)
+        let normalizedIndex = max(0, storedPageIndex)
+        guard pageSize != normalizedSize || pageIndex != normalizedIndex else { return }
+        pageSize = normalizedSize
+        pageIndex = normalizedIndex
+        await reloadVisibleMessages()
+    }
+
+    func setPageSize(_ size: Int) async {
+        let normalized = Self.normalizedPageSize(size)
+        guard pageSize != normalized else { return }
+        pageSize = normalized
+        pageIndex = 0
+        await reloadVisibleMessages()
+    }
+
+    func setPageIndex(_ index: Int) async {
+        let clamped = min(max(0, index), maxPageIndex)
+        guard pageIndex != clamped else { return }
+        pageIndex = clamped
+        await reloadVisibleMessages()
+    }
+
+    func previousPage() async {
+        await setPageIndex(pageIndex - 1)
+    }
+
+    func nextPage() async {
+        await setPageIndex(pageIndex + 1)
+    }
+
+    func resetPageAndReload() async {
+        pageIndex = 0
+        await reloadVisibleMessages()
+    }
+
     func browse(accountID: String, mailbox: String, clearQuery: Bool = true) async {
         guard selectedAccountID != accountID || selectedMailboxName != mailbox || clearQuery else {
             await reloadVisibleMessages()
@@ -102,6 +165,7 @@ final class MailReviewModel {
             searchText = ""
             activeQuickFilter = nil
         }
+        pageIndex = 0
         selectedThreadKey = nil
         selectedMessageID = nil
         await ensureMailboxesLoaded(for: [accountID], force: false)
@@ -115,14 +179,20 @@ final class MailReviewModel {
         selectedMessageID = nil
         searchText = ""
         activeQuickFilter = nil
+        pageIndex = 0
         await ensureMailboxesLoaded(for: [accountID], force: false)
-        selectedMailboxName = defaultMailboxName(from: selectableMailboxes(for: accountID))
+        if let account = mailAccounts?.accounts.first(where: { $0.accountID == accountID }) {
+            selectedMailboxName = defaultMailboxName(from: sidebarMailboxes(for: account).map(\.mailbox))
+        } else {
+            selectedMailboxName = defaultMailboxName(from: selectableMailboxes(for: accountID))
+        }
         await reloadVisibleMessages()
     }
 
     func selectMailbox(_ mailboxName: String) async {
         guard selectedMailboxName != mailboxName else { return }
         selectedMailboxName = mailboxName
+        pageIndex = 0
         selectedThreadKey = nil
         selectedMessageID = nil
         await reloadVisibleMessages()
@@ -140,6 +210,7 @@ final class MailReviewModel {
         let nextFilter = activeQuickFilter == filter ? nil : filter
         guard activeQuickFilter != nextFilter else { return }
         activeQuickFilter = nextFilter
+        pageIndex = 0
         selectedThreadKey = nil
         selectedMessageID = nil
         await reloadVisibleMessages()
@@ -147,6 +218,7 @@ final class MailReviewModel {
 
     func updateSearchText(_ text: String) {
         searchText = text
+        pageIndex = 0
         reloadTask?.cancel()
         reloadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
@@ -249,6 +321,15 @@ final class MailReviewModel {
         (mailboxesByAccountID[accountID] ?? []).sorted(by: mailboxComparator)
     }
 
+    func sidebarMailboxes(for account: EmailAccountRecord) -> [MailSidebarMailbox] {
+        MailboxSidebarPresentation.present(
+            mailboxes: (mailboxesByAccountID[account.accountID] ?? [])
+                .sorted(by: mailboxComparator)
+                .filter(\.isSelectable),
+            provider: account.provider
+        )
+    }
+
     func shareState(for thread: MailThreadRow, agent: TargetApp) -> MailThreadShareState {
         thread.shareState(sharedEmailIDs: sharedEmailIDsByAgent[agent, default: []])
     }
@@ -260,12 +341,14 @@ final class MailReviewModel {
     private func reloadVisibleMessages() async {
         guard let mailAccounts, let accountID = selectedAccountID else {
             messages = []
+            totalMessageCount = 0
             errorMessage = nil
             return
         }
 
         guard let mailbox = selectedMailboxName else {
             messages = []
+            totalMessageCount = 0
             errorMessage = nil
             return
         }
@@ -274,42 +357,30 @@ final class MailReviewModel {
         defer { isLoading = false }
 
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let loadedMessages: [EmailMessageRecord]
-        if trimmedSearch.isEmpty, activeQuickFilter == nil {
-            loadedMessages = await mailboxScopedMessages(
-                accountID: accountID,
-                mailbox: mailbox,
-                limit: 500
-            )
-        } else {
-            let scopedMatches = await mailAccounts.searchMessages(
+        var page = await mailAccounts.messagePage(
+            freeText: trimmedSearch,
+            accountID: accountID,
+            mailbox: mailbox,
+            filter: activeQuickFilter,
+            sortKey: .date,
+            limit: pageSize,
+            offset: pageOffset
+        )
+        if page.messages.isEmpty, page.totalCount > 0, pageIndex > 0 {
+            pageIndex = max(0, (page.totalCount - 1) / max(pageSize, 1))
+            page = await mailAccounts.messagePage(
                 freeText: trimmedSearch,
                 accountID: accountID,
                 mailbox: mailbox,
                 filter: activeQuickFilter,
                 sortKey: .date,
-                limit: 500
+                limit: pageSize,
+                offset: pageOffset
             )
-            if scopedMatches.isEmpty {
-                let accountMatches = await mailAccounts.searchMessages(
-                    freeText: trimmedSearch,
-                    accountID: accountID,
-                    mailbox: nil,
-                    filter: activeQuickFilter,
-                    sortKey: .date,
-                    limit: 500
-                )
-                loadedMessages = locallyScopedMessages(
-                    accountMatches,
-                    accountID: accountID,
-                    mailbox: mailbox
-                )
-            } else {
-                loadedMessages = scopedMatches
-            }
         }
 
-        messages = loadedMessages.sorted(by: MailDate.comparatorDescending)
+        messages = page.messages.sorted(by: MailDate.comparatorDescending)
+        totalMessageCount = page.totalCount
         errorMessage = mailAccounts.lastQueryError
         await refreshSharedState()
         reconcileSelection()
@@ -429,6 +500,8 @@ final class MailReviewModel {
         activeQuickFilter = nil
         searchText = ""
         messages = []
+        pageIndex = 0
+        totalMessageCount = 0
         sharedEmailIDsByAgent = [:]
         expandedThreadKeys = []
         selectedThreadKey = nil
@@ -446,6 +519,217 @@ final class MailReviewModel {
         }
         return lhs.mailboxName.localizedCaseInsensitiveCompare(rhs.mailboxName) == .orderedAscending
     }
+
+    private static func normalizedPageSize(_ value: Int) -> Int {
+        [25, 50, 75].contains(value) ? value : 25
+    }
+}
+
+struct MailSidebarMailbox: Identifiable, Hashable {
+    let mailbox: IMAPMailboxRecord
+    let displayName: String
+
+    var id: String { mailbox.id }
+    var mailboxName: String { mailbox.mailboxName }
+    var folderType: IMAPMailboxRecord.FolderType { mailbox.folderType }
+    var systemImage: String { folderType.systemImage }
+    var helpText: String? {
+        mailbox.mailboxName == displayName ? nil : "IMAP mailbox: \(mailbox.mailboxName)"
+    }
+}
+
+private enum MailboxSidebarPresentation {
+    private static let systemOrder: [IMAPMailboxRecord.FolderType] = [
+        .inbox,
+        .sent,
+        .drafts,
+        .flagged,
+        .archive,
+        .junk,
+        .trash,
+    ]
+
+    static func present(
+        mailboxes: [IMAPMailboxRecord],
+        provider: EmailProvider
+    ) -> [MailSidebarMailbox] {
+        let candidates = mailboxes.filter { !isHiddenSystemView($0, provider: provider) }
+        var rows: [MailSidebarMailbox] = []
+        var representedIDs = Set<String>()
+
+        for folderType in systemOrder {
+            let typed = candidates.filter { $0.folderType == folderType }
+            guard let mailbox = typed.min(by: { lhs, rhs in
+                isPreferred(lhs, over: rhs, folderType: folderType, provider: provider)
+            }) else {
+                continue
+            }
+            rows.append(MailSidebarMailbox(mailbox: mailbox, displayName: displayName(for: folderType)))
+            representedIDs.insert(mailbox.id)
+        }
+
+        let customRows = candidates
+            .filter { $0.folderType == .other && !representedIDs.contains($0.id) }
+            .sorted(by: rawMailboxComparator)
+            .map { mailbox in
+                MailSidebarMailbox(mailbox: mailbox, displayName: cleanedDisplayName(for: mailbox))
+            }
+
+        return rows + customRows
+    }
+
+    private static func isHiddenSystemView(_ mailbox: IMAPMailboxRecord, provider: EmailProvider) -> Bool {
+        guard provider == .gmail else { return false }
+        let flags = normalizedFlags(mailbox)
+        if flags.contains("\\all") || flags.contains("\\important") || flags.contains("\\flagged") {
+            return true
+        }
+
+        let normalizedName = normalizedMailboxName(mailbox.mailboxName)
+            .replacingOccurrences(of: "[google mail]/", with: "[gmail]/")
+        return normalizedName == "[gmail]/all mail"
+            || normalizedName == "[gmail]/important"
+            || normalizedName == "[gmail]/starred"
+    }
+
+    private static func isPreferred(
+        _ lhs: IMAPMailboxRecord,
+        over rhs: IMAPMailboxRecord,
+        folderType: IMAPMailboxRecord.FolderType,
+        provider: EmailProvider
+    ) -> Bool {
+        let lhsScore = preferenceScore(lhs, folderType: folderType, provider: provider)
+        let rhsScore = preferenceScore(rhs, folderType: folderType, provider: provider)
+        if lhsScore != rhsScore {
+            return lhsScore < rhsScore
+        }
+        if lhs.sortOrder != rhs.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        if lhs.mailboxName.count != rhs.mailboxName.count {
+            return lhs.mailboxName.count < rhs.mailboxName.count
+        }
+        return lhs.mailboxName.localizedCaseInsensitiveCompare(rhs.mailboxName) == .orderedAscending
+    }
+
+    private static func preferenceScore(
+        _ mailbox: IMAPMailboxRecord,
+        folderType: IMAPMailboxRecord.FolderType,
+        provider: EmailProvider
+    ) -> Int {
+        var score = 1_000
+        if hasSpecialUseFlag(mailbox, folderType: folderType) {
+            score -= 500
+        }
+        if provider == .gmail, isUnderGmailSystemRoot(mailbox.mailboxName) {
+            score -= 100
+        }
+        if canonicalAliases(for: folderType).contains(mailboxLeaf(mailbox.mailboxName)) {
+            score -= 50
+        }
+        return score
+    }
+
+    private static func hasSpecialUseFlag(
+        _ mailbox: IMAPMailboxRecord,
+        folderType: IMAPMailboxRecord.FolderType
+    ) -> Bool {
+        let flags = normalizedFlags(mailbox)
+        switch folderType {
+        case .inbox:
+            return flags.contains("\\inbox") || normalizedMailboxName(mailbox.mailboxName) == "inbox"
+        case .sent:
+            return flags.contains("\\sent")
+        case .drafts:
+            return flags.contains("\\drafts")
+        case .trash:
+            return flags.contains("\\trash")
+        case .junk:
+            return flags.contains("\\junk")
+        case .archive:
+            return flags.contains("\\archive") || flags.contains("\\all")
+        case .flagged:
+            return flags.contains("\\flagged")
+        case .other:
+            return false
+        }
+    }
+
+    private static func displayName(for folderType: IMAPMailboxRecord.FolderType) -> String {
+        switch folderType {
+        case .inbox: "Inbox"
+        case .sent: "Sent"
+        case .drafts: "Drafts"
+        case .trash: "Trash"
+        case .junk: "Junk"
+        case .archive: "Archive"
+        case .flagged: "Flagged"
+        case .other: "Mailbox"
+        }
+    }
+
+    private static func canonicalAliases(for folderType: IMAPMailboxRecord.FolderType) -> Set<String> {
+        switch folderType {
+        case .inbox:
+            return ["inbox"]
+        case .sent:
+            return ["sent", "sent mail", "sent messages", "sent items"]
+        case .drafts:
+            return ["drafts", "draft messages", "draft items"]
+        case .trash:
+            return ["trash", "deleted messages", "deleted items", "bin"]
+        case .junk:
+            return ["junk", "spam"]
+        case .archive:
+            return ["archive", "all mail", "all messages"]
+        case .flagged:
+            return ["flagged", "starred"]
+        case .other:
+            return []
+        }
+    }
+
+    private static func cleanedDisplayName(for mailbox: IMAPMailboxRecord) -> String {
+        let name = mailbox.mailboxName.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["[Gmail]/", "[Google Mail]/"] {
+            if name.lowercased().hasPrefix(prefix.lowercased()) {
+                let stripped = String(name.dropFirst(prefix.count))
+                return stripped.isEmpty ? name : stripped
+            }
+        }
+        return name.isEmpty ? mailbox.mailboxName : name
+    }
+
+    private static func normalizedFlags(_ mailbox: IMAPMailboxRecord) -> Set<String> {
+        Set(mailbox.flags.map { flag in
+            flag.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\\\\", with: "\\")
+                .lowercased()
+        })
+    }
+
+    private static func normalizedMailboxName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func mailboxLeaf(_ name: String) -> String {
+        normalizedMailboxName(name)
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? normalizedMailboxName(name)
+    }
+
+    private static func isUnderGmailSystemRoot(_ name: String) -> Bool {
+        let normalized = normalizedMailboxName(name)
+        return normalized.hasPrefix("[gmail]/") || normalized.hasPrefix("[google mail]/")
+    }
+
+    private static func rawMailboxComparator(lhs: IMAPMailboxRecord, rhs: IMAPMailboxRecord) -> Bool {
+        if lhs.sortOrder != rhs.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        return lhs.mailboxName.localizedCaseInsensitiveCompare(rhs.mailboxName) == .orderedAscending
+    }
 }
 
 enum MailThreadShareState: Hashable {
@@ -458,14 +742,6 @@ enum MailThreadShareState: Hashable {
         case .off: return "off"
         case .mixed: return "mixed"
         case .on: return "on"
-        }
-    }
-
-    var checkboxState: TriStateCheckbox.State {
-        switch self {
-        case .off: return .off
-        case .mixed: return .mixed
-        case .on: return .on
         }
     }
 

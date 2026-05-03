@@ -14,6 +14,7 @@ enum ClientIdentityVerifier {
     private static let trustedAppBundleIdentifiers: Set<String> = [
         "com.spatialduality.manifold",
     ]
+    private static let uiTestRunnerBundleIdentifier = "com.spatialduality.manifold.uitests.xctrunner"
     private static let readOnlyCLICommands: Set<String> = [
         "ping",
         "getStatus",
@@ -310,6 +311,23 @@ enum ClientIdentityVerifier {
             .flatMap { supportedHosts[$0] }
             ?? inferredTargetApp(fromExecutablePath: hostExecutablePath)
 
+        if let testTargetApp = syntheticUITestTargetApp(
+            requestedAgent: requestedAgent,
+            hostBundleIdentifier: hostBundleIdentifier
+        ) {
+            return VerifiedClientIdentity(
+                requestedTargetApp: requestedAgent,
+                effectiveTargetApp: testTargetApp.rawValue,
+                clientProcessID: clientProcessID,
+                clientExecutablePath: clientExecutablePath,
+                hostProcessID: hostProcessID,
+                hostBundleIdentifier: hostBundleIdentifier,
+                hostExecutablePath: hostExecutablePath,
+                status: .verified,
+                reason: "Synthetic UI test runner authorized for isolated MCP verification."
+            )
+        }
+
         guard let effectiveTargetApp else {
             return VerifiedClientIdentity(
                 requestedTargetApp: requestedAgent,
@@ -496,6 +514,24 @@ enum ClientIdentityVerifier {
             return "com.openai.codex"
         }
         return nil
+    }
+
+    private static func syntheticUITestTargetApp(
+        requestedAgent: String,
+        hostBundleIdentifier: String?,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> TargetApp? {
+        let explicitlyAllowed = ManifoldRuntimeEnvironment.string(
+            for: ManifoldRuntimeEnvironment.allowUITestRunnerMCPKey,
+            env: env
+        ) == "1"
+        let isAdHocTestRuntime = strictRuntimeTeamIdentifier() == nil
+        guard ManifoldRuntimeEnvironment.testHomeURL(env: env) != nil,
+              (explicitlyAllowed || isAdHocTestRuntime),
+              hostBundleIdentifier == uiTestRunnerBundleIdentifier else {
+            return nil
+        }
+        return TargetApp(rawValue: requestedAgent)
     }
 
     private static func inferredAppBundleIdentifier(from executablePath: String?) -> String? {

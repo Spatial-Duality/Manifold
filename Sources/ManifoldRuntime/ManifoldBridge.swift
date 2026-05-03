@@ -666,6 +666,41 @@ public actor ManifoldBridge {
         }
     }
 
+    private func resolveEmailAccessForTool(
+        toolName: String,
+        action: String,
+        resourcePath: String? = nil,
+        intent: AccessIntent? = nil
+    ) async throws -> (AccessContext, String?) {
+        do {
+            let context = try await resolveEmailAccess()
+            let decision = decisionContext(for: context)
+            let decisionID = await recordAccessDecision(
+                toolName: toolName,
+                resourcePath: resourcePath,
+                action: action,
+                allowed: true,
+                reason: decision.reason,
+                accessMode: decision.accessMode,
+                policySnapshot: decision.policySnapshot,
+                intent: intent
+            )
+            return (context, decisionID)
+        } catch {
+            let decision = deniedDecisionContext(for: error)
+            _ = await recordAccessDecision(
+                toolName: toolName,
+                resourcePath: resourcePath,
+                action: action,
+                allowed: false,
+                reason: decision.reason,
+                accessMode: decision.accessMode,
+                intent: intent
+            )
+            throw error
+        }
+    }
+
     private func validatedAccessIntent(for toolName: String, provided intent: AccessIntent?) async throws -> AccessIntent? {
         let activeGrantLevel = (try? await grantStore.activeGrant(targetApp: targetApp, profileID: profileID))?
             .sessionRequestDetailLevel
@@ -918,6 +953,30 @@ public actor ManifoldBridge {
         }
 
         // Path 2: Legacy grant-only (PolicyStore not injected)
+        return try await legacyRequireGrant()
+    }
+
+    /// Resolve access for governed email tools. Mail sharing is independent of
+    /// folder standing access, so this intentionally does not require an
+    /// allowed source folder before the email policy/shared-mail tables run.
+    private func resolveEmailAccess() async throws -> AccessContext {
+        if let policyStore {
+            let policy = try await policyStore.policy(for: targetApp)
+            if policy.isPaused {
+                throw ManifoldMCPError.accessPaused
+            }
+
+            if let wbStore = workBlockStore,
+               let block = try await wbStore.activeBlock(for: targetApp),
+               let grant = try await grantStore.grant(id: block.grantID) {
+                let grantSources = try await scopedGrantSources(grant: grant, policy: policy)
+                try await grantStore.touchGrant(grantID: grant.grantID)
+                return .workBlock(grant: grant, grantSources: grantSources, block: block)
+            }
+
+            return .standing(policy: policy, sources: [])
+        }
+
         return try await legacyRequireGrant()
     }
 
@@ -4265,7 +4324,7 @@ public actor ManifoldBridge {
     public func listEmails(intent: AccessIntent? = nil) async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
         let validatedIntent = try await validatedAccessIntent(for: "list_emails", provided: intent)
-        let (context, decisionID) = try await resolveAccessForTool(toolName: "list_emails", action: "list", intent: validatedIntent)
+        let (context, decisionID) = try await resolveEmailAccessForTool(toolName: "list_emails", action: "list", intent: validatedIntent)
         let emails: [EmailMessageRecord]
         switch context {
         case .standing(let policy, _):
@@ -4293,7 +4352,7 @@ public actor ManifoldBridge {
     public func readEmail(id: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
         let validatedIntent = try await validatedAccessIntent(for: "read_email", provided: intent)
-        let (context, decisionID) = try await resolveAccessForTool(
+        let (context, decisionID) = try await resolveEmailAccessForTool(
             toolName: "read_email",
             action: "read",
             resourcePath: id,
@@ -4377,7 +4436,7 @@ public actor ManifoldBridge {
     public func searchEmails(query: String, intent: AccessIntent? = nil) async throws -> [EmailMessageRecord] {
         await logToolCall(tool: "search_emails", arguments: ["query": query])
         let validatedIntent = try await validatedAccessIntent(for: "search_emails", provided: intent)
-        let (context, decisionID) = try await resolveAccessForTool(toolName: "search_emails", action: "search", resourcePath: query, intent: validatedIntent)
+        let (context, decisionID) = try await resolveEmailAccessForTool(toolName: "search_emails", action: "search", resourcePath: query, intent: validatedIntent)
         let results = try emailStore.searchEmailMessages(freeText: query, limit: 200)
         let visible: [EmailMessageRecord]
         let grantID: String?

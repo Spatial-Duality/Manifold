@@ -4,7 +4,7 @@ The mark `{ | }` is the product thesis as a glyph. Curly braces are the trust bo
 
 ## Files
 
-- `mark-light.svg` / `mark-dark.svg` — the canonical mark, light- and dark-mode variants. Used by the README hero (via `<picture>`). **Don't move or rename without updating `README.md`.**
+- `Icon/` — app icon source files (Affinity Designer source, exported PNGs, the macOS `.icon` bundle).
 - `assets/sources/` — vector source files (Affinity Designer). Not consumed by the build.
 - `assets/legacy/` — older icon exports kept for reference. Not consumed by the build.
 - `exploration/` — earlier mark variants. Not canonical.
@@ -18,14 +18,12 @@ The icon the running app actually uses lives at:
 ManifoldApp/ManifoldApp/Assets.xcassets/Symbols/Manifold Icon SF.symbolset/
 ```
 
-That's the source of truth for in-app rendering. The files in `brand/` are for documentation, marketing, and the README hero.
+That's the source of truth for in-app rendering. The exported PNGs in `brand/Icon/Icon Exports/` are what the README and external surfaces reference.
 
 ## Color
 
 - Primary text on light: `#141413`
 - Primary text on dark: `#faf9f5`
-
-The current `mark-light.svg` and `mark-dark.svg` are intentionally minimal placeholders rendered with a system mono font. Replace with hand-drawn paths when the mark is finalized for press use.
 
 ## Third-party marks
 

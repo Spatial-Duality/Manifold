@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="brand/mark-dark.svg">
-    <img src="brand/mark-light.svg" alt="Manifold mark" width="160">
-  </picture>
+  <img src="brand/Icon/Icon%20Exports/Icon-macOS-Default-256x256@1x.png" alt="Manifold app icon" width="160">
 </p>
 
 <h1 align="center">Manifold</h1>
@@ -20,8 +17,6 @@
 Manifold is the user-owned control plane that sits beside Claude and Codex, recording what they actually saw and changed on your Mac when their work goes through Manifold.
 
 It is a local macOS app and runtime for giving AI tools controlled access to the files and email you choose through Manifold, with reviewable workspaces, durable history, and a clear audit trail of what was exposed.
-
-The mark `{ | }` is the product thesis as a glyph. Curly braces are the trust boundary; the bar between them is the content authority that flows through. See [DESIGN.md](DESIGN.md#brand-mark) and [`brand/`](brand/) for the brand work.
 
 ## Can I Use It?
 
@@ -41,7 +36,6 @@ If that fits your setup, you can clone, build, and run the app locally today.
 - Mail surface mirrors Files: per-message chip stack, scrollable message excerpts in the inspector, and explicit export when readable `.eml` files are needed.
 - Sharing column on each folder reads as plain English — `Not shared`, `Shared with Claude`, `Partly shared · 1 of 2`, `Shared with all` — with a small dot when individual files inside have explicit allow/deny overrides.
 - Enforces a unified rule system across files, emails, and agent behavior, with Suggested rules for secrets (`.env`, `.ssh/**`, private keys) that cannot be accidentally opened up
-- Runs OpenAI Privacy Filter locally for PII and secret detection. The model is Apache 2.0; Manifold installs a pinned, checksum-verified MLX Community pack derived from OpenAI Privacy Filter. See the [source](https://github.com/openai/privacy-filter), [model page](https://huggingface.co/openai/privacy-filter), and installed [MLX pack](https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8).
 - Records what was actually exposed through the governed Manifold path
 - Routes reviewable edits through tracked workspaces instead of direct writes to originals
 - Keeps local version history and session context across sessions and across agents
@@ -52,6 +46,24 @@ If that fits your setup, you can clone, build, and run the app locally today.
 - Stays explicit about its boundary: native activity outside the Manifold path is outside Manifold's control
 
 <!-- TODO: Add screenshot -->
+
+## Optional: OpenAI Privacy Filter
+
+Manifold can install a local on-device filter for PII and other sensitive content, derived from [OpenAI Privacy Filter](https://github.com/openai/privacy-filter). When enabled, governed reads pass through this filter on the way to a connected agent, so detected PII can be redacted or flagged at the trust boundary instead of leaving Manifold verbatim.
+
+It is **optional**. Manifold runs perfectly well without it, and you can turn it on or off at any time from the app's settings.
+
+It is **entirely local**. The filter model runs on your Mac. No prompts, files, or email content leave the device because of the filter — the filter only exists to keep more from leaving than you intended.
+
+OpenAI Privacy Filter is open source under the Apache License, Version 2.0. The MLX Community pack Manifold uses, [`mlx-community/openai-privacy-filter-mxfp8`](https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8), is also Apache 2.0. Manifold pins the pack by checksum so you can verify exactly which weights are running on your machine.
+
+- Source: [openai/privacy-filter](https://github.com/openai/privacy-filter)
+- Model card: [openai/privacy-filter on Hugging Face](https://huggingface.co/openai/privacy-filter)
+- Pinned MLX pack: [mlx-community/openai-privacy-filter-mxfp8](https://huggingface.co/mlx-community/openai-privacy-filter-mxfp8)
+
+Manifold consumes this filter; it does not author or maintain it. Per Apache 2.0, attribution is in [`NOTICE`](NOTICE).
+
+What the filter is **not**: a guarantee. PII detectors miss things and false-positive on others. The filter narrows the surface of what slips out without your intent; it does not replace your judgment about what to share with an agent. Manifold's audit trail records both what was exposed and whether the filter ran on it, so missed cases are visible after the fact.
 
 ## Quick Start
 
@@ -64,6 +76,8 @@ open Manifold.xcodeproj
 ```
 
 Then run the `Manifold` scheme in Xcode.
+
+First time using Manifold? Toggle Demo Mode in Settings (or pick "Try with demo data first" on the welcome screen) to see every surface populated with realistic synthetic data, no setup required.
 
 For a shell-first verification pass, you can also build the app target from the command line:
 

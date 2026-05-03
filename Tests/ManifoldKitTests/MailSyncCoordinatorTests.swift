@@ -39,8 +39,8 @@ struct MailSyncCoordinatorTests {
         #expect(jobs.first?.state == .queued)
     }
 
-    @Test("Startup registration enqueues incremental sync when durable state exists")
-    func startupEnqueuesIncrementalForExistingState() async throws {
+    @Test("Startup registration enqueues recent pass when durable state exists")
+    func startupEnqueuesRecentPassForExistingState() async throws {
         let (store, _, tempDir, accountID) = try makeStore()
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
@@ -57,7 +57,28 @@ struct MailSyncCoordinatorTests {
         await coordinator.registerEnabledAccounts(startWorkers: false)
 
         let jobs = try await coordinator.jobs(accountID: accountID)
-        #expect(jobs.map(\.jobType) == [.incremental])
+        #expect(jobs.map(\.jobType) == [.recentPass])
+    }
+
+    @Test("Abandoned running jobs can be recovered as bounded recent passes")
+    func recoversAbandonedRunningJobsAsRecentPasses() async throws {
+        let (store, _, tempDir, accountID) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        _ = try store.enqueueMailSyncJob(
+            accountID: accountID,
+            jobType: .incremental,
+            priority: 900
+        )
+        _ = try store.claimNextQueuedMailSyncJob(accountID: accountID)
+
+        let coordinator = MailSyncCoordinator(emailStore: store)
+        let recovered = try store.requeueRunningMailSyncJobs()
+
+        #expect(recovered == 1)
+        let queued = try await coordinator.jobs(accountID: accountID, states: [.queued])
+        #expect(queued.contains { $0.jobType == .recentPass })
+        #expect(queued.allSatisfy { $0.state == .queued })
     }
 
     @Test("Processing a job updates durable state and schedules historical backfill after initial")
@@ -124,6 +145,39 @@ struct MailSyncCoordinatorTests {
         #expect(queued.count == 1)
         #expect(queued.first?.jobType == .historicalBackfill)
         #expect(queued.first?.mailboxName == "Archive")
+    }
+
+    @Test("Partial failures still schedule historical backfill for successful mailboxes")
+    func partialFailureSchedulesBackfill() async throws {
+        let (store, _, tempDir, accountID) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let coordinator = MailSyncCoordinator(emailStore: store) { accountID, _ in
+            SyncResult(
+                accountID: accountID,
+                newMessages: 3,
+                errors: ["Trash: IMAP operation timed out"],
+                mailboxResults: [
+                    MailboxSyncResult(
+                        mailboxName: "INBOX",
+                        newMessages: 3,
+                        lastUID: 500,
+                        uidValidity: 1,
+                        oldestFetchedUID: 250,
+                        fetchedUIDCount: 3,
+                        hasMoreHistory: true
+                    )
+                ]
+            )
+        }
+        _ = try await coordinator.enqueueRecentPass(accountID: accountID)
+
+        let processed = try await coordinator.processNextJob(accountID: accountID)
+
+        #expect(processed?.state == .failed)
+        let queued = try await coordinator.jobs(accountID: accountID, states: [.queued])
+        #expect(queued.map(\.jobType) == [.historicalBackfill])
+        #expect(queued.first?.mailboxName == "INBOX")
     }
 
     @Test("Failed jobs keep a redacted error and do not spin")

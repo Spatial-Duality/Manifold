@@ -41,11 +41,23 @@ final class ManifoldStore {
     let governance: GovernanceModel
     let rules: RulesModel
     let sessionWorkbench: SessionWorkbenchModel
-    let integrationHealth: IntegrationHealthModel
+    var integrationHealth: IntegrationHealthModel
     let diagnostics: DiagnosticsModel
     let updater: UpdaterModel?
 
-    let runtime: any RuntimeClientProtocol
+    var runtime: any RuntimeClientProtocol
+    private let defaults: UserDefaults
+
+    static let demoModeDefaultsKey = "manifold.demoMode"
+    static let demoWarningDefaultsKey = "manifold.demoMode.showWarning"
+
+    var isDemoModeEnabled: Bool {
+        didSet { defaults.set(isDemoModeEnabled, forKey: Self.demoModeDefaultsKey) }
+    }
+
+    var showDemoWarning: Bool {
+        didSet { defaults.set(showDemoWarning, forKey: Self.demoWarningDefaultsKey) }
+    }
 
     // Cross-cohort properties: declared `internal` so the
     // ManifoldStore+ConnectionState extension (in a sibling file) can
@@ -84,10 +96,14 @@ final class ManifoldStore {
     init(
         runtime: any RuntimeClientProtocol = AppRuntimeClient(),
         integrationHealth: IntegrationHealthModel = IntegrationHealthModel(),
-        startServices: Bool = true
+        startServices: Bool = true,
+        defaults: UserDefaults = AppTestEnvironment.userDefaults()
     ) {
+        self.defaults = defaults
         self.runtime = runtime
         self.integrationHealth = integrationHealth
+        isDemoModeEnabled = defaults.bool(forKey: Self.demoModeDefaultsKey)
+        showDemoWarning = defaults.object(forKey: Self.demoWarningDefaultsKey) as? Bool ?? true
         session = SessionModel()
         activity = ActivityModel()
         storage = StorageModel()
@@ -113,13 +129,8 @@ final class ManifoldStore {
             updater = nil
         }
 
-        session.configure(client: runtime)
-        activity.configure(client: runtime)
-        storage.configure(client: runtime)
-        mailAccounts.configure(client: runtime)
+        configureModels(client: runtime)
         mailReview.configure(mailAccounts: mailAccounts)
-        governance.configure(client: runtime, diagnostics: diagnostics)
-        rules.configure(client: runtime)
 
         integrationHealth.store = self
 
@@ -154,6 +165,16 @@ final class ManifoldStore {
         }
     }
 
+    private func configureModels(client: any RuntimeClientProtocol) {
+        session.configure(client: client)
+        activity.configure(client: client)
+        storage.configure(client: client)
+        mailAccounts.configure(client: client)
+        mailReview.configure(mailAccounts: mailAccounts)
+        governance.configure(client: client, diagnostics: diagnostics)
+        rules.configure(client: client)
+    }
+
     /// Mirror the diagnostics consent toggle to Sparkle's automatic-check
     /// preference. Polled rather than KVO'd because @Observable doesn't
     /// expose Combine publishers and the toggle changes at human cadence.
@@ -184,6 +205,38 @@ final class ManifoldStore {
 
     func refresh() async {
         await refreshAll(force: true)
+    }
+
+    func setDemoModeEnabled(_ enabled: Bool) {
+        guard enabled != isDemoModeEnabled else { return }
+        isDemoModeEnabled = enabled
+        if enabled {
+            showDemoWarning = true
+        }
+        applyRuntimeForCurrentMode()
+    }
+
+    func resetDemoData() {
+        guard isDemoModeEnabled else { return }
+        applyRuntimeForCurrentMode()
+    }
+
+    private func applyRuntimeForCurrentMode() {
+        let client: any RuntimeClientProtocol
+        if isDemoModeEnabled {
+            client = DemoRuntimeClient.anthropologie()
+            integrationHealth = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .demo))
+        } else {
+            client = AppRuntimeClient()
+            integrationHealth = IntegrationHealthModel()
+        }
+        runtime = client
+        integrationHealth.store = self
+        configureModels(client: client)
+        Task {
+            await refreshAll(force: true)
+            await integrationHealth.checkAll()
+        }
     }
 
     func refreshAll(force: Bool = false) async {

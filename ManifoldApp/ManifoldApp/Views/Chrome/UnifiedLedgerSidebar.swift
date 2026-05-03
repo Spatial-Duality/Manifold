@@ -7,6 +7,7 @@ import ManifoldKit
 struct UnifiedLedgerSidebar: View {
     @Binding var destination: LedgerDestination
     @Binding var accessSection: AccessSection
+    @Binding var mailSection: MailSection
     let work: WorkModel
 
     var body: some View {
@@ -24,7 +25,7 @@ struct UnifiedLedgerSidebar: View {
                 case .access:
                     AccessNavigator(selection: $accessSection)
                 case .mail:
-                    MailNavigator()
+                    MailNavigator(section: $mailSection)
                 case .rules:
                     RulesNavigator()
                 }
@@ -34,7 +35,7 @@ struct UnifiedLedgerSidebar: View {
             Divider()
             SidebarSettingsButton()
         }
-        .navigationSplitViewColumnWidth(min: 248, ideal: 284, max: 340)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .accessibilityIdentifier("ledger.sidebar")
     }
 }
@@ -160,17 +161,9 @@ private struct SidebarBrandHeader: View {
             .padding(.vertical, Spacing.s3)
             .padding(.horizontal, Spacing.s3)
             .background {
-                // Hover swaps the flat surface3 fill for brand-tinted
-                // Liquid Glass — a brief saffron warmth on the navigation
-                // chrome that says "this *is* Manifold." Honest brand
-                // presence: it only appears when you're actually
-                // interacting with the brand button.
                 if isHovering {
                     RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                        .fill(.clear)
-                        .liquidGlassBrand(
-                            in: RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                        )
+                        .fill(ManifoldPalette.surface3)
                 } else {
                     Color.clear
                 }

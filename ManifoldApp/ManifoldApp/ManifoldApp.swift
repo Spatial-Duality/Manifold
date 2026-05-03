@@ -42,7 +42,6 @@ func presentMainLedger(destination: LedgerDestination? = nil) {
 @main
 struct ManifoldApp: App {
     @State private var store: ManifoldStore
-    @State private var commandPalette = CommandPaletteModel()
 
     init() {
         _store = State(initialValue: Self.bootstrapStore())
@@ -52,65 +51,40 @@ struct ManifoldApp: App {
         Window("Manifold", id: "main") {
             AppRootView()
                 .environment(store)
-                .environment(commandPalette)
                 .frame(minWidth: 920, minHeight: 600)
         }
         .defaultSize(width: 1100, height: 720)
         .windowStyle(.automatic)
         .commands {
             CommandGroup(after: .newItem) {
-                if let command = commandPalette.command(.startSession, for: store) {
-                    Button(command.title) {
-                        Task { await command.action(store) }
-                    }
-                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                Button("New Session") {
+                    prepareSessionFromMenu()
                 }
+                .keyboardShortcut("n", modifiers: .command)
 
-                if let command = commandPalette.command(.addFolder, for: store) {
-                    Button(command.title) {
-                        Task { await command.action(store) }
-                    }
-                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                Button("Add Folder…") {
+                    store.addSourceFromPicker()
                 }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
 
             CommandGroup(after: .toolbar) {
-                Button("Command Palette") {
-                    commandPalette.isPresented.toggle()
-                }
-                .keyboardShortcut("k", modifiers: .command)
-
-                Divider()
-
-                if let command = commandPalette.command(.openSessionRecap, for: store) {
-                    Button(command.title) {
-                        Task { await command.action(store) }
-                    }
+                Button("Open Session Recap") {
+                    presentMainLedger(destination: .work)
                 }
 
-                if let command = commandPalette.command(.refreshRuntime, for: store) {
-                    Button(command.title) {
-                        Task { await command.action(store) }
-                    }
-                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                Button("Restart Runtime Helper") {
+                    Task { await store.restartRuntimeHelper() }
                 }
+                .keyboardShortcut("r", modifiers: .command)
             }
 
             CommandMenu("View") {
-                ForEach([ManifoldCommandID.openWork, .openAccess, .openMail, .openRules], id: \.self) { commandID in
-                    if let command = commandPalette.command(commandID, for: store) {
-                        Button(command.title) {
-                            Task { await command.action(store) }
-                        }
-                        .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                ForEach(LedgerDestination.allCases) { destination in
+                    Button("Open \(destination.title)") {
+                        presentMainLedger(destination: destination)
                     }
-                }
-                Divider()
-                if let command = commandPalette.command(.startSession, for: store) {
-                    Button(command.title) {
-                        Task { await command.action(store) }
-                    }
-                    .keyboardShortcut(command.shortcut!.key, modifiers: command.shortcut!.modifiers)
+                    .keyboardShortcut(destination.keyboardShortcut, modifiers: .command)
                 }
 
                 Divider()
@@ -124,6 +98,13 @@ struct ManifoldApp: App {
                     NotificationCenter.default.post(name: .manifoldCycleCurrentSubtab, object: 1)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+
+                Divider()
+
+                Button("Show/Hide Inspector") {
+                    NotificationCenter.default.post(name: .manifoldToggleCurrentInspector, object: nil)
+                }
+                .keyboardShortcut("0", modifiers: [.command, .option])
             }
 
             CommandMenu("Find") {
@@ -183,7 +164,6 @@ struct ManifoldApp: App {
         MenuBarExtra {
             MenuBarPanelView()
                 .environment(store)
-                .environment(commandPalette)
         } label: {
             Image(nsImage: menuBarImage())
                 .accessibilityLabel("Manifold")
@@ -199,7 +179,15 @@ struct ManifoldApp: App {
     private static func bootstrapStore() -> ManifoldStore {
         switch AppTestMode.current {
         case .live:
-            return ManifoldStore()
+            let defaults = AppTestEnvironment.userDefaults()
+            if defaults.bool(forKey: ManifoldStore.demoModeDefaultsKey) {
+                return ManifoldStore(
+                    runtime: DemoRuntimeClient.anthropologie(),
+                    integrationHealth: IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: .demo)),
+                    defaults: defaults
+                )
+            }
+            return ManifoldStore(defaults: defaults)
         case .fixture(let profile):
             let runtime = FixtureRuntimeClient(profile: profile)
             let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: profile))
@@ -207,12 +195,12 @@ struct ManifoldApp: App {
             store.setup.hasCompletedOnboarding = profile != .onboarding
             return store
         case .localRuntime(let scenario):
-            let profile: AppFixtureProfile = switch scenario {
-            case .syntheticMCPUI: .syntheticMCPUI
+            do {
+                try SyntheticMCPUITestBootstrap.prepare(scenario: scenario)
+            } catch {
+                preconditionFailure("Failed to prepare synthetic MCP/UI runtime: \(error)")
             }
-            let runtime = FixtureRuntimeClient(profile: profile)
-            let health = IntegrationHealthModel(checker: FixtureIntegrationHealthChecker(profile: profile))
-            let store = ManifoldStore(runtime: runtime, integrationHealth: health, startServices: false)
+            let store = ManifoldStore()
             store.setup.hasCompletedOnboarding = true
             return store
         }
@@ -222,5 +210,26 @@ struct ManifoldApp: App {
     private func menuBarImage() -> NSImage {
         MenuBarBrandIcon.renderTemplateImage(state: store.menuBarBadgeState)
             ?? menuBarBrandImage()
+    }
+
+    private func prepareSessionFromMenu() {
+        presentMainLedger(destination: .work)
+        if store.sessionWorkbench.preload == nil {
+            store.beginSessionPreload(
+                agent: store.defaultSessionAgent,
+                baseMode: .buildOnDefault
+            )
+        }
+    }
+}
+
+private extension LedgerDestination {
+    var keyboardShortcut: KeyEquivalent {
+        switch self {
+        case .work: return "1"
+        case .access: return "2"
+        case .mail: return "3"
+        case .rules: return "4"
+        }
     }
 }

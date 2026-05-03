@@ -259,6 +259,95 @@ struct EmailStoreTests {
         #expect(row["ref_count"] == "1")
     }
 
+    @Test("Paged message query returns stable windows and total count")
+    func pagedMessageQueryWindows() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let baseDate = try #require(ISO8601DateFormatter.shared.date(from: "2026-05-01T00:00:00Z"))
+        for index in 0..<80 {
+            let receivedAt = ISO8601DateFormatter.shared.string(
+                from: baseDate.addingTimeInterval(TimeInterval(index * 60))
+            )
+            try store.upsertEmailMessage(
+                emailID: String(format: "paged-%03d", index),
+                accountID: Self.testAccountID,
+                mailbox: "INBOX",
+                sender: "Sender \(index) <sender\(index)@example.com>",
+                senderEmail: "sender\(index)@example.com",
+                senderDomain: "example.com",
+                recipients: "recipient@test.com",
+                subject: "Paged \(index)",
+                receivedAt: receivedAt,
+                emlPath: nil,
+                sizeBytes: 100 + index,
+                preview: "Paged test \(index)"
+            )
+        }
+
+        let firstPage = try store.emailMessagePage(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sortKey: .date,
+            limit: 25,
+            offset: 0
+        )
+        #expect(firstPage.totalCount == 80)
+        #expect(firstPage.messages.count == 25)
+        #expect(firstPage.messages.first?.emailID == "paged-079")
+        #expect(firstPage.messages.last?.emailID == "paged-055")
+
+        let secondPage = try store.emailMessagePage(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sortKey: .date,
+            limit: 25,
+            offset: 25
+        )
+        #expect(secondPage.totalCount == 80)
+        #expect(Array(secondPage.messages.map(\.emailID).prefix(3)) == ["paged-054", "paged-053", "paged-052"])
+
+        let widePage = try store.emailMessagePage(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sortKey: .date,
+            limit: 75,
+            offset: 75
+        )
+        #expect(widePage.messages.count == 5)
+        #expect(widePage.messages.last?.emailID == "paged-000")
+    }
+
+    @Test("Attachment share records are per-agent and independent from parent email choice")
+    func attachmentShareRecordsArePerAgent() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let emailID = try await insertTestMessage(store: store, emailID: "message-with-attachment", attachmentCount: 1)
+        try store.upsertEmailAttachment(
+            attachmentID: "attachment-per-agent",
+            emailID: emailID,
+            filename: "agent-plan.txt",
+            mimeType: "text/plain",
+            sizeBytes: 32,
+            contentHash: "hash-agent-plan"
+        )
+
+        #expect(try store.sharedEmailAttachmentIDs(emailID: emailID, agent: .codex).isEmpty)
+        try store.shareEmailAttachments(attachmentIDs: ["attachment-per-agent"], for: .codex)
+        #expect(try store.sharedEmailAttachmentIDs(emailID: emailID, agent: .codex) == Set(["attachment-per-agent"]))
+        #expect(try store.sharedEmailAttachmentIDs(emailID: emailID, agent: .cowork).isEmpty)
+        #expect(try store.isEmailAttachmentShared(attachmentID: "attachment-per-agent", agent: .codex))
+        #expect(try !store.isEmailShared(emailID: emailID, agent: .codex))
+
+        try store.shareEmails(emailIDs: [emailID], for: .codex)
+        try store.unshareEmails(emailIDs: [emailID], for: .codex)
+        #expect(try store.sharedEmailAttachmentIDs(emailID: emailID, agent: .codex) == Set(["attachment-per-agent"]))
+
+        try store.unshareEmailAttachments(attachmentIDs: ["attachment-per-agent"], for: .codex)
+        #expect(try store.sharedEmailAttachmentIDs(emailID: emailID, agent: .codex).isEmpty)
+    }
+
     @Test("Private index mode does not enqueue plaintext body backfill")
     func privateModeSkipsPlaintextBodyBackfill() async throws {
         let (store, db, tempDir) = try await makeStore()
@@ -983,5 +1072,131 @@ struct EmailStoreTests {
             params: [emailID]
         )
         #expect(afterReveal == "0")
+    }
+
+    @Test("Removal history writes plain-text agent context before account reset")
+    func removalHistoryWritesPlainTextAgentContext() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let emailID = try await insertTestMessage(
+            store: store,
+            emailID: "msg-history",
+            subject: "Private mailbox subject"
+        )
+        try store.recordMailAccessAuditEvent(
+            accountID: nil,
+            emailID: emailID,
+            agentID: TargetApp.codex.rawValue,
+            sessionID: "session-1",
+            accessKind: "bodyRead",
+            policyGrantID: "grant-1",
+            detailsRedacted: "opened message body"
+        )
+        try store.shareEmails(emailIDs: [emailID], for: .codex)
+
+        let result = try store.writeAccountRemovalHistory(
+            accountID: Self.testAccountID,
+            destinationRoot: tempDir.appendingPathComponent("history", isDirectory: true)
+        )
+
+        let history = try String(contentsOfFile: result.contextArchivePath, encoding: .utf8)
+        #expect(result.accessAuditEventCount == 1)
+        #expect(result.sharedReferenceCount == 1)
+        #expect(history.contains("Manifold Mail Account Removal History"))
+        #expect(history.contains("access_kind=bodyRead"))
+        #expect(history.contains("agent=codex"))
+        #expect(history.contains("details_redacted=opened message body"))
+        #expect(!history.contains("Private mailbox subject"))
+    }
+
+    @Test("Removing an email account deletes derived indexes and saved email references")
+    func removeAccountDeletesDerivedIndexesAndSavedReferences() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        let emailID = try await insertTestMessage(store: store, emailID: "msg-derived")
+        try store.upsertEmailAttachment(
+            attachmentID: "att-derived",
+            emailID: emailID,
+            filename: "secret.txt",
+            mimeType: "text/plain",
+            sizeBytes: 42,
+            contentHash: "hash-derived",
+            attachmentBlobCID: "blob-att-derived"
+        )
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute("""
+            INSERT INTO access_presets (preset_id, name, created_at, updated_at, target_app)
+            VALUES (?, ?, ?, ?, ?)
+        """, params: ["preset-mail", "Mail preset", now, now, TargetApp.codex.rawValue])
+        try db.execute("""
+            INSERT INTO access_preset_emails (preset_id, email_id)
+            VALUES (?, ?)
+        """, params: ["preset-mail", emailID])
+        try db.execute("""
+            INSERT INTO privacy_content_index (
+                content_id, subject_kind, email_id, attachment_id, display_name,
+                extract_status, scan_status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            "privacy-email",
+            PrivacyIndexedContentKind.emailBody.rawValue,
+            emailID,
+            nil,
+            "message",
+            PrivacyExtractStatus.ready.rawValue,
+            PrivacyIndexStatus.scanned.rawValue,
+            now,
+        ])
+        try db.execute("""
+            INSERT INTO privacy_content_index (
+                content_id, subject_kind, email_id, attachment_id, display_name,
+                extract_status, scan_status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            "privacy-attachment",
+            PrivacyIndexedContentKind.emailAttachment.rawValue,
+            emailID,
+            "att-derived",
+            "secret.txt",
+            PrivacyExtractStatus.ready.rawValue,
+            PrivacyIndexStatus.scanned.rawValue,
+            now,
+        ])
+        try db.execute("""
+            INSERT INTO privacy_detected_spans (
+                span_id, content_id, category, start_utf16, end_utf16, source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, params: ["span-1", "privacy-email", "secret", "0", "6", "test", now])
+        try db.execute("""
+            INSERT INTO privacy_index_jobs (
+                job_id, content_id, reason, priority, status, scheduled_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, params: ["job-1", "privacy-attachment", "test", "1", "pending", now])
+        try store.recordMailAccessAuditEvent(
+            accountID: nil,
+            emailID: emailID,
+            agentID: TargetApp.codex.rawValue,
+            sessionID: "session-1",
+            accessKind: "search",
+            policyGrantID: nil,
+            detailsRedacted: "query"
+        )
+
+        try store.removeEmailAccount(id: Self.testAccountID)
+
+        for table in [
+            "access_preset_emails",
+            "privacy_content_index",
+            "privacy_detected_spans",
+            "privacy_index_jobs",
+            "mail_access_audit_events",
+            "email_attachments",
+            "email_messages",
+        ] {
+            let count = try db.queryScalar("SELECT COUNT(*) FROM \(table)")
+            #expect(count == "0", "\(table) should be empty after account removal")
+        }
     }
 }

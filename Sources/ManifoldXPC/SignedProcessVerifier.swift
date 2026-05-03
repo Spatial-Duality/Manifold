@@ -104,7 +104,11 @@ enum SignedProcessVerifier {
         var buffer = [CChar](repeating: 0, count: bufferSize)
         let result = proc_pidpath(processID, &buffer, UInt32(bufferSize))
         guard result > 0 else { return nil }
-        return String(cString: buffer)
+        let byteCount = min(Int(result), buffer.count)
+        let pathBytes = buffer.prefix(byteCount)
+            .prefix { $0 != 0 }
+            .map { UInt8(bitPattern: $0) }
+        return String(decoding: pathBytes, as: UTF8.self)
     }
 
     static func satisfiesDesignatedRequirement(

@@ -21,10 +21,11 @@ import ManifoldKit
 struct WorkView: View {
     @Environment(ManifoldStore.self) private var store
     @Bindable var work: WorkModel
+    @Binding var inspectorVisible: Bool
 
     var body: some View {
         WorkMainPane(work: work)
-        .inspector(isPresented: .constant(true)) {
+        .inspector(isPresented: $inspectorVisible) {
             WorkInspector(work: work)
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
         }
@@ -177,7 +178,9 @@ private struct WorkCommandStrip: View {
             } label: {
                 Label("New session", systemImage: "plus")
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .fixedSize()
             .help("Prepare a new session")
             .accessibilityIdentifier("work.command.newSession")
@@ -194,6 +197,7 @@ private struct WorkCommandStrip: View {
                     }
                 }
                 .controlSize(.small)
+                .buttonStyle(.bordered)
                 .disabled(store.sessionWorkbench.isActivating)
                 .accessibilityIdentifier("work.command.activate")
             }
@@ -205,6 +209,7 @@ private struct WorkCommandStrip: View {
                     Label("End", systemImage: "stop.fill")
                 }
                 .controlSize(.small)
+                .buttonStyle(.bordered)
                 .accessibilityIdentifier("work.command.end")
             }
 
@@ -217,11 +222,12 @@ private struct WorkCommandStrip: View {
                     .symbolEffect(.rotate, value: store.isRuntimeConnected)
             }
             .controlSize(.small)
+            .buttonStyle(.bordered)
             .accessibilityIdentifier("work.command.restartRuntime")
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
-        .background(.thinMaterial)
+        .controlSize(.small)
         .accessibilityIdentifier("work.commandStrip")
     }
 }
@@ -664,10 +670,6 @@ private struct WorkTimelineSection: View {
                 Label("Activity", systemImage: "list.bullet.rectangle")
                     .font(ManifoldType.bodyMedium)
                 Spacer()
-                TextField("Search", text: $work.timelineSearch)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 200)
-                    .accessibilityIdentifier("work.timeline.search")
             }
 
             if !store.connectionEvents.isEmpty {

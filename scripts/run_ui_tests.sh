@@ -39,23 +39,27 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "$SUITE" in
-  fixture)
-    ONLY_TESTING+=("ManifoldAppUITests/ManifoldFixtureUITests")
-    ;;
-  synthetic)
-    ONLY_TESTING+=("ManifoldAppUITests/ManifoldSyntheticMCPUITests")
-    ;;
-  runtime)
-    ONLY_TESTING+=("ManifoldAppUITests/ManifoldSyntheticMCPUITests")
-    ;;
-  all)
-    ;;
-  *)
-    echo "Unknown suite: $SUITE" >&2
-    exit 64
-    ;;
-esac
+if (( ${#ONLY_TESTING[@]} == 0 )); then
+  case "$SUITE" in
+    fixture)
+      ONLY_TESTING+=("ManifoldAppUITests/ManifoldFixtureUITests")
+      ;;
+    synthetic)
+      ONLY_TESTING+=("ManifoldAppUITests/ManifoldSyntheticMCPUITests")
+      ONLY_TESTING+=("ManifoldAppUITests/ManifoldSharingMCPUITests")
+      ;;
+    runtime)
+      ONLY_TESTING+=("ManifoldAppUITests/ManifoldSyntheticMCPUITests")
+      ONLY_TESTING+=("ManifoldAppUITests/ManifoldSharingMCPUITests")
+      ;;
+    all)
+      ;;
+    *)
+      echo "Unknown suite: $SUITE" >&2
+      exit 64
+      ;;
+  esac
+fi
 
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/tmp/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-/tmp/swiftpm-module-cache}"

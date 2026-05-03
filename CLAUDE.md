@@ -98,7 +98,7 @@ For launch/runtime fixes, also verify the app actually registers or starts the r
 
 - `docs/` = canonical contributor and user docs. `docs/archive/` = history, don't rewrite.
 - `DESIGN.md` (root) = canonical design system. `ARCHITECTURE.md` (root) = deep architecture reference. `docs/architecture.md` = outsider-friendly view.
-- `brand/` = mark and brand assets. `mark-light.svg` / `mark-dark.svg` are README-load-bearing — don't move or rename without updating `README.md`.
+- `brand/` = mark and brand assets. The PNG at `brand/Icon/Icon Exports/Icon-macOS-Default-256x256@1x.png` is README-load-bearing — don't move or rename without updating `README.md`.
 - `scripts/` (plural) = all shell and Python helpers. There is no `script/` directory anymore.
 - `Resources/` (root) holds the LaunchAgent plist, referenced by `project.yml`'s post-build script. Don't move it without updating that script.
 - `unsort/` = personal scratch dropzone. **Gitignored. Hands off unless asked.**

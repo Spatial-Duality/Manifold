@@ -10,6 +10,14 @@ private let runtimeLogger = Logger(subsystem: "com.spatialduality.manifold", cat
 
 /// Owns the local runtime graph used by the app, XPC service, and MCP bridge.
 public actor ManifoldRuntime {
+    /// Runtime store root. The runtime owns all persistent data below this root.
+    public nonisolated let rootURL: URL
+    /// Legacy pre-v2 mail backup root.
+    public nonisolated let mailBackupRoot: URL
+    /// Archive-v2 encrypted mail blob root.
+    public nonisolated let mailArchiveRoot: URL
+    /// Plain-text account-removal audit exports.
+    public nonisolated let mailAccountRemovalHistoryRoot: URL
     /// Shared database connection for runtime-owned stores.
     public nonisolated let db: DatabaseConnection
     /// Content-addressed blob store for tracked file history.
@@ -85,6 +93,9 @@ public actor ManifoldRuntime {
     /// Creates the runtime and initializes all local stores at the chosen root URL.
     public init(storeURL: URL? = nil) throws {
         let rootURL = storeURL ?? Self.defaultStoreURL
+        let mailBackupRoot = Self.mailBackupRoot(for: rootURL)
+        let mailArchiveRoot = Self.mailArchiveRoot(for: rootURL)
+        let mailAccountRemovalHistoryRoot = rootURL.appendingPathComponent("MailAccountRemovalHistory", isDirectory: true)
         try LocalFileProtection.ensureDirectory(at: rootURL)
 
         let db = try DatabaseConnection(url: rootURL.appendingPathComponent("manifold.db"))
@@ -93,8 +104,8 @@ public actor ManifoldRuntime {
         do {
             try MailFreshStartReset.cleanupIfNeeded(
                 db: db,
-                backupRoot: Self.mailBackupRoot(for: rootURL),
-                archiveRoot: Self.mailArchiveRoot(for: rootURL)
+                backupRoot: mailBackupRoot,
+                archiveRoot: mailArchiveRoot
             )
         } catch {
             runtimeLogger.error("Mail fresh-start cleanup failed: \(String(describing: error), privacy: .public)")
@@ -151,6 +162,10 @@ public actor ManifoldRuntime {
             mlxBackend: mlxPrivacyBackend
         )
 
+        self.rootURL = rootURL
+        self.mailBackupRoot = mailBackupRoot
+        self.mailArchiveRoot = mailArchiveRoot
+        self.mailAccountRemovalHistoryRoot = mailAccountRemovalHistoryRoot
         self.db = db
         self.contentStore = contentStore
         self.auditStore = auditStore
@@ -202,8 +217,9 @@ public actor ManifoldRuntime {
             runtimeLogger.error("Rule catalog seeding failed: \(String(describing: error), privacy: .public)")
         }
 
-        await privacyIndexCoordinator.bootstrap()
+        async let privacyBootstrap: Void = privacyIndexCoordinator.bootstrap()
         await mailSyncCoordinator.startRuntimeSync()
+        await privacyBootstrap
     }
 
     /// Mutates standing source scope through the same runtime-owned path the

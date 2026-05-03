@@ -18,20 +18,11 @@ public struct KeychainMailSecretStore: Sendable {
     public func store(_ secret: Data, reference: MailCredentialReference) -> Bool {
         delete(reference: reference)
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: reference.keychainService,
-            kSecAttrAccount as String: reference.keychainAccount,
-            kSecValueData as String: secret,
-            kSecUseDataProtectionKeychain as String: true,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-        ]
+        let query = Self.dataProtectionStoreQuery(secret, reference: reference)
         let dpStatus = SecItemAdd(query as CFDictionary, nil)
         if dpStatus == errSecSuccess { return true }
 
-        var loginQuery = query
-        loginQuery.removeValue(forKey: kSecUseDataProtectionKeychain as String)
-        let status = SecItemAdd(loginQuery as CFDictionary, nil)
+        let status = SecItemAdd(Self.loginStoreQuery(secret, reference: reference) as CFDictionary, nil)
         if status != errSecSuccess {
             let message = SecCopyErrorMessageString(status, nil) as String? ?? "Unknown"
             mailSecretLogger.error("Mail keychain store failed (\(status)): \(message)")
@@ -76,6 +67,58 @@ public struct KeychainMailSecretStore: Sendable {
 
         let status = SecItemDelete(baseQuery as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    /// Stores a pending credential for app-to-agent handoff in the
+    /// login keychain. Pending handoffs intentionally avoid the data
+    /// protection keychain because the app and LaunchAgent can have
+    /// different entitlement contexts during local development.
+    @discardableResult
+    public func storePendingHandoff(
+        _ secret: Data,
+        reference: MailCredentialReference,
+        trustedApplicationPaths _: [String]
+    ) -> Bool {
+        delete(reference: reference)
+
+        // Keep the pending handoff in the login keychain so the app and
+        // LaunchAgent share the same lookup scope. The trusted-application
+        // ACL APIs were legacy SecKeychain APIs and are deprecated on macOS.
+        let status = SecItemAdd(Self.loginStoreQuery(secret, reference: reference) as CFDictionary, nil)
+        if status != errSecSuccess {
+            let message = SecCopyErrorMessageString(status, nil) as String? ?? "Unknown"
+            mailSecretLogger.error("Pending mail credential store failed (\(status)): \(message)")
+        }
+        return status == errSecSuccess
+    }
+
+    static func dataProtectionStoreQuery(
+        _ secret: Data,
+        reference: MailCredentialReference
+    ) -> [String: Any] {
+        var query = baseStoreQuery(secret, reference: reference)
+        query[kSecUseDataProtectionKeychain as String] = true
+        return query
+    }
+
+    static func loginStoreQuery(
+        _ secret: Data,
+        reference: MailCredentialReference
+    ) -> [String: Any] {
+        baseStoreQuery(secret, reference: reference)
+    }
+
+    private static func baseStoreQuery(
+        _ secret: Data,
+        reference: MailCredentialReference
+    ) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: reference.keychainService,
+            kSecAttrAccount as String: reference.keychainAccount,
+            kSecValueData as String: secret,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+        ]
     }
 
     public static func appPasswordReference(accountID: String) -> MailCredentialReference {

@@ -117,9 +117,10 @@ public actor EmailSyncEngine {
             guard let account, let server = account.server, let port = account.port else {
                 return SyncResult(accountID: accountID, errors: ["Account not configured"])
             }
+            let provider = EmailProvider(rawValue: account.providerType)
 
             // Get or create connection
-            let conn = try await ensureConnection(accountID: accountID, account: account, server: server, port: port)
+            var conn = try await ensureConnection(accountID: accountID, account: account, server: server, port: port)
 
             // Discover all mailboxes and persist metadata
             let listEntries = try await conn.listDetailed()
@@ -147,18 +148,26 @@ public actor EmailSyncEngine {
             let junkMailboxNames = Set(
                 imapMailboxes.filter { $0.folderType == .junk }.map(\.mailboxName)
             )
-            let session = ReadOnlyIMAPSession(connection: conn)
+            var session = ReadOnlyIMAPSession(connection: conn)
 
-            // Sync all selectable mailboxes, skipping redundant Gmail system folders
-            let skipPatterns = ["[gmail]/all mail", "[gmail]/important", "[gmail]/starred"]
+            // Sync all selectable mailboxes. Inbox and sent mail run first so
+            // a slow trash/junk body cannot starve the mail users expect to see.
             let toSync = listEntries.filter { entry in
                 let isSelectable = !entry.flags.contains("\\Noselect") && !entry.flags.contains("\\NonExistent")
-                let isRedundant = skipPatterns.contains(entry.name.lowercased())
+                let isRedundant = Self.isRedundantMailbox(entry, provider: provider)
                 let matchesFilter = mailboxFilter == nil || entry.name == mailboxFilter
                 return isSelectable && !isRedundant && matchesFilter
-            }.map(\.name)
+            }.sorted { lhs, rhs in
+                let lhsKey = Self.mailboxSortKey(lhs)
+                let rhsKey = Self.mailboxSortKey(rhs)
+                if lhsKey.priority != rhsKey.priority {
+                    return lhsKey.priority < rhsKey.priority
+                }
+                return lhsKey.name.localizedStandardCompare(rhsKey.name) == .orderedAscending
+            }
 
-            for mailboxName in toSync {
+            for (index, entry) in toSync.enumerated() {
+                let mailboxName = entry.name
                 do {
                     let result = try await syncMailbox(
                         accountID: accountID,
@@ -170,13 +179,26 @@ public actor EmailSyncEngine {
                     totalNew += result.newMessages
                     mailboxResults.append(result)
                 } catch {
-                    errors.append("\(mailboxName): \(error.localizedDescription)")
+                    let message = error.localizedDescription
+                    errors.append("\(mailboxName): \(message)")
+                    recordMailboxError(accountID: accountID, mailboxName: mailboxName, errorMessage: message)
+                    await conn.disconnect()
+                    connections.removeValue(forKey: accountID)
+
+                    guard index < toSync.count - 1 else { continue }
+                    do {
+                        conn = try await ensureConnection(accountID: accountID, account: account, server: server, port: port)
+                        session = ReadOnlyIMAPSession(connection: conn)
+                    } catch {
+                        errors.append("Reconnect after \(mailboxName): \(error.localizedDescription)")
+                        break
+                    }
                 }
             }
 
             // SEARCH ALL reconciliation: detect server-side deletions
             if !mode.isRecentPass && !mode.isHistoricalBackfill {
-                for mailboxName in toSync {
+                for mailboxName in toSync.map(\.name) {
                     do {
                         try await reconcileMailbox(
                             accountID: accountID,
@@ -212,6 +234,81 @@ public actor EmailSyncEngine {
         )
     }
 
+    private func recordMailboxError(accountID: String, mailboxName: String, errorMessage: String) {
+        do {
+            let state = try emailStore.syncState(accountID: accountID, mailbox: mailboxName)
+            let count = try emailStore.messageCountInMailbox(accountID: accountID, mailbox: mailboxName)
+            try emailStore.updateSyncState(
+                accountID: accountID,
+                mailbox: mailboxName,
+                uidValidity: state?.uidValidity,
+                lastSyncUID: state?.lastSyncUID ?? 0,
+                messageCount: max(state?.messageCount ?? 0, count),
+                syncStatus: .error,
+                errorMessage: String(errorMessage.prefix(512))
+            )
+        } catch {
+            logger.warning("Failed to record mailbox sync error for \(mailboxName): \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated static func isRedundantMailbox(
+        _ entry: IMAPConnection.ListEntry,
+        provider: EmailProvider?
+    ) -> Bool {
+        guard provider == .gmail else { return false }
+        let lowerName = entry.name.lowercased()
+        let flags = Set(entry.flags.map { $0.lowercased() })
+        if flags.contains("\\all") || flags.contains("\\important") || flags.contains("\\flagged") {
+            return true
+        }
+        return lowerName == "[gmail]/all mail"
+            || lowerName == "[gmail]/important"
+            || lowerName == "[gmail]/starred"
+            || lowerName == "[google mail]/all mail"
+            || lowerName == "[google mail]/important"
+            || lowerName == "[google mail]/starred"
+    }
+
+    nonisolated static func mailboxSortKey(
+        _ entry: IMAPConnection.ListEntry
+    ) -> (priority: Int, name: String) {
+        let lowerName = entry.name.lowercased()
+        let flags = Set(entry.flags.map { $0.lowercased() })
+        let priority: Int
+        if lowerName == "inbox" {
+            priority = 0
+        } else if flags.contains("\\sent") || lowerName.contains("sent") {
+            priority = 10
+        } else if lowerName.contains("archive") {
+            priority = 20
+        } else if flags.contains("\\drafts") || lowerName.contains("draft") {
+            priority = 80
+        } else if flags.contains("\\junk")
+            || flags.contains("\\trash")
+            || lowerName.contains("junk")
+            || lowerName.contains("spam")
+            || lowerName.contains("trash")
+            || lowerName.contains("deleted") {
+            priority = 90
+        } else if lowerName.contains("notes") {
+            priority = 95
+        } else {
+            priority = 30
+        }
+        return (priority, entry.name)
+    }
+
+    nonisolated static func invalidatesConnection(_ error: Error) -> Bool {
+        guard let imapError = error as? IMAPError else { return false }
+        switch imapError {
+        case .connectionFailed, .timeout, .disconnected:
+            return true
+        case .authenticationFailed, .mailboxNotFound, .unexpectedResponse, .serverError, .protocolError:
+            return false
+        }
+    }
+
     private func syncMailbox(
         accountID: String,
         session: ReadOnlyIMAPSession,
@@ -244,6 +341,14 @@ public actor EmailSyncEngine {
         )
 
         guard !uidPlan.selectedUIDs.isEmpty else {
+            lastUID = Self.nextHighWatermark(
+                previousLastUID: previousLastUID,
+                searchedUIDs: uidPlan.searchedUIDs,
+                savedUIDs: uidPlan.knownSavedUIDs,
+                mode: mode,
+                selectedUIDCount: 0,
+                candidateUIDCount: uidPlan.candidateUIDCount
+            )
             try emailStore.updateSyncState(
                 accountID: accountID, mailbox: mailboxName,
                 uidValidity: selectResult.uidValidity,
@@ -288,6 +393,9 @@ public actor EmailSyncEngine {
                 } catch {
                     try? FileManager.default.removeItem(at: messageStagingURL)
                     logger.warning("Failed to fetch body for UID \(uid): \(error.localizedDescription)")
+                    if Self.invalidatesConnection(error) {
+                        throw error
+                    }
                     continue
                 }
 
@@ -419,7 +527,7 @@ public actor EmailSyncEngine {
         lastUID = Self.nextHighWatermark(
             previousLastUID: previousLastUID,
             searchedUIDs: uidPlan.searchedUIDs,
-            savedUIDs: savedUIDs,
+            savedUIDs: savedUIDs.union(uidPlan.knownSavedUIDs),
             mode: mode,
             selectedUIDCount: uidPlan.selectedUIDs.count,
             candidateUIDCount: uidPlan.candidateUIDCount
@@ -449,6 +557,7 @@ public actor EmailSyncEngine {
         let selectedUIDs: [UInt32]
         let candidateUIDCount: Int
         let hasMoreHistory: Bool
+        let knownSavedUIDs: Set<UInt32>
     }
 
     private func syncUIDPlan(
@@ -462,24 +571,30 @@ public actor EmailSyncEngine {
         case .incremental:
             let criteria = lastUID > 0 ? "UID \(lastUID + 1):*" : "ALL"
             let uids = try await session.search(criteria: criteria)
-            let candidates = uids.filter { $0 > lastUID }.sorted(by: >)
+            let storedUIDs = try emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
+            let searched = uids.filter { $0 > lastUID }.sorted(by: >)
+            let candidates = searched.filter { !storedUIDs.contains($0) }
             return MailboxUIDPlan(
-                searchedUIDs: candidates,
+                searchedUIDs: searched,
                 selectedUIDs: candidates,
                 candidateUIDCount: candidates.count,
-                hasMoreHistory: false
+                hasMoreHistory: false,
+                knownSavedUIDs: Set(storedUIDs.filter { $0 > lastUID })
             )
 
         case .recentPass(let limitPerMailbox):
             let criteria = lastUID > 0 ? "UID \(lastUID + 1):*" : "ALL"
             let uids = try await session.search(criteria: criteria)
-            let candidates = uids.filter { $0 > lastUID }.sorted(by: >)
+            let storedUIDs = try emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
+            let searched = uids.filter { $0 > lastUID }.sorted(by: >)
+            let candidates = searched.filter { !storedUIDs.contains($0) }
             let selected = Array(candidates.prefix(max(0, limitPerMailbox)))
             return MailboxUIDPlan(
-                searchedUIDs: candidates,
+                searchedUIDs: searched,
                 selectedUIDs: selected,
                 candidateUIDCount: candidates.count,
-                hasMoreHistory: selected.count < candidates.count
+                hasMoreHistory: selected.count < candidates.count,
+                knownSavedUIDs: Set(storedUIDs.filter { $0 > lastUID })
             )
 
         case .historicalBackfill(let batchLimitPerMailbox):
@@ -489,7 +604,8 @@ public actor EmailSyncEngine {
                     searchedUIDs: [],
                     selectedUIDs: [],
                     candidateUIDCount: 0,
-                    hasMoreHistory: false
+                    hasMoreHistory: false,
+                    knownSavedUIDs: storedUIDs
                 )
             }
 
@@ -503,7 +619,8 @@ public actor EmailSyncEngine {
                 searchedUIDs: candidates,
                 selectedUIDs: selected,
                 candidateUIDCount: candidates.count,
-                hasMoreHistory: selected.count < candidates.count
+                hasMoreHistory: selected.count < candidates.count,
+                knownSavedUIDs: storedUIDs
             )
         }
     }
@@ -590,6 +707,13 @@ public actor EmailSyncEngine {
             // Recent pass intentionally skips older UIDs for later backfill.
             // The high-water mark tracks newest-mail incremental progress only;
             // historical jobs fill the lower UID range from stored membership.
+            if selectedUIDCount >= candidateUIDCount {
+                return safeHighWatermark(
+                    previousLastUID: previousLastUID,
+                    searchedUIDs: searchedUIDs,
+                    savedUIDs: savedUIDs
+                )
+            }
             return max(previousLastUID, savedUIDs.max() ?? previousLastUID)
         case .incremental:
             if selectedUIDCount < candidateUIDCount {

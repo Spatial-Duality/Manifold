@@ -56,11 +56,13 @@ targets:
           ENABLE_HARDENED_RUNTIME: NO
     postBuildScripts:
       - name: Bundle Launch Agent
+        basedOnDependencyAnalysis: false
         script: |
           set -euo pipefail
           cd "${SRCROOT}"
           config_name="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')"
-          swift build --product ManifoldAgent --product manifold-mcp -c "$config_name" 2>&1
+          swift build --product ManifoldAgent -c "$config_name" 2>&1
+          swift build --product manifold-mcp -c "$config_name" 2>&1
           launch_agents_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents"
           launch_services_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchServices"
           resources_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
@@ -71,9 +73,19 @@ targets:
           cp "${SRCROOT}/.build/$config_name/ManifoldAgent" "$helper_path"
           cp "${SRCROOT}/.build/$config_name/manifold-mcp" "$mcp_path"
           chmod +x "$helper_path" "$mcp_path"
+          signing_identity=""
+          signing_options=""
           if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-            /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none --options runtime --generate-entitlement-der "$helper_path"
-            /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none --options runtime --generate-entitlement-der "$mcp_path"
+            signing_identity="${EXPANDED_CODE_SIGN_IDENTITY}"
+            if [ "${ENABLE_HARDENED_RUNTIME:-NO}" = "YES" ]; then
+              signing_options="--options runtime"
+            fi
+          elif [ "${CONFIGURATION:-Debug}" = "Debug" ]; then
+            signing_identity="-"
+          fi
+          if [ -n "$signing_identity" ]; then
+            /usr/bin/codesign --force --sign "$signing_identity" --timestamp=none $signing_options --generate-entitlement-der "$helper_path"
+            /usr/bin/codesign --force --sign "$signing_identity" --timestamp=none $signing_options --generate-entitlement-der "$mcp_path"
           fi
         inputFiles:
           - $(SRCROOT)/Resources/com.spatialduality.manifold.runtime.plist
@@ -121,3 +133,14 @@ targets:
         TEST_TARGET_NAME: Manifold
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
+
+schemes:
+  Manifold:
+    build:
+      targets:
+        Manifold: all
+    test:
+      config: Debug
+      targets:
+        - ManifoldAppTests
+        - ManifoldAppUITests

@@ -49,6 +49,15 @@ struct MailPrivateTokenIndexTests {
         #expect(first != other)
     }
 
+    @Test("Term HMAC can reuse a derived account key")
+    func reusableAccountTermKeyMatchesSingleTermDerivation() throws {
+        let key = try MailArchiveStore.accountDerivedKey(accountID: "account-a", purpose: "mail-private-index")
+        let direct = try MailPrivateTokenIndex.termHMAC(accountID: "account-a", normalizedToken: "launch")
+        let reusedKey = MailPrivateTokenIndex.termHMAC(normalizedToken: "launch", key: key)
+
+        #expect(reusedKey == direct)
+    }
+
     @Test("Private index supports multi-term body search without plaintext terms")
     func privateIndexSearch() throws {
         let (store, db, tempDir) = try makeStore()
