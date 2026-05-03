@@ -32,7 +32,7 @@ private func menuBarManifoldImage() -> NSImage {
 private func configureApplicationIconImage() {
     if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
        let icon = NSImage(contentsOf: iconURL) {
-        NSApp.applicationIconImage = icon
+        NSApplication.shared.applicationIconImage = icon
     }
 }
 
