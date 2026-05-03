@@ -1,5 +1,11 @@
 # Manifold
 
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Spatial-Duality/Manifold?include_prereleases&sort=semver)](https://github.com/Spatial-Duality/Manifold/releases)
+[![macOS 26+](https://img.shields.io/badge/macOS-26%2B-A89E91)](https://www.apple.com/macos/)
+[![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://swift.org/)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-only-141413)](https://www.apple.com/mac/)
+
 The macOS app for doing real, non-code work with Claude and Codex Mac apps. Drafts, contracts, briefs, emails, meeting notes. File by file, message by message. With version history, an AI-usage audit log, and on-device PII redaction.
 
 Site: [spatialduality.com/manifold](https://spatialduality.com/manifold/).
