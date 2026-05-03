@@ -146,19 +146,66 @@ if [[ "$CONFIG" == "release" ]]; then
 
     if [[ -n "$APP_IDENTITY" ]]; then
         echo "Signing nested helpers and app bundle..."
+        TEAM_ID="${MANIFOLD_DEVELOPMENT_TEAM:-}"
+        if [[ -z "$TEAM_ID" && "$APP_IDENTITY" =~ \(([A-Z0-9]+)\)$ ]]; then
+            TEAM_ID="${BASH_REMATCH[1]}"
+        fi
+        if [[ -z "$TEAM_ID" ]]; then
+            echo "error: could not infer Team ID from MANIFOLD_CODESIGN_IDENTITY." >&2
+            echo "       Set MANIFOLD_DEVELOPMENT_TEAM explicitly." >&2
+            exit 1
+        fi
+
+        APP_IDENTIFIER_PREFIX="${MANIFOLD_APP_IDENTIFIER_PREFIX:-$TEAM_ID.}"
+        PROCESSED_ENTITLEMENTS="$BUILD_OUTPUT_DIR/Manifold.processed.entitlements"
+        sed "s/\$(AppIdentifierPrefix)/$APP_IDENTIFIER_PREFIX/g" \
+            "$PROJECT_DIR/ManifoldApp/ManifoldApp/Manifold.entitlements" \
+            > "$PROCESSED_ENTITLEMENTS"
+
+        sign_runtime() {
+            /usr/bin/codesign \
+                --force \
+                --sign "$APP_IDENTITY" \
+                --options runtime \
+                --timestamp \
+                --generate-entitlement-der \
+                "$@"
+        }
+
+        sign_sparkle_nested_code() {
+            local framework="$1"
+            local nested
+
+            while IFS= read -r -d '' nested; do
+                sign_runtime "$nested"
+            done < <(find "$framework" -type d -name "*.xpc" -print0)
+
+            while IFS= read -r -d '' nested; do
+                sign_runtime "$nested"
+            done < <(find "$framework" -type f -name "Autoupdate" -perm +111 -print0)
+
+            while IFS= read -r -d '' nested; do
+                sign_runtime "$nested"
+            done < <(find "$framework" -type d -name "*.app" -print0)
+        }
+
         if [[ -d "$BUNDLE/Contents/Frameworks" ]]; then
             while IFS= read -r -d '' nested_code; do
-                /usr/bin/codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp --generate-entitlement-der "$nested_code"
+                if [[ "$(basename "$nested_code")" == "Sparkle.framework" ]]; then
+                    sign_sparkle_nested_code "$nested_code"
+                fi
+                sign_runtime "$nested_code"
             done < <(find "$BUNDLE/Contents/Frameworks" -mindepth 1 -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) -print0)
         fi
-        /usr/bin/codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp --generate-entitlement-der "$MCP_BINARY_PATH"
-        /usr/bin/codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp --generate-entitlement-der "$AGENT_BINARY_PATH"
+        sign_runtime "$MCP_BINARY_PATH"
+        sign_runtime "$AGENT_BINARY_PATH"
         /usr/bin/codesign \
             --force \
             --sign "$APP_IDENTITY" \
-            --entitlements "$PROJECT_DIR/ManifoldApp/ManifoldApp/Manifold.entitlements" \
+            --entitlements "$PROCESSED_ENTITLEMENTS" \
             --options runtime \
             --timestamp \
+            --generate-entitlement-der \
             "$BUNDLE"
         /usr/bin/codesign --verify --deep --strict "$BUNDLE"
     fi
