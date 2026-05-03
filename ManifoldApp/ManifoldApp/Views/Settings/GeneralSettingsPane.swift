@@ -98,31 +98,6 @@ struct GeneralSettingsPane: View {
                 Toggle("Access denied alerts", isOn: $store.notifyOnAccessDenied)
             }
 
-            Section("Demo Mode") {
-                // Demo Mode populates a fictional parody universe (Anthropologie). See ManifoldApp/ManifoldApp/Models/DemoRuntimeClient.swift for the data entry point; the universe is intentionally not based on any real people or organization.
-                Toggle("Demo Mode", isOn: Binding(
-                    get: { store.isDemoModeEnabled },
-                    set: { store.setDemoModeEnabled($0) }
-                ))
-                Text("Populate the app with realistic synthetic data so you can explore every surface without connecting your real files or email. Toggle off to return to live mode.")
-                    .font(ManifoldType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if store.isDemoModeEnabled {
-                    Toggle("Show Demo warning", isOn: $store.showDemoWarning)
-                    Text("Shows a visible Demo badge while synthetic data is active. Turn this off only for screenshots or recordings.")
-                        .font(ManifoldType.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Button("Reset demo data") {
-                        store.resetDemoData()
-                    }
-                    .controlSize(.small)
-                }
-            }
-
             Section {
                 Toggle("Include anonymous ID in diagnostic exports", isOn: $diagnostics.diagnosticSharingEnabled)
                 if diagnostics.diagnosticSharingEnabled {

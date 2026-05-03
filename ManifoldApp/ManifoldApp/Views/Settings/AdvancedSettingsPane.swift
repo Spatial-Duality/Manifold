@@ -27,6 +27,8 @@ struct AdvancedSettingsPane: View {
     }
 
     var body: some View {
+        @Bindable var store = store
+
         Form {
             Section("Runtime") {
                 LabeledContent("Status") {
@@ -51,6 +53,34 @@ struct AdvancedSettingsPane: View {
                     }
                 }
                 .controlSize(.small)
+            }
+
+            Section("Demo Mode") {
+                Toggle("Demo Mode", isOn: Binding(
+                    get: { store.isDemoModeEnabled },
+                    set: { store.setDemoModeEnabled($0) }
+                ))
+                .accessibilityIdentifier("settings.advanced.demoMode")
+
+                Text("Populate the app with realistic synthetic data so you can explore every surface without connecting your real files or email. Toggle off to return to live mode.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if store.isDemoModeEnabled {
+                    Toggle("Show Demo warning", isOn: $store.showDemoWarning)
+                        .accessibilityIdentifier("settings.advanced.demoWarning")
+                    Text("Shows a visible Demo badge while synthetic data is active. Turn this off only for screenshots or recordings.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Reset demo data") {
+                        store.resetDemoData()
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("settings.advanced.resetDemoData")
+                }
             }
 
             Section("Paths") {
