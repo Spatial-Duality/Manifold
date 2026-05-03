@@ -146,21 +146,6 @@ if [[ "$CONFIG" == "release" ]]; then
 
     if [[ -n "$APP_IDENTITY" ]]; then
         echo "Signing nested helpers and app bundle..."
-        TEAM_ID="${MANIFOLD_DEVELOPMENT_TEAM:-}"
-        if [[ -z "$TEAM_ID" && "$APP_IDENTITY" =~ \(([A-Z0-9]+)\)$ ]]; then
-            TEAM_ID="${BASH_REMATCH[1]}"
-        fi
-        if [[ -z "$TEAM_ID" ]]; then
-            echo "error: could not infer Team ID from MANIFOLD_CODESIGN_IDENTITY." >&2
-            echo "       Set MANIFOLD_DEVELOPMENT_TEAM explicitly." >&2
-            exit 1
-        fi
-
-        APP_IDENTIFIER_PREFIX="${MANIFOLD_APP_IDENTIFIER_PREFIX:-$TEAM_ID.}"
-        PROCESSED_ENTITLEMENTS="$BUILD_OUTPUT_DIR/Manifold.processed.entitlements"
-        sed "s/\$(AppIdentifierPrefix)/$APP_IDENTIFIER_PREFIX/g" \
-            "$PROJECT_DIR/ManifoldApp/ManifoldApp/Manifold.entitlements" \
-            > "$PROCESSED_ENTITLEMENTS"
 
         sign_runtime() {
             /usr/bin/codesign \
@@ -202,7 +187,6 @@ if [[ "$CONFIG" == "release" ]]; then
         /usr/bin/codesign \
             --force \
             --sign "$APP_IDENTITY" \
-            --entitlements "$PROCESSED_ENTITLEMENTS" \
             --options runtime \
             --timestamp \
             --generate-entitlement-der \

@@ -69,6 +69,10 @@ if [[ -n "$APP_PATH" ]]; then
         if /usr/bin/codesign --verify --deep --strict "$APP_PATH" >/tmp/manifold-release-verify.log 2>&1; then
             /usr/bin/codesign -d --verbose=4 "$APP_PATH" 2>&1 | grep -q 'Runtime Version=' \
                 || fail "Signed app is missing hardened runtime metadata."
+            ENTITLEMENTS="$(/usr/bin/codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true)"
+            if printf '%s' "$ENTITLEMENTS" | grep -q 'keychain-access-groups'; then
+                fail "Developer ID release app must not include keychain-access-groups without an embedded provisioning profile."
+            fi
             /usr/sbin/spctl -a -vv "$APP_PATH" >/tmp/manifold-release-spctl.log 2>&1 \
                 || fail "spctl assessment failed for $APP_PATH"
         elif [[ "$REQUIRE_SIGNED_APP" == "1" ]]; then
