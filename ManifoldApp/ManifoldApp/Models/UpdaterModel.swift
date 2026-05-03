@@ -9,6 +9,20 @@ import ManifoldKit
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "updater")
 
+enum SoftwareUpdateState: Equatable {
+    case ready
+    case checking
+    case updateAvailable(version: String)
+    case downloading(version: String)
+    case downloaded(version: String)
+    case installing(version: String)
+    case relaunching
+    case upToDate(checkedAt: Date)
+    case skipped(version: String)
+    case deferred(version: String)
+    case failed(reason: DiagnosticEvent.SparkleUpdateFailureReason)
+}
+
 /// App-side wrapper around `SPUStandardUpdaterController`.
 ///
 /// Two non-default behaviors:
@@ -33,6 +47,8 @@ final class UpdaterModel: NSObject, ObservableObject {
     let controller: SPUStandardUpdaterController
     private let diagnostics: DiagnosticsModel
     private let delegateAdapter: UpdaterDelegateAdapter
+    @Published private(set) var state: SoftwareUpdateState = .ready
+    @Published private(set) var isManualCheckInFlight = false
 
     /// Set by `ManifoldStore` after init so the closure can capture `self`.
     /// Invoked on the main actor immediately before Sparkle relaunches.
@@ -65,8 +81,15 @@ final class UpdaterModel: NSObject, ObservableObject {
     /// Manual `Check for Updates…` invocation. Always allowed regardless of
     /// the automatic-check preference — the user explicitly asked.
     func checkForUpdates() {
+        guard canStartManualCheck else { return }
+        isManualCheckInFlight = true
+        state = .checking
         diagnostics.record(.sparkleUpdateChecked)
         controller.checkForUpdates(nil)
+    }
+
+    var canStartManualCheck: Bool {
+        controller.updater.canCheckForUpdates && !isManualCheckInFlight
     }
 
     /// Mirror the consent toggle to Sparkle's persisted automatic-check
@@ -80,6 +103,7 @@ final class UpdaterModel: NSObject, ObservableObject {
     // MARK: - Delegate callbacks (invoked from the adapter)
 
     fileprivate func handleWillRelaunch() {
+        state = .relaunching
         agentShutdown()
         diagnostics.record(.sparkleUpdateApplied(
             from: Bundle.main.shortVersionString,
@@ -88,11 +112,58 @@ final class UpdaterModel: NSObject, ObservableObject {
     }
 
     fileprivate func handleDidFinish(error: Error?) {
-        guard let error else { return }
+        isManualCheckInFlight = false
+        guard let error else {
+            if state == .checking {
+                state = .upToDate(checkedAt: Date())
+            }
+            return
+        }
         let nsError = error as NSError
         let reason = Self.classify(nsError)
+        state = .failed(reason: reason)
         diagnostics.record(.sparkleUpdateFailed(reason: reason))
         logger.error("Sparkle update failed: code=\(nsError.code, privacy: .public) reason=\(reason.rawValue, privacy: .public)")
+    }
+
+    fileprivate func handleDidFindUpdate(_ item: SUAppcastItem) {
+        state = .updateAvailable(version: item.displayVersionString)
+    }
+
+    fileprivate func handleDidNotFindUpdate() {
+        state = .upToDate(checkedAt: Date())
+    }
+
+    fileprivate func handleWillDownload(_ item: SUAppcastItem) {
+        state = .downloading(version: item.displayVersionString)
+    }
+
+    fileprivate func handleDidDownload(_ item: SUAppcastItem) {
+        state = .downloaded(version: item.displayVersionString)
+    }
+
+    fileprivate func handleFailedDownload(_ item: SUAppcastItem, error: Error) {
+        state = .failed(reason: .downloadFailed)
+        diagnostics.record(.sparkleUpdateFailed(reason: .downloadFailed))
+        logger.error("Sparkle update download failed for \(item.displayVersionString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+    }
+
+    fileprivate func handleWillInstall(_ item: SUAppcastItem) {
+        state = .installing(version: item.displayVersionString)
+    }
+
+    fileprivate func handleChoice(_ choice: SPUUserUpdateChoice, item: SUAppcastItem, state updateState: SPUUserUpdateState) {
+        let version = item.displayVersionString
+        switch choice {
+        case .install:
+            state = updateState.stage == .notDownloaded ? .downloading(version: version) : .installing(version: version)
+        case .skip:
+            state = .skipped(version: version)
+        case .dismiss:
+            state = .deferred(version: version)
+        @unknown default:
+            state = .ready
+        }
     }
 
     /// Exposed for unit testing. Maps a Sparkle `NSError` (in the
@@ -132,6 +203,51 @@ private final class UpdaterDelegateAdapter: NSObject, SPUUpdaterDelegate, SPUSta
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
         let owner = self.owner
         DispatchQueue.main.async { owner?.handleWillRelaunch() }
+    }
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleDidFindUpdate(item) }
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleDidNotFindUpdate() }
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleDidNotFindUpdate() }
+    }
+
+    func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleWillDownload(item) }
+    }
+
+    func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleDidDownload(item) }
+    }
+
+    func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleFailedDownload(item, error: error) }
+    }
+
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleWillInstall(item) }
+    }
+
+    func updater(
+        _ updater: SPUUpdater,
+        userDidMake choice: SPUUserUpdateChoice,
+        forUpdate item: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        let owner = self.owner
+        DispatchQueue.main.async { owner?.handleChoice(choice, item: item, state: state) }
     }
 
     func updater(

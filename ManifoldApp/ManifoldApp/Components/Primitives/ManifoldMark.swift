@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// BrandMark — the Manifold mark, { | }.
+// ManifoldMark — the Manifold mark, { | }.
 //
 // Composed from Apple's `curlybraces` SF Symbol (which gives us correctly
 // designed `{}` bracket glyphs at any weight, native template tinting,
@@ -20,7 +20,7 @@
 
 import SwiftUI
 
-struct BrandMark: View {
+struct ManifoldMark: View {
     enum Placement {
         /// 18pt menu bar template image. Heavier weight reads at small sizes.
         case menubar
@@ -64,26 +64,26 @@ struct BrandMark: View {
 
 // MARK: - Previews
 
-#Preview("BrandMark — sizes") {
+#Preview("ManifoldMark — sizes") {
     HStack(alignment: .center, spacing: 24) {
         VStack {
-            BrandMark(placement: .menubar).frame(width: 18, height: 18)
+            ManifoldMark(placement: .menubar).frame(width: 18, height: 18)
             Text("18 menubar").font(ManifoldType.tiny)
         }
         VStack {
-            BrandMark(placement: .inline).frame(width: 24, height: 24)
+            ManifoldMark(placement: .inline).frame(width: 24, height: 24)
             Text("24 inline").font(ManifoldType.tiny)
         }
         VStack {
-            BrandMark(placement: .inline).frame(width: 36, height: 36)
+            ManifoldMark(placement: .inline).frame(width: 36, height: 36)
             Text("36 inline").font(ManifoldType.tiny)
         }
         VStack {
-            BrandMark(placement: .display).frame(width: 80, height: 80)
+            ManifoldMark(placement: .display).frame(width: 80, height: 80)
             Text("80 display").font(ManifoldType.tiny)
         }
         VStack {
-            BrandMark(placement: .display).frame(width: 140, height: 140)
+            ManifoldMark(placement: .display).frame(width: 140, height: 140)
             Text("140 display").font(ManifoldType.tiny)
         }
     }
@@ -91,11 +91,11 @@ struct BrandMark: View {
     .background(ManifoldPalette.bg)
 }
 
-#Preview("BrandMark — slash form") {
+#Preview("ManifoldMark — slash form") {
     HStack(spacing: 32) {
-        BrandMark(placement: .display, pipeForm: .bar)
+        ManifoldMark(placement: .display, pipeForm: .bar)
             .frame(width: 200, height: 200)
-        BrandMark(placement: .display, pipeForm: .slash)
+        ManifoldMark(placement: .display, pipeForm: .slash)
             .frame(width: 200, height: 200)
     }
     .padding(32)

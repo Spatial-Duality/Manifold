@@ -1,7 +1,7 @@
 // Copyright 2026 Spatial Duality
 // SPDX-License-Identifier: Apache-2.0
 //
-// ApprovalResolution — the one branded confirmation animation in Manifold.
+// ApprovalResolution — the confirmation animation in Manifold.
 //
 // When the user resolves an approval (deny / allow once / add to default),
 // the row animates locally before the store removes it from
@@ -11,7 +11,7 @@
 //   180–500ms settle out (1.03 → 0.97, opacity 1.0 → 0)
 //
 // The user feels the resolution land before the row vanishes. No
-// branded-mark pop, no checkmark dance — just the row breathing once
+// app-mark pop, no checkmark dance — just the row breathing once
 // and disappearing. Sparing.
 //
 // Reduce-motion bypass: the modifier collapses to a pure 200ms opacity
@@ -23,7 +23,7 @@ struct ApprovalResolutionValues: Animatable {
     var scale: CGFloat = 1.0
     var opacity: CGFloat = 1.0
     var blur: CGFloat = 0.0
-    /// R3.3 enhancement: brand-tinted sparkle accent that overlays the
+    /// R3.3 enhancement: accent-tinted sparkle that overlays the
     /// resolving row. 0 = invisible, 1 = peak. Travels with the row's
     /// scale/opacity envelope so it lands as a single moment.
     var sparkleOpacity: CGFloat = 0.0
@@ -70,16 +70,16 @@ struct ApprovalResolutionModifier: ViewModifier {
                         .opacity(value.opacity)
                         .blur(radius: value.blur)
                         .overlay(alignment: .trailing) {
-                            // R3.3 brand sparkle — fires on resolution
+                            // R3.3 accent sparkle — fires on resolution
                             // and fades with the row. Tints with the
-                            // brand saffron so the resolution feels
+                            // saffron so the resolution feels
                             // like a Manifold moment, not a generic
                             // fade-out. Single sparkle, ~16pt, anchored
                             // to the trailing edge near the action
                             // buttons that just fired.
                             Image(systemName: "sparkle")
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(ManifoldPalette.brand)
+                                .foregroundStyle(ManifoldPalette.accent)
                                 .scaleEffect(value.sparkleScale)
                                 .opacity(value.sparkleOpacity)
                                 .padding(.trailing, 16)

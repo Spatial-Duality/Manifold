@@ -19,7 +19,7 @@ struct EmptyFoldersView: View {
                 title: "Nothing shared yet",
                 subtitle: "Nothing is shared until you share it. Add a folder to let an agent read inside a session. Mail is a separate surface.",
                 tint: ManifoldPalette.selection,
-                style: .brandMark
+                style: .manifoldMark
             )
 
             HStack(spacing: Spacing.s2) {

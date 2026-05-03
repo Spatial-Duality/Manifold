@@ -2448,7 +2448,7 @@ private struct SyntheticMCPUIReport {
             return "file scope"
         case "search_structured":
             return "structured search"
-        case "list_emails", "search_emails", "read_email":
+        case "list_emails", "search_emails", "read_email", "read_email_eml":
             return "email scope"
         case "filter_mode":
             return "privacy filter mode"

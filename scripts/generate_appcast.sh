@@ -2,8 +2,7 @@
 # Copyright 2026 Spatial Duality
 # SPDX-License-Identifier: Apache-2.0
 #
-# Generate the single-item Sparkle appcast that is published at
-# https://spatialduality.com/updates/appcast.xml.
+# Generate the single-item Sparkle appcast for a signed Manifold disk image.
 #
 # Usage:
 #   bash scripts/generate_appcast.sh <path/to/Manifold-vX.Y.Z.dmg> <sparkle-ed-signature> [output.xml]
@@ -13,7 +12,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DMG_PATH="${1:-}"
 SPARKLE_SIGNATURE="${2:-}"
-OUTPUT="${3:-$PROJECT_DIR/website/spatialduality-site/updates/appcast.xml}"
+OUTPUT="${3:-$PROJECT_DIR/ManifoldApp/build/appcast.xml}"
 
 if [[ -z "$DMG_PATH" || -z "$SPARKLE_SIGNATURE" ]]; then
     echo "usage: $0 <path/to/Manifold-vX.Y.Z.dmg> <sparkle-ed-signature> [output.xml]" >&2
@@ -49,8 +48,9 @@ fi
 LENGTH="$(stat -f%z "$DMG_PATH")"
 RELEASE_TAG="${MANIFOLD_RELEASE_TAG:-v$VERSION}"
 DMG_NAME="$(basename "$DMG_PATH")"
-DOWNLOAD_URL="${MANIFOLD_DMG_URL:-https://github.com/amargandhi/Manifold/releases/download/$RELEASE_TAG/$DMG_NAME}"
-RELEASE_NOTES_URL="${MANIFOLD_RELEASE_NOTES_URL:-https://spatialduality.com/releases/}"
+DOWNLOAD_URL="${MANIFOLD_DMG_URL:-https://github.com/Spatial-Duality/Manifold/releases/download/$RELEASE_TAG/$DMG_NAME}"
+RELEASE_NOTES_URL="${MANIFOLD_RELEASE_NOTES_URL:-https://github.com/Spatial-Duality/Manifold/releases/tag/$RELEASE_TAG}"
+APPCAST_URL="${MANIFOLD_SPARKLE_FEED_URL:-https://github.com/Spatial-Duality/Manifold/releases/latest/download/appcast.xml}"
 PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
 
 mkdir -p "$(dirname "$OUTPUT")"
@@ -60,7 +60,7 @@ cat > "$OUTPUT" <<XML
      xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>Manifold Updates</title>
-    <link>https://spatialduality.com/updates/appcast.xml</link>
+    <link>$APPCAST_URL</link>
     <description>Signed Manifold updates.</description>
     <language>en</language>
     <item>

@@ -29,7 +29,12 @@ struct FirstRunFlow: View {
             case .defaults:
                 DefaultsPanel(next: advance, back: back)
             case .helpImprove:
-                HelpImprovePanel(diagnostics: store.diagnostics, next: advance, back: back)
+                HelpImprovePanel(
+                    diagnostics: store.diagnostics,
+                    supportsSoftwareUpdates: store.updater != nil,
+                    next: advance,
+                    back: back
+                )
             case .guidedAdd:
                 GuidedAddPanel(choose: chooseFirstProject, back: back)
             case .scopeReview:

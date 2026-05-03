@@ -36,8 +36,7 @@ enum DemoFileCatalog {
                     sourceID: source.sourceID,
                     fileExtension: entry.fileExtension,
                     sizeBytes: entry.sizeBytes,
-                    modifiedDate: date(entry.modifiedAt),
-                    isGrantedToClaude: true
+                    modifiedDate: date(entry.modifiedAt)
                 )
             }
     }
@@ -53,8 +52,11 @@ enum DemoFileCatalog {
         guard path == rootPath || path.hasPrefix(rootPath + "/") else { return nil }
         let trimmed = path == rootPath ? "" : String(path.dropFirst(rootPath.count + 1))
         let parts = trimmed.split(separator: "/").map(String.init)
-        guard parts.count >= 1 else { return nil }
-        let sourceName = parts[0]
+        guard let sourceName = parts.first else {
+            return sourceNames.map { name in
+                FileNode(name: name, path: "\(rootPath)/\(name)", isDirectory: true, fileSize: 0)
+            }
+        }
         let sourceID = "demo-\(sourceName)"
         let parentRelative = parts.dropFirst().joined(separator: "/")
         let prefix = parentRelative.isEmpty ? "" : parentRelative + "/"
@@ -83,6 +85,15 @@ enum DemoFileCatalog {
 
     private static func date(_ iso8601: String) -> Date {
         ISO8601DateFormatter.shared.date(from: iso8601) ?? Date(timeIntervalSince1970: 1_714_560_000)
+    }
+
+    private static var sourceNames: [String] {
+        Set(entries.map { entry in
+            entry.sourceID.hasPrefix("demo-")
+                ? String(entry.sourceID.dropFirst("demo-".count))
+                : entry.sourceID
+        })
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     static let entries: [Entry] = [

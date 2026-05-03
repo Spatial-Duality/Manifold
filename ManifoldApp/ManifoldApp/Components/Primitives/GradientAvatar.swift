@@ -7,7 +7,7 @@
 // product mark. Color is drawn from the fixed ManifoldPalette
 // (Principle 6), never from system accent.
 //
-// A brand-gradient variant (Claude + Codex blended) is available for
+// An app-gradient variant (Claude + Codex blended) is available for
 // app-identity surfaces like AboutView and General settings.
 
 import SwiftUI
@@ -18,8 +18,8 @@ struct GradientAvatar: View {
 
     enum Identity {
         case agent(TargetApp)
-        /// Combined Claude + Codex gradient for app-brand surfaces.
-        case brand
+        /// Combined Claude + Codex gradient for app-identity surfaces.
+        case app
     }
 
     let identity: Identity
@@ -30,8 +30,8 @@ struct GradientAvatar: View {
         self.size = size
     }
 
-    init(brand: Bool, size: Size = .medium) {
-        self.identity = brand ? .brand : .agent(.cowork)
+    init(app: Bool, size: Size = .medium) {
+        self.identity = app ? .app : .agent(.cowork)
         self.size = size
     }
 
@@ -83,8 +83,8 @@ struct GradientAvatar: View {
         switch identity {
         case .agent(let agent):
             agentAvatar(agent)
-        case .brand:
-            brandAvatar
+        case .app:
+            appAvatar
         }
     }
 
@@ -103,7 +103,7 @@ struct GradientAvatar: View {
             .accessibilityLabel(AgentMeta.label(agent))
     }
 
-    private var brandAvatar: some View {
+    private var appAvatar: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(
                 LinearGradient(
@@ -179,10 +179,10 @@ struct AgentLogo: View {
             GradientAvatar(agent: .codex, size: .extraLarge)
         }
         VStack(spacing: Spacing.s2) {
-            GradientAvatar(brand: true, size: .small)
-            GradientAvatar(brand: true, size: .medium)
-            GradientAvatar(brand: true, size: .large)
-            GradientAvatar(brand: true, size: .extraLarge)
+            GradientAvatar(app: true, size: .small)
+            GradientAvatar(app: true, size: .medium)
+            GradientAvatar(app: true, size: .large)
+            GradientAvatar(app: true, size: .extraLarge)
         }
     }
     .padding(Spacing.s6)

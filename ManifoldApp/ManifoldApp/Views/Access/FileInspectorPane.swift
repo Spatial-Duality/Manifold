@@ -190,13 +190,13 @@ struct FileInspectorPane: View {
         let mostRecentTimestamp: String
     }
 
-    /// Brand mark inline next to the filename. The Manifold mark *is* the
+    /// Manifold mark inline next to the filename. The mark *is* the
     /// tracked-edit symbol — its presence says "Manifold saw this write."
-    /// Saffron tint so it reads as brand identity, not generic AI sparkle.
+    /// Saffron tint so it reads as app identity, not generic AI sparkle.
     /// Tooltip names the count + relative recency of the latest AI write.
     @ViewBuilder
     private func sparkleBadge(_ summary: AITouchSummary) -> some View {
-        BrandMark(placement: .inline, color: ManifoldPalette.brand)
+        ManifoldMark(placement: .inline, color: ManifoldPalette.accent)
             .frame(width: 11, height: 11)
             .help(sparkleHelpText(summary))
             .accessibilityLabel(sparkleHelpText(summary))

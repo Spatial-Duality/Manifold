@@ -167,7 +167,7 @@ struct LedgerView: View {
     /// Tracked Work Block visual signature: a saffron border around the
     /// detail column that announces "writes are bounded right now." On
     /// open, a one-shot keyframe pulse breathes the border out and back,
-    /// then settles at a thin 1pt brand line that persists for the
+    /// then settles at a thin 1pt accent line that persists for the
     /// duration of the block. This is the moment that says "this is
     /// Manifold's product promise, made visible."
     @ViewBuilder
@@ -175,7 +175,7 @@ struct LedgerView: View {
         // Persistent settled border — fades in/out via intensity (0 or 1).
         Rectangle()
             .strokeBorder(
-                ManifoldPalette.brand.opacity(0.22 * trackedEditIntensity),
+                ManifoldPalette.accent.opacity(0.22 * trackedEditIntensity),
                 lineWidth: 1
             )
             .allowsHitTesting(false)
@@ -190,7 +190,7 @@ struct LedgerView: View {
                 ) { _, value in
                     Rectangle()
                         .strokeBorder(
-                            ManifoldPalette.brand.opacity(value.opacity),
+                            ManifoldPalette.accent.opacity(value.opacity),
                             lineWidth: value.width
                         )
                         .blur(radius: value.width * 0.6)

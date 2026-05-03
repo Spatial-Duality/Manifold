@@ -6,8 +6,8 @@ import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "AgentRules")
 
-/// Manifold-managed Markdown block for AI-tool rules files (CLAUDE.md,
-/// AGENTS.md, etc.). The block is delimited by HTML-comment markers so
+/// Manifold-managed Markdown block for tool rules files. The block is
+/// delimited by HTML-comment markers so
 /// re-running `manifold-mcp --install` replaces only the Manifold section
 /// while preserving everything else the user has written.
 ///

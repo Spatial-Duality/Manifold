@@ -430,7 +430,7 @@ struct ConfigWriterTests {
 
     // MARK: - Agent Rules Tests
 
-    @Test("Fresh install creates ~/CLAUDE.md with the manifold rules block")
+    @Test("Fresh install creates the user rules file with the manifold rules block")
     func freshClaudeCodeRulesInstall() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }
@@ -447,7 +447,7 @@ struct ConfigWriterTests {
                 "Rules must reference the cross-agent hero-shot tool")
     }
 
-    @Test("Fresh install creates ~/.codex/AGENTS.md with the manifold rules block")
+    @Test("Fresh install creates the agents rules file with the manifold rules block")
     func freshCodexRulesInstall() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }
@@ -461,11 +461,11 @@ struct ConfigWriterTests {
         #expect(content.contains("Manifold MCP tools (preferred when available)"))
     }
 
-    /// CRITICAL regression test: a user with hand-edited CLAUDE.md must keep
+    /// CRITICAL regression test: a user with hand-edited rules must keep
     /// every line of their content above and below the Manifold block, even
     /// after multiple re-installs. Without this, `manifold-mcp --install`
     /// would silently destroy user rules on every upgrade.
-    @Test("Re-install preserves user content above and below the manifold block in ~/CLAUDE.md")
+    @Test("Re-install preserves user content above and below the manifold block")
     func reinstallPreservesUserContent() throws {
         let home = try makeTempHome()
         defer { cleanup(home) }

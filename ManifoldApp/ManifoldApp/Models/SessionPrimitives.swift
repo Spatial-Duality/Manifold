@@ -275,7 +275,7 @@ enum RevertOutcome: Hashable, Sendable {
 // All write-path operations the UI might perform are declared here so
 // view code doesn't reach into model internals. The default implementation
 // (see `ManifoldStoreCommands`) routes every call through ManifoldStore
-// so the runtime boundary stays single-source (CLAUDE.md §Editing Rules).
+// so the runtime boundary stays single-source.
 
 @MainActor
 protocol ManifoldCommands: AnyObject {

@@ -18,7 +18,6 @@ struct SourceFile: Identifiable, Sendable {
     let fileExtension: String
     let sizeBytes: Int
     let modifiedDate: Date
-    let isGrantedToClaude: Bool
     var versionCount: Int = 0
     var hasAIActivity: Bool = false
     var isDraftWorkspace: Bool = false

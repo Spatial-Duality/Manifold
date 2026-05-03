@@ -239,6 +239,34 @@ public struct EmailEntry: Sendable {
 
 public typealias EmailSummary = EmailEntry
 
+public struct EmailEMLExport: Codable, Sendable, Equatable {
+    public let id: String
+    public let filename: String
+    public let mimeType: String
+    public let encoding: String
+    public let sizeBytes: Int
+    public let sha256: String
+    public let contentBase64: String
+
+    public init(
+        id: String,
+        filename: String,
+        mimeType: String = "message/rfc822",
+        encoding: String = "base64",
+        sizeBytes: Int,
+        sha256: String,
+        contentBase64: String
+    ) {
+        self.id = id
+        self.filename = filename
+        self.mimeType = mimeType
+        self.encoding = encoding
+        self.sizeBytes = sizeBytes
+        self.sha256 = sha256
+        self.contentBase64 = contentBase64
+    }
+}
+
 public struct EmailContent: Sendable {
     public let id: String
     public let content: String

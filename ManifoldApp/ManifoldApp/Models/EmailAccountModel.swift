@@ -652,12 +652,6 @@ final class MailAccountsModel {
         return (try? await client.domainCounts()) ?? [:]
     }
 
-    func readEmail(emlPath: String?) -> MIMEParser.ParsedEmail? {
-        guard let path = emlPath, !path.isEmpty else { return nil }
-        guard let data = EmailSyncEngine.readStoredMessage(at: path) else { return nil }
-        return MIMEParser.parse(data: data)
-    }
-
     func unreadCountAll() async -> Int {
         guard let client else { return 0 }
         return (try? await client.unreadCountAll()) ?? 0

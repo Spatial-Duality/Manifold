@@ -170,7 +170,7 @@ struct PromoteEngineTests {
 
         // Agent modifies one file, creates one new
         try Data("changed".utf8).write(to: mountDir.appendingPathComponent("file_a.txt"))
-        try Data("brand new".utf8).write(to: mountDir.appendingPathComponent("new.txt"))
+        try Data("new file".utf8).write(to: mountDir.appendingPathComponent("new.txt"))
 
         let (applied, conflicts, skipped, newFiles) = try PromoteEngine.dryRun(
             mountURL: mountDir, originalURL: sourceDir

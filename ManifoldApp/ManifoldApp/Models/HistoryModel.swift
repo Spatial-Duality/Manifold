@@ -47,6 +47,11 @@ final class ActivityModel {
         }
     }
 
+    func refresh() async {
+        await loadActivity()
+        await loadSessions()
+    }
+
     func loadSessionEvents(sessionID: String) async {
         guard let client else { return }
         do {

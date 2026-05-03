@@ -34,7 +34,7 @@ struct AppRootView: View {
 
     /// Plays once before first-run on a cold launch where reduce-motion is
     /// off. After it finishes the user transitions into FirstRunFlow.
-    /// There is no replay path — the splash is a one-shot brand moment.
+    /// There is no replay path — the splash is a one-shot launch moment.
     private var shouldShowSplash: Bool {
         shouldShowFirstRun && !splashFinished && !reduceMotion
     }

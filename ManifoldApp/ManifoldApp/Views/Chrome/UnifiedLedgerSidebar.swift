@@ -12,7 +12,7 @@ struct UnifiedLedgerSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarBrandHeader()
+            SidebarIdentityHeader()
             SpaceSwitcher(selection: $destination)
             Divider()
 
@@ -45,7 +45,7 @@ struct UnifiedLedgerSidebar: View {
 /// runs the most useful action for the current state).
 ///
 /// Layout (top to bottom):
-///   {|}            ← brand mark, whole-coloured by state
+///   {|}            ← app mark, whole-coloured by state
 ///   Manifold       ← wordmark, always neutral text colour (identity)
 ///   STATUS         ← small uppercase status badge in state colour
 ///
@@ -61,11 +61,11 @@ struct UnifiedLedgerSidebar: View {
 ///
 /// No motion — pulsing reads as "needs action" in Apple's design
 /// language. State communication is colour + text only.
-private struct SidebarBrandHeader: View {
+private struct SidebarIdentityHeader: View {
     @Environment(ManifoldStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
-    /// Brand mark scales alongside the wordmark text style. Keeps the
+    /// App mark scales alongside the wordmark text style. Keeps the
     /// mark + wordmark + status badge in proportion under any Dynamic
     /// Type size. Apple HIG: visual elements adjacent to text should
     /// scale together via @ScaledMetric.
@@ -108,7 +108,7 @@ private struct SidebarBrandHeader: View {
     }
 
     /// Colour applied to the whole {|} mark and the status badge text.
-    /// The "Manifold" wordmark stays neutral to preserve brand identity.
+    /// The "Manifold" wordmark stays neutral while state is shown on the mark.
     private var stateColor: Color {
         switch sessionState {
         case .disconnected:         return ManifoldPalette.danger     // red
@@ -144,7 +144,7 @@ private struct SidebarBrandHeader: View {
     var body: some View {
         Button(action: handleAction) {
             VStack(spacing: 6) {
-                BrandMark(placement: .display, color: stateColor)
+                ManifoldMark(placement: .display, color: stateColor)
                     .frame(width: markSize, height: markSize)
 
                 Text("Manifold")
@@ -155,7 +155,7 @@ private struct SidebarBrandHeader: View {
                 Text(statusLabel)
                     .font(ManifoldType.captionMedium)
                     .foregroundStyle(stateColor)
-                    .accessibilityIdentifier("ledger.sidebar.brand.state")
+                    .accessibilityIdentifier("ledger.sidebar.mark.state")
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.s3)
@@ -182,7 +182,7 @@ private struct SidebarBrandHeader: View {
         .padding(.horizontal, Spacing.s2)
         .padding(.top, Spacing.s3)
         .padding(.bottom, Spacing.s2)
-        .accessibilityIdentifier("ledger.sidebar.brand")
+        .accessibilityIdentifier("ledger.sidebar.mark")
         .accessibilityLabel("Manifold — \(statusLabel)")
         .accessibilityHint(actionLabel)
         .accessibilityAddTraits(.isButton)

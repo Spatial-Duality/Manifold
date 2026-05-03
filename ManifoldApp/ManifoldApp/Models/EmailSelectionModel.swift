@@ -393,42 +393,6 @@ final class MailReviewModel {
         reconcileSelection()
     }
 
-    private func mailboxScopedMessages(accountID: String, mailbox: String, limit: Int) async -> [EmailMessageRecord] {
-        guard let mailAccounts else { return [] }
-
-        let scopedMessages = await mailAccounts.messagesInMailbox(
-            accountID: accountID,
-            mailbox: mailbox,
-            limit: limit
-        )
-        if !scopedMessages.isEmpty {
-            return scopedMessages
-        }
-
-        let accountMessages = await mailAccounts.messages(accountID: accountID, limit: limit)
-        return locallyScopedMessages(accountMessages, accountID: accountID, mailbox: mailbox)
-    }
-
-    private func locallyScopedMessages(
-        _ accountMessages: [EmailMessageRecord],
-        accountID: String,
-        mailbox: String
-    ) -> [EmailMessageRecord] {
-        let resolvedMailbox = MailboxResolver.resolve(
-            requestedName: mailbox,
-            imapMailboxes: mailboxes(for: accountID)
-        )
-
-        return accountMessages.filter { message in
-            guard message.accountID == accountID else { return false }
-            let resolvedMessageMailbox = MailboxResolver.resolve(
-                requestedName: message.mailbox,
-                imapMailboxes: mailboxes(for: accountID)
-            )
-            return resolvedMessageMailbox.caseInsensitiveCompare(resolvedMailbox) == .orderedSame
-        }
-    }
-
     private func refreshSharedState() async {
         guard let mailAccounts else { return }
         // mailAccounts is @MainActor, so a TaskGroup wouldn't actually

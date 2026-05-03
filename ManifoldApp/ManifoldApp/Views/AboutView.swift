@@ -7,7 +7,7 @@ import SwiftUI
 struct AboutView: View {
     var body: some View {
         VStack(spacing: Spacing.s3) {
-            GradientAvatar(brand: true, size: .extraLarge)
+            GradientAvatar(app: true, size: .extraLarge)
                 .padding(.bottom, Spacing.s1)
 
             Text("Manifold")

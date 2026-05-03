@@ -46,6 +46,25 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertTrue(DemoFileCatalog.entries.contains { $0.relativePath.hasSuffix(".docx") })
         XCTAssertTrue(DemoFileCatalog.entries.contains { $0.relativePath.hasSuffix(".txt") })
 
+        let demoRootChildren = FileNode.loadChildren(at: DemoFileCatalog.rootPath)
+        XCTAssertEqual(demoRootChildren.count, sources.count)
+        XCTAssertTrue(demoRootChildren.allSatisfy(\.isDirectory))
+
+        for source in sources {
+            let files = DemoFileCatalog.files(for: source)
+            XCTAssertFalse(files.isEmpty, "Demo source \(source.sourceID) has no catalog files")
+            XCTAssertTrue(files.allSatisfy { $0.sourceID == source.sourceID })
+            XCTAssertTrue(files.allSatisfy { $0.path.hasPrefix(source.originalRootPath + "/") })
+            XCTAssertTrue(files.allSatisfy { $0.canonicalPath.hasPrefix(source.canonicalMountName + "/") })
+
+            let rootChildren = FileNode.loadChildren(at: source.originalRootPath)
+            let actualNames = Set(rootChildren.map(\.name))
+            let expectedNames = Set(DemoFileCatalog.entries
+                .filter { $0.sourceID == source.sourceID }
+                .compactMap { $0.relativePath.split(separator: "/").first.map(String.init) })
+            XCTAssertEqual(actualNames, expectedNames, "Demo tree root mismatch for \(source.sourceID)")
+        }
+
         let haystack = [
             activity.map { [$0.filePath, $0.metadata].compactMap { $0 }.joined(separator: " ") }.joined(separator: "\n"),
             rules.map(\.name).joined(separator: "\n"),
@@ -308,8 +327,7 @@ final class ManifoldStoreTests: XCTestCase {
             sourceID: "src-work",
             fileExtension: "pdf",
             sizeBytes: 2048,
-            modifiedDate: Date(timeIntervalSince1970: 1_800_000_000),
-            isGrantedToClaude: false
+            modifiedDate: Date(timeIntervalSince1970: 1_800_000_000)
         )
 
         XCTAssertTrue(FilesFlatView.fileMatchesRawSearch(file, searchText: "invoice"))

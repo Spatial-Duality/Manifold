@@ -13,7 +13,7 @@ struct ConceptPanel: View {
     let tryDemo: () -> Void
 
     var body: some View {
-        // Full-bleed atmospheric backdrop carries the brand identity.
+        // Full-bleed atmospheric backdrop carries the app identity.
         // Replaces the previous halo-glow circle behind a static mark —
         // we now have proper layered atmosphere (breathing mesh + curl
         // cloud + grain) doing the work the halo was approximating.
@@ -21,7 +21,7 @@ struct ConceptPanel: View {
             VStack(spacing: Spacing.s6) {
                 Spacer()
 
-                BrandMark(placement: .display, color: ManifoldPalette.text)
+                ManifoldMark(placement: .display, color: ManifoldPalette.text)
                     .frame(width: 140, height: 140)
 
                 VStack(spacing: Spacing.s3) {
@@ -222,6 +222,7 @@ struct ScopeReviewPanel: View {
 
 struct HelpImprovePanel: View {
     @Bindable var diagnostics: DiagnosticsModel
+    let supportsSoftwareUpdates: Bool
     let next: () -> Void
     let back: () -> Void
 
@@ -237,8 +238,10 @@ struct HelpImprovePanel: View {
                 VStack(alignment: .leading, spacing: Spacing.s2) {
                     Toggle("Include anonymous ID in diagnostic exports", isOn: $diagnostics.diagnosticSharingEnabled)
                         .accessibilityIdentifier("onboarding.help.sharing")
-                    Toggle("Check for app updates automatically", isOn: $diagnostics.updateChecksEnabled)
-                        .accessibilityIdentifier("onboarding.help.updates")
+                    if supportsSoftwareUpdates {
+                        Toggle("Check for app updates automatically", isOn: $diagnostics.updateChecksEnabled)
+                            .accessibilityIdentifier("onboarding.help.updates")
+                    }
                     Text("You can change these later in Settings → General. Reset the anonymous identifier any time.")
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)

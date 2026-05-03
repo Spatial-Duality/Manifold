@@ -4,7 +4,7 @@
 // AtmosphericBackground — Manifold's hero / splash background.
 //
 // Layers (bottom to top):
-//   1. Saffron base — `ManifoldPalette.brand` flat fill.
+//   1. Saffron base — `ManifoldPalette.accent` flat fill.
 //   2. MeshGradient with slow-drifting interior points — adds organic
 //      colour blending; "breathing" via two incommensurate cycles
 //      (23s and 31s) so the field never visibly repeats.
@@ -17,8 +17,7 @@
 // effect over 30 seconds that reads as "alive but calm." Reduce-motion
 // collapses both cycles to their midpoints (static).
 //
-// Used in: TitleSequence settle, FirstRun ConceptPanel, eventually
-// website hero (recreated in WebGL/CSS).
+// Used in: TitleSequence settle and FirstRun ConceptPanel.
 
 import SwiftUI
 
@@ -117,7 +116,7 @@ private struct BreathingMeshLayer: View {
                 height: 5,
                 points: meshPoints(t1: t1, t2: t2),
                 colors: meshColors,
-                background: ManifoldPalette.brand
+                background: ManifoldPalette.accent
             )
             .ignoresSafeArea()
         }
@@ -159,12 +158,12 @@ private struct BreathingMeshLayer: View {
 
     /// 25 colours, one per mesh point. The pattern alternates between
     /// the saffron lift (highlight) and the saffron deep (shadow), with
-    /// the brand saffron in between. The result reads as cloud-and-light
+    /// the saffron accent in between. The result reads as cloud-and-light
     /// rather than a single hue.
     private var meshColors: [Color] {
-        let lift = ManifoldPalette.brandLift   // sun catches the cloud
-        let mid  = ManifoldPalette.brand        // saffron base
-        let deep = ManifoldPalette.brandDeep   // shadow side
+        let lift = ManifoldPalette.accentLift   // sun catches the cloud
+        let mid  = ManifoldPalette.accent        // saffron base
+        let deep = ManifoldPalette.accentDeep   // shadow side
         return [
             // Row 0 — top edge (deeper, like the sky's far edge)
             deep, deep, mid,  lift, deep,
@@ -190,7 +189,7 @@ private struct BreathingMeshLayer: View {
 #Preview("Atmospheric — with content") {
     AtmosphericBackground {
         VStack(spacing: 24) {
-            BrandMark(placement: .display, color: ManifoldPalette.text)
+            ManifoldMark(placement: .display, color: ManifoldPalette.text)
                 .frame(width: 120, height: 120)
             Text("MANIFOLD")
                 .font(.system(size: 32, weight: .medium))

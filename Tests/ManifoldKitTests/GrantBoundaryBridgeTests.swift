@@ -221,6 +221,13 @@ struct GrantBoundaryBridgeTests {
         )
         #expect(refused.status == ExecRunStatus.refused.rawValue)
         #expect(refused.reason.contains("refused op shell"))
+
+        let refusedRawMail = try await harness.bridge.runCode(
+            code: #"{"steps":[{"op":"read_email_eml","id":"email-1"}]}"#,
+            language: "json"
+        )
+        #expect(refusedRawMail.status == ExecRunStatus.refused.rawValue)
+        #expect(refusedRawMail.reason.contains("refused op read_email_eml"))
     }
 
     @Test("Bridge invokes executable skills and applies Rule of Two")
@@ -785,6 +792,159 @@ struct GrantBoundaryBridgeTests {
         #expect(status.active == true)
         #expect(status.grantID == grant.grantID)
         #expect(status.emailCount == 1)
+    }
+
+    @Test("Explicit raw EML read returns exact original bytes")
+    func emailRawEMLReadReturnsExactOriginalBytes() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let longBody = String(repeating: "Archived line.\n", count: 420) + "RAW_EML_TAIL_MARKER"
+        let emlContent = """
+        From: archive@example.com
+        To: team@example.com
+        Date: 2026-04-06
+        Subject: Exact archive payload
+        Message-ID: email-raw-1
+        MIME-Version: 1.0
+        Content-Type: text/plain; charset=utf-8
+
+        \(longBody)
+        """
+        let emlData = Data(emlContent.utf8)
+        let emlDir = harness.tempDir.appendingPathComponent("eml")
+        try FileManager.default.createDirectory(at: emlDir, withIntermediateDirectories: true)
+        let emlFile = emlDir.appendingPathComponent("raw-1.eml")
+        try emlData.write(to: emlFile)
+
+        let emailAccount = try harness.emailStore.addEmailAccount(
+            displayName: "Test Account",
+            providerType: "other",
+            server: "imap.example.com",
+            port: 993,
+            username: "test@example.com",
+            authType: "password"
+        )
+
+        try harness.emailStore.upsertEmailMessage(
+            emailID: "email-raw-1",
+            accountID: emailAccount.accountID,
+            mailbox: "Inbox",
+            sender: "archive@example.com",
+            recipients: "team@example.com",
+            subject: "Exact archive payload",
+            receivedAt: "2026-04-06",
+            emlPath: emlFile.path,
+            sizeBytes: emlData.count,
+            preview: "Exact archive payload"
+        )
+
+        _ = try await harness.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [],
+            materializationRoot: harness.tempDir.appendingPathComponent("email-raw").path
+        )
+
+        let export = try await harness.bridge.readEmailEML(id: "email-raw-1")
+        let decoded = try #require(Data(base64Encoded: export.contentBase64))
+
+        #expect(export.id == "email-raw-1")
+        #expect(export.filename == "email-raw-1.eml")
+        #expect(export.mimeType == "message/rfc822")
+        #expect(export.encoding == "base64")
+        #expect(export.sizeBytes == emlData.count)
+        #expect(decoded == emlData)
+        #expect(String(decoding: decoded, as: UTF8.self).contains("RAW_EML_TAIL_MARKER"))
+
+        let exposures = try await harness.exposureStore.exposures(resourcePath: "email-raw-1", limit: 5)
+        let rawExposure = try #require(exposures.first { $0.toolName == "read_email_eml" })
+        #expect(rawExposure.exposureType == "email_raw_eml")
+        #expect(rawExposure.byteCount == emlData.count)
+        #expect(rawExposure.contentHash == export.sha256)
+    }
+
+    @Test("Raw EML read requires separately shared attachments")
+    func emailRawEMLReadRequiresSharedAttachments() async throws {
+        let harness = try makeHarness()
+        defer { cleanup(harness.tempDir) }
+
+        let emlContent = """
+        From: archive@example.com
+        To: team@example.com
+        Date: 2026-04-06
+        Subject: Attached archive payload
+        Message-ID: email-raw-attachment-1
+        MIME-Version: 1.0
+        Content-Type: multipart/mixed; boundary="manifold-test-boundary"
+
+        --manifold-test-boundary
+        Content-Type: text/plain; charset=utf-8
+
+        Body is shareable.
+        --manifold-test-boundary
+        Content-Type: application/pdf
+        Content-Disposition: attachment; filename="board.pdf"
+        Content-Transfer-Encoding: base64
+
+        JVBERi0xLjQK
+        --manifold-test-boundary--
+        """
+        let emlData = Data(emlContent.utf8)
+        let emlDir = harness.tempDir.appendingPathComponent("eml")
+        try FileManager.default.createDirectory(at: emlDir, withIntermediateDirectories: true)
+        let emlFile = emlDir.appendingPathComponent("raw-attachment-1.eml")
+        try emlData.write(to: emlFile)
+
+        let emailAccount = try harness.emailStore.addEmailAccount(
+            displayName: "Test Account",
+            providerType: "other",
+            server: "imap.example.com",
+            port: 993,
+            username: "test@example.com",
+            authType: "password"
+        )
+
+        try harness.emailStore.upsertEmailMessage(
+            emailID: "email-raw-attachment-1",
+            accountID: emailAccount.accountID,
+            mailbox: "Inbox",
+            sender: "archive@example.com",
+            recipients: "team@example.com",
+            subject: "Attached archive payload",
+            receivedAt: "2026-04-06",
+            emlPath: emlFile.path,
+            sizeBytes: emlData.count,
+            preview: "Attached archive payload",
+            attachmentCount: 1
+        )
+        try harness.emailStore.upsertEmailAttachment(
+            attachmentID: "attachment-raw-1",
+            emailID: "email-raw-attachment-1",
+            filename: "board.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 9,
+            contentHash: "fixture-board-pdf"
+        )
+
+        _ = try await harness.grantStore.startGrant(
+            targetApp: .cowork,
+            profileID: "default",
+            sourceIDs: [],
+            materializationRoot: harness.tempDir.appendingPathComponent("email-raw-attachment").path
+        )
+
+        do {
+            _ = try await harness.bridge.readEmailEML(id: "email-raw-attachment-1")
+            Issue.record("Expected raw EML read to be denied until attachments are shared")
+        } catch ManifoldMCPError.ruleDenied(let ruleName, _) {
+            #expect(ruleName == "Email Attachment Access")
+        }
+
+        try harness.emailStore.shareEmailAttachments(attachmentIDs: ["attachment-raw-1"], for: .cowork)
+        let export = try await harness.bridge.readEmailEML(id: "email-raw-attachment-1")
+        let decoded = try #require(Data(base64Encoded: export.contentBase64))
+        #expect(decoded == emlData)
     }
 
     @Test("Shared emails outside newest slice remain visible")

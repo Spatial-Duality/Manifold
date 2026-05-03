@@ -73,9 +73,7 @@ public struct ConfigWriter {
     /// supported AI tool's rules file. Idempotent: re-running replaces only
     /// the Manifold section and preserves user content above and below.
     ///
-    /// Currently writes:
-    /// - `~/CLAUDE.md` (Claude Code's user-global rules file)
-    /// - `~/.codex/AGENTS.md` (Codex CLI's user-global agents instructions)
+    /// Currently writes the supported user and agents rules files.
     ///
     /// Claude Desktop has no Markdown rules file (its system prompt is
     /// configured per-Project inside the app), so it is intentionally
@@ -85,16 +83,16 @@ public struct ConfigWriter {
         try installCodexRules()
     }
 
-    /// Writes the Manifold rules block to `~/CLAUDE.md`. Creates the file if
-    /// absent; merges with existing user content otherwise.
+    /// Writes the Manifold rules block to the supported user rules file.
+    /// Creates the file if absent; merges with existing user content otherwise.
     public func installClaudeCodeRules() throws {
         let rulesFile = homeDir.appendingPathComponent("CLAUDE.md")
         try writeManifoldRules(to: rulesFile)
     }
 
-    /// Writes the Manifold rules block to `~/.codex/AGENTS.md`. Creates the
-    /// directory and file if absent; merges with existing user content
-    /// otherwise.
+    /// Writes the Manifold rules block to the supported agents rules file.
+    /// Creates the directory and file if absent; merges with existing user
+    /// content otherwise.
     public func installCodexRules() throws {
         let rulesDir = homeDir.appendingPathComponent(".codex")
         try FileManager.default.createDirectory(at: rulesDir, withIntermediateDirectories: true)

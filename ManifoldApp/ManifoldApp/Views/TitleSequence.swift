@@ -1,5 +1,5 @@
 // TitleSequence.swift
-// Manifold — Brand Title Sequence (SwiftUI port of /brand/iter-05-final.html)
+// Manifold — Title Sequence
 //
 // Drop-in usage:
 //
@@ -108,7 +108,7 @@ private struct StaticMarkLayer: View {
         // Mark + wordmark + tagline sit on top in warm-charcoal.
         AtmosphericBackground {
             VStack(spacing: 22) {
-                BrandMark(placement: .display,
+                ManifoldMark(placement: .display,
                           color: ManifoldPalette.text)
                     .frame(width: 240, height: 240)
                 Text(wordmark)

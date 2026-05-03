@@ -68,6 +68,13 @@ enum ToolDefinitions {
                 ]), required: ["id"])
             ),
             MCPTool(
+                name: "read_email_eml",
+                description: "Read the exact original RFC 822/.eml bytes for a shared email. Messages with attachments require those attachments to be explicitly shared too. Returns JSON with base64 content, filename, byte count, and SHA-256. Use only when the original EML is required; read_email is preferred for normal body text.",
+                inputSchema: objectSchema(properties: withAccessIntent([
+                    "id": ["type": "string", "description": "Email message ID"],
+                ]), required: ["id"])
+            ),
+            MCPTool(
                 name: "search_emails",
                 description: "Search governed emails by sender, subject, preview, and indexed body text.",
                 inputSchema: objectSchema(properties: withAccessIntent([

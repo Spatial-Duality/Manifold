@@ -20,7 +20,7 @@ script/__pycache__/
 .gstack/
 .xcodebuildmcp/
 
-# AI collaborator configs (kept locally, not shipped in public repo)
+# Local tool configs
 /.claude/
 /.codex/
 /codex/
@@ -34,11 +34,11 @@ script/__pycache__/
 ManifoldLocalAuthConfig.plist
 **/ManifoldLocalAuthConfig.plist
 
-# Personal scratch dropzone — never tracked, never pushed
+# Scratch dropzone
 /unsort/
 
-# In-session parking lot for the local cleanup pass — see scripts/cleanup-pending.sh
+# Local cleanup staging
 .trash-pending-user-delete/
 
-# DocC generated output (build via scripts/generate-docs.sh)
+# Generated documentation
 /docs/

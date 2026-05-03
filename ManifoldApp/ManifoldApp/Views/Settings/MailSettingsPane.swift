@@ -179,8 +179,8 @@ private struct MailAccountRow: View {
 
     private var provider: EmailProvider { account.provider }
 
-    /// Brand glyph tinted with the provider's identity color. Provider
-    /// brand colors are allowed here (they are not an agent palette
+    /// Provider glyph tinted with the provider's identity color. Provider
+    /// identity colors are allowed here (they are not an agent palette
     /// collision — they signal "this is a Gmail mailbox" etc.).
     private var providerGlyph: some View {
         Image(systemName: provider.systemImage)

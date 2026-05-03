@@ -14,7 +14,7 @@ import ManifoldKit
 /// box (cap → descender) = 83 units. To put the visible bracket cap at
 /// 22pt, the NSImage size needs to be 22 × (83/70) ≈ 26pt.
 @MainActor
-private func menuBarBrandImage() -> NSImage {
+private func menuBarManifoldImage() -> NSImage {
     guard let original = NSImage(named: "Manifold Icon SF") else {
         let fallback = NSImage(systemSymbolName: "curlybraces",
                                accessibilityDescription: "Manifold")
@@ -26,6 +26,14 @@ private func menuBarBrandImage() -> NSImage {
     sized.size = NSSize(width: 26, height: 26)
     sized.isTemplate = true
     return sized
+}
+
+@MainActor
+private func configureApplicationIconImage() {
+    if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+       let icon = NSImage(contentsOf: iconURL) {
+        NSApp.applicationIconImage = icon
+    }
 }
 
 @MainActor
@@ -44,6 +52,7 @@ struct ManifoldApp: App {
     @State private var store: ManifoldStore
 
     init() {
+        configureApplicationIconImage()
         _store = State(initialValue: Self.bootstrapStore())
     }
 
@@ -66,6 +75,13 @@ struct ManifoldApp: App {
                     store.addSourceFromPicker()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    store.updater?.checkForUpdates()
+                }
+                .disabled(store.updater?.canStartManualCheck != true)
             }
 
             CommandGroup(after: .toolbar) {
@@ -123,17 +139,11 @@ struct ManifoldApp: App {
 
             CommandGroup(replacing: .help) {
                 Button("Manifold Help") {
-                    if let url = URL(string: "https://github.com/amargandhi/Manifold") {
+                    if let url = URL(string: "https://github.com/Spatial-Duality/Manifold") {
                         NSWorkspace.shared.open(url)
                     }
                 }
                 Divider()
-                if let updater = store.updater {
-                    Button("Check for Updates…") {
-                        updater.checkForUpdates()
-                    }
-                    Divider()
-                }
                 Button("Reveal Diagnostics in Finder") {
                     store.diagnostics.revealDiagnosticsInFinder()
                 }
@@ -208,8 +218,8 @@ struct ManifoldApp: App {
 
     @MainActor
     private func menuBarImage() -> NSImage {
-        MenuBarBrandIcon.renderTemplateImage(state: store.menuBarBadgeState)
-            ?? menuBarBrandImage()
+        MenuBarManifoldIcon.renderTemplateImage(state: store.menuBarBadgeState)
+            ?? menuBarManifoldImage()
     }
 
     private func prepareSessionFromMenu() {

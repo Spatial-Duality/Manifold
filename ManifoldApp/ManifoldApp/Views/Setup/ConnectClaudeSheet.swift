@@ -186,11 +186,11 @@ struct ConnectClaudeSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .fill(ManifoldPalette.brandSoft)
+                    .fill(ManifoldPalette.accentSoft)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .strokeBorder(ManifoldPalette.brand.opacity(0.20), lineWidth: 0.5)
+                    .strokeBorder(ManifoldPalette.accent.opacity(0.20), lineWidth: 0.5)
             )
         case .connected:
             VStack(alignment: .leading, spacing: Spacing.s3) {
@@ -235,7 +235,7 @@ struct ConnectClaudeSheet: View {
             HStack(spacing: Spacing.s2) {
                 Image(systemName: icon)
                     .font(.title2)
-                    .foregroundStyle(ManifoldPalette.brand)
+                    .foregroundStyle(ManifoldPalette.accent)
                 Text(title)
                     .font(ManifoldType.bodyMedium)
             }
@@ -349,7 +349,7 @@ private struct StepProgressBar: View {
                 stepDot(index: index, label: label)
                 if index < labels.count - 1 {
                     Rectangle()
-                        .fill(stepIndex > index ? ManifoldPalette.brand : ManifoldPalette.border)
+                        .fill(stepIndex > index ? ManifoldPalette.accent : ManifoldPalette.border)
                         .frame(height: 1)
                         .frame(maxWidth: .infinity)
                 }
@@ -364,7 +364,7 @@ private struct StepProgressBar: View {
         VStack(spacing: 4) {
             ZStack {
                 Circle()
-                    .fill(stepIndex >= index ? ManifoldPalette.brand : ManifoldPalette.surface3)
+                    .fill(stepIndex >= index ? ManifoldPalette.accent : ManifoldPalette.surface3)
                     .frame(width: 18, height: 18)
                 if stepIndex > index {
                     Image(systemName: "checkmark")

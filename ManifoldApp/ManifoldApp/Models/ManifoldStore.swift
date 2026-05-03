@@ -681,8 +681,7 @@ final class ManifoldStore {
                         sourceID: source.sourceID,
                         fileExtension: url.pathExtension.lowercased(),
                         sizeBytes: values.fileSize ?? 0,
-                        modifiedDate: values.contentModificationDate ?? .distantPast,
-                        isGrantedToClaude: true
+                        modifiedDate: values.contentModificationDate ?? .distantPast
                     )
                 )
                 didEmitSourceFile = true
@@ -745,8 +744,7 @@ final class ManifoldStore {
                     sourceID: source.sourceID,
                     fileExtension: url.pathExtension.lowercased(),
                     sizeBytes: values.fileSize ?? 0,
-                    modifiedDate: values.contentModificationDate ?? .distantPast,
-                    isGrantedToClaude: true
+                    modifiedDate: values.contentModificationDate ?? .distantPast
                 ))
                 didAppendSourceFile = true
             }
@@ -790,8 +788,7 @@ final class ManifoldStore {
                 sourceID: source.sourceID,
                 fileExtension: url.pathExtension.lowercased(),
                 sizeBytes: 0,
-                modifiedDate: Date(),
-                isGrantedToClaude: true
+                modifiedDate: Date()
             )
         }
     }
@@ -826,8 +823,7 @@ final class ManifoldStore {
                         sourceID: mount.sourceID,
                         fileExtension: url.pathExtension.lowercased(),
                         sizeBytes: values.fileSize ?? 0,
-                        modifiedDate: values.contentModificationDate ?? .distantPast,
-                        isGrantedToClaude: true
+                        modifiedDate: values.contentModificationDate ?? .distantPast
                     ))
                 }
             }

@@ -4,9 +4,9 @@
 // ManifoldStore+Commands — ManifoldCommands default implementation.
 //
 // Routes every write-path operation through the existing store and
-// runtime so the XPC boundary stays single-source (CLAUDE.md §Editing
-// Rules). Views should inject `store as any ManifoldCommands` — never
-// reach into runtime internals directly.
+// runtime so the XPC boundary stays single-source. Views should inject
+// `store as any ManifoldCommands` — never reach into runtime internals
+// directly.
 
 import Foundation
 import os

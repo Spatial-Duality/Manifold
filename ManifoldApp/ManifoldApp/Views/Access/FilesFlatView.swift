@@ -513,9 +513,9 @@ struct FilesFlatView: View {
                             .truncationMode(.middle)
                         if aiTouchedPaths.contains(file.canonicalPath) {
                             // Manifold mark = tracked-edit indicator. Saffron
-                            // says "Manifold saw this write" — brand presence
+                            // says "Manifold saw this write" — app presence
                             // doing real work as a column glyph.
-                            BrandMark(placement: .inline, color: ManifoldPalette.brand)
+                            ManifoldMark(placement: .inline, color: ManifoldPalette.accent)
                                 .frame(width: 10, height: 10)
                                 .help("Manifold tracked an agent write to this file")
                                 .accessibilityLabel("Agent-touched")
@@ -891,7 +891,6 @@ struct FilesFlatView: View {
                 fileExtension: url.pathExtension.lowercased(),
                 sizeBytes: values.fileSize ?? 0,
                 modifiedDate: values.contentModificationDate ?? .distantPast,
-                isGrantedToClaude: true,
                 versionCount: versionCounts[canonicalPath] ?? 0,
                 hasAIActivity: aiTouchedPaths.contains(canonicalPath),
                 isDraftWorkspace: true

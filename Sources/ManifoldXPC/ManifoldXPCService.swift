@@ -573,6 +573,12 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 }
                 return textResult(try await bridge.readEmail(id: id, intent: intent))
 
+            case "read_email_eml":
+                guard let id = arguments["id"] as? String else {
+                    return errorResult("'id' parameter required")
+                }
+                return textResult(Self.prettyJSON(try await bridge.readEmailEML(id: id, intent: intent)))
+
             case "search_emails":
                 guard let query = arguments["query"] as? String else {
                     return errorResult("'query' parameter required")

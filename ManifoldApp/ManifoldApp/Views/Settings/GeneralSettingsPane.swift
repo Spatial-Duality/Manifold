@@ -3,7 +3,7 @@
 //
 // GeneralSettingsPane — the first Settings tab.
 //
-// Stage-11 redesign: a small identity strip at the top (brand
+// Stage-11 redesign: a small identity strip at the top (app
 // GradientAvatar + "Manifold" + version) followed by the usual
 // launch / default-agent / notifications / privacy sections. All
 // typography migrated from Typ.* to ManifoldType.*.
@@ -21,6 +21,28 @@ struct GeneralSettingsPane: View {
         Form {
             Section {
                 IdentityRow()
+            }
+
+            Section {
+                SoftwareUpdateSettings(
+                    updater: store.updater,
+                    automaticChecksEnabled: Binding(
+                        get: { diagnostics.updateChecksEnabled },
+                        set: { enabled in
+                            diagnostics.updateChecksEnabled = enabled
+                            store.updater?.applyAutomaticCheckPreference(enabled)
+                        }
+                    )
+                )
+            } header: {
+                Text("Software Updates")
+            } footer: {
+                Text(store.updater == nil
+                     ? "This Xcode build is not configured with a signed update feed. Official release builds enable Check for Updates, update download, install, skip, and remind-later choices."
+                     : "Manifold uses the standard macOS update flow. When an update is available, the update dialog offers install, skip, and remind-later choices.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
@@ -76,7 +98,6 @@ struct GeneralSettingsPane: View {
             }
 
             Section {
-                Toggle("Check for updates automatically", isOn: $diagnostics.updateChecksEnabled)
                 Toggle("Include anonymous ID in diagnostic exports", isOn: $diagnostics.diagnosticSharingEnabled)
                 if diagnostics.diagnosticSharingEnabled {
                     HStack {
@@ -91,7 +112,7 @@ struct GeneralSettingsPane: View {
                     }
                 }
             } header: {
-                Text("Updates and diagnostics")
+                Text("Diagnostics")
             } footer: {
                 VStack(alignment: .leading, spacing: Spacing.s2) {
                     Text("Diagnostic reports are kept on this Mac. Export is manual — see the Advanced tab to preview or save the JSON.")
@@ -103,6 +124,175 @@ struct GeneralSettingsPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct SoftwareUpdateSettings: View {
+    var updater: UpdaterModel?
+    @Binding var automaticChecksEnabled: Bool
+
+    var body: some View {
+        if let updater {
+            ConfiguredSoftwareUpdateSettings(
+                updater: updater,
+                automaticChecksEnabled: $automaticChecksEnabled
+            )
+        } else {
+            SourceBuildSoftwareUpdateSettings(automaticChecksEnabled: $automaticChecksEnabled)
+        }
+    }
+}
+
+private struct ConfiguredSoftwareUpdateSettings: View {
+    @ObservedObject var updater: UpdaterModel
+    @Binding var automaticChecksEnabled: Bool
+
+    var body: some View {
+        Toggle("Automatically check for updates", isOn: $automaticChecksEnabled)
+
+        LabeledContent("Status") {
+            HStack(spacing: Spacing.s2) {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Checking for updates")
+                } else {
+                    Image(systemName: statusSymbol)
+                        .foregroundStyle(statusTint)
+                        .accessibilityHidden(true)
+                }
+
+                Text(statusText)
+                    .foregroundStyle(statusTextColor)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+
+        HStack {
+            Spacer()
+            Button("Check Now") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.canStartManualCheck)
+            .help("Check for Manifold updates now.")
+        }
+    }
+
+    private var showsProgress: Bool {
+        switch updater.state {
+        case .checking, .downloading, .installing, .relaunching:
+            return true
+        case .ready, .updateAvailable, .downloaded, .upToDate, .skipped, .deferred, .failed:
+            return false
+        }
+    }
+
+    private var statusSymbol: String {
+        switch updater.state {
+        case .ready:
+            return "arrow.triangle.2.circlepath"
+        case .updateAvailable:
+            return "arrow.down.circle"
+        case .downloaded:
+            return "checkmark.circle"
+        case .upToDate:
+            return "checkmark.circle"
+        case .skipped:
+            return "forward.circle"
+        case .deferred:
+            return "clock"
+        case .failed:
+            return "exclamationmark.triangle"
+        case .checking, .downloading, .installing, .relaunching:
+            return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private var statusTint: Color {
+        switch updater.state {
+        case .updateAvailable, .downloaded:
+            return .accentColor
+        case .upToDate:
+            return .green
+        case .failed:
+            return .red
+        case .skipped, .deferred:
+            return .orange
+        case .ready, .checking, .downloading, .installing, .relaunching:
+            return .secondary
+        }
+    }
+
+    private var statusTextColor: Color {
+        switch updater.state {
+        case .failed:
+            return .red
+        default:
+            return .secondary
+        }
+    }
+
+    private var statusText: String {
+        switch updater.state {
+        case .ready:
+            return "Ready to check."
+        case .checking:
+            return "Checking for updates..."
+        case .updateAvailable(let version):
+            return "Update \(version) is available."
+        case .downloading(let version):
+            return "Downloading \(version)..."
+        case .downloaded(let version):
+            return "Update \(version) is ready to install."
+        case .installing(let version):
+            return "Installing \(version)..."
+        case .relaunching:
+            return "Restarting Manifold..."
+        case .upToDate(let date):
+            return "Up to date. Checked \(date.formatted(date: .omitted, time: .shortened))."
+        case .skipped(let version):
+            return "Skipped \(version). Check manually to see it again."
+        case .deferred(let version):
+            return "Deferred \(version). Manifold will remind you later."
+        case .failed(let reason):
+            return failureText(for: reason)
+        }
+    }
+
+    private func failureText(for reason: DiagnosticEvent.SparkleUpdateFailureReason) -> String {
+        switch reason {
+        case .signatureMismatch:
+            return "Update signature could not be verified."
+        case .downloadFailed:
+            return "Update check or download failed."
+        case .installFailed:
+            return "Update installation failed."
+        case .userCancelled:
+            return "Update was cancelled."
+        }
+    }
+}
+
+private struct SourceBuildSoftwareUpdateSettings: View {
+    @Binding var automaticChecksEnabled: Bool
+
+    var body: some View {
+        Toggle("Automatically check for updates", isOn: $automaticChecksEnabled)
+            .disabled(true)
+
+        LabeledContent("Status") {
+            Label("Unavailable in this Xcode build", systemImage: "slash.circle")
+                .foregroundStyle(.secondary)
+        }
+
+        HStack {
+            Spacer()
+            Button("Check Now") {}
+                .disabled(true)
+                .help("Official signed release builds enable update checks.")
+        }
     }
 }
 
@@ -123,13 +313,13 @@ private struct IdentityRow: View {
 
     var body: some View {
         VStack(spacing: Spacing.s2) {
-            // Mark tints to brand saffron while spinning — the easter egg
+            // Mark tints to saffron while spinning — the easter egg
             // is a small celebration of identity, so the colour shift
             // matches the motion. Cross-fade is animated so the colour
             // change isn't a jarring step.
-            BrandMark(
+            ManifoldMark(
                 placement: .display,
-                color: spinning ? ManifoldPalette.brand : ManifoldPalette.text
+                color: spinning ? ManifoldPalette.accent : ManifoldPalette.text
             )
                 .frame(width: 56, height: 56)
                 .rotationEffect(.degrees(rotation))

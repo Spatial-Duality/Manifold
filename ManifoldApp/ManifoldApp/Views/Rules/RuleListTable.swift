@@ -234,7 +234,7 @@ private struct RulesEmptyState: View {
             title: "No rules in \(filter.title.lowercased())",
             subtitle: message,
             tint: ManifoldPalette.active,
-            style: .brandMark
+            style: .manifoldMark
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.s8)

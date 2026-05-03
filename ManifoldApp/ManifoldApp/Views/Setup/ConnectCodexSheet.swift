@@ -143,11 +143,11 @@ struct ConnectCodexSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .fill(ManifoldPalette.brandSoft)
+                    .fill(ManifoldPalette.accentSoft)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .strokeBorder(ManifoldPalette.brand.opacity(0.20), lineWidth: 0.5)
+                    .strokeBorder(ManifoldPalette.accent.opacity(0.20), lineWidth: 0.5)
             )
         case .connected:
             VStack(alignment: .leading, spacing: Spacing.s3) {

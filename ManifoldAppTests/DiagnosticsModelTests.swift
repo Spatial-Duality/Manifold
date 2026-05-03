@@ -106,7 +106,7 @@ final class DiagnosticsModelTests: XCTestCase {
     }
 
     func testCanSendReportsFalseEvenWithEndpointInExportOnlyV1() {
-        let model = makeModel(endpoint: URL(string: "https://telemetry.spatialduality.com/v1/reports"))
+        let model = makeModel(endpoint: URL(string: "https://example.invalid/v1/reports"))
         XCTAssertFalse(model.canSendReports)
     }
 

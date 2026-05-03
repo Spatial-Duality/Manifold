@@ -30,9 +30,11 @@ struct WorkView: View {
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
         }
         .task {
-            await store.activity.loadActivity()
-            await store.activity.loadSessions()
             await store.governance.loadPolicies()
+            while !Task.isCancelled {
+                await store.activity.refresh()
+                try? await Task.sleep(for: .seconds(2))
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ledger.surface.work")
@@ -96,7 +98,7 @@ private struct WorkFirstRunCoachmark: View {
     var body: some View {
         if !dismissed {
             HStack(alignment: .top, spacing: Spacing.s3) {
-                BrandMark(placement: .inline, color: ManifoldPalette.brand)
+                ManifoldMark(placement: .inline, color: ManifoldPalette.accent)
                     .frame(width: 22, height: 22)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) {
@@ -136,11 +138,11 @@ private struct WorkFirstRunCoachmark: View {
             .padding(Spacing.s3)
             .background(
                 RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .fill(ManifoldPalette.brandSoft)
+                    .fill(ManifoldPalette.accentSoft)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Spacing.r4, style: .continuous)
-                    .strokeBorder(ManifoldPalette.brand.opacity(0.18), lineWidth: 0.5)
+                    .strokeBorder(ManifoldPalette.accent.opacity(0.18), lineWidth: 0.5)
             )
             .transition(.opacity.combined(with: .move(edge: .top)))
             .accessibilityIdentifier("work.coachmark")
@@ -798,13 +800,21 @@ private struct WorkTimelineSection: View {
             return store.activityEntries.filter { $0.sessionID == id || $0.grantID == id }
         case .active, .defaultSession:
             if let grant = store.session.activeGrant {
-                return store.activityEntries.filter {
-                    $0.grantID == grant.grantID || $0.sessionID == grant.grantID
-                }
+                return activeGrantEntries(grant)
             }
-            return []
+            return store.activityEntries
         case .prepared:
             return []
+        }
+    }
+
+    private func activeGrantEntries(_ grant: GrantRecord) -> [AuditEntry] {
+        store.activityEntries.filter { entry in
+            if entry.grantID == grant.grantID || entry.sessionID == grant.grantID {
+                return true
+            }
+            guard entry.agent == grant.targetApp else { return false }
+            return entry.timestamp >= grant.startedAt
         }
     }
 }

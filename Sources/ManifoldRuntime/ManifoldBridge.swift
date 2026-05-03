@@ -28,6 +28,7 @@ public actor ManifoldBridge {
 
     static let maxExposurePreviewCharacters = 512
     static let maxDirectBinaryWriteBytes = 25 * 1024 * 1024
+    static let maxRawEmailExportBytes = 25 * 1024 * 1024
     static let maxPDFAnnotationBytes = 25 * 1024 * 1024
     static let maxPDFAnnotationPages = 500
     static let maxDirectBinaryWriteBase64Characters = ((maxDirectBinaryWriteBytes + 2) / 3) * 4 + 8_192
@@ -355,7 +356,7 @@ public actor ManifoldBridge {
         switch toolName {
         case "diff_file":
             return .diff
-        case "read_email", "search_emails":
+        case "read_email", "read_email_eml", "search_emails":
             return .email
         case "search_files":
             return .snippet
@@ -4384,8 +4385,7 @@ public actor ManifoldBridge {
 
         try await enforceEmailReadRules(email: email, grantID: grantID)
 
-        if let emlPath = email.emlPath,
-           let data = EmailSyncEngine.readStoredMessage(at: emlPath) {
+        if let data = try? storedEmailData(for: email) {
             let parsed = MIMEParser.parse(data: data)
             let excerpt = parsed.safeExcerpt(maxCharacters: 4_000) ?? email.preview ?? "(no preview available)"
             let content = """
@@ -4430,6 +4430,133 @@ public actor ManifoldBridge {
         )
         await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredPreview, exposureType: "email_preview", decisionID: decisionID, intent: validatedIntent)
         return deliveredPreview
+    }
+
+    /// Reads the exact original governed RFC 822/.eml bytes for one email.
+    /// The response is base64 because MCP text payloads cannot safely carry
+    /// arbitrary MIME bytes without corrupting boundaries or attachments.
+    public func readEmailEML(id: String, intent: AccessIntent? = nil) async throws -> EmailEMLExport {
+        await logToolCall(tool: "read_email_eml", arguments: ["id": id])
+        let validatedIntent = try await validatedAccessIntent(for: "read_email_eml", provided: intent)
+        let (context, decisionID) = try await resolveEmailAccessForTool(
+            toolName: "read_email_eml",
+            action: "read",
+            resourcePath: id,
+            intent: validatedIntent
+        )
+
+        guard let email = try emailStore.emailMessage(id: id) else {
+            throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
+        }
+
+        let grantID: String?
+        let emailDecision: EmailRuleDecision
+        switch context {
+        case .standing(let policy, _):
+            let decision = try await emailRuleDecision(for: email, policy: policy)
+            guard decision.allowed else {
+                throw ManifoldMCPError.fileNotFound("Email not accessible with current standing access rules")
+            }
+            emailDecision = decision
+            grantID = nil
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            let decision = try await emailRuleDecision(for: email, grant: grant)
+            guard decision.allowed else {
+                throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
+            }
+            emailDecision = decision
+            grantID = grant.grantID
+        }
+
+        try await enforceEmailReadRules(email: email, grantID: grantID)
+        try enforceRawEmailAttachmentAccess(email: email)
+
+        let data = try storedEmailData(for: email)
+        guard data.count <= Self.maxRawEmailExportBytes else {
+            throw ManifoldMCPError.invalidPath(
+                "read_email_eml refused \(id) because the stored message is \(data.count) bytes; direct raw EML export is limited to \(Self.maxRawEmailExportBytes) bytes."
+            )
+        }
+
+        let rawText = String(decoding: data, as: UTF8.self)
+        let preflightedText = try await applyPrivacyPreflight(
+            toolName: "read_email_eml",
+            resourcePath: id,
+            text: rawText,
+            decisionID: decisionID,
+            grantID: grantID,
+            contentKind: .email
+        )
+        guard preflightedText == rawText else {
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: "Privacy Preflight",
+                explanation: "Raw EML export cannot apply redactions without changing the original file. Use read_email for filtered body text or approve the original payload."
+            )
+        }
+
+        await auditEmailRead(email: email, grantID: grantID, decision: emailDecision)
+        await recordExposure(
+            toolName: "read_email_eml",
+            resourcePath: id,
+            data: data,
+            exposureType: "email_raw_eml",
+            decisionID: decisionID,
+            intent: validatedIntent
+        )
+
+        return EmailEMLExport(
+            id: id,
+            filename: Self.rawEmailFilename(for: email),
+            sizeBytes: data.count,
+            sha256: Self.sha256Hex(data),
+            contentBase64: data.base64EncodedString()
+        )
+    }
+
+    private func enforceRawEmailAttachmentAccess(email: EmailMessageRecord) throws {
+        let attachments = try emailStore.emailAttachments(emailID: email.emailID)
+        if email.attachmentCount > 0, attachments.isEmpty {
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: "Email Attachment Access",
+                explanation: "Raw EML export includes attachment MIME parts, but Manifold does not have attachment metadata for this message. Use read_email or resync the mailbox before exporting the original."
+            )
+        }
+
+        let attachmentIDs = Set(attachments.map(\.attachmentID))
+        guard !attachmentIDs.isEmpty else { return }
+
+        let sharedAttachmentIDs = try emailStore.sharedEmailAttachmentIDs(
+            emailID: email.emailID,
+            agent: targetApp
+        )
+        let blockedAttachmentCount = attachmentIDs.subtracting(sharedAttachmentIDs).count
+        guard blockedAttachmentCount == 0 else {
+            throw ManifoldMCPError.ruleDenied(
+                ruleName: "Email Attachment Access",
+                explanation: "Raw EML export includes \(blockedAttachmentCount) attachment MIME \(blockedAttachmentCount == 1 ? "part" : "parts") not shared with \(targetApp.rawValue). Share the attachments explicitly or use read_email for body text only."
+            )
+        }
+    }
+
+    private func storedEmailData(for email: EmailMessageRecord) throws -> Data {
+        if let contentID = email.canonicalBlobCID, !contentID.isEmpty {
+            let archive = try MailArchiveStore(rootURL: EmailSyncEngine.mailArchiveRoot)
+            return try archive.readObject(contentID: contentID, accountID: email.accountID)
+        }
+        if let emlPath = email.emlPath,
+           let data = EmailSyncEngine.readStoredMessage(at: emlPath) {
+            return data
+        }
+        throw ManifoldMCPError.fileNotFound("Stored EML content is unavailable for \(email.emailID)")
+    }
+
+    private static func rawEmailFilename(for email: EmailMessageRecord) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let sanitized = String(email.emailID.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar) : "_"
+        })
+        let base = String(sanitized.prefix(96)).trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
+        return "\(base.isEmpty ? "email" : base).eml"
     }
 
     /// Searches governed email content through the runtime email policy engine.
@@ -4631,7 +4758,7 @@ public actor ManifoldBridge {
     static func staticExecRefusal(for steps: [[String: Any]]) -> ExecRunResult? {
         let deniedOps: Set<String> = [
             "shell", "bash", "sh", "zsh", "python", "javascript", "node",
-            "curl", "fetch", "network", "http", "read_file", "read_email",
+            "curl", "fetch", "network", "http", "read_file", "read_email", "read_email_eml",
             "write_file", "write_binary_file", "annotate_pdf", "send_email", "save_memory_note", "forget_memory", "save_skill", "run_code",
         ]
         let ops = steps.compactMap { ($0["op"] as? String)?.lowercased() }

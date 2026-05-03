@@ -1,9 +1,0 @@
-/*
-  X-Content-Type-Options: nosniff
-  Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
-  Content-Security-Policy: default-src 'self'; img-src 'self' data:; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-
-/updates/appcast.xml
-  Content-Type: application/xml; charset=utf-8
-  Cache-Control: public, max-age=300

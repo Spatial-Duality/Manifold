@@ -19,8 +19,8 @@ struct EmptyStateIllustration: View {
         /// Low-emphasis Manifold mark sitting behind/under the icon. Used
         /// where the surface is empty *because the user hasn't done
         /// anything yet* — the mark says "this is the product" without
-        /// shouting. Earned-presence brand identity, no animation.
-        case brandMark
+        /// shouting. Earned-presence app identity, no animation.
+        case manifoldMark
     }
 
     let systemImage: String
@@ -155,16 +155,16 @@ struct EmptyStateIllustration: View {
                     .font(.system(size: 32, weight: .light))
                     .foregroundStyle(tint)
             }
-        case .brandMark:
+        case .manifoldMark:
             ZStack {
-                // Saffron watermark — barely-there brand presence in
+                // Saffron watermark — barely-there app presence in
                 // empty surfaces. Far quieter than a full atmospheric
                 // background (which would cost Metal shader cycles for
                 // a surface the user mostly passes through). Reads as
                 // "Manifold's there, watching the empty room."
-                BrandMark(
+                ManifoldMark(
                     placement: .display,
-                    color: ManifoldPalette.brand.opacity(0.10)
+                    color: ManifoldPalette.accent.opacity(0.10)
                 )
                 .frame(width: 116, height: 116)
                 Image(systemName: systemImage)

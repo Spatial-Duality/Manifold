@@ -22,7 +22,7 @@ extension ManifoldBridge {
                     output: """
                     Supported language: manifoldexec-json
                     Supported ops: recall_memory, reuse_prior_context, was_exposed_before, what_changed_since, search_structured, query_graph, list_skills, tool_cost_report, verify_ledger_entry
-                    Denied inside Exec: shell, network, raw filesystem, write_file, write_binary_file, annotate_pdf, read_file, read_email, save_memory_note, forget_memory, save_skill
+                    Denied inside Exec: shell, network, raw filesystem, write_file, write_binary_file, annotate_pdf, read_file, read_email, read_email_eml, save_memory_note, forget_memory, save_skill
                     """
                 ),
                 toolName: "run_code",
