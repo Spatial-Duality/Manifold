@@ -44,9 +44,9 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "A227F0E313129DE30F0086F0"
-               BuildableName = "ManifoldAppTests.xctest"
-               BlueprintName = "ManifoldAppTests"
+               BlueprintIdentifier = "9BFDA9E65C644407209A6256"
+               BuildableName = "ManifoldAppUITests.xctest"
+               BlueprintName = "ManifoldAppUITests"
                ReferencedContainer = "container:Manifold.xcodeproj">
             </BuildableReference>
          </TestableReference>

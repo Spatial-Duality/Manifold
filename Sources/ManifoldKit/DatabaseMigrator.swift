@@ -2074,5 +2074,101 @@ public struct DatabaseMigrator {
                 ON shared_email_attachments(attachment_id)
             """)
         },
+
+        // v42: Mail sync truth model. Counts and progress are backed by
+        // durable mailbox/backfill state, dates preserve raw trust metadata,
+        // and sync activity is recorded as a dated runtime log.
+        Migration(version: 42, name: "mail_sync_truth_model") { db in
+            if try tableExists(db, named: "email_messages") {
+                try addColumnIfMissing(
+                    db,
+                    table: "email_messages",
+                    column: "received_at_raw",
+                    sql: "ALTER TABLE email_messages ADD COLUMN received_at_raw TEXT"
+                )
+                try addColumnIfMissing(
+                    db,
+                    table: "email_messages",
+                    column: "received_at_is_trusted",
+                    sql: "ALTER TABLE email_messages ADD COLUMN received_at_is_trusted INTEGER NOT NULL DEFAULT 1"
+                )
+                try db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_email_messages_received_trusted
+                    ON email_messages(received_at_is_trusted, received_at)
+                """)
+            }
+
+            if try tableExists(db, named: "email_sync_state") {
+                try addColumnIfMissing(
+                    db,
+                    table: "email_sync_state",
+                    column: "oldest_synced_uid",
+                    sql: "ALTER TABLE email_sync_state ADD COLUMN oldest_synced_uid INTEGER"
+                )
+                try addColumnIfMissing(
+                    db,
+                    table: "email_sync_state",
+                    column: "server_message_count",
+                    sql: "ALTER TABLE email_sync_state ADD COLUMN server_message_count INTEGER"
+                )
+                try addColumnIfMissing(
+                    db,
+                    table: "email_sync_state",
+                    column: "backfill_completed",
+                    sql: "ALTER TABLE email_sync_state ADD COLUMN backfill_completed INTEGER NOT NULL DEFAULT 0"
+                )
+                try addColumnIfMissing(
+                    db,
+                    table: "email_sync_state",
+                    column: "last_successful_sync_at",
+                    sql: "ALTER TABLE email_sync_state ADD COLUMN last_successful_sync_at TEXT"
+                )
+                try addColumnIfMissing(
+                    db,
+                    table: "email_sync_state",
+                    column: "last_error_at",
+                    sql: "ALTER TABLE email_sync_state ADD COLUMN last_error_at TEXT"
+                )
+            }
+
+            if try tableExists(db, named: "mail_sync_jobs") {
+                try addColumnIfMissing(
+                    db,
+                    table: "mail_sync_jobs",
+                    column: "attempt_count",
+                    sql: "ALTER TABLE mail_sync_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"
+                )
+                try addColumnIfMissing(
+                    db,
+                    table: "mail_sync_jobs",
+                    column: "next_attempt_at",
+                    sql: "ALTER TABLE mail_sync_jobs ADD COLUMN next_attempt_at TEXT"
+                )
+                try db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mail_sync_jobs_next_attempt
+                    ON mail_sync_jobs(account_id, state, next_attempt_at)
+                """)
+            }
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS mail_sync_events (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    mailbox_name TEXT,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    job_type TEXT,
+                    error_code TEXT,
+                    detail_redacted TEXT,
+                    created_at TEXT NOT NULL,
+                    needs_attention INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(account_id) REFERENCES email_accounts(account_id)
+                )
+            """)
+            try db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_mail_sync_events_account_created
+                ON mail_sync_events(account_id, created_at)
+            """)
+        },
     ]
 }

@@ -446,11 +446,15 @@ extension ManifoldXPCService {
                 let syncedCount = try runtime.emailStore.emailMessageCount(
                     accountID: account.accountID
                 )
+                let mailboxCounts = try runtime.emailStore.authoritativeMailboxCounts(
+                    accountID: account.accountID
+                )
                 return MailSyncProgressSnapshot.derive(
                     account: account,
                     states: states,
                     jobs: jobs,
                     syncedMessageCount: syncedCount,
+                    authoritativeMailboxCounts: mailboxCounts,
                     privacyIndexActive: privacyIndexActive
                 )
             }
@@ -635,7 +639,9 @@ extension ManifoldXPCService {
                 throw ManifoldXPCError.invalidPayload
             }
             _ = try await runtime.mailSyncCoordinator.recoverStaleRunningJobs(accountID: accountID)
+            _ = try runtime.emailStore.requeueRetryableMailSyncJobs(accountID: accountID)
             _ = try await runtime.mailSyncCoordinator.enqueueRecentPass(accountID: accountID)
+            await runtime.mailSyncCoordinator.startWorker(accountID: accountID)
             let processed = try await runtime.mailSyncCoordinator.processNextJobWithResult(accountID: accountID)
             let result = processed?.result ?? SyncResult(
                 accountID: accountID,
@@ -643,6 +649,14 @@ extension ManifoldXPCService {
             )
             await runtime.privacyIndexCoordinator.bootstrap()
             return ["result": try XPCJSON.object(from: result)]
+
+        case "mailSyncActivity":
+            let accountID = payload["accountID"] as? String
+            let limit = payload["limit"] as? Int ?? 100
+            return ["events": try XPCJSON.object(from: runtime.emailStore.mailSyncActivity(
+                accountID: accountID,
+                limit: limit
+            ))]
 
         case "mailSyncJobs":
             let accountID = payload["accountID"] as? String

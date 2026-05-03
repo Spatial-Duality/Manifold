@@ -72,7 +72,7 @@ rm -rf \
 echo "==> Build for testing"
 xcodebuild \
   -project "$ROOT_DIR/Manifold.xcodeproj" \
-  -scheme Manifold \
+  -scheme ManifoldUITests \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   build-for-testing \

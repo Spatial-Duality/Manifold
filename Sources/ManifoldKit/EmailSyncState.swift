@@ -16,6 +16,11 @@ public struct SyncStateRecord: Sendable, Identifiable, Codable {
     public let messageCount: Int
     public let syncStatus: SyncStatus
     public let errorMessage: String?
+    public let oldestSyncedUID: UInt32?
+    public let serverMessageCount: Int?
+    public let backfillCompleted: Bool
+    public let lastSuccessfulSyncAt: String?
+    public let lastErrorAt: String?
 
     public init(
         accountID: String,
@@ -25,7 +30,12 @@ public struct SyncStateRecord: Sendable, Identifiable, Codable {
         lastSyncAt: String? = nil,
         messageCount: Int = 0,
         syncStatus: SyncStatus = .idle,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        oldestSyncedUID: UInt32? = nil,
+        serverMessageCount: Int? = nil,
+        backfillCompleted: Bool = false,
+        lastSuccessfulSyncAt: String? = nil,
+        lastErrorAt: String? = nil
     ) {
         self.accountID = accountID
         self.mailboxName = mailboxName
@@ -35,6 +45,11 @@ public struct SyncStateRecord: Sendable, Identifiable, Codable {
         self.messageCount = messageCount
         self.syncStatus = syncStatus
         self.errorMessage = errorMessage
+        self.oldestSyncedUID = oldestSyncedUID
+        self.serverMessageCount = serverMessageCount
+        self.backfillCompleted = backfillCompleted
+        self.lastSuccessfulSyncAt = lastSuccessfulSyncAt
+        self.lastErrorAt = lastErrorAt
     }
 
     public init?(row: [String: String]) {
@@ -48,6 +63,11 @@ public struct SyncStateRecord: Sendable, Identifiable, Codable {
         self.messageCount = row["message_count"].flatMap { Int($0) } ?? 0
         self.syncStatus = SyncStatus(rawValue: row["sync_status"] ?? "idle") ?? .idle
         self.errorMessage = row["error_message"].flatMap { $0.isEmpty ? nil : $0 }
+        self.oldestSyncedUID = row["oldest_synced_uid"].flatMap { UInt32($0) }
+        self.serverMessageCount = row["server_message_count"].flatMap { Int($0) }
+        self.backfillCompleted = row["backfill_completed"] == "1"
+        self.lastSuccessfulSyncAt = row["last_successful_sync_at"].flatMap { $0.isEmpty ? nil : $0 }
+        self.lastErrorAt = row["last_error_at"].flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -166,6 +186,8 @@ public struct MailSyncJobRecord: Sendable, Codable, Identifiable, Equatable {
     public let errorRedacted: String?
     public let createdAt: String
     public let updatedAt: String
+    public let attemptCount: Int
+    public let nextAttemptAt: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -178,7 +200,9 @@ public struct MailSyncJobRecord: Sendable, Codable, Identifiable, Equatable {
         errorCode: String? = nil,
         errorRedacted: String? = nil,
         createdAt: String = ISO8601DateFormatter.shared.string(from: Date()),
-        updatedAt: String = ISO8601DateFormatter.shared.string(from: Date())
+        updatedAt: String = ISO8601DateFormatter.shared.string(from: Date()),
+        attemptCount: Int = 0,
+        nextAttemptAt: String? = nil
     ) {
         self.id = id
         self.accountID = accountID
@@ -191,6 +215,8 @@ public struct MailSyncJobRecord: Sendable, Codable, Identifiable, Equatable {
         self.errorRedacted = errorRedacted
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.attemptCount = attemptCount
+        self.nextAttemptAt = nextAttemptAt
     }
 
     public init?(row: [String: String]) {
@@ -215,5 +241,83 @@ public struct MailSyncJobRecord: Sendable, Codable, Identifiable, Equatable {
         self.errorRedacted = row["error_redacted"]
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.attemptCount = row["attempt_count"].flatMap(Int.init) ?? 0
+        self.nextAttemptAt = row["next_attempt_at"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    public var hasRetryScheduled: Bool {
+        state == .failed && nextAttemptAt != nil
+    }
+}
+
+public enum MailSyncEventKind: String, Sendable, Codable, CaseIterable {
+    case jobQueued
+    case jobStarted
+    case jobSucceeded
+    case retryScheduled
+    case jobFailed
+    case mailboxStarted
+    case mailboxCompleted
+    case mailboxError
+    case dateRepair
+    case headerRepair
+    case accountDeleted
+}
+
+public struct MailSyncActivityLogEntry: Sendable, Codable, Identifiable, Equatable {
+    public let id: String
+    public let accountID: String
+    public let mailboxName: String?
+    public let kind: MailSyncEventKind
+    public let status: String
+    public let jobType: MailSyncJobType?
+    public let errorCode: String?
+    public let detailRedacted: String?
+    public let createdAt: String
+    public let needsAttention: Bool
+
+    public init(
+        id: String = UUID().uuidString,
+        accountID: String,
+        mailboxName: String? = nil,
+        kind: MailSyncEventKind,
+        status: String,
+        jobType: MailSyncJobType? = nil,
+        errorCode: String? = nil,
+        detailRedacted: String? = nil,
+        createdAt: String = ISO8601DateFormatter.shared.string(from: Date()),
+        needsAttention: Bool = false
+    ) {
+        self.id = id
+        self.accountID = accountID
+        self.mailboxName = mailboxName
+        self.kind = kind
+        self.status = status
+        self.jobType = jobType
+        self.errorCode = errorCode
+        self.detailRedacted = detailRedacted
+        self.createdAt = createdAt
+        self.needsAttention = needsAttention
+    }
+
+    public init?(row: [String: String]) {
+        guard let id = row["id"],
+              let accountID = row["account_id"],
+              let rawKind = row["kind"],
+              let kind = MailSyncEventKind(rawValue: rawKind),
+              let status = row["status"],
+              let createdAt = row["created_at"] else {
+            return nil
+        }
+        self.id = id
+        self.accountID = accountID
+        self.mailboxName = row["mailbox_name"]
+        self.kind = kind
+        self.status = status
+        self.jobType = row["job_type"].flatMap(MailSyncJobType.init(rawValue:))
+        self.errorCode = row["error_code"]
+        self.detailRedacted = row["detail_redacted"]
+        self.createdAt = createdAt
+        self.needsAttention = row["needs_attention"] == "1"
     }
 }

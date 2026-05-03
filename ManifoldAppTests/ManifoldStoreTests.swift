@@ -28,19 +28,31 @@ final class ManifoldStoreTests: XCTestCase {
         let activity = try await runtime.recentActivity(limit: 50)
         let rules = try await runtime.listRules(scope: nil)
         let accounts = try await runtime.listEmailAccounts()
+        let sources = try await runtime.listSources()
+        let emails = try await runtime.emailMessages(accountID: nil, mailbox: nil, ids: nil, limit: 100)
         let claudeShared = try await runtime.sharedEmailIDs(agent: .cowork)
         let codexShared = try await runtime.sharedEmailIDs(agent: .codex)
 
         XCTAssertEqual(activity.count, 13)
         XCTAssertTrue(rules.contains { $0.name == "racing/* never shared" })
         XCTAssertEqual(Set(accounts.map(\.displayName)), ["iCloud", "Gmail", "Microsoft 365"])
-        XCTAssertEqual(claudeShared.count, 3)
-        XCTAssertEqual(codexShared.count, 3)
+        XCTAssertEqual(sources.count, 18)
+        XCTAssertGreaterThanOrEqual(emails.count, 25)
+        XCTAssertGreaterThanOrEqual(DemoFileCatalog.entries.count, 70)
+        XCTAssertGreaterThanOrEqual(claudeShared.count, 8)
+        XCTAssertGreaterThanOrEqual(codexShared.count, 6)
+        XCTAssertTrue(DemoFileCatalog.entries.contains { $0.relativePath.hasSuffix(".pdf") })
+        XCTAssertTrue(DemoFileCatalog.entries.contains { $0.relativePath.hasSuffix(".csv") })
+        XCTAssertTrue(DemoFileCatalog.entries.contains { $0.relativePath.hasSuffix(".docx") })
+        XCTAssertTrue(DemoFileCatalog.entries.contains { $0.relativePath.hasSuffix(".txt") })
 
         let haystack = [
             activity.map { [$0.filePath, $0.metadata].compactMap { $0 }.joined(separator: " ") }.joined(separator: "\n"),
             rules.map(\.name).joined(separator: "\n"),
             accounts.map { "\($0.displayName) \($0.username ?? "")" }.joined(separator: "\n"),
+            sources.map { "\($0.displayName) \($0.originalRootPath)" }.joined(separator: "\n"),
+            emails.map { "\($0.sender) \($0.subject)" }.joined(separator: "\n"),
+            DemoFileCatalog.entries.map(\.relativePath).joined(separator: "\n"),
         ].joined(separator: "\n")
         for forbidden in ["Dario Amodei", "Daniela Amodei", "Boris Cherny", "Mark Chen", "Tim Cook", "Sam Altman"] {
             XCTAssertFalse(haystack.contains(forbidden), "Demo data leaked forbidden real-name string: \(forbidden)")
@@ -254,6 +266,58 @@ final class ManifoldStoreTests: XCTestCase {
         XCTAssertEqual(mailReview.messages.map(\.subject), ["Codex found the missing semicolon"])
     }
 
+    func testMailReviewNextAndPreviousReloadRuntimePages() async throws {
+        let runtime = PagingMailRuntime()
+        let mailAccounts = MailAccountsModel()
+        mailAccounts.configure(client: runtime)
+        let mailReview = MailReviewModel()
+        mailReview.configure(mailAccounts: mailAccounts)
+
+        await mailReview.prepare(force: true)
+
+        let firstPageIDs = mailReview.messages.map(\.emailID)
+        XCTAssertEqual(mailReview.totalMessageCount, 60)
+        XCTAssertEqual(firstPageIDs.first, "page-059")
+        XCTAssertEqual(firstPageIDs.last, "page-035")
+
+        await mailReview.nextPage()
+        let secondPageIDs = mailReview.messages.map(\.emailID)
+        XCTAssertNotEqual(firstPageIDs, secondPageIDs)
+        XCTAssertEqual(secondPageIDs.first, "page-034")
+        XCTAssertEqual(secondPageIDs.last, "page-010")
+
+        await mailReview.previousPage()
+        XCTAssertEqual(mailReview.messages.map(\.emailID), firstPageIDs)
+
+        mailReview.searchText = "sender10@example.com"
+        await mailReview.retry()
+        let searchRequest = await runtime.lastPageRequest()
+        XCTAssertEqual(searchRequest?.freeText, "sender10@example.com")
+        XCTAssertNil(searchRequest?.accountID)
+        XCTAssertNil(searchRequest?.mailbox)
+        XCTAssertNil(searchRequest?.filter)
+    }
+
+    func testAccessFileSearchMatchesRawUnfilteredPaths() {
+        let file = SourceFile(
+            name: "Invoice.pdf",
+            path: "/Users/example/Documents/Receipts/Invoice.pdf",
+            canonicalPath: "Work/Receipts/Invoice.pdf",
+            relativePath: "Receipts/Invoice.pdf",
+            sourceName: "Work",
+            sourceID: "src-work",
+            fileExtension: "pdf",
+            sizeBytes: 2048,
+            modifiedDate: Date(timeIntervalSince1970: 1_800_000_000),
+            isGrantedToClaude: false
+        )
+
+        XCTAssertTrue(FilesFlatView.fileMatchesRawSearch(file, searchText: "invoice"))
+        XCTAssertTrue(FilesFlatView.fileMatchesRawSearch(file, searchText: "Work/Receipts"))
+        XCTAssertTrue(FilesFlatView.fileMatchesRawSearch(file, searchText: "/Users/example/Documents"))
+        XCTAssertFalse(FilesFlatView.fileMatchesRawSearch(file, searchText: "missing"))
+    }
+
     private func mailboxRecord(
         accountID: String,
         name: String,
@@ -291,7 +355,7 @@ final class ManifoldStoreTests: XCTestCase {
             emailID: "email-root",
             accountID: "account-1",
             mailbox: "INBOX",
-            sender: "Dario Amodei <dario@anthropic.test>",
+            sender: "Mario Amodei <mario@anthropologie.test>",
             recipients: "policy@manifold.test",
             subject: "Constitution sync",
             receivedAt: "2026-04-15T09:00:00Z",
@@ -301,7 +365,7 @@ final class ManifoldStoreTests: XCTestCase {
             emailID: "email-reply",
             accountID: "account-1",
             mailbox: "INBOX",
-            sender: "Sam Altman <sam@openai.test>",
+            sender: "Sable Alman <sable@openai.test>",
             recipients: "policy@manifold.test",
             subject: "Re: Constitution sync",
             receivedAt: "2026-04-15T10:00:00Z",
@@ -313,7 +377,7 @@ final class ManifoldStoreTests: XCTestCase {
             emailID: "email-unrelated",
             accountID: "account-1",
             mailbox: "INBOX",
-            sender: "Greg Brockman <greg@openai.test>",
+            sender: "Greg Brackman <greg@openai.test>",
             recipients: "policy@manifold.test",
             subject: "Operator checklist",
             receivedAt: "2026-04-15T08:00:00Z",
@@ -608,6 +672,20 @@ final class MailProviderOnboardingGuideTests: XCTestCase {
         XCTAssertEqual(subtitle, "Needs attention · Sync error")
     }
 
+    func testMailSyncProgressPresentationShowsRetryQueuedWithoutNeedsAttention() {
+        let progress = mailProgress(
+            stage: .recentMailReady,
+            syncedMessageCount: 2_381,
+            retryScheduledCount: 3
+        )
+        let subtitle = MailSyncProgressPresentation.accountSubtitle(
+            progress: progress,
+            account: mailAccount()
+        )
+
+        XCTAssertEqual(subtitle, "2,381 synced · Retry queued")
+    }
+
     func testMailSyncProgressPresentationBuildsMailboxCountAndStatus() {
         let progress = mailProgress(
             stage: .syncingRecentMail,
@@ -658,6 +736,22 @@ final class MailProviderOnboardingGuideTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.accountID), ["error", "active", "ready", "up-to-date"])
     }
 
+    func testMailSyncProgressPresentationBuildsActivityLogEntryTitle() {
+        let event = MailSyncActivityLogEntry(
+            accountID: "account-1",
+            mailboxName: "INBOX",
+            kind: .retryScheduled,
+            status: "Retry scheduled",
+            jobType: .historicalBackfill,
+            createdAt: "2026-05-03T00:30:00Z"
+        )
+
+        XCTAssertEqual(
+            MailSyncProgressPresentation.eventTitle(event),
+            "Retry scheduled · INBOX · Older mail archive"
+        )
+    }
+
     private func mailAccount() -> EmailAccountRecord {
         EmailAccountRecord(
             accountID: "account-1",
@@ -674,6 +768,7 @@ final class MailProviderOnboardingGuideTests: XCTestCase {
         mailboxSyncedCounts: [String: Int] = ["INBOX": 842],
         runningJobCount: Int = 0,
         queuedBackfillCount: Int = 0,
+        retryScheduledCount: Int = 0,
         failedMailboxCount: Int = 0,
         currentMailboxName: String? = nil
     ) -> MailSyncProgressSnapshot {
@@ -686,6 +781,7 @@ final class MailProviderOnboardingGuideTests: XCTestCase {
             stage: stage,
             runningJobCount: runningJobCount,
             queuedBackfillCount: queuedBackfillCount,
+            retryScheduledCount: retryScheduledCount,
             failedMailboxCount: failedMailboxCount,
             currentMailboxName: currentMailboxName,
             lastUpdatedAt: "2026-05-02T10:05:00Z"
@@ -695,6 +791,104 @@ final class MailProviderOnboardingGuideTests: XCTestCase {
 
 private enum PendingApprovalsFailure: Error {
     case unavailable
+}
+
+private struct MailPageRequest: Sendable {
+    let freeText: String
+    let accountID: String?
+    let mailbox: String?
+    let filter: QuickFilter?
+}
+
+private actor PagingMailRuntime: RuntimeClientProtocol {
+    private let accountID: String
+    private let account: EmailAccountRecord
+    private let mailbox: IMAPMailboxRecord
+    private let messages: [EmailMessageRecord]
+    private var pageRequests: [MailPageRequest] = []
+
+    init() {
+        let accountID = "paging-account"
+        self.accountID = accountID
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        account = EmailAccountRecord(
+            accountID: accountID,
+            displayName: "Paging Mail",
+            providerType: EmailProvider.gmail.rawValue,
+            server: "imap.example.com",
+            port: 993,
+            username: "paging@example.com",
+            createdAt: now,
+            updatedAt: now
+        )
+        mailbox = IMAPMailboxRecord(row: [
+            "account_id": accountID,
+            "mailbox_name": "INBOX",
+            "delimiter": "/",
+            "flags": #"["\\Inbox"]"#,
+            "is_selectable": "1",
+            "sort_order": "0",
+        ])!
+        messages = (0..<60).map { index in
+            EmailMessageRecord(
+                emailID: String(format: "page-%03d", index),
+                accountID: accountID,
+                mailbox: "INBOX",
+                sender: "Sender \(index) <sender\(index)@example.com>",
+                senderEmail: "sender\(index)@example.com",
+                senderDomain: "example.com",
+                recipients: "recipient@example.com",
+                subject: "Paged message \(index)",
+                receivedAt: ISO8601DateFormatter.shared.string(
+                    from: Date(timeIntervalSince1970: 1_800_000_000 + TimeInterval(index))
+                )
+            )
+        }
+    }
+
+    func listEmailAccounts() async throws -> [EmailAccountRecord] {
+        [account]
+    }
+
+    func emailMessageCount() async throws -> Int {
+        messages.count
+    }
+
+    func imapMailboxes(accountID: String) async throws -> [IMAPMailboxRecord] {
+        accountID == self.accountID ? [mailbox] : []
+    }
+
+    func lastPageRequest() -> MailPageRequest? {
+        pageRequests.last
+    }
+
+    func emailMessagePage(
+        tokens: [SearchToken],
+        freeText: String,
+        accountID: String?,
+        mailbox: String?,
+        filter: QuickFilter?,
+        sortKey: EmailSortKey,
+        limit: Int,
+        offset: Int
+    ) async throws -> EmailMessagePage {
+        pageRequests.append(MailPageRequest(freeText: freeText, accountID: accountID, mailbox: mailbox, filter: filter))
+        let term = freeText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sorted = messages
+            .filter { message in
+                (accountID == nil || message.accountID == accountID)
+                    && (mailbox == nil || message.mailbox == mailbox)
+                    && (term.isEmpty || [message.sender, message.subject, message.preview ?? ""].joined(separator: "\n").lowercased().contains(term))
+            }
+            .sorted { $0.receivedAt > $1.receivedAt }
+        let page = sorted.dropFirst(max(0, offset)).prefix(max(0, limit))
+        return EmailMessagePage(
+            messages: Array(page),
+            totalCount: sorted.count,
+            limit: max(0, limit),
+            offset: max(0, offset)
+        )
+    }
 }
 
 private actor PendingApprovalsFailureRuntime: RuntimeClientProtocol {

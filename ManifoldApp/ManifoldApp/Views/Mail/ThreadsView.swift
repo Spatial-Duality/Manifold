@@ -17,7 +17,6 @@ struct MailReviewView: View {
     @Environment(MailReviewModel.self) private var mailReview
     @Environment(ManifoldStore.self) private var store
     @AppStorage("mail.review.pageSize") private var storedPageSize = 25
-    @SceneStorage("mail.review.pageIndex") private var storedPageIndex = 0
     @State private var sortOrder = [KeyPathComparator(\MailReviewRow.receivedDate, order: .reverse)]
 
     private var connectedAgents: [TargetApp] {
@@ -71,7 +70,6 @@ struct MailReviewView: View {
                 sharedAgents: sharedAgents
             )
         }
-        .sorted(using: sortOrder)
     }
 
     private var sortOrderBinding: Binding<[KeyPathComparator<MailReviewRow>]> {
@@ -126,11 +124,8 @@ struct MailReviewView: View {
         .task(id: connectedAgentsKey) {
             await mailReview.setConnectedAgents(connectedAgents)
         }
-        .task(id: "\(storedPageSize)-\(storedPageIndex)") {
-            await mailReview.applyStoredPaging(pageSize: storedPageSize, pageIndex: storedPageIndex)
-        }
-        .onChange(of: mailReview.pageIndex) { _, newValue in
-            if storedPageIndex != newValue { storedPageIndex = newValue }
+        .task(id: storedPageSize) {
+            await mailReview.applyStoredPaging(pageSize: storedPageSize, pageIndex: 0)
         }
         .onChange(of: mailReview.pageSize) { _, newValue in
             if storedPageSize != newValue { storedPageSize = newValue }
@@ -173,7 +168,8 @@ private struct ThreadToolbar: View {
                         selectedAccountID: selectedAccount?.accountID,
                         snapshots: MailSyncProgressPresentation.orderedForActivity(
                             Array(mailAccounts.syncProgressByAccountID.values)
-                        )
+                        ),
+                        eventsByAccountID: mailAccounts.syncActivityByAccountID
                     )
                     .frame(width: 360)
                 }
@@ -210,7 +206,11 @@ private struct ThreadToolbar: View {
     }
 
     private var scopeStatusLine: String {
-        MailSyncProgressPresentation.toolbarStatus(
+        let trimmedSearch = mailReview.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSearch.isEmpty {
+            return "Search · All backed-up mail"
+        }
+        return MailSyncProgressPresentation.toolbarStatus(
             account: selectedAccount,
             mailboxDisplayName: selectedMailboxDisplayName,
             mailboxName: selectedMailboxName,
@@ -241,6 +241,7 @@ private struct MailSyncActivityPopover: View {
 
     let selectedAccountID: String?
     let snapshots: [MailSyncProgressSnapshot]
+    let eventsByAccountID: [String: [MailSyncActivityLogEntry]]
 
     private var visibleSnapshots: [MailSyncProgressSnapshot] {
         if let selectedAccountID,
@@ -261,6 +262,7 @@ private struct MailSyncActivityPopover: View {
             } else {
                 ForEach(visibleSnapshots) { snapshot in
                     accountSection(snapshot)
+                    activitySection(snapshot)
                     mailboxSection(snapshot)
                 }
             }
@@ -281,17 +283,12 @@ private struct MailSyncActivityPopover: View {
             }
             LabeledContent("Running jobs", value: "\(snapshot.runningJobCount)")
             LabeledContent("Queued backfills", value: "\(snapshot.queuedBackfillCount)")
+            LabeledContent("Queued retries", value: "\(snapshot.retryScheduledCount)")
             LabeledContent("Current work") {
                 Text(currentWorkText(snapshot))
                     .multilineTextAlignment(.trailing)
             }
             LabeledContent("Last updated", value: lastUpdatedText(snapshot))
-            if let errorMessage = snapshot.errorMessage, !errorMessage.isEmpty {
-                LabeledContent("Last error") {
-                    Text(errorMessage)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
             if let completed = snapshot.progressCompleted,
                let total = snapshot.progressTotal,
                total > 0 {
@@ -310,6 +307,31 @@ private struct MailSyncActivityPopover: View {
                 }
             }
             .controlSize(.small)
+        }
+    }
+
+    private func activitySection(_ snapshot: MailSyncProgressSnapshot) -> some View {
+        Section("Recent Activity") {
+            let events = eventsByAccountID[snapshot.accountID] ?? []
+            if events.isEmpty {
+                Text("No sync activity has been recorded yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(events.prefix(8)) { event in
+                    LabeledContent {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(MailSyncProgressPresentation.eventTitle(event))
+                            if let detail = event.detailRedacted, !detail.isEmpty {
+                                Text(detail)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    } label: {
+                        Text(MailSyncProgressPresentation.relativeTimestamp(event.createdAt) ?? "recently")
+                    }
+                }
+            }
         }
     }
 
@@ -370,6 +392,22 @@ private struct MailReviewTableArea: View {
     let connectedAgents: [TargetApp]
     let onOpenInspector: () -> Void
 
+    private var shareColumnWidth: CGFloat {
+        AccessCheckboxStrip.compactWidth(agentCount: connectedAgents.count)
+    }
+
+    private var tableIdentity: String {
+        [
+            mailReview.selectedAccountID ?? "none",
+            mailReview.selectedMailboxName ?? "none",
+            mailReview.activeQuickFilter?.rawValue ?? "all",
+            mailReview.searchText,
+            "\(mailReview.pageSize)",
+            "\(mailReview.pageIndex)",
+            rows.map(\.emailID).joined(separator: ","),
+        ].joined(separator: "::")
+    }
+
     var body: some View {
         if mailReview.isLoading && mailReview.messages.isEmpty {
             ProgressView("Loading backed-up mail…")
@@ -421,6 +459,7 @@ private struct MailReviewTableArea: View {
                         AccessCheckboxStrip(
                             agents: connectedAgents,
                             visibleAgents: row.sharedAgents,
+                            showsTitles: false,
                             accessibilityIDPrefix: "mail.share.\(row.emailID)",
                             onToggleAgent: { agent, wasVisible in
                                 Task {
@@ -442,7 +481,7 @@ private struct MailReviewTableArea: View {
                         )
                         .accessibilityIdentifier("mail.share.\(row.emailID)")
                     }
-                    .width(min: 150, ideal: 180, max: 230)
+                    .width(min: shareColumnWidth, ideal: shareColumnWidth, max: shareColumnWidth)
 
                     TableColumn("Sender", value: \.senderSortKey) { row in
                         HStack(spacing: Spacing.s2) {
@@ -506,7 +545,7 @@ private struct MailReviewTableArea: View {
                     .width(min: 90, ideal: 110, max: 150)
 
                     TableColumn("Received", value: \.receivedDate) { row in
-                        Text(MailDisplayFormatter.mailTimestamp(row.receivedAt))
+                        Text(MailDisplayFormatter.mailTimestamp(row.receivedAt, isTrusted: row.receivedAtIsTrusted))
                             .font(ManifoldType.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -538,6 +577,7 @@ private struct MailReviewTableArea: View {
                     }
                 }
                 .tableStyle(.inset)
+                .id(tableIdentity)
                 .accessibilityIdentifier("mail.review.table")
 
                 Divider()
@@ -582,15 +622,23 @@ private struct MailPagerBar: View {
 
     var body: some View {
         HStack(spacing: Spacing.s3) {
-            Picker("Rows", selection: pageSizeBinding) {
-                ForEach(pageSizes, id: \.self) { size in
-                    Text("\(size)").tag(size)
+            HStack(spacing: Spacing.s2) {
+                Text("Rows")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Picker("Rows", selection: pageSizeBinding) {
+                    ForEach(pageSizes, id: \.self) { size in
+                        Text("\(size)").tag(size)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .frame(width: 108)
+                .accessibilityIdentifier("mail.pager.pageSize")
             }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(width: 132)
-            .accessibilityIdentifier("mail.pager.pageSize")
+            .fixedSize(horizontal: true, vertical: false)
 
             Text(rangeText)
                 .font(ManifoldType.caption)
@@ -663,6 +711,9 @@ private struct EmptyMailboxState: View {
     }
 
     private var titleText: String {
+        if !mailReview.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "No matching backed-up mail"
+        }
         guard selectedAccount != nil else { return "No mailbox selected" }
         if selectedSyncProgress?.stage == .needsAttention || selectedSyncState?.syncStatus == .error {
             return "Mailbox needs attention"
@@ -693,6 +744,9 @@ private struct EmptyMailboxState: View {
     }
 
     private var descriptionText: String {
+        if !mailReview.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Search checks all backed-up mail, not just the selected mailbox or filter."
+        }
         guard let selectedAccount else {
             return "Choose an account and mailbox to browse backed-up mail."
         }
@@ -1157,6 +1211,7 @@ private struct MailReviewRow: Identifiable, Hashable {
     var mailboxSortKey: String { message.mailbox }
     var receivedDate: Date { MailDisplayFormatter.date(from: message.receivedAt) }
     var receivedAt: String { message.receivedAt }
+    var receivedAtIsTrusted: Bool { message.receivedAtIsTrusted }
     var attachmentCount: Int { message.attachmentCount }
     var previewText: String {
         MailDisplayFormatter.compactPreview(message.preview ?? message.bodyText ?? "No preview available")
@@ -1220,10 +1275,13 @@ enum MailDisplayFormatter {
     nonisolated(unsafe) private static let relativeFormatter = RelativeDateTimeFormatter()
 
     static func date(from rawValue: String) -> Date {
-        ISO8601DateFormatter.shared.date(from: rawValue) ?? .distantPast
+        MailDateNormalizer.parse(rawValue) ?? .distantPast
     }
 
-    static func mailTimestamp(_ rawValue: String) -> String {
+    static func mailTimestamp(_ rawValue: String, isTrusted: Bool = true) -> String {
+        guard isTrusted, MailDateNormalizer.parse(rawValue) != nil else {
+            return "Unknown"
+        }
         let date = date(from: rawValue)
         let calendar = Calendar.current
         if calendar.isDateInToday(date) {

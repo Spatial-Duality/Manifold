@@ -275,6 +275,7 @@ protocol RuntimeClientProtocol: Sendable {
     func syncStates(accountID: String) async throws -> [SyncStateRecord]
     func emailMessageCount() async throws -> Int
     func mailSyncProgress(accountID: String?) async throws -> [MailSyncProgressSnapshot]
+    func mailSyncActivity(accountID: String?, limit: Int) async throws -> [MailSyncActivityLogEntry]
     func addIMAPAccount(
         displayName: String,
         provider: EmailProvider,
@@ -638,6 +639,7 @@ extension RuntimeClientProtocol {
     func syncStates(accountID: String) async throws -> [SyncStateRecord] { [] }
     func emailMessageCount() async throws -> Int { 0 }
     func mailSyncProgress(accountID: String? = nil) async throws -> [MailSyncProgressSnapshot] { [] }
+    func mailSyncActivity(accountID: String? = nil, limit: Int = 100) async throws -> [MailSyncActivityLogEntry] { [] }
     func addIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, password: String) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addIMAPAccount") }
     func addOAuthIMAPAccount(displayName: String, provider: EmailProvider, server: String, port: Int, username: String, tokenSet: MicrosoftOAuthTokenSet) async throws -> EmailAccountRecord { throw RuntimeClientStubError.unimplemented("addOAuthIMAPAccount") }
     func removeEmailAccount(id: String) async throws -> MailAccountRemovalResult { throw RuntimeClientStubError.unimplemented("removeEmailAccount") }
@@ -2122,10 +2124,15 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                     account: account,
                     states: state.syncStates[account.accountID] ?? [],
                     jobs: [],
-                    syncedMessageCount: state.emails.filter { $0.accountID == account.accountID }.count
+                    syncedMessageCount: state.emails.filter { $0.accountID == account.accountID }.count,
+                    authoritativeMailboxCounts: Dictionary(
+                        grouping: state.emails.filter { $0.accountID == account.accountID },
+                        by: \.mailbox
+                    ).mapValues(\.count)
                 )
             }
     }
+    func mailSyncActivity(accountID: String? = nil, limit: Int = 100) async throws -> [MailSyncActivityLogEntry] { [] }
     func syncEmailNow(accountID: String) async throws -> SyncResult {
         let now = ISO8601DateFormatter.shared.string(from: Date())
         state.syncStates[accountID] = (state.syncStates[accountID] ?? []).map { existing in
@@ -3304,13 +3311,29 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
     private static func makeDemoState() -> FixtureState {
         let now = "2026-05-01T17:00:00Z"
         let base = "/Users/demo/Anthropologie"
-        let sourceProduct = SourceRecord(sourceID: "demo-product", displayName: "product", originalRootPath: "\(base)/product", status: "idle", createdAt: now, updatedAt: now)
-        let sourceCode = SourceRecord(sourceID: "demo-code", displayName: "code", originalRootPath: "\(base)/code", status: "idle", createdAt: now, updatedAt: now)
-        let sourceNotes = SourceRecord(sourceID: "demo-notes", displayName: "notes", originalRootPath: "\(base)/notes", status: "idle", createdAt: now, updatedAt: now)
-        let sourceInvoices = SourceRecord(sourceID: "demo-invoices", displayName: "invoices", originalRootPath: "\(base)/invoices", status: "idle", createdAt: now, updatedAt: now)
-        let sourceRacing = SourceRecord(sourceID: "demo-racing", displayName: "racing", originalRootPath: "\(base)/racing", status: "idle", createdAt: now, updatedAt: now)
-        let sourceLegal = SourceRecord(sourceID: "demo-legal", displayName: "legal", originalRootPath: "\(base)/legal", status: "idle", createdAt: now, updatedAt: now)
-        let sources = [sourceProduct, sourceCode, sourceNotes, sourceInvoices, sourceRacing, sourceLegal]
+        let sourceNames = [
+            "product",
+            "code",
+            "notes",
+            "invoices",
+            "racing",
+            "legal",
+            "research",
+            "design",
+            "sales",
+            "support",
+            "finance",
+            "operations",
+            "data",
+            "docs",
+            "media",
+            "sessions",
+            "templates",
+            "experiments",
+        ]
+        let sources = sourceNames.map { name in
+            SourceRecord(sourceID: "demo-\(name)", displayName: name, originalRootPath: "\(base)/\(name)", status: "idle", createdAt: now, updatedAt: now)
+        }
 
         let claudeRules = EmailRuleSet(
             agent: .cowork,
@@ -3328,8 +3351,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             defaultPolicy: .blockUnlessAllowed,
             emailSensitivity: .strict
         )
-        let claudePolicy = AgentAccessPolicy(agent: .cowork, allowedSourceIDs: ["demo-product", "demo-code", "demo-notes"], allowedEmailDomains: ["anthropologie.test"], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
-        let codexPolicy = AgentAccessPolicy(agent: .codex, allowedSourceIDs: ["demo-code", "demo-notes", "demo-invoices"], allowedEmailDomains: ["github.test", "stripe.test"], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
+        let claudePolicy = AgentAccessPolicy(agent: .cowork, allowedSourceIDs: ["demo-product", "demo-notes", "demo-research", "demo-design", "demo-docs", "demo-support", "demo-templates"], allowedEmailDomains: ["anthropologie.test"], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
+        let codexPolicy = AgentAccessPolicy(agent: .codex, allowedSourceIDs: ["demo-code", "demo-notes", "demo-invoices", "demo-operations", "demo-data", "demo-sessions", "demo-experiments"], allowedEmailDomains: ["github.test", "stripe.test"], emailSensitivity: .strict, defaultEmailPolicy: .blockUnlessAllowed, accessRecordingLevel: .detailed, isPaused: false)
         let claudeGovernance = AgentEmailGovernanceSummary(agent: .cowork, enabledShieldCount: claudeRules.shields.filter(\.isEnabled).count, domainRuleCount: claudeRules.domainRules.count, contactRuleCount: claudeRules.contactRules.count, keywordRuleCount: claudeRules.keywordRules.count, defaultPolicy: claudeRules.defaultPolicy, emailSensitivity: claudeRules.emailSensitivity)
         let codexGovernance = AgentEmailGovernanceSummary(agent: .codex, enabledShieldCount: codexRules.shields.filter(\.isEnabled).count, domainRuleCount: codexRules.domainRules.count, contactRuleCount: codexRules.contactRules.count, keywordRuleCount: codexRules.keywordRules.count, defaultPolicy: codexRules.defaultPolicy, emailSensitivity: codexRules.emailSensitivity)
 
@@ -3485,7 +3508,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             fabricationFindings: [],
             activeGrant: activeGrant,
             activeGrantSources: [GrantSourceRecord(grantID: activeGrant.grantID, sourceID: "demo-code", mountName: "code")],
-            activeGrantEmailIDs: ["demo-m365-github", "demo-m365-stripe", "demo-m365-boris"],
+            activeGrantEmailIDs: ["demo-m365-github", "demo-m365-stripe", "demo-m365-boris", "demo-m365-build", "demo-m365-data", "demo-m365-incident"],
             pendingApprovals: [
                 PendingApprovalRecord(id: "approval-demo-142", connectionID: "demo-codex", agent: TargetApp.codex.rawValue, path: "\(base)/code/src/auth.ts", action: "write", kind: "tracked_work", sourceID: "demo-code", mountName: "code", relativePath: "src/auth.ts", contextJSON: #"{"comment":"Respectfully: this regresses the v6 null check. Suggest restoring v6's guard, then layering the bearer path on top.","controls":["promote","discard","restore-to-v6"]}"#, requestedAt: 1_714_563_780, status: "pending")
             ],
@@ -3494,7 +3517,7 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
                 .cowork: EmailRuleActivitySummary(agent: .cowork, shieldBlockedCounts: ["2FA": 1, "PII": 1], recentShieldMatches: [], domainRuleHits: [.init(ruleID: claudeRules.domainRules[0].id, count: 3)], contactRuleHits: [.init(ruleID: claudeRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: claudeRules.keywordRules[0].id, count: 1)]),
                 .codex: EmailRuleActivitySummary(agent: .codex, shieldBlockedCounts: ["financial": 1], recentShieldMatches: [], domainRuleHits: [.init(ruleID: codexRules.domainRules[0].id, count: 1)], contactRuleHits: [.init(ruleID: codexRules.contactRules[0].id, count: 1)], keywordRuleHits: [.init(ruleID: codexRules.keywordRules[0].id, count: 2)]),
             ],
-            domainCounts: ["anthropologie.test": 4, "gmail.test": 1, "github.test": 1, "stripe.test": 1, "oldmotors.test": 1],
+            domainCounts: ["anthropologie.test": 6, "anthropologie.org": 8, "gmail.test": 1, "github.test": 2, "stripe.test": 1, "oldmotors.test": 2, "openai.test": 2, "deepmind.test": 1, "microsoft.test": 1, "survey.test": 1, "retail.test": 1],
             trackedFiles: [
                 "\(base)/product/customer-proposal.docx",
                 "\(base)/product/pricing-decisions.md",
@@ -3510,8 +3533,8 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             emails: emails,
             imapMailboxes: imapMailboxes,
             sharedEmailIDsByAgent: [
-                .cowork: ["demo-icloud-roadmap", "demo-icloud-pricing", "demo-gmail-interview"],
-                .codex: ["demo-m365-github", "demo-m365-stripe", "demo-m365-boris"],
+                .cowork: ["demo-icloud-roadmap", "demo-icloud-pricing", "demo-gmail-interview", "demo-icloud-support", "demo-icloud-launch", "demo-icloud-calendar", "demo-gmail-survey", "demo-m365-design", "demo-m365-template"],
+                .codex: ["demo-m365-github", "demo-m365-stripe", "demo-m365-boris", "demo-m365-build", "demo-m365-data", "demo-m365-incident"],
             ],
             sharedEmailAttachmentIDsByAgent: [:],
             fileVisibilityOverrides: [
@@ -3551,6 +3574,22 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             demoEmail("demo-m365-openai", "demo-m365", "Sam Altmore <sam@openai.test>", "sam@openai.test", "openai.test", "Friendly nudge re: AGI working group", "2026-05-01T12:04:00Z", "Not shared with any AI."),
             demoEmail("demo-m365-demi", "demo-m365", "Demi Hassabit <demi@deepmind.test>", "demi@deepmind.test", "deepmind.test", "Catching up - saw your kart photos", "2026-05-01T13:48:00Z", "Not shared. Non-AI things."),
             demoEmail("demo-m365-mustafa", "demo-m365", "Mustafa Sailmán <mustafa@microsoft.test>", "mustafa@microsoft.test", "microsoft.test", "Re: linen line - collaboration?", "2026-05-01T15:12:00Z", "Forwarded to Tom Brownie."),
+            demoEmail("demo-icloud-support", "demo-icloud", "Support Queue <support@anthropologie.test>", "support@anthropologie.test", "anthropologie.test", "Refund macro needs privacy-safe wording", "2026-05-01T06:58:00Z", "Claude can use this for support macro cleanup."),
+            demoEmail("demo-icloud-launch", "demo-icloud", "Mae Ribbon <mae@anthropologie.test>", "mae@anthropologie.test", "anthropologie.test", "Launch copy v4 attached", "2026-05-01T06:31:00Z", "Claude shared. Copy references linen launch, not lab roadmap."),
+            demoEmail("demo-icloud-vendor", "demo-icloud", "Fabric Samples <orders@fabric.test>", "orders@fabric.test", "fabric.test", "Invoice and swatch PDF", "2026-04-30T18:02:00Z", "Not shared. Vendor receipt stays outside AI."),
+            demoEmail("demo-icloud-calendar", "demo-icloud", "Calendar <calendar@anthropologie.test>", "calendar@anthropologie.test", "anthropologie.test", "Coffee tasting notes moved to 4pm", "2026-04-30T16:12:00Z", "Claude can see the meeting note summary."),
+            demoEmail("demo-gmail-survey", "demo-gmail", "Research Panel <panel@survey.test>", "panel@survey.test", "survey.test", "Q2 preference study export ready", "2026-05-01T08:12:00Z", "Shared with Claude only after PII redaction."),
+            demoEmail("demo-gmail-race-entry", "demo-gmail", "Kart Club <events@oldmotors.test>", "events@oldmotors.test", "oldmotors.test", "Saturday heat assignments", "2026-05-01T08:04:00Z", "Not shared. racing/* never shared."),
+            demoEmail("demo-gmail-maps", "demo-gmail", "Map Room <maps@openai.test>", "maps@openai.test", "openai.test", "Cupcake table coordinates", "2026-05-01T07:44:00Z", "Not shared; unrelated external note."),
+            demoEmail("demo-gmail-bank", "demo-gmail", "Bank Alerts <alerts@bank.test>", "alerts@bank.test", "bank.test", "Wire confirmation", "2026-05-01T07:21:00Z", "Blocked by privacy filter before sharing."),
+            demoEmail("demo-gmail-newsletter", "demo-gmail", "Retail Futures <newsletter@retail.test>", "newsletter@retail.test", "retail.test", "Five merchandising signals for May", "2026-04-30T20:00:00Z", "Claude can use this as market context."),
+            demoEmail("demo-m365-build", "demo-m365", "Build Bot <ci@github.test>", "ci@github.test", "github.test", "PR #142 checks failing on auth.test.ts", "2026-05-01T10:22:00Z", "Shared with Codex for the tracked work review."),
+            demoEmail("demo-m365-data", "demo-m365", "Data Warehouse <warehouse@anthropologie.org>", "warehouse@anthropologie.org", "anthropologie.org", "Privacy index export completed", "2026-05-01T10:33:00Z", "Codex can inspect the privacy-index schema only."),
+            demoEmail("demo-m365-incident", "demo-m365", "Ops Desk <ops@anthropologie.org>", "ops@anthropologie.org", "anthropologie.org", "Mail sync incident review", "2026-05-01T10:45:00Z", "Shared with Codex for runbook edits."),
+            demoEmail("demo-m365-sales", "demo-m365", "Pipeline Bot <pipeline@sales.test>", "pipeline@sales.test", "sales.test", "Enterprise pipeline CSV updated", "2026-05-01T11:05:00Z", "Claude can summarize only the redacted rows."),
+            demoEmail("demo-m365-design", "demo-m365", "Pixel Desk <design@anthropologie.org>", "design@anthropologie.org", "anthropologie.org", "Access matrix screenshot notes", "2026-05-01T11:22:00Z", "Claude can see this design thread."),
+            demoEmail("demo-m365-legal", "demo-m365", "Legal Desk <legal@anthropologie.org>", "legal@anthropologie.org", "anthropologie.org", "NDA redline for vendor terms", "2026-05-01T11:40:00Z", "Not shared. legal/* never shared."),
+            demoEmail("demo-m365-template", "demo-m365", "Session Librarian <sessions@anthropologie.org>", "sessions@anthropologie.org", "anthropologie.org", "Saved session templates refreshed", "2026-05-01T12:15:00Z", "Shared with Claude for onboarding polish."),
         ]
     }
 
@@ -4220,6 +4259,19 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
             payload: payload,
             field: "progress",
             as: [MailSyncProgressSnapshot].self
+        )
+    }
+
+    func mailSyncActivity(accountID: String? = nil, limit: Int = 100) async throws -> [MailSyncActivityLogEntry] {
+        var payload: [String: Any] = ["limit": limit]
+        if let accountID {
+            payload["accountID"] = accountID
+        }
+        return try await command(
+            name: "mailSyncActivity",
+            payload: payload,
+            field: "events",
+            as: [MailSyncActivityLogEntry].self
         )
     }
 

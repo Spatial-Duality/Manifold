@@ -219,6 +219,9 @@ enum MailSyncProgressPresentation {
             let errors = progress.failedMailboxCount == 1 ? "1 mailbox error" : "\(progress.failedMailboxCount) mailbox errors"
             return "Needs attention · \(errors)"
         }
+        if progress.retryScheduledCount > 0 {
+            return "\(formattedCount(progress.syncedMessageCount)) synced · Retry queued"
+        }
         return "\(formattedCount(progress.syncedMessageCount)) synced · \(stageTitle(progress.stage))"
     }
 
@@ -328,6 +331,17 @@ enum MailSyncProgressPresentation {
         }
     }
 
+    static func eventTitle(_ event: MailSyncActivityLogEntry) -> String {
+        var parts = [event.status]
+        if let mailbox = event.mailboxName, !mailbox.isEmpty {
+            parts.append(mailbox)
+        }
+        if let jobType = event.jobType {
+            parts.append(runningJobTitle(jobType))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     static func orderedForActivity(_ snapshots: [MailSyncProgressSnapshot]) -> [MailSyncProgressSnapshot] {
         snapshots.sorted { left, right in
             if left.stage.activitySortRank != right.stage.activitySortRank {
@@ -421,6 +435,7 @@ final class MailAccountsModel {
     var syncStates: [String: [SyncStateRecord]] = [:]
     var syncJobsByAccountID: [String: [MailSyncJobRecord]] = [:]
     var syncProgressByAccountID: [String: MailSyncProgressSnapshot] = [:]
+    var syncActivityByAccountID: [String: [MailSyncActivityLogEntry]] = [:]
     var totalMessageCount: Int = 0
     var mailboxRefreshToken: Int = 0
     var lastQueryError: String?
@@ -451,19 +466,25 @@ final class MailAccountsModel {
             let fetchedProgress = (try? await client.mailSyncProgress(accountID: nil)) ?? []
             var nextStates: [String: [SyncStateRecord]] = [:]
             var nextJobs: [String: [MailSyncJobRecord]] = [:]
+            var nextActivity: [String: [MailSyncActivityLogEntry]] = [:]
             for account in fetchedAccounts {
                 nextStates[account.accountID] = try await client.syncStates(accountID: account.accountID)
                 nextJobs[account.accountID] = try await client.mailSyncJobs(
                     accountID: account.accountID,
-                    states: [.queued, .running],
+                    states: [.queued, .running, .failed],
                     limit: 100
                 )
+                nextActivity[account.accountID] = (try? await client.mailSyncActivity(
+                    accountID: account.accountID,
+                    limit: 50
+                )) ?? []
             }
             accounts = fetchedAccounts
             totalMessageCount = fetchedMessageCount
             archiveInfo = fetchedArchiveInfo
             syncStates = nextStates
             syncJobsByAccountID = nextJobs
+            syncActivityByAccountID = nextActivity
             syncProgressByAccountID = Dictionary(
                 uniqueKeysWithValues: fetchedProgress.map { ($0.accountID, $0) }
             )
@@ -569,6 +590,10 @@ final class MailAccountsModel {
             lastQueryError = error.localizedDescription
         }
         await loadAccounts()
+    }
+
+    func syncActivity(accountID: String) -> [MailSyncActivityLogEntry] {
+        syncActivityByAccountID[accountID] ?? []
     }
 
     func messages(accountID: String, limit: Int = 200) async -> [EmailMessageRecord] {

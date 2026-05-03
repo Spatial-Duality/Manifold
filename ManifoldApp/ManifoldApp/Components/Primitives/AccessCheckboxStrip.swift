@@ -12,6 +12,16 @@ import SwiftUI
 import ManifoldKit
 
 struct AccessCheckboxStrip: View {
+    static func compactWidth(agentCount: Int, showsAllControl: Bool = true) -> CGFloat {
+        let allControlCount = showsAllControl && agentCount > 1 ? 1 : 0
+        let controlCount = agentCount + allControlCount
+        guard controlCount > 0 else { return 72 }
+
+        let controlWidth: CGFloat = 34
+        let spacing: CGFloat = 5
+        return CGFloat(controlCount) * controlWidth + CGFloat(max(0, controlCount - 1)) * spacing
+    }
+
     let agents: [TargetApp]
     let visibleAgents: Set<TargetApp>
     /// Agents whose state was set explicitly (.explicitAllow or
@@ -21,6 +31,7 @@ struct AccessCheckboxStrip: View {
     /// manually overridden.
     var explicitOverrideAgents: Set<TargetApp> = []
     var showsAllControl = true
+    var showsTitles = true
     var accessibilityIDPrefix: String? = nil
     let onToggleAgent: (TargetApp, Bool) -> Void
     let onSetAll: (Bool) -> Void
@@ -50,6 +61,7 @@ struct AccessCheckboxStrip: View {
                         systemImage: "person.2",
                         state: allVisible ? .on : (partiallyVisible ? .mixed : .off),
                         tint: ManifoldPalette.selection,
+                        showsTitle: showsTitles,
                         accessibilityIdentifier: accessibilityIDPrefix.map { "\($0).all" }
                     ) {
                         onSetAll(!allVisible)
@@ -67,6 +79,7 @@ struct AccessCheckboxStrip: View {
                         state: visible ? .on : .off,
                         tint: AgentMeta.color(agent),
                         isExplicitOverride: isOverride,
+                        showsTitle: showsTitles,
                         accessibilityIdentifier: accessibilityIDPrefix.map { "\($0).agent.\(agent.rawValue)" }
                     ) {
                         onToggleAgent(agent, visible)
@@ -98,6 +111,7 @@ private struct AccessCheckButton: View {
     let state: State
     let tint: Color
     var isExplicitOverride: Bool = false
+    var showsTitle = true
     let accessibilityIdentifier: String?
     let action: () -> Void
 
@@ -117,12 +131,14 @@ private struct AccessCheckButton: View {
                         Image(systemName: systemImage)
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    Text(title)
-                        .font(ManifoldType.captionMedium)
-                        .lineLimit(1)
+                    if showsTitle {
+                        Text(title)
+                            .font(ManifoldType.captionMedium)
+                            .lineLimit(1)
+                    }
                 }
                 .foregroundStyle(state == .off ? ManifoldPalette.text2 : tint)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, showsTitle ? 4 : 2)
                 .frame(height: 24)
 
                 // Explicit-override underline. Renders only when the user

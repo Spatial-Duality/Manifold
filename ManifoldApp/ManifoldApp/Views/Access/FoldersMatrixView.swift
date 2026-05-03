@@ -50,6 +50,10 @@ struct FoldersMatrixView: View {
         connectedAgents.count > 4
     }
 
+    private var shareColumnWidth: CGFloat {
+        AccessCheckboxStrip.compactWidth(agentCount: connectedAgents.count)
+    }
+
     private var scopeByAgent: [TargetApp: Set<String>] {
         var result: [TargetApp: Set<String>] = [:]
         for agent in connectedAgents {
@@ -299,6 +303,7 @@ struct FoldersMatrixView: View {
             AccessCheckboxStrip(
                 agents: connectedAgents,
                 visibleAgents: visible,
+                showsTitles: false,
                 accessibilityIDPrefix: "access.folder.\(source.sourceID.manifoldAccessIdentifierComponent)",
                 onToggleAgent: { agent, wasVisible in
                     Task {
@@ -312,6 +317,7 @@ struct FoldersMatrixView: View {
                 }
             )
         }
+        .width(min: shareColumnWidth, ideal: shareColumnWidth, max: shareColumnWidth)
     }
 
     private var statusColumn: TableColumn<SourceRecord, Never, some View, Text> {

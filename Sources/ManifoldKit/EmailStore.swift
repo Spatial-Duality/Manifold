@@ -30,6 +30,8 @@ public struct EmailStore: Sendable {
         cc: String = "",
         subject: String,
         receivedAt: String,
+        receivedAtRaw: String? = nil,
+        receivedAtIsTrusted: Bool = true,
         emlPath: String?,
         sizeBytes: Int,
         preview: String?,
@@ -45,11 +47,12 @@ public struct EmailStore: Sendable {
         try db.execute("""
             INSERT INTO email_messages (
                 email_id, account, account_id, mailbox, sender, sender_email, sender_domain,
-                recipients, cc, subject, received_at, eml_path, size_bytes, preview,
+                recipients, cc, subject, received_at, received_at_raw, received_at_is_trusted,
+                eml_path, size_bytes, preview,
                 content_type, is_read, is_flagged, in_reply_to, references_header,
                 message_id_header, attachment_count, canonical_blob_cid
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email_id) DO UPDATE SET
                 account_id = excluded.account_id,
                 mailbox = excluded.mailbox,
@@ -60,6 +63,8 @@ public struct EmailStore: Sendable {
                 cc = excluded.cc,
                 subject = excluded.subject,
                 received_at = excluded.received_at,
+                received_at_raw = excluded.received_at_raw,
+                received_at_is_trusted = excluded.received_at_is_trusted,
                 eml_path = COALESCE(excluded.eml_path, email_messages.eml_path),
                 size_bytes = excluded.size_bytes,
                 preview = COALESCE(excluded.preview, email_messages.preview),
@@ -73,7 +78,8 @@ public struct EmailStore: Sendable {
                 canonical_blob_cid = COALESCE(excluded.canonical_blob_cid, email_messages.canonical_blob_cid)
         """, params: [
             emailID, accountID, accountID, mailbox, sender, senderEmail, senderDomain,
-            recipients, cc, subject, receivedAt, emlPath, "\(sizeBytes)", preview,
+            recipients, cc, subject, receivedAt, receivedAtRaw, receivedAtIsTrusted ? "1" : "0",
+            emlPath, "\(sizeBytes)", preview,
             contentType, isRead ? "1" : "0", isFlagged ? "1" : "0",
             inReplyTo, referencesHeader, messageIDHeader, "\(attachmentCount)", canonicalBlobCID,
         ])
@@ -84,7 +90,7 @@ public struct EmailStore: Sendable {
             """
             SELECT em.* FROM email_messages em
             WHERE em.account_id = ?
-            ORDER BY em.received_at DESC, em.email_id DESC
+            ORDER BY \(dateOrderSQL()), em.email_id DESC
             LIMIT ? OFFSET ?
             """,
             params: [accountID, "\(max(0, limit))", "\(max(0, offset))"]
@@ -103,7 +109,7 @@ public struct EmailStore: Sendable {
                     )
                     OR em.mailbox = ?
               )
-            ORDER BY em.received_at DESC, em.email_id DESC
+            ORDER BY \(dateOrderSQL()), em.email_id DESC
             LIMIT ? OFFSET ?
         """, params: [accountID, mailbox, mailbox, "\(max(0, limit))", "\(max(0, offset))"])
         return rows.compactMap { EmailMessageRecord(row: $0) }
@@ -120,7 +126,7 @@ public struct EmailStore: Sendable {
             rows = try db.queryAll("""
                 SELECT mailbox, COUNT(DISTINCT email_id) as cnt
                 FROM email_mailbox_membership
-                WHERE account_id = ?
+                WHERE account_id = ? AND missing_from IS NULL
                 GROUP BY mailbox
                 ORDER BY mailbox ASC
             """, params: [accountID])
@@ -156,7 +162,7 @@ public struct EmailStore: Sendable {
         let rows = try db.queryAll(
             """
             SELECT em.* FROM email_messages em
-            ORDER BY em.received_at DESC, em.email_id DESC
+            ORDER BY \(dateOrderSQL()), em.email_id DESC
             LIMIT ? OFFSET ?
             """,
             params: ["\(max(0, limit))", "\(max(0, offset))"]
@@ -168,7 +174,7 @@ public struct EmailStore: Sendable {
         guard !ids.isEmpty else { return [] }
         let placeholders = ids.map { _ in "?" }.joined(separator: ",")
         let rows = try db.queryAll(
-            "SELECT * FROM email_messages WHERE email_id IN (\(placeholders)) ORDER BY received_at DESC",
+            "SELECT * FROM email_messages WHERE email_id IN (\(placeholders)) ORDER BY \(dateOrderSQL(tableAlias: nil)), email_id DESC",
             params: ids
         )
         return rows.compactMap { EmailMessageRecord(row: $0) }
@@ -674,6 +680,7 @@ public struct EmailStore: Sendable {
             try db.execute("DELETE FROM email_messages WHERE account = ?", params: [id])
             try db.execute("DELETE FROM mail_private_terms WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM mail_sync_jobs WHERE account_id = ?", params: [id])
+            try db.execute("DELETE FROM mail_sync_events WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM mail_blobs WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM imap_mailboxes WHERE account_id = ?", params: [id])
             try db.execute("DELETE FROM email_sync_state WHERE account_id = ?", params: [id])
@@ -685,6 +692,24 @@ public struct EmailStore: Sendable {
         for reference in MailFreshStartReset.knownCredentialReferences(accountID: id) {
             KeychainMailSecretStore().delete(reference: reference)
         }
+    }
+
+    public func mailAccountResidueCounts(accountID: String) throws -> [String: Int] {
+        var counts: [String: Int] = [:]
+        func count(_ name: String, _ sql: String, _ params: [String?]) throws {
+            let value = try db.queryScalar(sql, params: params).flatMap(Int.init) ?? 0
+            if value > 0 { counts[name] = value }
+        }
+        try count("email_accounts", "SELECT COUNT(*) FROM email_accounts WHERE account_id = ?", [accountID])
+        try count("email_messages", "SELECT COUNT(*) FROM email_messages WHERE account_id = ? OR account = ?", [accountID, accountID])
+        try count("email_mailbox_membership", "SELECT COUNT(*) FROM email_mailbox_membership WHERE account_id = ?", [accountID])
+        try count("email_sync_state", "SELECT COUNT(*) FROM email_sync_state WHERE account_id = ?", [accountID])
+        try count("mail_sync_jobs", "SELECT COUNT(*) FROM mail_sync_jobs WHERE account_id = ?", [accountID])
+        try count("mail_sync_events", "SELECT COUNT(*) FROM mail_sync_events WHERE account_id = ?", [accountID])
+        try count("imap_mailboxes", "SELECT COUNT(*) FROM imap_mailboxes WHERE account_id = ?", [accountID])
+        try count("mail_private_terms", "SELECT COUNT(*) FROM mail_private_terms WHERE account_id = ?", [accountID])
+        try count("mail_blobs", "SELECT COUNT(*) FROM mail_blobs WHERE account_id = ?", [accountID])
+        return counts
     }
 
     public func setEmailAccountSyncEnabled(accountID: String, enabled: Bool) throws {
@@ -732,27 +757,49 @@ public struct EmailStore: Sendable {
         lastSyncUID: UInt32,
         messageCount: Int,
         syncStatus: SyncStatus,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        oldestSyncedUID: UInt32? = nil,
+        serverMessageCount: Int? = nil,
+        backfillCompleted: Bool? = nil,
+        lastSuccessfulSyncAt: String? = nil,
+        lastErrorAt: String? = nil
     ) throws {
         let now = ISO8601DateFormatter.shared.string(from: Date())
+        let backfillCompletedValue = backfillCompleted.map { $0 ? "1" : "0" }
         try db.execute("""
             INSERT INTO email_sync_state (
                 account_id, mailbox_name, uid_validity, last_sync_uid,
-                last_sync_at, message_count, sync_status, error_message
+                last_sync_at, message_count, sync_status, error_message,
+                oldest_synced_uid, server_message_count, backfill_completed,
+                last_successful_sync_at, last_error_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?)
             ON CONFLICT(account_id, mailbox_name) DO UPDATE SET
                 uid_validity = excluded.uid_validity,
                 last_sync_uid = excluded.last_sync_uid,
                 last_sync_at = excluded.last_sync_at,
                 message_count = excluded.message_count,
                 sync_status = excluded.sync_status,
-                error_message = excluded.error_message
+                error_message = excluded.error_message,
+                oldest_synced_uid = COALESCE(excluded.oldest_synced_uid, email_sync_state.oldest_synced_uid),
+                server_message_count = COALESCE(excluded.server_message_count, email_sync_state.server_message_count),
+                backfill_completed = CASE
+                    WHEN ? IS NULL THEN email_sync_state.backfill_completed
+                    ELSE excluded.backfill_completed
+                END,
+                last_successful_sync_at = COALESCE(excluded.last_successful_sync_at, email_sync_state.last_successful_sync_at),
+                last_error_at = COALESCE(excluded.last_error_at, email_sync_state.last_error_at)
         """, params: [
             accountID, mailbox,
             uidValidity.map { "\($0)" },
             "\(lastSyncUID)", now, "\(messageCount)",
             syncStatus.rawValue, errorMessage,
+            oldestSyncedUID.map { "\($0)" },
+            serverMessageCount.map { "\($0)" },
+            backfillCompletedValue,
+            lastSuccessfulSyncAt,
+            lastErrorAt,
+            backfillCompletedValue,
         ])
     }
 
@@ -797,9 +844,10 @@ public struct EmailStore: Sendable {
         try db.execute("""
             INSERT INTO mail_sync_jobs (
                 id, account_id, mailbox_name, job_type, state, priority,
-                cursor_json_ciphertext, error_code, error_redacted, created_at, updated_at
+                cursor_json_ciphertext, error_code, error_redacted, created_at, updated_at,
+                attempt_count, next_attempt_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, params: [
             job.id,
             job.accountID,
@@ -812,7 +860,16 @@ public struct EmailStore: Sendable {
             job.errorRedacted,
             job.createdAt,
             job.updatedAt,
+            "\(job.attemptCount)",
+            job.nextAttemptAt,
         ])
+        try recordMailSyncEvent(
+            accountID: accountID,
+            mailboxName: mailboxName,
+            kind: .jobQueued,
+            status: "Queued",
+            jobType: jobType
+        )
         return job
     }
 
@@ -856,15 +913,16 @@ public struct EmailStore: Sendable {
             let rows = try db.queryAll("""
                 SELECT * FROM mail_sync_jobs
                 WHERE account_id = ? AND state = ?
+                  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
                 ORDER BY priority DESC, created_at ASC
                 LIMIT 1
-            """, params: [accountID, MailSyncJobState.queued.rawValue])
+            """, params: [accountID, MailSyncJobState.queued.rawValue, ISO8601DateFormatter.shared.string(from: Date())])
             guard let row = rows.first,
                   let id = row["id"] else { return }
             let now = ISO8601DateFormatter.shared.string(from: Date())
             try db.execute("""
                 UPDATE mail_sync_jobs
-                SET state = ?, updated_at = ?, error_code = NULL, error_redacted = NULL
+                SET state = ?, updated_at = ?, error_code = NULL, error_redacted = NULL, next_attempt_at = NULL
                 WHERE id = ? AND state = ?
             """, params: [
                 MailSyncJobState.running.rawValue,
@@ -875,6 +933,15 @@ public struct EmailStore: Sendable {
             guard try db.queryScalar("SELECT changes()") == "1" else { return }
             claimed = try mailSyncJob(id: id)
         }
+        if let claimed {
+            try recordMailSyncEvent(
+                accountID: claimed.accountID,
+                mailboxName: claimed.mailboxName,
+                kind: .jobStarted,
+                status: "Started",
+                jobType: claimed.jobType
+            )
+        }
         return claimed
     }
 
@@ -882,20 +949,104 @@ public struct EmailStore: Sendable {
         id: String,
         state: MailSyncJobState,
         errorCode: String? = nil,
-        errorRedacted: String? = nil
+        errorRedacted: String? = nil,
+        nextAttemptAt: String? = nil,
+        incrementAttempt: Bool = false
     ) throws {
         let now = ISO8601DateFormatter.shared.string(from: Date())
         try db.execute("""
             UPDATE mail_sync_jobs
-            SET state = ?, updated_at = ?, error_code = ?, error_redacted = ?
+            SET state = ?,
+                updated_at = ?,
+                error_code = ?,
+                error_redacted = ?,
+                next_attempt_at = ?,
+                attempt_count = CASE WHEN ? = '1' THEN attempt_count + 1 ELSE attempt_count END
             WHERE id = ?
         """, params: [
             state.rawValue,
             now,
             errorCode,
             errorRedacted,
+            nextAttemptAt,
+            incrementAttempt ? "1" : "0",
             id,
         ])
+    }
+
+    @discardableResult
+    public func requeueRetryableMailSyncJobs(accountID: String) throws -> Int {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute("""
+            UPDATE mail_sync_jobs
+            SET state = ?, updated_at = ?, error_code = NULL, error_redacted = NULL
+            WHERE account_id = ?
+              AND state = ?
+              AND next_attempt_at IS NOT NULL
+        """, params: [
+            MailSyncJobState.queued.rawValue,
+            now,
+            accountID,
+            MailSyncJobState.failed.rawValue,
+        ])
+        return try db.queryScalar("SELECT changes()").flatMap(Int.init) ?? 0
+    }
+
+    public func recordMailSyncEvent(
+        accountID: String,
+        mailboxName: String? = nil,
+        kind: MailSyncEventKind,
+        status: String,
+        jobType: MailSyncJobType? = nil,
+        errorCode: String? = nil,
+        detailRedacted: String? = nil,
+        needsAttention: Bool = false
+    ) throws {
+        let event = MailSyncActivityLogEntry(
+            accountID: accountID,
+            mailboxName: mailboxName,
+            kind: kind,
+            status: status,
+            jobType: jobType,
+            errorCode: errorCode,
+            detailRedacted: detailRedacted.map { String($0.prefix(512)) },
+            needsAttention: needsAttention
+        )
+        try db.execute("""
+            INSERT INTO mail_sync_events (
+                id, account_id, mailbox_name, kind, status, job_type,
+                error_code, detail_redacted, created_at, needs_attention
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, params: [
+            event.id,
+            event.accountID,
+            event.mailboxName,
+            event.kind.rawValue,
+            event.status,
+            event.jobType?.rawValue,
+            event.errorCode,
+            event.detailRedacted,
+            event.createdAt,
+            event.needsAttention ? "1" : "0",
+        ])
+    }
+
+    public func mailSyncActivity(accountID: String? = nil, limit: Int = 100) throws -> [MailSyncActivityLogEntry] {
+        var whereClause = ""
+        var params: [String?] = []
+        if let accountID {
+            whereClause = "WHERE account_id = ?"
+            params.append(accountID)
+        }
+        params.append("\(max(1, min(limit, 500)))")
+        let rows = try db.queryAll("""
+            SELECT * FROM mail_sync_events
+            \(whereClause)
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        """, params: params)
+        return rows.compactMap(MailSyncActivityLogEntry.init(row:))
     }
 
     public func pauseMailSyncJobs(accountID: String) throws {
@@ -1102,7 +1253,7 @@ public struct EmailStore: Sendable {
             WHERE em.body_text IS NULL
               AND em.eml_path IS NOT NULL
               AND ea.index_privacy_mode = 'plaintextFTSWithDisclosure'
-            ORDER BY received_at DESC
+            ORDER BY \(dateOrderSQL()), em.email_id DESC
             LIMIT ?
         """, params: ["\(limit)"])
         return rows.compactMap { row in
@@ -1183,7 +1334,7 @@ public struct EmailStore: Sendable {
             SELECT em.* FROM email_messages em
             JOIN grant_emails ge ON em.email_id = ge.email_id
             WHERE ge.grant_id = ?
-            ORDER BY em.received_at DESC
+            ORDER BY \(dateOrderSQL()), em.email_id DESC
             LIMIT ?
             """,
             params: [grantID, "\(limit)"]
@@ -1210,9 +1361,75 @@ public struct EmailStore: Sendable {
     public func messageCountInMailbox(accountID: String, mailbox: String) throws -> Int {
         let result = try db.queryScalar("""
             SELECT COUNT(*) FROM email_mailbox_membership
-            WHERE account_id = ? AND mailbox = ?
+            WHERE account_id = ? AND mailbox = ? AND missing_from IS NULL
         """, params: [accountID, mailbox])
         return result.flatMap { Int($0) } ?? 0
+    }
+
+    public func authoritativeMailboxCounts(accountID: String) throws -> [String: Int] {
+        Dictionary(uniqueKeysWithValues: try mailboxes(accountID: accountID))
+    }
+
+    public func repairStoredMailMetadata(accountID: String? = nil, limit: Int = 5_000) throws -> (dateRepairs: Int, headerRepairs: Int) {
+        var whereParts: [String] = []
+        var params: [String?] = []
+        if let accountID {
+            whereParts.append("account_id = ?")
+            params.append(accountID)
+        }
+        whereParts.append("(received_at_is_trusted = 0 OR received_at_raw IS NULL OR sender LIKE '%=?%' OR subject LIKE '%=?%' OR recipients LIKE '%=?%')")
+        let whereClause = "WHERE " + whereParts.joined(separator: " AND ")
+        params.append("\(max(1, limit))")
+        let rows = try db.queryAll("""
+            SELECT email_id, sender, recipients, cc, subject, received_at, received_at_raw, received_at_is_trusted
+            FROM email_messages
+            \(whereClause)
+            LIMIT ?
+        """, params: params)
+
+        var dateRepairs = 0
+        var headerRepairs = 0
+        for row in rows {
+            guard let emailID = row["email_id"] else { continue }
+            let currentDate = row["received_at"]
+            let rawDate = row["received_at_raw"] ?? currentDate
+            let normalized = MailDateNormalizer.normalize(rawDate)
+            let decodedSender = MailHeaderDecoder.decode(row["sender"])
+            let decodedRecipients = MailHeaderDecoder.decode(row["recipients"])
+            let decodedCC = MailHeaderDecoder.decode(row["cc"])
+            let decodedSubject = MailHeaderDecoder.decode(row["subject"])
+            let dateChanged = normalized.normalized != currentDate
+                || normalized.raw != row["received_at_raw"]
+                || (normalized.isTrusted ? "1" : "0") != (row["received_at_is_trusted"] ?? "1")
+            let headerChanged = decodedSender != (row["sender"] ?? "")
+                || decodedRecipients != (row["recipients"] ?? "")
+                || decodedCC != (row["cc"] ?? "")
+                || decodedSubject != (row["subject"] ?? "")
+            guard dateChanged || headerChanged else { continue }
+            try db.execute("""
+                UPDATE email_messages
+                SET sender = ?,
+                    recipients = ?,
+                    cc = ?,
+                    subject = ?,
+                    received_at = ?,
+                    received_at_raw = ?,
+                    received_at_is_trusted = ?
+                WHERE email_id = ?
+            """, params: [
+                decodedSender,
+                decodedRecipients,
+                decodedCC,
+                decodedSubject,
+                normalized.normalized,
+                normalized.raw,
+                normalized.isTrusted ? "1" : "0",
+                emailID,
+            ])
+            if dateChanged { dateRepairs += 1 }
+            if headerChanged { headerRepairs += 1 }
+        }
+        return (dateRepairs, headerRepairs)
     }
 
     // MARK: - EXPUNGE Detection (SEARCH ALL reconciliation)
@@ -1542,7 +1759,7 @@ public struct EmailStore: Sendable {
         let rows = try db.queryAll("""
             SELECT * FROM email_messages
             WHERE message_id_header = ? OR in_reply_to = ?
-            ORDER BY received_at ASC
+            ORDER BY received_at_is_trusted ASC, received_at ASC, email_id ASC
         """, params: [messageIDHeader, messageIDHeader])
         return rows.compactMap { EmailMessageRecord(row: $0) }
     }
@@ -1638,6 +1855,18 @@ public struct EmailStore: Sendable {
         """, params: search.params).flatMap(Int.init) ?? 0
     }
 
+    private func safeFTSQuery(_ rawValue: String) -> String? {
+        let tokens = rawValue
+            .split { character in
+                !character.isLetter && !character.isNumber
+            }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+
+        guard !tokens.isEmpty else { return nil }
+        return tokens.map { "\"\($0)\"" }.joined(separator: " ")
+    }
+
     private func emailSearchConditionSQL(
         tokens: [SearchToken],
         freeText: String,
@@ -1658,9 +1887,9 @@ public struct EmailStore: Sendable {
 
         // Date-relative filters (not expressible as static RuleConditions)
         if filter == .today {
-            extraSQL.append("em.received_at >= date('now', 'start of day')")
+            extraSQL.append("em.received_at_is_trusted = 1 AND em.received_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'start of day')")
         } else if filter == .thisWeek {
-            extraSQL.append("em.received_at >= date('now', '-6 days', 'start of day')")
+            extraSQL.append("em.received_at_is_trusted = 1 AND em.received_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-6 days', 'start of day')")
         }
 
         // Scope filters (not expressible as RuleConditions)
@@ -1685,10 +1914,11 @@ public struct EmailStore: Sendable {
         let privateIndexLimit = min(max(resultLimitHint * 4, 500), 5_000)
         if !bodyTokens.isEmpty {
             let bodyQuery = bodyTokens.map(\.value).joined(separator: " ")
-            var bodySQL = [
-                "em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?)",
-            ]
-            extraParams.append(bodyQuery)
+            var bodySQL: [String] = []
+            if let ftsQuery = safeFTSQuery(bodyQuery) {
+                bodySQL.append("em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?)")
+                extraParams.append(ftsQuery)
+            }
 
             let privateIDs = try privateTokenSearchEmailIDs(
                 query: bodyQuery,
@@ -1699,22 +1929,31 @@ public struct EmailStore: Sendable {
                 bodySQL.append("em.email_id IN (\(privateIDs.map { _ in "?" }.joined(separator: ",")))")
                 extraParams.append(contentsOf: privateIDs)
             }
-            extraSQL.append("(" + bodySQL.joined(separator: " OR ") + ")")
+            if !bodySQL.isEmpty {
+                extraSQL.append("(" + bodySQL.joined(separator: " OR ") + ")")
+            }
         }
 
         // Free text search across sender, subject, preview, and body
         if !freeText.isEmpty {
             var freeTextSQL = [
                 "em.sender LIKE ?",
+                "em.sender_email LIKE ?",
+                "em.recipients LIKE ?",
                 "em.subject LIKE ?",
                 "em.preview LIKE ?",
-                "em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?)",
             ]
             let pattern = "%\(freeText)%"
             extraParams.append(pattern)
             extraParams.append(pattern)
             extraParams.append(pattern)
-            extraParams.append(freeText)
+            extraParams.append(pattern)
+            extraParams.append(pattern)
+
+            if let ftsQuery = safeFTSQuery(freeText) {
+                freeTextSQL.append("em.email_id IN (SELECT email_id FROM email_fts WHERE body_text MATCH ?)")
+                extraParams.append(ftsQuery)
+            }
 
             let privateIDs = try privateTokenSearchEmailIDs(
                 query: freeText,
@@ -2052,10 +2291,15 @@ public struct EmailStore: Sendable {
     /// Generate ORDER BY SQL for a sort key.
     private func orderSQL(for sortKey: EmailSortKey) -> String {
         switch sortKey {
-        case .date: return "em.received_at DESC, em.email_id DESC"
-        case .sender: return "em.sender_email ASC, em.received_at DESC, em.email_id DESC"
-        case .subject: return "em.subject ASC, em.received_at DESC, em.email_id DESC"
-        case .size: return "em.size_bytes DESC, em.received_at DESC, em.email_id DESC"
+        case .date: return "\(dateOrderSQL()), em.email_id DESC"
+        case .sender: return "em.sender_email ASC, \(dateOrderSQL()), em.email_id DESC"
+        case .subject: return "em.subject ASC, \(dateOrderSQL()), em.email_id DESC"
+        case .size: return "em.size_bytes DESC, \(dateOrderSQL()), em.email_id DESC"
         }
+    }
+
+    private func dateOrderSQL(tableAlias: String? = "em") -> String {
+        let prefix = tableAlias.map { "\($0)." } ?? ""
+        return "\(prefix)received_at_is_trusted DESC, \(prefix)received_at DESC"
     }
 }

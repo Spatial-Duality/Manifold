@@ -36,6 +36,20 @@ extension ManifoldRuntime {
         }
 
         try removeMailSyncTemporaryDirectory(accountID: accountID)
+        let residue = try emailStore.mailAccountResidueCounts(accountID: accountID)
+        if !residue.isEmpty {
+            let detail = residue
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }
+                .joined(separator: ", ")
+            mailAccountRemovalLogger.error("Mail account removal left residue for \(accountID, privacy: .public): \(detail, privacy: .public)")
+            throw NSError(
+                domain: "com.spatialduality.manifold.mail-removal",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Mail account removal incomplete: \(detail)"]
+            )
+        }
+        mailAccountRemovalLogger.info("Verified local mail deletion for \(accountID, privacy: .public)")
         await privacyIndexCoordinator.bootstrap()
 
         return result
@@ -62,4 +76,3 @@ extension ManifoldRuntime {
         try FileManager.default.removeItem(at: accountTempURL)
     }
 }
-

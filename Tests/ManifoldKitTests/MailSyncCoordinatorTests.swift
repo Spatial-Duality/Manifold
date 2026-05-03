@@ -147,37 +147,27 @@ struct MailSyncCoordinatorTests {
         #expect(queued.first?.mailboxName == "Archive")
     }
 
-    @Test("Partial failures still schedule historical backfill for successful mailboxes")
-    func partialFailureSchedulesBackfill() async throws {
+    @Test("Retryable failures are delayed instead of becoming immediate needs-attention failures")
+    func retryableFailureSchedulesRetry() async throws {
         let (store, _, tempDir, accountID) = try makeStore()
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let coordinator = MailSyncCoordinator(emailStore: store) { accountID, _ in
             SyncResult(
                 accountID: accountID,
-                newMessages: 3,
-                errors: ["Trash: IMAP operation timed out"],
-                mailboxResults: [
-                    MailboxSyncResult(
-                        mailboxName: "INBOX",
-                        newMessages: 3,
-                        lastUID: 500,
-                        uidValidity: 1,
-                        oldestFetchedUID: 250,
-                        fetchedUIDCount: 3,
-                        hasMoreHistory: true
-                    )
-                ]
+                errors: ["Trash: IMAP connection lost"]
             )
         }
         _ = try await coordinator.enqueueRecentPass(accountID: accountID)
 
         let processed = try await coordinator.processNextJob(accountID: accountID)
 
-        #expect(processed?.state == .failed)
-        let queued = try await coordinator.jobs(accountID: accountID, states: [.queued])
-        #expect(queued.map(\.jobType) == [.historicalBackfill])
-        #expect(queued.first?.mailboxName == "INBOX")
+        #expect(processed?.state == .queued)
+        #expect(processed?.errorCode == "sync_retry_scheduled")
+        #expect(processed?.attemptCount == 1)
+        #expect(processed?.nextAttemptAt != nil)
+        let events = try store.mailSyncActivity(accountID: accountID)
+        #expect(events.contains { $0.kind == .retryScheduled })
     }
 
     @Test("Failed jobs keep a redacted error and do not spin")
@@ -186,7 +176,7 @@ struct MailSyncCoordinatorTests {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let coordinator = MailSyncCoordinator(emailStore: store) { accountID, _ in
-            SyncResult(accountID: accountID, errors: ["network timeout"])
+            SyncResult(accountID: accountID, errors: ["Authentication failed"])
         }
         let job = try await coordinator.enqueueIncrementalSync(accountID: accountID)
 
@@ -195,7 +185,7 @@ struct MailSyncCoordinatorTests {
         #expect(processed?.id == job.id)
         #expect(processed?.state == .failed)
         #expect(processed?.errorCode == "sync_failed")
-        #expect(processed?.errorRedacted == "network timeout")
+        #expect(processed?.errorRedacted == "Authentication failed")
     }
 
     @Test("Pause and resume update account and queued job state")

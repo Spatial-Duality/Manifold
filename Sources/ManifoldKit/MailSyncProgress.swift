@@ -22,9 +22,11 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
     public let provider: EmailProvider
     public let syncedMessageCount: Int
     public let mailboxSyncedCounts: [String: Int]
+    public let mailboxBackfillCompleted: [String: Bool]
     public let stage: MailSyncProgressStage
     public let runningJobCount: Int
     public let queuedBackfillCount: Int
+    public let retryScheduledCount: Int
     public let failedMailboxCount: Int
     public let failedMailboxNames: [String]
     public let currentMailboxName: String?
@@ -40,9 +42,11 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
         provider: EmailProvider,
         syncedMessageCount: Int,
         mailboxSyncedCounts: [String: Int],
+        mailboxBackfillCompleted: [String: Bool] = [:],
         stage: MailSyncProgressStage,
         runningJobCount: Int = 0,
         queuedBackfillCount: Int = 0,
+        retryScheduledCount: Int = 0,
         failedMailboxCount: Int = 0,
         failedMailboxNames: [String] = [],
         currentMailboxName: String? = nil,
@@ -57,9 +61,11 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
         self.provider = provider
         self.syncedMessageCount = syncedMessageCount
         self.mailboxSyncedCounts = mailboxSyncedCounts
+        self.mailboxBackfillCompleted = mailboxBackfillCompleted
         self.stage = stage
         self.runningJobCount = runningJobCount
         self.queuedBackfillCount = queuedBackfillCount
+        self.retryScheduledCount = retryScheduledCount
         self.failedMailboxCount = failedMailboxCount
         self.failedMailboxNames = failedMailboxNames
         self.currentMailboxName = currentMailboxName
@@ -75,19 +81,28 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
         states: [SyncStateRecord],
         jobs: [MailSyncJobRecord],
         syncedMessageCount: Int,
+        authoritativeMailboxCounts: [String: Int]? = nil,
         privacyIndexActive: Bool = false
     ) -> MailSyncProgressSnapshot {
         var mailboxCounts: [String: Int] = [:]
         for state in states {
             mailboxCounts[state.mailboxName] = max(0, state.messageCount)
         }
+        if let authoritativeMailboxCounts {
+            mailboxCounts = authoritativeMailboxCounts
+        }
+        let mailboxBackfillCompleted = Dictionary(
+            uniqueKeysWithValues: states.map { ($0.mailboxName, $0.backfillCompleted) }
+        )
         let runningJobs = jobs.filter { $0.state == .running }
         let queuedJobs = jobs.filter { $0.state == .queued }
         let failedJobs = jobs.filter { $0.state == .failed }
+        let retryScheduledJobs = failedJobs.filter(\.hasRetryScheduled)
+        let permanentFailedJobs = failedJobs.filter { !$0.hasRetryScheduled }
         let queuedBackfillCount = queuedJobs.filter { $0.jobType == .historicalBackfill }.count
         let failedMailboxes = Set(
             states.filter { $0.syncStatus == .error }.map(\.mailboxName)
-                + failedJobs.compactMap(\.mailboxName)
+                + permanentFailedJobs.compactMap(\.mailboxName)
         )
         let currentJob = runningJobs.first ?? queuedJobs.first
         let lastUpdatedAt = ([account.updatedAt.nilIfEmpty]
@@ -104,18 +119,22 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
             provider: account.provider,
             syncedMessageCount: max(0, syncedMessageCount),
             mailboxSyncedCounts: mailboxCounts,
+            mailboxBackfillCompleted: mailboxBackfillCompleted,
             stage: deriveStage(
                 account: account,
                 syncedMessageCount: syncedMessageCount,
                 runningJobs: runningJobs,
                 queuedJobs: queuedJobs,
                 queuedBackfillCount: queuedBackfillCount,
+                retryScheduledCount: retryScheduledJobs.count,
+                incompleteBackfillCount: mailboxBackfillCompleted.values.filter { !$0 }.count,
                 failedMailboxCount: failedMailboxes.count,
-                failedJobCount: failedJobs.count,
+                failedJobCount: permanentFailedJobs.count,
                 privacyIndexActive: privacyIndexActive
             ),
             runningJobCount: runningJobs.count,
             queuedBackfillCount: queuedBackfillCount,
+            retryScheduledCount: retryScheduledJobs.count,
             failedMailboxCount: failedMailboxes.count,
             failedMailboxNames: failedMailboxes.sorted(),
             currentMailboxName: currentJob?.mailboxName,
@@ -133,6 +152,8 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
         runningJobs: [MailSyncJobRecord],
         queuedJobs: [MailSyncJobRecord],
         queuedBackfillCount: Int,
+        retryScheduledCount: Int,
+        incompleteBackfillCount: Int,
         failedMailboxCount: Int,
         failedJobCount: Int,
         privacyIndexActive: Bool
@@ -159,6 +180,9 @@ public struct MailSyncProgressSnapshot: Sendable, Codable, Identifiable, Equatab
             return .syncingRecentMail
         }
         if queuedBackfillCount > 0 {
+            return syncedMessageCount > 0 ? .recentMailReady : .archivingOlderMail
+        }
+        if retryScheduledCount > 0 || incompleteBackfillCount > 0 {
             return syncedMessageCount > 0 ? .recentMailReady : .archivingOlderMail
         }
         if privacyIndexActive && syncedMessageCount > 0 {

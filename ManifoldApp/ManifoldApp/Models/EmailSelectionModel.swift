@@ -346,7 +346,15 @@ final class MailReviewModel {
             return
         }
 
-        guard let mailbox = selectedMailboxName else {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isRawSearch = !trimmedSearch.isEmpty
+
+        let scopedMailbox: String?
+        if isRawSearch {
+            scopedMailbox = nil
+        } else if let mailbox = selectedMailboxName {
+            scopedMailbox = mailbox
+        } else {
             messages = []
             totalMessageCount = 0
             errorMessage = nil
@@ -356,12 +364,11 @@ final class MailReviewModel {
         isLoading = true
         defer { isLoading = false }
 
-        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         var page = await mailAccounts.messagePage(
             freeText: trimmedSearch,
-            accountID: accountID,
-            mailbox: mailbox,
-            filter: activeQuickFilter,
+            accountID: isRawSearch ? nil : accountID,
+            mailbox: scopedMailbox,
+            filter: isRawSearch ? nil : activeQuickFilter,
             sortKey: .date,
             limit: pageSize,
             offset: pageOffset
@@ -370,16 +377,16 @@ final class MailReviewModel {
             pageIndex = max(0, (page.totalCount - 1) / max(pageSize, 1))
             page = await mailAccounts.messagePage(
                 freeText: trimmedSearch,
-                accountID: accountID,
-                mailbox: mailbox,
-                filter: activeQuickFilter,
+                accountID: isRawSearch ? nil : accountID,
+                mailbox: scopedMailbox,
+                filter: isRawSearch ? nil : activeQuickFilter,
                 sortKey: .date,
                 limit: pageSize,
                 offset: pageOffset
             )
         }
 
-        messages = page.messages.sorted(by: MailDate.comparatorDescending)
+        messages = page.messages
         totalMessageCount = page.totalCount
         errorMessage = mailAccounts.lastQueryError
         await refreshSharedState()
@@ -866,7 +873,7 @@ struct MailThreadRow: Identifiable, Hashable {
 
 private enum MailDate {
     static func parse(_ rawValue: String) -> Date {
-        ISO8601DateFormatter.shared.date(from: rawValue) ?? .distantPast
+        MailDateNormalizer.parse(rawValue) ?? .distantPast
     }
 
     static func comparatorDescending(lhs: EmailMessageRecord, rhs: EmailMessageRecord) -> Bool {

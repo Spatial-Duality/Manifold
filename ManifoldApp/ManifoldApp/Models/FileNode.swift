@@ -33,6 +33,10 @@ struct FileNode: Identifiable {
 
     /// Load children from disk (lazy, called on expand).
     static func loadChildren(at path: String) -> [FileNode] {
+        if let demoChildren = DemoFileCatalog.children(at: path) {
+            return demoChildren
+        }
+
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: path) else { return [] }
         return items

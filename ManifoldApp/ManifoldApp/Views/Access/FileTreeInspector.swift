@@ -561,10 +561,27 @@ private struct TreeNode: Identifiable, Sendable {
     let isTruncated: Bool
 
     static func load(from source: SourceRecord) async -> TreeNode? {
+        if DemoFileCatalog.isDemoSource(source) {
+            return demoTree(from: source)
+        }
+
         let root = URL(fileURLWithPath: source.originalRootPath)
         return await Task.detached(priority: .userInitiated) {
             walk(root: root, baseRoot: root, depth: 0, maxDepth: 2)
         }.value
+    }
+
+    private static func demoTree(from source: SourceRecord) -> TreeNode {
+        var root = DemoTreeBuilder.Node(name: source.displayName, isDirectory: true)
+        for relativePath in DemoFileCatalog.relativePaths(sourceID: source.sourceID) {
+            root.insert(relativePath.split(separator: "/").map(String.init))
+        }
+        return root.render(
+            absolutePath: source.originalRootPath,
+            relativePath: "",
+            maxDepth: 2,
+            depth: 0
+        )
     }
 
     private static func walk(root: URL, baseRoot: URL, depth: Int, maxDepth: Int) -> TreeNode? {
@@ -619,5 +636,57 @@ private struct TreeNode: Identifiable, Sendable {
             return false
         }
         return urls.contains { !skip.contains($0.lastPathComponent) }
+    }
+}
+
+private enum DemoTreeBuilder {
+    struct Node {
+        var name: String
+        var isDirectory: Bool
+        var children: [String: Node] = [:]
+
+        mutating func insert(_ parts: [String]) {
+            guard let first = parts.first else { return }
+            if parts.count == 1 {
+                children[first] = Node(name: first, isDirectory: false)
+                return
+            }
+            var child = children[first] ?? Node(name: first, isDirectory: true)
+            child.insert(Array(parts.dropFirst()))
+            children[first] = child
+        }
+
+        func render(absolutePath: String, relativePath: String, maxDepth: Int, depth: Int) -> TreeNode {
+            let sortedChildren = children.values.sorted {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory && !$1.isDirectory }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            let renderedChildren: [TreeNode]
+            let isTruncated: Bool
+            if isDirectory && depth < maxDepth {
+                renderedChildren = sortedChildren.map { child in
+                    let childRelative = relativePath.isEmpty ? child.name : "\(relativePath)/\(child.name)"
+                    return child.render(
+                        absolutePath: "\(absolutePath)/\(child.name)",
+                        relativePath: childRelative,
+                        maxDepth: maxDepth,
+                        depth: depth + 1
+                    )
+                }
+                isTruncated = false
+            } else {
+                renderedChildren = []
+                isTruncated = isDirectory && !children.isEmpty
+            }
+            return TreeNode(
+                id: absolutePath,
+                name: name,
+                path: absolutePath,
+                relativePath: relativePath,
+                isDirectory: isDirectory,
+                children: renderedChildren,
+                isTruncated: isTruncated
+            )
+        }
     }
 }

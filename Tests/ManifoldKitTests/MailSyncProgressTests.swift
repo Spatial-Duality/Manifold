@@ -10,7 +10,7 @@ struct MailSyncProgressTests {
     func derivesUpToDateAccount() {
         let snapshot = MailSyncProgressSnapshot.derive(
             account: account(),
-            states: [state(mailbox: "INBOX", count: 842)],
+            states: [state(mailbox: "INBOX", count: 842, backfillCompleted: true)],
             jobs: [],
             syncedMessageCount: 842
         )
@@ -108,7 +108,8 @@ struct MailSyncProgressTests {
         mailbox: String,
         count: Int,
         syncStatus: SyncStatus = .idle,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        backfillCompleted: Bool = false
     ) -> SyncStateRecord {
         SyncStateRecord(
             accountID: "account-1",
@@ -116,7 +117,8 @@ struct MailSyncProgressTests {
             lastSyncAt: "2026-05-02T10:05:00Z",
             messageCount: count,
             syncStatus: syncStatus,
-            errorMessage: errorMessage
+            errorMessage: errorMessage,
+            backfillCompleted: backfillCompleted
         )
     }
 

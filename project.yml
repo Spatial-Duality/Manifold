@@ -143,4 +143,11 @@ schemes:
       config: Debug
       targets:
         - ManifoldAppTests
+  ManifoldUITests:
+    build:
+      targets:
+        Manifold: all
+    test:
+      config: Debug
+      targets:
         - ManifoldAppUITests

@@ -117,6 +117,23 @@ public actor EmailSyncEngine {
             guard let account, let server = account.server, let port = account.port else {
                 return SyncResult(accountID: accountID, errors: ["Account not configured"])
             }
+            let repairs = try emailStore.repairStoredMailMetadata(accountID: accountID, limit: 5_000)
+            if repairs.dateRepairs > 0 {
+                try? emailStore.recordMailSyncEvent(
+                    accountID: accountID,
+                    kind: .dateRepair,
+                    status: "Date metadata repaired",
+                    detailRedacted: "\(repairs.dateRepairs) message date(s) repaired"
+                )
+            }
+            if repairs.headerRepairs > 0 {
+                try? emailStore.recordMailSyncEvent(
+                    accountID: accountID,
+                    kind: .headerRepair,
+                    status: "Header metadata repaired",
+                    detailRedacted: "\(repairs.headerRepairs) message header(s) repaired"
+                )
+            }
             let provider = EmailProvider(rawValue: account.providerType)
 
             // Get or create connection
@@ -181,7 +198,13 @@ public actor EmailSyncEngine {
                 } catch {
                     let message = error.localizedDescription
                     errors.append("\(mailboxName): \(message)")
-                    recordMailboxError(accountID: accountID, mailboxName: mailboxName, errorMessage: message)
+                    let retryable = Self.invalidatesConnection(error)
+                    recordMailboxError(
+                        accountID: accountID,
+                        mailboxName: mailboxName,
+                        errorMessage: message,
+                        retryable: retryable
+                    )
                     await conn.disconnect()
                     connections.removeValue(forKey: accountID)
 
@@ -234,18 +257,38 @@ public actor EmailSyncEngine {
         )
     }
 
-    private func recordMailboxError(accountID: String, mailboxName: String, errorMessage: String) {
+    private func recordMailboxError(
+        accountID: String,
+        mailboxName: String,
+        errorMessage: String,
+        retryable: Bool
+    ) {
         do {
             let state = try emailStore.syncState(accountID: accountID, mailbox: mailboxName)
             let count = try emailStore.messageCountInMailbox(accountID: accountID, mailbox: mailboxName)
+            let now = ISO8601DateFormatter.shared.string(from: Date())
             try emailStore.updateSyncState(
                 accountID: accountID,
                 mailbox: mailboxName,
                 uidValidity: state?.uidValidity,
                 lastSyncUID: state?.lastSyncUID ?? 0,
-                messageCount: max(state?.messageCount ?? 0, count),
-                syncStatus: .error,
-                errorMessage: String(errorMessage.prefix(512))
+                messageCount: count,
+                syncStatus: retryable ? .idle : .error,
+                errorMessage: retryable ? nil : String(errorMessage.prefix(512)),
+                oldestSyncedUID: state?.oldestSyncedUID,
+                serverMessageCount: state?.serverMessageCount,
+                backfillCompleted: state?.backfillCompleted,
+                lastSuccessfulSyncAt: state?.lastSuccessfulSyncAt,
+                lastErrorAt: now
+            )
+            try emailStore.recordMailSyncEvent(
+                accountID: accountID,
+                mailboxName: mailboxName,
+                kind: .mailboxError,
+                status: retryable ? "Connection interrupted" : "Mailbox error",
+                errorCode: retryable ? "connection_interrupted" : "mailbox_error",
+                detailRedacted: errorMessage,
+                needsAttention: !retryable
             )
         } catch {
             logger.warning("Failed to record mailbox sync error for \(mailboxName): \(error.localizedDescription)")
@@ -324,6 +367,13 @@ public actor EmailSyncEngine {
 
         // EXAMINE mailbox so Manifold never opens a read-write IMAP session.
         let selectResult = try await session.examine(mailbox: mailboxName)
+        try? emailStore.recordMailSyncEvent(
+            accountID: accountID,
+            mailboxName: mailboxName,
+            kind: .mailboxStarted,
+            status: "Started",
+            detailRedacted: "\(selectResult.exists) message(s) reported by server"
+        )
 
         // Check UIDVALIDITY — if changed, full resync
         if let saved = savedValidity, saved != selectResult.uidValidity {
@@ -353,8 +403,19 @@ public actor EmailSyncEngine {
                 accountID: accountID, mailbox: mailboxName,
                 uidValidity: selectResult.uidValidity,
                 lastSyncUID: lastUID,
-                messageCount: state?.messageCount ?? selectResult.exists,
-                syncStatus: .idle
+                messageCount: try emailStore.messageCountInMailbox(accountID: accountID, mailbox: mailboxName),
+                syncStatus: .idle,
+                oldestSyncedUID: uidPlan.knownSavedUIDs.min(),
+                serverMessageCount: selectResult.exists,
+                backfillCompleted: state?.backfillCompleted ?? !uidPlan.hasMoreHistory,
+                lastSuccessfulSyncAt: ISO8601DateFormatter.shared.string(from: Date())
+            )
+            try? emailStore.recordMailSyncEvent(
+                accountID: accountID,
+                mailboxName: mailboxName,
+                kind: .mailboxCompleted,
+                status: "Completed",
+                detailRedacted: "No new messages"
             )
             return MailboxSyncResult(
                 mailboxName: mailboxName,
@@ -421,9 +482,16 @@ public actor EmailSyncEngine {
                 let envelope = item.envelope
                 let messageID = envelope?.messageID.nilIfEmpty
                 let emailID = messageID ?? "imap-\(accountID)-\(mailboxName)-\(uid)"
+                let decodedSender = MailHeaderDecoder.decode(envelope?.from)
+                let decodedRecipients = MailHeaderDecoder.decode(envelope?.to)
+                let decodedCC = MailHeaderDecoder.decode(envelope?.cc)
+                let decodedSubject = MailHeaderDecoder.decode(envelope?.subject).nilIfEmpty ?? "(no subject)"
+                let normalizedDate = MailDateNormalizer.normalize(
+                    envelope?.date ?? ISO8601DateFormatter.shared.string(from: Date())
+                )
 
                 // Normalize sender email and domain from envelope.from
-                let senderEmail = Self.extractEmail(from: envelope?.from ?? "")
+                let senderEmail = Self.extractEmail(from: decodedSender)
                 let senderDomain = senderEmail.flatMap { Self.extractDomain(from: $0) }
 
                 // Map IMAP flags to read/flagged state
@@ -434,13 +502,15 @@ public actor EmailSyncEngine {
                     emailID: emailID,
                     accountID: accountID,
                     mailbox: mailboxName,
-                    sender: envelope?.from ?? "",
+                    sender: decodedSender,
                     senderEmail: senderEmail,
                     senderDomain: senderDomain,
-                    recipients: envelope?.to ?? "",
-                    cc: envelope?.cc ?? "",
-                    subject: envelope?.subject ?? "(no subject)",
-                    receivedAt: Self.normalizeDate(envelope?.date ?? ISO8601DateFormatter.shared.string(from: Date())),
+                    recipients: decodedRecipients,
+                    cc: decodedCC,
+                    subject: decodedSubject,
+                    receivedAt: normalizedDate.normalized,
+                    receivedAtRaw: normalizedDate.raw,
+                    receivedAtIsTrusted: normalizedDate.isTrusted,
                     emlPath: archivedMessage.manifestURL.path,
                     sizeBytes: item.rfc822Size,
                     preview: preview,
@@ -534,12 +604,31 @@ public actor EmailSyncEngine {
         )
 
         // Update sync state
+        let storedUIDsAfterSync = try emailStore.storedUIDs(accountID: accountID, mailbox: mailboxName)
+        let actualCount = try emailStore.messageCountInMailbox(accountID: accountID, mailbox: mailboxName)
+        let backfillCompleted: Bool
+        if mode.isHistoricalBackfill {
+            backfillCompleted = !uidPlan.hasMoreHistory
+        } else {
+            backfillCompleted = state?.backfillCompleted ?? !uidPlan.hasMoreHistory
+        }
         try emailStore.updateSyncState(
             accountID: accountID, mailbox: mailboxName,
             uidValidity: selectResult.uidValidity,
             lastSyncUID: lastUID,
-            messageCount: (state?.messageCount ?? 0) + newCount,
-            syncStatus: .idle
+            messageCount: actualCount,
+            syncStatus: .idle,
+            oldestSyncedUID: storedUIDsAfterSync.min(),
+            serverMessageCount: selectResult.exists,
+            backfillCompleted: backfillCompleted,
+            lastSuccessfulSyncAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+        try? emailStore.recordMailSyncEvent(
+            accountID: accountID,
+            mailboxName: mailboxName,
+            kind: .mailboxCompleted,
+            status: backfillCompleted ? "Completed" : "Recent mail ready",
+            detailRedacted: "\(newCount) new message(s); \(actualCount) stored"
         )
 
         logger.info("Synced \(newCount) new messages from \(mailboxName)")
@@ -796,25 +885,6 @@ public actor EmailSyncEngine {
         }
     }
 
-    // MARK: - Cached Date Formatters
-
-    private static let rfc2822Formatters: [DateFormatter] = {
-        let formats = [
-            "EEE, dd MMM yyyy HH:mm:ss Z",
-            "dd MMM yyyy HH:mm:ss Z",
-            "EEE, dd MMM yyyy HH:mm:ss zzz",
-            "dd MMM yyyy HH:mm:ss zzz",
-            "EEE, d MMM yyyy HH:mm:ss Z",
-            "d MMM yyyy HH:mm:ss Z",
-        ]
-        return formats.map { fmt in
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.dateFormat = fmt
-            return f
-        }
-    }()
-
     // MARK: - Connection Management
 
     private func ensureConnection(
@@ -988,23 +1058,6 @@ public actor EmailSyncEngine {
     /// IMAP dates come in formats like "05 Jan 2013 12:00:00 +0000" which sort
     /// incorrectly as strings. This converts them to "2013-01-05T12:00:00Z".
     nonisolated static func normalizeDate(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-
-        // Already ISO 8601?
-        if trimmed.contains("T") && (trimmed.hasSuffix("Z") || trimmed.contains("+") || trimmed.contains("-")) {
-            let iso = ISO8601DateFormatter.shared
-            if iso.date(from: trimmed) != nil { return trimmed }
-        }
-
-        // Try RFC 2822 formats (cached formatters — DateFormatter creation is expensive)
-        for formatter in Self.rfc2822Formatters {
-            if let date = formatter.date(from: trimmed) {
-                return ISO8601DateFormatter.shared.string(from: date)
-            }
-        }
-
-        // Can't parse — return as-is (better than crashing)
-        return trimmed
+        MailDateNormalizer.normalize(raw).normalized
     }
 }

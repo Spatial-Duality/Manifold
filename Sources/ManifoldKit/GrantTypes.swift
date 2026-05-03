@@ -430,6 +430,8 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
     public let cc: String
     public let subject: String
     public let receivedAt: String
+    public let receivedAtRaw: String?
+    public let receivedAtIsTrusted: Bool
     public let emlPath: String?         // archive-v2 manifest path; legacy encrypted EML in tests/dev safety only
     public let canonicalBlobCID: String?
     public let sizeBytes: Int
@@ -458,6 +460,8 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
         cc: String = "",
         subject: String,
         receivedAt: String,
+        receivedAtRaw: String? = nil,
+        receivedAtIsTrusted: Bool = true,
         emlPath: String? = nil,
         canonicalBlobCID: String? = nil,
         sizeBytes: Int = 0,
@@ -485,6 +489,8 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
         self.cc = cc
         self.subject = subject
         self.receivedAt = receivedAt
+        self.receivedAtRaw = receivedAtRaw
+        self.receivedAtIsTrusted = receivedAtIsTrusted
         self.emlPath = emlPath
         self.canonicalBlobCID = canonicalBlobCID
         self.sizeBytes = sizeBytes
@@ -524,6 +530,8 @@ public struct EmailMessageRecord: Sendable, Identifiable, Hashable, Codable {
         self.cc = row["cc"] ?? ""
         self.subject = subject
         self.receivedAt = receivedAt
+        self.receivedAtRaw = row["received_at_raw"]
+        self.receivedAtIsTrusted = row["received_at_is_trusted"] != "0"
         self.emlPath = row["eml_path"]
         self.canonicalBlobCID = row["canonical_blob_cid"]
         self.sizeBytes = row["size_bytes"].flatMap { Int($0) } ?? 0

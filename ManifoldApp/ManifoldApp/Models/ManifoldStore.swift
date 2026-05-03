@@ -760,6 +760,10 @@ final class ManifoldStore {
     }
 
     private nonisolated static func fixtureSourceFilesIfNeeded(for source: SourceRecord) -> [SourceFile] {
+        if DemoFileCatalog.isDemoSource(source) {
+            return DemoFileCatalog.files(for: source)
+        }
+
         guard ProcessInfo.processInfo.environment[AppTestEnvironment.runtimeModeKey] == "fixture" else {
             return []
         }

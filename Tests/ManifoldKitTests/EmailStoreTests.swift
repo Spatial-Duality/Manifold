@@ -318,6 +318,170 @@ struct EmailStoreTests {
         #expect(widePage.messages.last?.emailID == "paged-000")
     }
 
+    @Test("Paged mail search tolerates punctuation and matches sender fields")
+    func pagedMailSearchToleratesPunctuation() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        _ = try await insertTestMessage(
+            store: store,
+            emailID: "punctuated-search",
+            sender: "Mindbody <alerts@mindbody.com>",
+            senderEmail: "alerts@mindbody.com",
+            senderDomain: "mindbody.com",
+            subject: "Finish creating your Cambridge Country Club account"
+        )
+
+        let page = try store.emailMessagePage(
+            freeText: "alerts@mindbody.com",
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sortKey: .date,
+            limit: 10,
+            offset: 0
+        )
+
+        #expect(page.totalCount == 1)
+        #expect(page.messages.map(\.emailID) == ["punctuated-search"])
+    }
+
+    @Test("Authoritative mailbox counts ignore stale sync state counts")
+    func authoritativeMailboxCountsIgnoreStaleSyncState() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        for index in 0..<3 {
+            let id = "counted-\(index)"
+            _ = try await insertTestMessage(store: store, emailID: id, mailbox: "INBOX")
+            try store.upsertMailboxMembership(
+                accountID: Self.testAccountID,
+                mailbox: "INBOX",
+                imapUID: UInt32(index + 1),
+                emailID: id
+            )
+        }
+        try store.updateSyncState(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            uidValidity: 1,
+            lastSyncUID: 3,
+            messageCount: 1,
+            syncStatus: .idle
+        )
+
+        let account = try #require(try store.emailAccount(id: Self.testAccountID))
+        let progress = MailSyncProgressSnapshot.derive(
+            account: account,
+            states: try store.syncStates(accountID: Self.testAccountID),
+            jobs: [],
+            syncedMessageCount: try store.emailMessageCount(accountID: Self.testAccountID),
+            authoritativeMailboxCounts: try store.authoritativeMailboxCounts(accountID: Self.testAccountID)
+        )
+
+        #expect(progress.mailboxSyncedCounts["INBOX"] == 3)
+    }
+
+    @Test("Sync state update preserves completed backfill unless explicitly changed")
+    func syncStateUpdatePreservesCompletedBackfill() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        try store.updateSyncState(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            uidValidity: 1,
+            lastSyncUID: 10,
+            messageCount: 10,
+            syncStatus: .idle,
+            backfillCompleted: true
+        )
+        try store.updateSyncState(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            uidValidity: 1,
+            lastSyncUID: 11,
+            messageCount: 11,
+            syncStatus: .idle
+        )
+
+        let state = try #require(try store.syncState(accountID: Self.testAccountID, mailbox: "INBOX"))
+        #expect(state.backfillCompleted)
+    }
+
+    @Test("Mail metadata repair normalizes dates and decodes encoded headers")
+    func mailMetadataRepairNormalizesDatesAndHeaders() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        try store.upsertEmailMessage(
+            emailID: "encoded-date",
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sender: "=?UTF-8?Q?Jos=C3=A9_Test?= <jose@example.com>",
+            senderEmail: "jose@example.com",
+            senderDomain: "example.com",
+            recipients: "recipient@test.com",
+            subject: "=?UTF-8?Q?Quarterly_Update?=",
+            receivedAt: "Fri, 05 Jan 2024 12:13:14 +0000",
+            emlPath: nil,
+            sizeBytes: 100,
+            preview: nil
+        )
+
+        let repairs = try store.repairStoredMailMetadata(accountID: Self.testAccountID)
+        let repaired = try #require(try store.emailMessage(id: "encoded-date"))
+
+        #expect(repairs.dateRepairs == 1)
+        #expect(repairs.headerRepairs == 1)
+        #expect(repaired.receivedAt == "2024-01-05T12:13:14Z")
+        #expect(repaired.receivedAtIsTrusted)
+        #expect(repaired.sender == "José Test <jose@example.com>")
+        #expect(repaired.subject == "Quarterly Update")
+    }
+
+    @Test("Untrusted dates sort after trusted dates")
+    func untrustedDatesSortAfterTrustedDates() async throws {
+        let (store, _, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        try store.upsertEmailMessage(
+            emailID: "unknown-date",
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sender: "Unknown <unknown@example.com>",
+            recipients: "recipient@test.com",
+            subject: "Unknown",
+            receivedAt: "not a date",
+            emlPath: nil,
+            sizeBytes: 100,
+            preview: nil
+        )
+        try store.upsertEmailMessage(
+            emailID: "trusted-date",
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sender: "Trusted <trusted@example.com>",
+            recipients: "recipient@test.com",
+            subject: "Trusted",
+            receivedAt: "2026-05-01T10:00:00Z",
+            emlPath: nil,
+            sizeBytes: 100,
+            preview: nil
+        )
+
+        _ = try store.repairStoredMailMetadata(accountID: Self.testAccountID)
+        let page = try store.emailMessagePage(
+            accountID: Self.testAccountID,
+            mailbox: "INBOX",
+            sortKey: .date,
+            limit: 10,
+            offset: 0
+        )
+
+        #expect(page.messages.map(\.emailID) == ["trusted-date", "unknown-date"])
+        #expect(page.messages.last?.receivedAtIsTrusted == false)
+    }
+
     @Test("Attachment share records are per-agent and independent from parent email choice")
     func attachmentShareRecordsArePerAgent() async throws {
         let (store, _, tempDir) = try await makeStore()

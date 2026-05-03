@@ -32,6 +32,10 @@ struct FilesFlatView: View {
         KeyPathComparator(\SourceFile.relativePath),
     ]
 
+    private var shareColumnWidth: CGFloat {
+        AccessCheckboxStrip.compactWidth(agentCount: connectedAgents.count)
+    }
+
     init(
         searchText: Binding<String> = .constant(""),
         inspectorVisible: Binding<Bool> = .constant(true)
@@ -187,6 +191,10 @@ struct FilesFlatView: View {
     private var visibleFiles: [SourceFile] {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return files.filter { file in
+            if !trimmed.isEmpty {
+                return Self.fileMatchesRawSearch(file, searchText: trimmed)
+            }
+
             let visible = visibleAgents(for: file)
 
             let matches: Bool
@@ -208,13 +216,22 @@ struct FilesFlatView: View {
             case .aiTouched:
                 matches = aiTouchedPaths.contains(file.canonicalPath)
             }
-            guard matches else { return false }
-
-            guard !trimmed.isEmpty else { return true }
-            let haystack = [file.name, file.relativePath, file.sourceName].joined(separator: "\n")
-            return haystack.localizedCaseInsensitiveContains(trimmed)
+            return matches
         }
         .sorted(using: sortOrder)
+    }
+
+    static func fileMatchesRawSearch(_ file: SourceFile, searchText: String) -> Bool {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let haystack = [
+            file.name,
+            file.relativePath,
+            file.canonicalPath,
+            file.path,
+            file.sourceName,
+        ].joined(separator: "\n")
+        return haystack.localizedCaseInsensitiveContains(trimmed)
     }
 
     private var selectedFile: SourceFile? {
@@ -466,6 +483,7 @@ struct FilesFlatView: View {
                     agents: connectedAgents,
                     visibleAgents: visibleAgents(for: file),
                     explicitOverrideAgents: explicitOverrideAgents(for: file),
+                    showsTitles: false,
                     accessibilityIDPrefix: accessIdentifierPrefix(for: file),
                     onToggleAgent: { agent, wasVisible in
                         Task { await toggle(agent: agent, for: file, currentlyVisible: wasVisible) }
@@ -481,7 +499,7 @@ struct FilesFlatView: View {
                     }
                 )
             }
-            .width(min: 180, ideal: 220, max: 300)
+            .width(min: shareColumnWidth, ideal: shareColumnWidth, max: shareColumnWidth)
 
             TableColumn("Name", value: \.name) { file in
                 Button {
