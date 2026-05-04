@@ -27,7 +27,14 @@ struct LedgerView: View {
     @State private var work = WorkModel()
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isSearchPresented = false
-    @SceneStorage("ledger.inspector.visible") private var inspectorVisible = true
+    // Apple-native default: inspector is hidden until the user opens it
+    // via the toolbar toggle. An empty inspector pane is a HIG smell —
+    // we'd rather show no panel than a blank one. SceneStorage means the
+    // user's choice (open/closed) persists per window.
+    //
+    // Key bumped to .v2 so the new `false` default applies even for
+    // users who had the .v1 SceneStorage value persisted at `true`.
+    @SceneStorage("ledger.inspector.visible.v2") private var inspectorVisible = false
 
     /// 0 = no Tracked Work Block. 1 = TWB present, settled border visible.
     /// Animates between 0 and 1 with .landing motion when TWB transitions.

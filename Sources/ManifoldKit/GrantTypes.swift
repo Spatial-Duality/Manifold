@@ -377,6 +377,30 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
     /// `nil` means the preset is unscoped (legacy presets, or templates that
     /// apply to any agent).
     public let targetApp: TargetApp?
+    /// Per-Focus session settings, persisted alongside scope. `nil` means
+    /// "use the agent's default" (no override). When the preset is activated
+    /// as a Focus, these flow into the new grant via startSessionFromTemplate.
+    public let requestDetailLevel: AccessRecordingLevel?
+    public let noteCaptureMode: SessionNoteCaptureMode?
+    public let allowFileMemory: Bool
+    public let summaryFraming: String?
+    public let emailSensitivity: EmailSensitivityLevel?
+    /// At most one preset per `targetApp` may have this true at a time —
+    /// invariant enforced by AccessStore.setDefaultAtLaunch via a clear+set
+    /// transaction.
+    public let isDefaultAtLaunch: Bool
+    /// Per-Focus editor UI mode. `true` = scope editor shows ONE combined
+    /// column; ticking a folder applies to both agents (writes scope rows
+    /// with agent=''). `false` = the editor exposes the per-agent
+    /// matrix (writes scope rows with agent='cowork' or 'codex').
+    /// Default Focus is seeded with `false` to preserve today's
+    /// independent-per-agent Access matrix behavior; new user Focuses
+    /// default to `true` so creating "Q4 reports" implicitly mirrors
+    /// across both AIs.
+    public let mirrorToBoth: Bool
+    /// Built-in Focuses (Default, Locked Down) — user can rename but not
+    /// delete. The delete UI checks this flag.
+    public let isBuiltIn: Bool
     public let createdAt: String
     public let updatedAt: String
 
@@ -384,12 +408,28 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
         presetID: String,
         name: String,
         targetApp: TargetApp? = nil,
+        requestDetailLevel: AccessRecordingLevel? = nil,
+        noteCaptureMode: SessionNoteCaptureMode? = nil,
+        allowFileMemory: Bool = false,
+        summaryFraming: String? = nil,
+        emailSensitivity: EmailSensitivityLevel? = nil,
+        isDefaultAtLaunch: Bool = false,
+        mirrorToBoth: Bool = true,
+        isBuiltIn: Bool = false,
         createdAt: String,
         updatedAt: String
     ) {
         self.presetID = presetID
         self.name = name
         self.targetApp = targetApp
+        self.requestDetailLevel = requestDetailLevel
+        self.noteCaptureMode = noteCaptureMode
+        self.allowFileMemory = allowFileMemory
+        self.summaryFraming = summaryFraming
+        self.emailSensitivity = emailSensitivity
+        self.isDefaultAtLaunch = isDefaultAtLaunch
+        self.mirrorToBoth = mirrorToBoth
+        self.isBuiltIn = isBuiltIn
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -411,8 +451,72 @@ public struct AccessPresetRecord: Sendable, Hashable, Identifiable, Codable {
         self.presetID = presetID
         self.name = name
         self.targetApp = targetApp
+        // New v43 columns — nil-tolerant for rows written before the migration.
+        self.requestDetailLevel = row["request_detail_level"]
+            .flatMap { $0.isEmpty ? nil : AccessRecordingLevel(rawValue: $0) }
+        self.noteCaptureMode = row["note_capture_mode"]
+            .flatMap { $0.isEmpty ? nil : SessionNoteCaptureMode(rawValue: $0) }
+        self.allowFileMemory = row["allow_file_memory"] == "1"
+        self.summaryFraming = row["summary_framing"].flatMap { $0.isEmpty ? nil : $0 }
+        self.emailSensitivity = row["email_sensitivity"]
+            .flatMap { $0.isEmpty ? nil : EmailSensitivityLevel(rawValue: $0) }
+        self.isDefaultAtLaunch = row["is_default_at_launch"] == "1"
+        // v44 columns. Default for legacy rows that haven't been touched
+        // since the migration: mirror_to_both=1 is the column default
+        // (new behavior); is_built_in=0 is the column default. Reading
+        // returns whatever the DB has, with `1`/`0` parsed.
+        self.mirrorToBoth = (row["mirror_to_both"] ?? "1") == "1"
+        self.isBuiltIn = row["is_built_in"] == "1"
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    // Custom Codable: keep round-trips backwards-compatible with payloads
+    // serialized before v43/v44 added the new fields. Booleans default
+    // to sensible values when absent; optional settings default to nil.
+    // Encoding writes everything.
+    private enum CodingKeys: String, CodingKey {
+        case presetID, name, targetApp
+        case requestDetailLevel, noteCaptureMode, allowFileMemory
+        case summaryFraming, emailSensitivity, isDefaultAtLaunch
+        case mirrorToBoth, isBuiltIn
+        case createdAt, updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.presetID = try c.decode(String.self, forKey: .presetID)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.targetApp = try c.decodeIfPresent(TargetApp.self, forKey: .targetApp)
+        self.requestDetailLevel = try c.decodeIfPresent(AccessRecordingLevel.self, forKey: .requestDetailLevel)
+        self.noteCaptureMode = try c.decodeIfPresent(SessionNoteCaptureMode.self, forKey: .noteCaptureMode)
+        self.allowFileMemory = try c.decodeIfPresent(Bool.self, forKey: .allowFileMemory) ?? false
+        self.summaryFraming = try c.decodeIfPresent(String.self, forKey: .summaryFraming)
+        self.emailSensitivity = try c.decodeIfPresent(EmailSensitivityLevel.self, forKey: .emailSensitivity)
+        self.isDefaultAtLaunch = try c.decodeIfPresent(Bool.self, forKey: .isDefaultAtLaunch) ?? false
+        // mirrorToBoth defaults to true (matches v44 column default for
+        // new presets). isBuiltIn defaults to false (column default).
+        self.mirrorToBoth = try c.decodeIfPresent(Bool.self, forKey: .mirrorToBoth) ?? true
+        self.isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        self.createdAt = try c.decode(String.self, forKey: .createdAt)
+        self.updatedAt = try c.decode(String.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(presetID, forKey: .presetID)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(targetApp, forKey: .targetApp)
+        try c.encodeIfPresent(requestDetailLevel, forKey: .requestDetailLevel)
+        try c.encodeIfPresent(noteCaptureMode, forKey: .noteCaptureMode)
+        try c.encode(allowFileMemory, forKey: .allowFileMemory)
+        try c.encodeIfPresent(summaryFraming, forKey: .summaryFraming)
+        try c.encodeIfPresent(emailSensitivity, forKey: .emailSensitivity)
+        try c.encode(isDefaultAtLaunch, forKey: .isDefaultAtLaunch)
+        try c.encode(mirrorToBoth, forKey: .mirrorToBoth)
+        try c.encode(isBuiltIn, forKey: .isBuiltIn)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(updatedAt, forKey: .updatedAt)
     }
 }
 

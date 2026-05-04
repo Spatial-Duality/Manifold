@@ -34,7 +34,7 @@ enum LedgerDestination: String, Hashable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .work: return "Work"
+        case .work: return "Focus"
         case .access: return "Access"
         case .mail: return "Mail"
         case .rules: return "Rules"
@@ -43,7 +43,7 @@ enum LedgerDestination: String, Hashable, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .work: return "square.stack.3d.up"
+        case .work: return "circle.lefthalf.filled"
         case .access: return "folder.badge.gearshape"
         case .mail: return "envelope"
         case .rules: return "slider.horizontal.3"
@@ -53,7 +53,7 @@ enum LedgerDestination: String, Hashable, CaseIterable, Identifiable {
     var emptySubtitle: String {
         switch self {
         case .work:
-            return "Start a session to give Claude or Codex access to your shared folders and mailboxes. Approvals and activity will appear here."
+            return "Pick a Focus to give Claude or Codex access to a saved bundle of folders, mailboxes, and settings. Approvals and activity will appear here."
         case .access:
             return "Nothing is shared until you share it. Add a folder to let an agent read from it inside a session."
         case .mail:

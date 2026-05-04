@@ -196,5 +196,95 @@ enum DemoFileCatalog {
         Entry(sourceID: "demo-experiments", relativePath: "evals/cupcake-table.md", sizeBytes: 4_900, modifiedAt: "2026-04-19T11:10:00Z"),
         Entry(sourceID: "demo-experiments", relativePath: "notebooks/sharing-simulation.ipynb", sizeBytes: 180_000, modifiedAt: "2026-04-18T11:00:00Z"),
         Entry(sourceID: "demo-experiments", relativePath: "notebooks/agent-coverage.ipynb", sizeBytes: 190_000, modifiedAt: "2026-04-18T11:10:00Z"),
+
+        Entry(sourceID: "demo-product", relativePath: "story/mario-linen-launch-arc.md", sizeBytes: 15_800, modifiedAt: "2026-05-02T09:10:00Z"),
+        Entry(sourceID: "demo-product", relativePath: "story/donatella-roadmap-notes.md", sizeBytes: 12_900, modifiedAt: "2026-05-02T09:22:00Z"),
+        Entry(sourceID: "demo-product", relativePath: "story/tom-brownie-pricing-table.csv", sizeBytes: 21_600, modifiedAt: "2026-05-02T09:40:00Z"),
+        Entry(sourceID: "demo-product", relativePath: "launch/mae-ribbon-copy-review.md", sizeBytes: 10_700, modifiedAt: "2026-05-02T10:05:00Z"),
+
+        Entry(sourceID: "demo-code", relativePath: "src/story/accessNarrative.ts", sizeBytes: 12_400, modifiedAt: "2026-05-02T10:18:00Z"),
+        Entry(sourceID: "demo-code", relativePath: "src/auth/marc-chenille-oauth.ts", sizeBytes: 17_600, modifiedAt: "2026-05-02T10:31:00Z"),
+        Entry(sourceID: "demo-code", relativePath: "src/tests/boris-auth-edge-case.test.ts", sizeBytes: 13_900, modifiedAt: "2026-05-02T10:44:00Z"),
+        Entry(sourceID: "demo-code", relativePath: "docs/codex-pr-143-notes.md", sizeBytes: 7_800, modifiedAt: "2026-05-02T11:02:00Z"),
+
+        Entry(sourceID: "demo-notes", relativePath: "story/mario-donatella-thread.md", sizeBytes: 9_400, modifiedAt: "2026-05-02T11:20:00Z"),
+        Entry(sourceID: "demo-notes", relativePath: "story/mae-ribbon-launch-room.md", sizeBytes: 8_600, modifiedAt: "2026-05-02T11:32:00Z"),
+        Entry(sourceID: "demo-notes", relativePath: "meetings/2026-05-02-mustafa-partnership.md", sizeBytes: 7_900, modifiedAt: "2026-05-02T11:45:00Z"),
+        Entry(sourceID: "demo-notes", relativePath: "interviews/user-18-linen-feedback.md", sizeBytes: 11_300, modifiedAt: "2026-05-02T12:00:00Z"),
+
+        Entry(sourceID: "demo-invoices", relativePath: "story/tom-scarf-margin-check.csv", sizeBytes: 53_000, modifiedAt: "2026-05-02T12:12:00Z"),
+        Entry(sourceID: "demo-invoices", relativePath: "stripe/pr-143-webhook-samples.json", sizeBytes: 24_500, modifiedAt: "2026-05-02T12:18:00Z"),
+        Entry(sourceID: "demo-invoices", relativePath: "receipts/mae-ribbon-window-display.pdf", sizeBytes: 188_000, modifiedAt: "2026-05-02T12:24:00Z"),
+        Entry(sourceID: "demo-invoices", relativePath: "forecast/donatella-launch-spend.xlsx", sizeBytes: 94_000, modifiedAt: "2026-05-02T12:30:00Z"),
+
+        Entry(sourceID: "demo-racing", relativePath: "story/mario-kart-alibi.md", sizeBytes: 6_800, modifiedAt: "2026-05-02T12:40:00Z"),
+        Entry(sourceID: "demo-racing", relativePath: "telemetry/demi-hassabit-lap-notes.csv", sizeBytes: 26_000, modifiedAt: "2026-05-02T12:48:00Z"),
+        Entry(sourceID: "demo-racing", relativePath: "garage/spare-parts-inventory.csv", sizeBytes: 19_600, modifiedAt: "2026-05-02T12:55:00Z"),
+        Entry(sourceID: "demo-racing", relativePath: "photos/demi-track-walk.png", sizeBytes: 510_000, modifiedAt: "2026-05-02T13:02:00Z"),
+
+        Entry(sourceID: "demo-legal", relativePath: "story/sam-altmore-working-group-nda.pdf", sizeBytes: 244_000, modifiedAt: "2026-05-02T13:15:00Z"),
+        Entry(sourceID: "demo-legal", relativePath: "contracts/mustafa-partnership-redline.docx", sizeBytes: 162_000, modifiedAt: "2026-05-02T13:24:00Z"),
+        Entry(sourceID: "demo-legal", relativePath: "board/donatella-vote-notes.md", sizeBytes: 13_300, modifiedAt: "2026-05-02T13:31:00Z"),
+        Entry(sourceID: "demo-legal", relativePath: "keys/staging_private_key.pem", sizeBytes: 1_900, modifiedAt: "2026-05-02T13:40:00Z"),
+
+        Entry(sourceID: "demo-research", relativePath: "story/demi-market-map-annotations.md", sizeBytes: 10_900, modifiedAt: "2026-05-02T13:52:00Z"),
+        Entry(sourceID: "demo-research", relativePath: "surveys/linen-launch-pulse.csv", sizeBytes: 96_000, modifiedAt: "2026-05-02T14:05:00Z"),
+        Entry(sourceID: "demo-research", relativePath: "interviews/donatella-persona-synthesis.md", sizeBytes: 14_200, modifiedAt: "2026-05-02T14:11:00Z"),
+        Entry(sourceID: "demo-research", relativePath: "reports/tom-brownie-price-elasticity.pdf", sizeBytes: 336_000, modifiedAt: "2026-05-02T14:19:00Z"),
+
+        Entry(sourceID: "demo-design", relativePath: "story/mae-ribbon-window-board.png", sizeBytes: 580_000, modifiedAt: "2026-05-02T14:32:00Z"),
+        Entry(sourceID: "demo-design", relativePath: "tokens/donatella-color-annotations.md", sizeBytes: 5_800, modifiedAt: "2026-05-02T14:40:00Z"),
+        Entry(sourceID: "demo-design", relativePath: "screens/mario-access-storyboard.png", sizeBytes: 612_000, modifiedAt: "2026-05-02T14:48:00Z"),
+        Entry(sourceID: "demo-design", relativePath: "exports/launch-room-state.svg", sizeBytes: 4_900, modifiedAt: "2026-05-02T14:55:00Z"),
+
+        Entry(sourceID: "demo-sales", relativePath: "story/mustafa-retail-collab.md", sizeBytes: 8_500, modifiedAt: "2026-05-02T15:05:00Z"),
+        Entry(sourceID: "demo-sales", relativePath: "pipeline/donatella-enterprise-followups.csv", sizeBytes: 61_000, modifiedAt: "2026-05-02T15:12:00Z"),
+        Entry(sourceID: "demo-sales", relativePath: "decks/mario-board-demo-v2.pdf", sizeBytes: 704_000, modifiedAt: "2026-05-02T15:20:00Z"),
+        Entry(sourceID: "demo-sales", relativePath: "contracts/tom-brownie-pilot-terms.docx", sizeBytes: 91_000, modifiedAt: "2026-05-02T15:28:00Z"),
+
+        Entry(sourceID: "demo-support", relativePath: "story/mae-refund-escalation.md", sizeBytes: 7_400, modifiedAt: "2026-05-02T15:40:00Z"),
+        Entry(sourceID: "demo-support", relativePath: "tickets/donatella-vip-escalations.csv", sizeBytes: 44_000, modifiedAt: "2026-05-02T15:48:00Z"),
+        Entry(sourceID: "demo-support", relativePath: "macros/linen-launch-delay.md", sizeBytes: 3_900, modifiedAt: "2026-05-02T15:56:00Z"),
+        Entry(sourceID: "demo-support", relativePath: "runbooks/mario-approval-path.md", sizeBytes: 6_300, modifiedAt: "2026-05-02T16:04:00Z"),
+
+        Entry(sourceID: "demo-finance", relativePath: "story/tom-brownie-runway-note.md", sizeBytes: 9_200, modifiedAt: "2026-05-02T16:15:00Z"),
+        Entry(sourceID: "demo-finance", relativePath: "forecast/linen-launch-sensitivity.xlsx", sizeBytes: 148_000, modifiedAt: "2026-05-02T16:24:00Z"),
+        Entry(sourceID: "demo-finance", relativePath: "tax/mustafa-collab-vat.csv", sizeBytes: 27_000, modifiedAt: "2026-05-02T16:30:00Z"),
+        Entry(sourceID: "demo-finance", relativePath: "tax/launch_credentials.json", sizeBytes: 2_300, modifiedAt: "2026-05-02T16:36:00Z"),
+
+        Entry(sourceID: "demo-operations", relativePath: "story/ops-launch-day-timeline.md", sizeBytes: 12_600, modifiedAt: "2026-05-02T16:45:00Z"),
+        Entry(sourceID: "demo-operations", relativePath: "vendors/mae-window-vendors.csv", sizeBytes: 41_000, modifiedAt: "2026-05-02T16:52:00Z"),
+        Entry(sourceID: "demo-operations", relativePath: "runbooks/boris-deploy-rollback.md", sizeBytes: 15_400, modifiedAt: "2026-05-02T17:00:00Z"),
+        Entry(sourceID: "demo-operations", relativePath: "runbooks/demi-privacy-drill.md", sizeBytes: 11_900, modifiedAt: "2026-05-02T17:08:00Z"),
+
+        Entry(sourceID: "demo-data", relativePath: "story/character-access-graph.json", sizeBytes: 64_000, modifiedAt: "2026-05-02T17:20:00Z"),
+        Entry(sourceID: "demo-data", relativePath: "warehouse/story-events.parquet", sizeBytes: 1_080_000, modifiedAt: "2026-05-02T17:28:00Z"),
+        Entry(sourceID: "demo-data", relativePath: "exports/mario-donatella-cohorts.csv", sizeBytes: 84_000, modifiedAt: "2026-05-02T17:36:00Z"),
+        Entry(sourceID: "demo-data", relativePath: "exports/boris-auth-index.json", sizeBytes: 52_000, modifiedAt: "2026-05-02T17:44:00Z"),
+
+        Entry(sourceID: "demo-docs", relativePath: "story/demo-cast-bible.md", sizeBytes: 10_800, modifiedAt: "2026-05-02T18:00:00Z"),
+        Entry(sourceID: "demo-docs", relativePath: "handbook/claude-codex-story-mode.md", sizeBytes: 12_700, modifiedAt: "2026-05-02T18:08:00Z"),
+        Entry(sourceID: "demo-docs", relativePath: "api/story-fixture-contract.md", sizeBytes: 9_600, modifiedAt: "2026-05-02T18:16:00Z"),
+        Entry(sourceID: "demo-docs", relativePath: "api/demo-email-storylines.md", sizeBytes: 10_500, modifiedAt: "2026-05-02T18:24:00Z"),
+
+        Entry(sourceID: "demo-media", relativePath: "story/launch-room-wide.png", sizeBytes: 690_000, modifiedAt: "2026-05-02T18:35:00Z"),
+        Entry(sourceID: "demo-media", relativePath: "screenshots/claude-story-recall.png", sizeBytes: 630_000, modifiedAt: "2026-05-02T18:42:00Z"),
+        Entry(sourceID: "demo-media", relativePath: "video/mario-demo-rehearsal.mov", sizeBytes: 5_200_000, modifiedAt: "2026-05-02T18:50:00Z"),
+        Entry(sourceID: "demo-media", relativePath: "audio/donatella-voice-note.wav", sizeBytes: 1_420_000, modifiedAt: "2026-05-02T18:58:00Z"),
+
+        Entry(sourceID: "demo-sessions", relativePath: "story/claude-donatella-session.json", sizeBytes: 19_400, modifiedAt: "2026-05-02T19:10:00Z"),
+        Entry(sourceID: "demo-sessions", relativePath: "story/codex-boris-pr-143.json", sizeBytes: 22_800, modifiedAt: "2026-05-02T19:18:00Z"),
+        Entry(sourceID: "demo-sessions", relativePath: "mock/mario-briefing.transcript.txt", sizeBytes: 36_000, modifiedAt: "2026-05-02T19:26:00Z"),
+        Entry(sourceID: "demo-sessions", relativePath: "mock/mae-launch-copy.transcript.txt", sizeBytes: 33_000, modifiedAt: "2026-05-02T19:34:00Z"),
+
+        Entry(sourceID: "demo-templates", relativePath: "story/character-summary.prompt.md", sizeBytes: 6_200, modifiedAt: "2026-05-02T19:45:00Z"),
+        Entry(sourceID: "demo-templates", relativePath: "saved-sessions/donatella-roadmap-review.manifold.json", sizeBytes: 7_600, modifiedAt: "2026-05-02T19:52:00Z"),
+        Entry(sourceID: "demo-templates", relativePath: "prompts/boris-auth-review.md", sizeBytes: 6_400, modifiedAt: "2026-05-02T20:00:00Z"),
+        Entry(sourceID: "demo-templates", relativePath: "prompts/mae-copy-polish.md", sizeBytes: 5_700, modifiedAt: "2026-05-02T20:08:00Z"),
+
+        Entry(sourceID: "demo-experiments", relativePath: "story/agent-memory-callbacks.csv", sizeBytes: 58_000, modifiedAt: "2026-05-02T20:20:00Z"),
+        Entry(sourceID: "demo-experiments", relativePath: "evals/story-mode-privacy-results.csv", sizeBytes: 55_000, modifiedAt: "2026-05-02T20:28:00Z"),
+        Entry(sourceID: "demo-experiments", relativePath: "notebooks/character-access-simulation.ipynb", sizeBytes: 198_000, modifiedAt: "2026-05-02T20:36:00Z"),
+        Entry(sourceID: "demo-experiments", relativePath: "evals/demi-cupcake-regression.md", sizeBytes: 5_400, modifiedAt: "2026-05-02T20:44:00Z"),
     ]
 }

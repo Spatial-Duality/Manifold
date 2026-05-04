@@ -23,13 +23,93 @@ struct WorkView: View {
     @Bindable var work: WorkModel
     @Binding var inspectorVisible: Bool
 
+    /// Live subtitle reflecting the Focus that's currently running.
+    /// Resolution must mirror `editingFocus` in WorkCurrentSessionSummary:
+    /// explicit active first, default-at-launch second (Default IS
+    /// running on startup even before the user's first switch), then any
+    /// Focus, then the fallback string.
+    private var activeFocusSubtitle: String {
+        let agent = store.activeSession?.agents.first ?? store.defaultSessionAgent
+        if let id = store.activeFocusID[agent],
+           let f = store.availableFocuses.first(where: { $0.presetID == id }) {
+            return f.name
+        }
+        if let id = store.defaultLaunchFocusID[agent] ?? nil,
+           let f = store.availableFocuses.first(where: { $0.presetID == id }) {
+            return f.name
+        }
+        return store.availableFocuses.first?.name ?? "Default"
+    }
+
     var body: some View {
         WorkMainPane(work: work)
         .inspector(isPresented: $inspectorVisible) {
             WorkInspector(work: work)
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
         }
+        .navigationSubtitle(activeFocusSubtitle)
+        .toolbar {
+            // Apple-native toolbar items: Liquid Glass auto-applied on
+            // macOS 26 via `.primaryAction` placement. Replaces the
+            // WorkCommandStrip inline HStack so the actions live where
+            // macOS users expect them.
+            ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        store.beginSessionPreload(
+                            agent: store.defaultSessionAgent,
+                            baseMode: .buildOnDefault
+                        )
+                        work.sessionSelection = .prepared
+                        work.inspectorSelection = .session(.prepared)
+                    } label: {
+                        Label("Build on default", systemImage: "plus.rectangle.on.rectangle")
+                    }
+                    Button {
+                        store.beginSessionPreload(
+                            agent: store.defaultSessionAgent,
+                            baseMode: .blank
+                        )
+                        work.sessionSelection = .prepared
+                        work.inspectorSelection = .session(.prepared)
+                    } label: {
+                        Label("Start blank", systemImage: "plus.rectangle")
+                    }
+                } label: {
+                    Label("New session", systemImage: "plus.square")
+                }
+                .help("Prepare a new session")
+                .accessibilityIdentifier("work.toolbar.newSession")
+
+                if store.sessionWorkbench.preload != nil {
+                    Button {
+                        Task { await store.activateSessionPreload() }
+                    } label: {
+                        Label("Activate", systemImage: "play.fill")
+                    }
+                    .disabled(store.sessionWorkbench.isActivating)
+                    .accessibilityIdentifier("work.toolbar.activate")
+                }
+
+                if store.activeSession != nil {
+                    Button(role: .destructive) {
+                        Task { await store.endSession() }
+                    } label: {
+                        Label("End session", systemImage: "stop.fill")
+                    }
+                    .accessibilityIdentifier("work.toolbar.end")
+                }
+
+                Button {
+                    Task { await store.restartRuntimeHelper() }
+                } label: {
+                    Label("Restart runtime", systemImage: "arrow.clockwise")
+                }
+                .accessibilityIdentifier("work.toolbar.restart")
+            }
+        }
         .task {
+            await store.refreshFocuses()
             await store.governance.loadPolicies()
             while !Task.isCancelled {
                 await store.activity.refresh()
@@ -49,8 +129,6 @@ private struct WorkMainPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            WorkCommandStrip(work: work)
-            Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.s4) {
                     WorkFirstRunCoachmark()
@@ -58,7 +136,14 @@ private struct WorkMainPane: View {
                         WorkRuntimeIssueBanner(issue: issue, work: work)
                     }
                     WorkCurrentSessionSummary()
-                    WorkPendingApprovalsSection(work: work)
+                    // Approvals are session-scoped: only meaningful when
+                    // viewing the Focus that owns the current grant.
+                    // Activity is global history — always visible so the
+                    // user can see what's happened recently regardless of
+                    // which Focus they're inspecting.
+                    if isViewingActiveFocus {
+                        WorkPendingApprovalsSection(work: work)
+                    }
                     WorkTimelineSection(work: work)
                 }
                 .padding(.horizontal, Spacing.s4)
@@ -66,6 +151,16 @@ private struct WorkMainPane: View {
             }
         }
         .accessibilityIdentifier("work.main")
+    }
+
+    /// True when the editor is bound to the same Focus that currently
+    /// owns the live grant. Approvals + Activity are session-scoped, so
+    /// they only make sense in this state.
+    private var isViewingActiveFocus: Bool {
+        let agent = store.activeSession?.agents.first ?? store.defaultSessionAgent
+        let editingID = store.resolvedEditingFocusID(for: agent)
+        let activeID = store.activeFocusID[agent]
+        return editingID != nil && editingID == activeID
     }
 }
 
@@ -77,21 +172,21 @@ private struct WorkMainPane: View {
 /// Auto-dismisses on first user action so it doesn't outstay its welcome.
 private struct WorkFirstRunCoachmark: View {
     @Environment(ManifoldStore.self) private var store
-    @AppStorage("work.coachmark.dismissed") private var dismissed: Bool = false
+    @AppStorage("focus.coachmark.dismissed") private var dismissed: Bool = false
 
     private var hasAgentConnected: Bool {
         store.isClaudeConnected || store.isCodexConnected
     }
 
     private var title: String {
-        hasAgentConnected ? "Welcome to Work" : "Connect an agent to start sharing"
+        hasAgentConnected ? "Welcome to Focus" : "Connect an agent to start sharing"
     }
 
     private var body_text: String {
         if hasAgentConnected {
-            return "Sessions land in the command strip above. Pending approvals and the activity ledger flow here. The inspector on the right shows whatever you've selected."
+            return "A Focus is a saved bundle of folders, mailboxes, and settings. Switch Focuses from the chip on the active session card. Pending approvals and the activity ledger flow here."
         } else {
-            return "Manifold governs what Claude and Codex can see. Open Settings → Agents to install Manifold for either, then come back here to start a session."
+            return "Manifold governs what Claude and Codex can see. Open Settings → Agents to install Manifold for either, then come back here to pick a Focus."
         }
     }
 
@@ -150,103 +245,61 @@ private struct WorkFirstRunCoachmark: View {
     }
 }
 
-private struct WorkCommandStrip: View {
-    @Environment(ManifoldStore.self) private var store
-    @Bindable var work: WorkModel
-
-    var body: some View {
-        HStack(spacing: Spacing.s2) {
-            Menu {
-                Button {
-                    store.beginSessionPreload(
-                        agent: store.defaultSessionAgent,
-                        baseMode: .buildOnDefault
-                    )
-                    work.sessionSelection = .prepared
-                    work.inspectorSelection = .session(.prepared)
-                } label: {
-                    Label("Build on default", systemImage: "plus.rectangle.on.rectangle")
-                }
-                Button {
-                    store.beginSessionPreload(
-                        agent: store.defaultSessionAgent,
-                        baseMode: .blank
-                    )
-                    work.sessionSelection = .prepared
-                    work.inspectorSelection = .session(.prepared)
-                } label: {
-                    Label("Start blank", systemImage: "plus.rectangle")
-                }
-            } label: {
-                Label("New session", systemImage: "plus")
-            }
-            .menuStyle(.button)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .fixedSize()
-            .help("Prepare a new session")
-            .accessibilityIdentifier("work.command.newSession")
-
-            if store.sessionWorkbench.preload != nil {
-                Button {
-                    Task { await store.activateSessionPreload() }
-                } label: {
-                    if store.sessionWorkbench.isActivating {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Activate", systemImage: "play.fill")
-                            .symbolEffect(.bounce, value: store.activeSession?.id)
-                    }
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .disabled(store.sessionWorkbench.isActivating)
-                .accessibilityIdentifier("work.command.activate")
-            }
-
-            if store.activeSession != nil {
-                Button(role: .destructive) {
-                    Task { await store.endSession() }
-                } label: {
-                    Label("End", systemImage: "stop.fill")
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("work.command.end")
-            }
-
-            Spacer()
-
-            Button {
-                Task { await store.restartRuntimeHelper() }
-            } label: {
-                Label("Restart runtime", systemImage: "arrow.clockwise")
-                    .symbolEffect(.rotate, value: store.isRuntimeConnected)
-            }
-            .controlSize(.small)
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("work.command.restartRuntime")
-        }
-        .padding(.horizontal, Spacing.s4)
-        .padding(.vertical, Spacing.s2)
-        .controlSize(.small)
-        .accessibilityIdentifier("work.commandStrip")
-    }
-}
-
 // MARK: - Current session summary card
 
 private struct WorkCurrentSessionSummary: View {
     @Environment(ManifoldStore.self) private var store
 
+    @State private var showSeparateSharingPrompt = false
+    @State private var pendingSeparateSharingTarget: Bool = true
+    @State private var showSyncSheet = false
+    @State private var syncStatusMessage: String?
+
     var body: some View {
+        @Bindable var bindableStore = store
         VStack(alignment: .leading, spacing: Spacing.s3) {
-            HStack(spacing: Spacing.s2) {
+            // Apple-native header: H1 = Focus name, Toggle = active state.
+            // Replaces the chip duo with proper SwiftUI controls that
+            // get Liquid Glass automatically on macOS 26.
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
                 AgentStatusDot(status: store.activeSession == nil ? .paused : .active, size: 9)
-                Text(headline)
-                    .font(ManifoldType.heading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(focusHeadline)
+                        .font(ManifoldType.heading)
+                    Text(focusSubline)
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Spacer()
-                Pill(text: startupLabel, variant: .scope)
+                Toggle("Active", isOn: activeToggleBinding)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .disabled(editingFocus == nil)
+                    .accessibilityIdentifier("work.focus.activeToggle")
+                    .help(toggleHelp)
+            }
+
+            // Apply-to: which agent(s) the active/edited Focus targets.
+            // null = both AIs; explicit single = just that one. Mirrors
+            // Apple Focus's per-Focus filters pattern.
+            if let editingFocus {
+                HStack(spacing: Spacing.s2) {
+                    Text("Apply to")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("Apply to", selection: applyToBinding(for: editingFocus)) {
+                        Text("Claude").tag(Optional(TargetApp.cowork))
+                        Text("Codex").tag(Optional(TargetApp.codex))
+                        Text("Both").tag(Optional<TargetApp>.none)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 240)
+                    .disabled(editingFocus.isBuiltIn && editingFocus.name == "Default")
+                    Spacer()
+                }
             }
 
             Text(subtext)
@@ -285,6 +338,57 @@ private struct WorkCurrentSessionSummary: View {
 
             sessionRequestDetailControl
             fileMemoryAccessControl
+
+            // Separate-sharing toggle + sync action. Hidden for
+            // built-in Focuses: Default is per-agent independent by
+            // design (the toggle would lie), Locked Down has empty
+            // scope so mirror state is moot. User-created Focuses get
+            // the full control.
+            if let editingFocus, !editingFocus.isBuiltIn {
+                HStack(spacing: Spacing.s2) {
+                    Toggle("Mirror to both AIs", isOn: mirrorBinding(for: editingFocus))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("work.focus.mirrorToggle")
+                    Spacer()
+                    Button {
+                        showSyncSheet = true
+                    } label: {
+                        Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .controlSize(.small)
+                    .help("Copy one AI's scope onto the other in one shot — useful when separate-sharing has diverged.")
+                    .accessibilityIdentifier("work.focus.syncNow")
+                }
+                .padding(.top, Spacing.s2)
+
+                Text(editingFocus.mirrorToBoth
+                    ? "Sharing this Focus with one AI also shares it with the other."
+                    : "Claude and Codex are independent — tick each separately in the Folders matrix. Use Sync now to merge their scopes once.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let editingFocus, editingFocus.name == "Default" {
+                // Default-only hint: explain why mirror is missing here
+                // and where to find sync if they need it.
+                HStack(spacing: Spacing.s2) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                    Text("Default keeps Claude and Codex independent. Use the Folders matrix per-agent ticks to share separately.")
+                        .font(ManifoldType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button {
+                        showSyncSheet = true
+                    } label: {
+                        Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .controlSize(.small)
+                    .help("Copy one AI's scope onto the other in one shot.")
+                }
+                .padding(.top, Spacing.s2)
+            }
         }
         .padding(Spacing.s4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -297,6 +401,183 @@ private struct WorkCurrentSessionSummary: View {
                 .strokeBorder(ManifoldPalette.border, lineWidth: 0.5)
         )
         .accessibilityIdentifier("work.summary")
+        .confirmationDialog(
+            "Mirror this Focus's scope across both AIs?",
+            isPresented: $showSeparateSharingPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Mirror") {
+                Task { await applyMirrorChange(toMirror: pendingSeparateSharingTarget) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Anything either AI can currently see will be shared with both. Per-agent decisions in this Focus collapse into a single set.")
+        }
+        .sheet(isPresented: $showSyncSheet) {
+            // Reuse the existing one-shot sync sheet (relocated to
+            // Settings → Advanced earlier). Surfacing it inline next to
+            // the mirror toggle is the canonical home now — Settings
+            // can keep its copy for power-user discovery.
+            MirrorScopeSheet(
+                runtime: store.runtime,
+                onApplied: { summary in
+                    syncStatusMessage = summary
+                    showSyncSheet = false
+                },
+                onCancel: { showSyncSheet = false }
+            )
+        }
+        .task { await store.refreshFocuses() }
+    }
+
+    /// Which agent's Focus the editor is currently bound to. Prefers
+    /// the active grant's agent, falls back to the default-session agent.
+    private var activeAgentForChip: TargetApp {
+        store.activeSession?.agents.first ?? store.defaultSessionAgent
+    }
+
+    /// The Focus the editor is currently bound to. Resolution order:
+    /// (1) what the user explicitly selected in the sidebar
+    /// (2) what's currently active for the agent
+    /// (3) the default-at-launch Focus (Default)
+    /// (4) any first available Focus
+    /// Drives the H1, the Apply-to picker, and the mirror toggle.
+    /// Default is always running on startup, so this should rarely be nil.
+    private var editingFocus: AccessPresetRecord? {
+        let agent = activeAgentForChip
+        if let id = store.resolvedEditingFocusID(for: agent),
+           let f = store.availableFocuses.first(where: { $0.presetID == id }) {
+            return f
+        }
+        if let defaultID = store.defaultLaunchFocusID[agent] ?? nil,
+           let f = store.availableFocuses.first(where: { $0.presetID == defaultID }) {
+            return f
+        }
+        return store.availableFocuses.first
+    }
+
+    /// Whether the Focus the editor is bound to is currently active.
+    /// The Default Focus is always considered active when the runtime is
+    /// running and no other Focus has been switched to — matches the
+    /// "Default focus is always running on startup" mental model.
+    private var isFocusActive: Bool {
+        guard let editing = editingFocus else { return false }
+        let agent = activeAgentForChip
+        // Explicit activation wins.
+        if store.activeFocusID[agent] == editing.presetID { return true }
+        // Default-at-launch is implicitly active when no other Focus has
+        // been explicitly switched to.
+        let hasExplicitActive = (store.activeFocusID[agent] != nil)
+        return !hasExplicitActive && editing.isDefaultAtLaunch
+    }
+
+    private var focusHeadline: String {
+        editingFocus?.name ?? "Default"
+    }
+
+    private var focusSubline: String {
+        guard editingFocus != nil else {
+            return "Setting up your default Focus…"
+        }
+        if isFocusActive {
+            // Active Focus → show what's running.
+            if let active = store.activeSession {
+                let agent = active.agents.first.map { store.displayName(for: $0) } ?? "Agent"
+                return "\(agent) running"
+            }
+            return "Running"
+        }
+        // Selected for editing but not the active one — Default is still
+        // running in the background. Make that explicit.
+        return "Editing — Default is running. Turn on to switch to this Focus."
+    }
+
+    private var toggleHelp: String {
+        guard editingFocus != nil else { return "Default Focus is starting up" }
+        return isFocusActive
+            ? "Turn off to end this Focus's session and return to Default"
+            : "Turn on to activate this Focus (replaces Default)"
+    }
+
+    private var activeToggleBinding: Binding<Bool> {
+        Binding(
+            get: { isFocusActive },
+            set: { newValue in
+                guard let editingID = store.resolvedEditingFocusID(for: activeAgentForChip) else { return }
+                Task {
+                    if newValue {
+                        await store.setActiveFocus(presetID: editingID, targetApp: editingFocus?.targetApp)
+                    } else {
+                        // Flip-off: switch to Default rather than simply
+                        // ending the session. Ending leaves activeFocusID
+                        // pointing at the just-deactivated Focus, so
+                        // isFocusActive recomputes back to true (Default
+                        // fallback) and the toggle snaps ON again — bad
+                        // UX. Switching to Default produces the visible
+                        // state change the user expects ("Default is
+                        // running again").
+                        let agent = activeAgentForChip
+                        if let defaultID = store.defaultLaunchFocusID[agent] ?? nil,
+                           defaultID != editingID {
+                            await store.setActiveFocus(presetID: defaultID, targetApp: editingFocus?.targetApp)
+                        } else {
+                            await store.endSession()
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    /// Apply-to picker binding: writes target_app on the Focus's preset
+    /// row. nil = both AIs (mirror). The target change is persisted via
+    /// the savePreset call which preserves all other fields.
+    private func applyToBinding(for focus: AccessPresetRecord) -> Binding<TargetApp?> {
+        Binding(
+            get: { focus.targetApp },
+            set: { newValue in
+                Task { await updateTargetApp(focus, to: newValue) }
+            }
+        )
+    }
+
+    /// Mirror toggle binding: writes mirror_to_both on the Focus's
+    /// preset row. Flipping mirror=false → true on a Focus with diverged
+    /// per-agent scope prompts a confirmation (the union behavior).
+    private func mirrorBinding(for focus: AccessPresetRecord) -> Binding<Bool> {
+        Binding(
+            get: { focus.mirrorToBoth },
+            set: { newValue in
+                if newValue && !focus.mirrorToBoth {
+                    // Going from separate → mirror needs the union prompt.
+                    pendingSeparateSharingTarget = newValue
+                    showSeparateSharingPrompt = true
+                } else {
+                    Task { await applyMirrorChange(toMirror: newValue) }
+                }
+            }
+        )
+    }
+
+    private func updateTargetApp(_ focus: AccessPresetRecord, to newValue: TargetApp?) async {
+        guard let client = store.runtime as? AppRuntimeClient else { return }
+        do {
+            _ = try await client.updatePresetTargetApp(presetID: focus.presetID, targetApp: newValue)
+            await store.refreshFocuses()
+        } catch {
+            store.lastError = "Couldn't change Apply to: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyMirrorChange(toMirror newValue: Bool) async {
+        guard let focus = editingFocus,
+              let client = store.runtime as? AppRuntimeClient else { return }
+        do {
+            _ = try await client.updatePresetMirror(presetID: focus.presetID, mirrorToBoth: newValue)
+            await store.refreshFocuses()
+        } catch {
+            store.lastError = "Couldn't change mirror mode: \(error.localizedDescription)"
+        }
     }
 
     private struct ActiveSummary {
@@ -737,11 +1018,15 @@ private struct WorkTimelineSection: View {
     }
 
     private var emptyState: some View {
-        Text(emptyMessage)
-            .font(ManifoldType.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Spacing.s3)
+        // Apple-native empty state per WWDC23 — ContentUnavailableView
+        // with a generic "no activity" message instead of a flat Text.
+        ContentUnavailableView(
+            "No activity yet",
+            systemImage: "list.bullet.rectangle",
+            description: Text(emptyMessage)
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Spacing.s4)
     }
 
     private var emptyMessage: String {
@@ -1063,14 +1348,15 @@ private struct WorkInspector: View {
     }
 
     private var emptyInspector: some View {
-        VStack(alignment: .leading, spacing: Spacing.s2) {
-            Label("Inspector", systemImage: "info.circle")
-                .font(ManifoldType.bodyMedium)
-            Text("Select a session, an approval, or a timeline event to see details here.")
-                .font(ManifoldType.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        // HIG-canonical empty state. Per WWDC 2023 ("Inspectors in
+        // SwiftUI"): when no item is selected, show ContentUnavailableView
+        // rather than ad-hoc inline copy. Auto-centered, system-styled,
+        // accessibility-correct.
+        ContentUnavailableView(
+            "Nothing Selected",
+            systemImage: "sidebar.right",
+            description: Text("Select a session, approval, or timeline event to see its details.")
+        )
         .accessibilityIdentifier("work.inspector.empty")
     }
 }

@@ -60,9 +60,9 @@ struct ManifoldShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartSessionIntent(),
             phrases: [
-                "Prepare a work session in \(.applicationName)"
+                "Prepare a Focus in \(.applicationName)"
             ],
-            shortTitle: "Work Session",
+            shortTitle: "Prepare Focus",
             systemImageName: "rectangle.stack.badge.play"
         )
     }

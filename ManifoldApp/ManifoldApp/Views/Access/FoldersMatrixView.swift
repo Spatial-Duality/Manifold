@@ -66,6 +66,16 @@ struct FoldersMatrixView: View {
         Set(connectedAgents.filter { scopeByAgent[$0]?.contains(source.sourceID) == true })
     }
 
+    /// Color the folder icon by which assistants currently have this source
+    /// in scope — reads from the live governance policies rather than the
+    /// (possibly narrower) connected-agent set, so the cue stays accurate
+    /// even when an assistant isn't currently connected.
+    private func sharingTint(for source: SourceRecord) -> Color {
+        let cowork = store.governance.policy(for: .cowork)?.allowedSourceIDs.contains(source.sourceID) ?? false
+        let codex = store.governance.policy(for: .codex)?.allowedSourceIDs.contains(source.sourceID) ?? false
+        return ManifoldPalette.sharingTint(coworkShared: cowork, codexShared: codex)
+    }
+
     private var visibleSources: [SourceRecord] {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return store.sources.filter { source in
@@ -147,6 +157,7 @@ struct FoldersMatrixView: View {
 
     private var toolbar: some View {
         HStack(spacing: Spacing.s3) {
+            mirrorStateBadge
             Spacer()
             Text("\(visibleSources.count) of \(store.sources.count) folders")
                 .font(ManifoldType.numericCaption)
@@ -155,6 +166,28 @@ struct FoldersMatrixView: View {
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s3)
+    }
+
+    /// Small badge showing whether the active Focus is mirroring or
+    /// has separate-sharing on. Per HIG: "Status — always reinforced
+    /// by a second channel (icon/text)" — icon + tinted text + tooltip.
+    /// Drives the user's confidence about how a tick will behave.
+    @ViewBuilder
+    private var mirrorStateBadge: some View {
+        let agent = connectedAgents.first ?? .cowork
+        if let focusID = store.activeFocusID[agent],
+           let focus = store.availableFocuses.first(where: { $0.presetID == focusID }) {
+            HStack(spacing: 4) {
+                Image(systemName: focus.mirrorToBoth ? "link" : "link.badge.plus")
+                    .foregroundStyle(focus.mirrorToBoth ? ManifoldPalette.active : .secondary)
+                Text(focus.mirrorToBoth
+                    ? "Mirror: ticking either AI ticks both"
+                    : "Separate: Claude and Codex are independent")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .help("Mirror state is set per-Focus. Toggle 'Mirror to both AIs' on the active Focus to change.")
+        }
     }
 
     // MARK: - Table
@@ -185,7 +218,12 @@ struct FoldersMatrixView: View {
     private var folderColumn: TableColumn<SourceRecord, KeyPathComparator<SourceRecord>, some View, Text> {
         TableColumn("Folder", value: \.displayName) { source in
             HStack(spacing: Spacing.s2) {
-                FileTypeIcon(filename: source.displayName, isFolder: true, size: 13)
+                FileTypeIcon(
+                    filename: source.displayName,
+                    isFolder: true,
+                    size: 13,
+                    tint: sharingTint(for: source)
+                )
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: Spacing.s1) {
                         Text(source.displayName)

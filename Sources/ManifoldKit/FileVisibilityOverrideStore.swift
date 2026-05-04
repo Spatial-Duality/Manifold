@@ -272,4 +272,14 @@ public actor FileVisibilityOverrideStore {
             params: [sourceID]
         )
     }
+
+    /// Wipe every override for one agent. Used by the Focus activation
+    /// pipeline to swap an agent's override set in one shot before
+    /// repopulating from the new Focus's saved overrides.
+    public func clearAllOverrides(agent: TargetApp) throws {
+        try db.execute(
+            "DELETE FROM file_visibility_overrides WHERE agent = ?",
+            params: [agent.rawValue]
+        )
+    }
 }

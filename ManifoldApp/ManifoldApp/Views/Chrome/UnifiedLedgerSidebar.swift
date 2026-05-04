@@ -133,7 +133,7 @@ private struct SidebarIdentityHeader: View {
     private var actionLabel: String {
         switch sessionState {
         case .disconnected: return "Reconnect runtime"
-        case .warning:      return "Open Work"
+        case .warning:      return "Open Focus"
         case .idle:         return "Start session"
         case .prepared:     return "Activate session"
         case .active:       return "End session"

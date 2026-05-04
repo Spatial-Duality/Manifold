@@ -217,9 +217,160 @@ public actor ManifoldRuntime {
             runtimeLogger.error("Rule catalog seeding failed: \(String(describing: error), privacy: .public)")
         }
 
+        await seedDefaultFocusIfNeeded()
+
         async let privacyBootstrap: Void = privacyIndexCoordinator.bootstrap()
         await mailSyncCoordinator.startRuntimeSync()
         await privacyBootstrap
+    }
+
+    /// Seed Built-in Focuses (Default + Locked Down) the first time the
+    /// v44 schema is in place. Default captures the agent's existing
+    /// per-agent standing scope verbatim — `mirror_to_both=0` so the
+    /// editor keeps the existing Access matrix's independent-per-agent
+    /// behavior. Locked Down ships empty + `mirror_to_both=1`. Both are
+    /// `is_built_in=1` so the delete UI blocks them.
+    /// Off-path once seeded — the gate is a key in the runtime settings
+    /// store so it survives migrations cleanly.
+    private func seedDefaultFocusIfNeeded() async {
+        let key = "manifold.focusV1.seeded"
+        let v44CorrectionKey = "manifold.focusV1.builtinFlagsCorrected"
+        do {
+            if try await runtimeSettingsStore.flag(forKey: key) == true {
+                // v44 corrected built-in flags. Fix Defaults seeded under
+                // v43 that ended up with column-default values
+                // (mirror_to_both=1, is_built_in=0) instead of the
+                // intended (false, true).
+                if try await runtimeSettingsStore.flag(forKey: v44CorrectionKey) != true {
+                    await correctExistingBuiltInDefaultFlags()
+                    try? await runtimeSettingsStore.setFlag(forKey: v44CorrectionKey, value: true)
+                }
+                return
+            }
+        } catch {
+            runtimeLogger.error("Default-Focus seed gate read failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+
+        for agent in TargetApp.allCases {
+            do {
+                // If a default-at-launch already exists for this agent
+                // (e.g. user manually set one), don't create a duplicate.
+                if try await accessStore.defaultPresetForLaunch(agent: agent) != nil { continue }
+
+                let policy = try await policyStore.policy(for: agent)
+                let allowed = Array(policy.allowedSourceIDs).sorted()
+                // Seed Default even with an empty scope so new users
+                // see the system has structure on first launch. They
+                // can add folders to Default later via the Access matrix.
+                let scopes = allowed.map {
+                    FileSelectionScope(sourceID: $0, relativePath: "", isDirectory: true)
+                }
+                // Pull existing agent-keyed overrides into the seeded
+                // Focus so switching away from Default and back doesn't
+                // lose any per-file decisions the user already made.
+                let overrides = try await fileVisibilityOverrideStore.overrides(agent: agent)
+
+                let preset = try await accessStore.savePreset(
+                    id: nil,
+                    name: "Default",
+                    targetApp: agent,
+                    fileScopes: scopes,
+                    emailIDs: [],
+                    requestDetailLevel: policy.accessRecordingLevel,
+                    noteCaptureMode: nil,
+                    allowFileMemory: false,
+                    summaryFraming: nil,
+                    emailSensitivity: policy.emailSensitivity,
+                    mirrorToBoth: false,    // Default keeps Access-matrix independent per-agent behavior
+                    isBuiltIn: true,
+                    overrides: overrides
+                )
+                try await accessStore.setDefaultAtLaunch(presetID: preset.presetID, for: agent)
+                runtimeLogger.info("Seeded Default Focus for \(agent.rawValue, privacy: .public): \(preset.presetID, privacy: .public)")
+            } catch {
+                runtimeLogger.error("Seeding Default Focus for \(agent.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+
+        // Seed a single shared "Locked Down" Focus targeting both AIs.
+        // Empty scope, conservative settings, mirrors-to-both. Same
+        // gate prevents duplicates on re-runs.
+        do {
+            let alreadySeeded = try await accessStore.allPresets().contains {
+                $0.isBuiltIn && $0.name == "Locked Down"
+            }
+            if !alreadySeeded {
+                _ = try await accessStore.savePreset(
+                    id: nil,
+                    name: "Locked Down",
+                    targetApp: nil,
+                    fileScopes: [],
+                    emailIDs: [],
+                    requestDetailLevel: .lightweight,
+                    noteCaptureMode: .off,
+                    allowFileMemory: false,
+                    summaryFraming: nil,
+                    emailSensitivity: .strict,
+                    mirrorToBoth: true,
+                    isBuiltIn: true,
+                    overrides: []
+                )
+                runtimeLogger.info("Seeded Locked Down Focus")
+            }
+        } catch {
+            runtimeLogger.error("Seeding Locked Down Focus failed: \(String(describing: error), privacy: .public)")
+        }
+
+        do {
+            try await runtimeSettingsStore.setFlag(forKey: key, value: true)
+        } catch {
+            runtimeLogger.error("Failed to mark Default-Focus seeding complete: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// One-shot correction for Defaults seeded under v43. They got the
+    /// v44 column-default values (`mirror_to_both=1`, `is_built_in=0`)
+    /// instead of the intended (`false`, `true`). Match by exact name
+    /// "Default" + `is_default_at_launch=1` (the unique anchor) so we
+    /// don't touch user-renamed presets. Idempotent — gated by a
+    /// runtime-settings flag so it runs once per machine.
+    private func correctExistingBuiltInDefaultFlags() async {
+        do {
+            let presets = try await accessStore.allPresets()
+            for preset in presets where preset.name == "Default"
+                && preset.isDefaultAtLaunch
+                && (!preset.isBuiltIn || preset.mirrorToBoth) {
+                _ = try await accessStore.updatePresetMirror(
+                    presetID: preset.presetID,
+                    mirrorToBoth: false
+                )
+                // Setting is_built_in via savePreset would round-trip
+                // everything; we only want to flip the flag, so go
+                // direct via a dedicated path. Reuse savePreset with
+                // existing values.
+                if !preset.isBuiltIn {
+                    _ = try await accessStore.savePreset(
+                        id: preset.presetID,
+                        name: preset.name,
+                        targetApp: preset.targetApp,
+                        fileScopes: try await accessStore.fileScopes(presetID: preset.presetID, agent: preset.targetApp ?? .cowork),
+                        emailIDs: try await accessStore.emailIDs(presetID: preset.presetID, agent: preset.targetApp ?? .cowork),
+                        requestDetailLevel: preset.requestDetailLevel,
+                        noteCaptureMode: preset.noteCaptureMode,
+                        allowFileMemory: preset.allowFileMemory,
+                        summaryFraming: preset.summaryFraming,
+                        emailSensitivity: preset.emailSensitivity,
+                        mirrorToBoth: false,
+                        isBuiltIn: true,
+                        overrides: try await accessStore.presetOverrides(presetID: preset.presetID, agent: preset.targetApp ?? .cowork)
+                    )
+                }
+                runtimeLogger.info("Corrected built-in flags on legacy Default preset \(preset.presetID, privacy: .public)")
+            }
+        } catch {
+            runtimeLogger.error("Built-in flag correction failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Mutates standing source scope through the same runtime-owned path the

@@ -2170,5 +2170,155 @@ public struct DatabaseMigrator {
                 ON mail_sync_events(account_id, created_at)
             """)
         },
+
+        // v43: Focus presets carry settings + per-preset overrides.
+        // Extends `access_presets` with the per-session settings that today
+        // are passed fresh to startSessionFromTemplate, and adds a sibling
+        // overrides table so each Focus has its own per-file decisions.
+        // Defensive PRAGMA pattern matches v31. Application-level invariant
+        // (≤1 row with is_default_at_launch=1 per target_app) is enforced
+        // in AccessStore.setDefaultAtLaunch via a transactional clear+set.
+        Migration(version: 43, name: "focus_preset_settings_and_overrides") { db in
+            let presetTableExists = try tableExists(db, named: "access_presets")
+            guard presetTableExists else {
+                logger.info("Migration 43: access_presets table missing, skipping (no-op)")
+                return
+            }
+
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "request_detail_level",
+                sql: "ALTER TABLE access_presets ADD COLUMN request_detail_level TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "note_capture_mode",
+                sql: "ALTER TABLE access_presets ADD COLUMN note_capture_mode TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "allow_file_memory",
+                sql: "ALTER TABLE access_presets ADD COLUMN allow_file_memory INTEGER NOT NULL DEFAULT 0"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "summary_framing",
+                sql: "ALTER TABLE access_presets ADD COLUMN summary_framing TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "email_sensitivity",
+                sql: "ALTER TABLE access_presets ADD COLUMN email_sensitivity TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "is_default_at_launch",
+                sql: "ALTER TABLE access_presets ADD COLUMN is_default_at_launch INTEGER NOT NULL DEFAULT 0"
+            )
+
+            try db.execute("""
+                CREATE TABLE IF NOT EXISTS access_preset_overrides (
+                    preset_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    is_directory INTEGER NOT NULL DEFAULT 0,
+                    decision TEXT NOT NULL,
+                    PRIMARY KEY (preset_id, source_id, relative_path, is_directory),
+                    FOREIGN KEY (preset_id) REFERENCES access_presets(preset_id) ON DELETE CASCADE
+                )
+            """)
+            try db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_access_preset_overrides_preset
+                ON access_preset_overrides(preset_id)
+            """)
+            // Partial index so the launch-default lookup is constant-time
+            // even with hundreds of saved Focuses.
+            try db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_access_presets_default_at_launch
+                ON access_presets(target_app)
+                WHERE is_default_at_launch = 1
+            """)
+
+            logger.info("Migration 43: focus preset settings + per-preset overrides table")
+        },
+
+        // v44: Per-agent scope storage on Focus presets + mirror_to_both
+        // editor mode flag + is_built_in tag.
+        //
+        // Design:
+        // - `mirror_to_both` controls how the Focus's scope EDITOR
+        //   behaves. true = one combined column, ticking applies to both
+        //   agents; false = the existing two-column Access matrix
+        //   (Claude / Codex independent). Default: 1 for new user Focuses,
+        //   0 for the seeded Default (preserves today's behavior).
+        // - `is_built_in` tags Focuses the user can rename but not delete
+        //   (Default + Locked Down).
+        // - `agent` columns on scope/email/override tables let a Focus
+        //   carry per-agent rows. agent='' = applies to both (the
+        //   mirror-mode write path); agent='cowork'|'codex' = per-agent
+        //   row (the separate-sharing write path). Existing rows default
+        //   to '' so legacy presets keep behaving as before.
+        Migration(version: 44, name: "focus_per_agent_scope_and_mirror_mode") { db in
+            guard try tableExists(db, named: "access_presets") else {
+                logger.info("Migration 44: access_presets table missing, skipping (no-op)")
+                return
+            }
+
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "mirror_to_both",
+                sql: "ALTER TABLE access_presets ADD COLUMN mirror_to_both INTEGER NOT NULL DEFAULT 1"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "access_presets",
+                column: "is_built_in",
+                sql: "ALTER TABLE access_presets ADD COLUMN is_built_in INTEGER NOT NULL DEFAULT 0"
+            )
+
+            if try tableExists(db, named: "access_preset_file_scopes") {
+                try addColumnIfMissing(
+                    db,
+                    table: "access_preset_file_scopes",
+                    column: "agent",
+                    sql: "ALTER TABLE access_preset_file_scopes ADD COLUMN agent TEXT NOT NULL DEFAULT ''"
+                )
+                try db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_access_preset_file_scopes_agent
+                    ON access_preset_file_scopes(preset_id, agent)
+                """)
+            }
+
+            if try tableExists(db, named: "access_preset_emails") {
+                try addColumnIfMissing(
+                    db,
+                    table: "access_preset_emails",
+                    column: "agent",
+                    sql: "ALTER TABLE access_preset_emails ADD COLUMN agent TEXT NOT NULL DEFAULT ''"
+                )
+            }
+
+            if try tableExists(db, named: "access_preset_overrides") {
+                try addColumnIfMissing(
+                    db,
+                    table: "access_preset_overrides",
+                    column: "agent",
+                    sql: "ALTER TABLE access_preset_overrides ADD COLUMN agent TEXT NOT NULL DEFAULT ''"
+                )
+                try db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_access_preset_overrides_agent
+                    ON access_preset_overrides(preset_id, agent)
+                """)
+            }
+
+            logger.info("Migration 44: per-agent Focus scope + mirror_to_both + is_built_in")
+        },
     ]
 }

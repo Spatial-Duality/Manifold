@@ -127,6 +127,168 @@ extension AppRuntimeClient {
         )
     }
 
+    /// Atomic Focus activation. Ends the agent's current grant, swaps
+    /// scope + overrides to match the Focus, and starts a new grant in
+    /// one round trip. Idempotent.
+    @discardableResult
+    func setActiveFocus(
+        presetID: String,
+        targetApp: TargetApp? = nil
+    ) async throws -> StartSessionFromTemplateResult {
+        var payload: [String: Any] = ["presetID": presetID]
+        if let targetApp { payload["targetApp"] = targetApp.rawValue }
+        let response = try await xpc.command(name: "setActiveFocus", payload: payload)
+        return try Self.decodeStartSessionFromTemplateResult(presetID: presetID, response: response)
+    }
+
+    /// Set or clear the default-at-launch Focus for an agent.
+    func setDefaultAtLaunch(presetID: String?, agent: TargetApp) async throws {
+        var payload: [String: Any] = ["agent": agent.rawValue]
+        if let presetID { payload["presetID"] = presetID }
+        _ = try await xpc.command(name: "setDefaultAtLaunch", payload: payload)
+    }
+
+    /// Look up the preset (if any) flagged default-at-launch for an agent.
+    func defaultPresetForLaunch(agent: TargetApp) async throws -> AccessPresetRecord? {
+        let response = try await xpc.command(
+            name: "defaultPresetForLaunch",
+            payload: ["agent": agent.rawValue]
+        )
+        guard let object = response["preset"], !(object is NSNull) else { return nil }
+        return try XPCJSON.decode(AccessPresetRecord.self, from: object)
+    }
+
+    // MARK: - Focus auto-save / per-preset settings + overrides
+
+    /// Patch mirror_to_both flag on a Focus. Used by the
+    /// "Separate sharing" toggle.
+    @discardableResult
+    func updatePresetMirror(presetID: String, mirrorToBoth: Bool) async throws -> AccessPresetRecord {
+        let response = try await xpc.command(
+            name: "updatePresetMirror",
+            payload: ["presetID": presetID, "mirrorToBoth": mirrorToBoth]
+        )
+        guard let object = response["preset"], !(object is NSNull) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return try XPCJSON.decode(AccessPresetRecord.self, from: object)
+    }
+
+    /// Patch target_app on a Focus. Pass nil to clear (= both AIs).
+    @discardableResult
+    func updatePresetTargetApp(presetID: String, targetApp: TargetApp?) async throws -> AccessPresetRecord {
+        var payload: [String: Any] = ["presetID": presetID]
+        if let targetApp { payload["targetApp"] = targetApp.rawValue }
+        let response = try await xpc.command(name: "updatePresetTargetApp", payload: payload)
+        guard let object = response["preset"], !(object is NSNull) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return try XPCJSON.decode(AccessPresetRecord.self, from: object)
+    }
+
+    /// Settings-only patch on an existing preset. Cheap path for the
+    /// auto-save fan-out — leaves scope and email lists untouched.
+    @discardableResult
+    func updatePresetSettings(
+        presetID: String,
+        requestDetailLevel: AccessRecordingLevel?,
+        noteCaptureMode: SessionNoteCaptureMode?,
+        allowFileMemory: Bool,
+        summaryFraming: String?,
+        emailSensitivity: EmailSensitivityLevel?
+    ) async throws -> AccessPresetRecord {
+        var payload: [String: Any] = [
+            "presetID": presetID,
+            "allowFileMemory": allowFileMemory,
+        ]
+        if let requestDetailLevel { payload["requestDetailLevel"] = requestDetailLevel.rawValue }
+        if let noteCaptureMode { payload["noteCaptureMode"] = noteCaptureMode.rawValue }
+        if let summaryFraming { payload["summaryFraming"] = summaryFraming }
+        if let emailSensitivity { payload["emailSensitivity"] = emailSensitivity.rawValue }
+        let response = try await xpc.command(name: "updatePresetSettings", payload: payload)
+        guard let object = response["preset"], !(object is NSNull) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return try XPCJSON.decode(AccessPresetRecord.self, from: object)
+    }
+
+    /// Replace a preset's file scopes in one transaction.
+    func updatePresetFileScopes(presetID: String, fileScopes: [FileSelectionScope]) async throws {
+        _ = try await xpc.command(
+            name: "updatePresetFileScopes",
+            payload: [
+                "presetID": presetID,
+                "fileScopes": try XPCJSON.object(from: fileScopes),
+            ]
+        )
+    }
+
+    /// Patch one override into a preset's saved override set.
+    func setPresetOverride(
+        presetID: String,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool,
+        decision: FileVisibilityOverrideDecision
+    ) async throws {
+        _ = try await xpc.command(
+            name: "setPresetOverride",
+            payload: [
+                "presetID": presetID,
+                "sourceID": sourceID,
+                "relativePath": relativePath,
+                "isDirectory": isDirectory,
+                "decision": decision.rawValue,
+            ]
+        )
+    }
+
+    /// Remove one override from a preset's saved set.
+    func clearPresetOverride(
+        presetID: String,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool
+    ) async throws {
+        _ = try await xpc.command(
+            name: "clearPresetOverride",
+            payload: [
+                "presetID": presetID,
+                "sourceID": sourceID,
+                "relativePath": relativePath,
+                "isDirectory": isDirectory,
+            ]
+        )
+    }
+
+    /// Full-replace a preset's override set in one transaction.
+    func savePresetOverrides(
+        presetID: String,
+        overrides: [FileVisibilityOverrideRecord]
+    ) async throws {
+        _ = try await xpc.command(
+            name: "savePresetOverrides",
+            payload: [
+                "presetID": presetID,
+                "overrides": try XPCJSON.object(from: overrides),
+            ]
+        )
+    }
+
+    /// Read a preset's saved override list. The records carry the
+    /// preset's `target_app` as their `agent` field.
+    func presetOverrides(presetID: String, agent: TargetApp) async throws -> [FileVisibilityOverrideRecord] {
+        let response = try await xpc.command(
+            name: "presetOverrides",
+            payload: [
+                "presetID": presetID,
+                "agent": agent.rawValue,
+            ]
+        )
+        guard let object = response["overrides"], !(object is NSNull) else { return [] }
+        return try XPCJSON.decode([FileVisibilityOverrideRecord].self, from: object)
+    }
+
     func startSessionFromTemplate(
         presetID: String,
         targetApp: TargetApp? = nil,
@@ -143,6 +305,16 @@ extension AppRuntimeClient {
         if let emailSensitivity { payload["emailSensitivity"] = emailSensitivity }
 
         let response = try await xpc.command(name: "startSessionFromTemplate", payload: payload)
+        return try Self.decodeStartSessionFromTemplateResult(presetID: presetID, response: response)
+    }
+
+    /// Shared decoder for `startSessionFromTemplate` and `setActiveFocus`
+    /// — both XPC commands return the same activeGrant + sources +
+    /// skipped/missing payload shape.
+    static func decodeStartSessionFromTemplateResult(
+        presetID: String,
+        response: [String: Any]
+    ) throws -> StartSessionFromTemplateResult {
         guard let grantObject = response["activeGrant"], !(grantObject is NSNull) else {
             throw ManifoldXPCError.malformedReply
         }
@@ -219,6 +391,30 @@ extension AppRuntimeClient {
         _ = try await xpc.command(
             name: "addFilterModeOverrides",
             payload: ["overrides": try XPCJSON.object(from: overrides)]
+        )
+    }
+
+    // MARK: - Scope mirror (per-AI scope copy)
+
+    /// Compute the diff that would bring `to` into alignment with `from`.
+    /// No side effects — used by the mirror confirmation sheet to show the
+    /// user exactly what will change before they apply.
+    func previewScopeMirror(from sourceAgent: TargetApp, to targetAgent: TargetApp) async throws -> ScopeMirrorPlan {
+        let response = try await xpc.command(
+            name: "previewScopeMirror",
+            payload: ["from": sourceAgent.rawValue, "to": targetAgent.rawValue]
+        )
+        guard let object = response["plan"], !(object is NSNull) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return try XPCJSON.decode(ScopeMirrorPlan.self, from: object)
+    }
+
+    /// Apply a previously-computed plan. Idempotent — safe to retry.
+    func applyScopeMirror(_ plan: ScopeMirrorPlan) async throws {
+        _ = try await xpc.command(
+            name: "applyScopeMirror",
+            payload: ["plan": try XPCJSON.object(from: plan)]
         )
     }
 

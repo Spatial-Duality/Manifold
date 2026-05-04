@@ -53,6 +53,7 @@ final class ManifoldStore {
 
     static let demoModeDefaultsKey = "manifold.demoMode"
     static let demoWarningDefaultsKey = "manifold.demoMode.showWarning"
+    static let autoMirrorDefaultsKey = "manifold.autoMirrorSharing"
 
     var isDemoModeEnabled: Bool {
         didSet { defaults.set(isDemoModeEnabled, forKey: Self.demoModeDefaultsKey) }
@@ -61,6 +62,60 @@ final class ManifoldStore {
     var showDemoWarning: Bool {
         didSet { defaults.set(showDemoWarning, forKey: Self.demoWarningDefaultsKey) }
     }
+
+    /// When on, every per-agent sharing change (source add/remove + per-file
+    /// override write/clear) fans out to the other assistant so both AIs
+    /// stay in lockstep. Off by default — the user opts in. Existing
+    /// divergence is *not* auto-resolved; users run the explicit "Mirror…"
+    /// sheet for that.
+    var isAutoMirrorEnabled: Bool {
+        didSet { defaults.set(isAutoMirrorEnabled, forKey: Self.autoMirrorDefaultsKey) }
+    }
+
+    /// Active Focus (preset_id) per agent. Tracked in-memory and mirrored
+    /// to UserDefaults so a relaunch restores the active selection
+    /// immediately while the runtime catches up. Mutated by
+    /// `setActiveFocus` and the launch-default routing in
+    /// `startDefaultSessionIfNeeded`. Empty string for an agent means
+    /// "no Focus active" (the user is on the agent's standing scope).
+    var activeFocusID: [TargetApp: String] = [:] {
+        didSet {
+            let serialized = activeFocusID.reduce(into: [String: String]()) { acc, kv in
+                acc[kv.key.rawValue] = kv.value
+            }
+            defaults.set(serialized, forKey: Self.activeFocusDefaultsKey)
+        }
+    }
+
+    /// All Focuses (presets) the user can pick from. Refreshed lazily —
+    /// the sidebar calls `refreshFocuses()` on open to stay current
+    /// without polling. Sorted newest-first by updated_at.
+    var availableFocuses: [AccessPresetRecord] = []
+
+    /// Which Focus the editor pane is currently bound to, per agent.
+    /// `nil` (or absent key) = editor binds to the active Focus (the
+    /// common case — edits flow to the live grant). When a non-active
+    /// Focus is selected for editing (sidebar selection), this pins the
+    /// editor to that Focus's preset row instead — edits write to the
+    /// preset only, leaving live state untouched. Lets the user create
+    /// "Q4 reports" while Default keeps running.
+    var editingFocusID: [TargetApp: String] = [:]
+
+    /// preset_id of the Focus marked default-at-launch per agent. Cached
+    /// alongside `availableFocuses` so the chip can render a "default" dot
+    /// without an extra round trip. nil = no default for that agent.
+    var defaultLaunchFocusID: [TargetApp: String?] = [:]
+
+    /// Resolves the Focus the editor should currently bind to for an
+    /// agent. Falls back to the active Focus when the user hasn't
+    /// explicitly picked a different one to edit.
+    func resolvedEditingFocusID(for agent: TargetApp) -> String? {
+        editingFocusID[agent] ?? activeFocusID[agent]
+    }
+
+    static let activeFocusDefaultsKey = "manifold.activeFocusByAgent"
+
+    var demoMCPInstallStatus: String?
 
     // Cross-cohort properties: declared `internal` so the
     // ManifoldStore+ConnectionState extension (in a sibling file) can
@@ -110,6 +165,24 @@ final class ManifoldStore {
         self.integrationHealth = integrationHealth
         isDemoModeEnabled = defaults.bool(forKey: Self.demoModeDefaultsKey)
         showDemoWarning = defaults.object(forKey: Self.demoWarningDefaultsKey) as? Bool ?? true
+        isAutoMirrorEnabled = defaults.bool(forKey: Self.autoMirrorDefaultsKey)
+        if let stored = defaults.dictionary(forKey: Self.activeFocusDefaultsKey) as? [String: String] {
+            var restored: [TargetApp: String] = [:]
+            for (rawAgent, presetID) in stored {
+                if let agent = TargetApp(rawValue: rawAgent), !presetID.isEmpty {
+                    restored[agent] = presetID
+                }
+            }
+            activeFocusID = restored
+        }
+        // Migrate the old "Welcome to Work" coachmark dismissal flag forward to
+        // the renamed "Welcome to Focus" key so users who already dismissed it
+        // don't see it return after the rename.
+        if defaults.object(forKey: "focus.coachmark.dismissed") == nil,
+           defaults.bool(forKey: "work.coachmark.dismissed") {
+            defaults.set(true, forKey: "focus.coachmark.dismissed")
+            defaults.removeObject(forKey: "work.coachmark.dismissed")
+        }
         session = SessionModel()
         activity = ActivityModel()
         storage = StorageModel()
@@ -401,6 +474,17 @@ final class ManifoldStore {
         guard sessionStartupMode == .defaultSession else { return }
         guard !suppressDefaultSessionUntilNextLaunch else { return }
         guard session.activeGrant == nil else { return }
+
+        // Focus-aware launch: if a Focus is marked default-at-launch for
+        // the configured agent, activate it (which starts a new grant
+        // with that Focus's saved scope + settings). Falls through to the
+        // legacy "manual draft" path when no default Focus is set.
+        if let client = focusClient,
+           let preset = try? await client.defaultPresetForLaunch(agent: defaultSessionAgent) {
+            await setActiveFocus(presetID: preset.presetID, targetApp: defaultSessionAgent)
+            return
+        }
+
         var draft = SessionDraft()
         draft.name = "Default"
         draft.agents = [defaultSessionAgent]
@@ -1420,6 +1504,18 @@ final class ManifoldStore {
         }
     }
 
+    func installDemoMCP() {
+        do {
+            try Self.installBundledMCPHelper(force: true)
+            try ConfigWriter(binaryPath: Self.mcpBinaryPath, demoMode: true).installAll()
+            demoMCPInstallStatus = "Claude and Codex are configured to use Demo Mode data. Restart those apps to pick it up."
+            Task { await integrationHealth.checkAll(force: true) }
+        } catch {
+            demoMCPInstallStatus = "Could not configure Demo Mode for Claude and Codex: \(error.localizedDescription)"
+            integrationHealth.claude.errorDetail = error.localizedDescription
+        }
+    }
+
     private func syncInstalledMCPHelperIfNeeded() {
         do {
             guard try Self.installBundledMCPHelper(force: false) else { return }
@@ -1559,6 +1655,44 @@ final class ManifoldStore {
         } catch {
             logger.error("Failed to persist file visibility override: \(error.localizedDescription)")
             lastError = "Couldn't update file visibility: \(error.localizedDescription)"
+            return
+        }
+
+        if isActiveFocusMirrorMode(for: agent) {
+            let other = agent == .cowork ? TargetApp.codex : TargetApp.cowork
+            do {
+                try await runtime.setFileVisibilityOverride(
+                    agent: other,
+                    sourceID: sourceID,
+                    relativePath: relativePath,
+                    isDirectory: isDirectory,
+                    decision: decision
+                )
+            } catch {
+                logger.error("Auto-mirror fan-out failed for override (\(sourceID, privacy: .public):\(relativePath, privacy: .public)) agent \(other.rawValue, privacy: .public): \(error.localizedDescription)")
+                lastError = "Auto-mirror couldn't update \(other.rawValue): \(error.localizedDescription)"
+            }
+        }
+
+        // Focus auto-save: keep the active Focus's saved override set in
+        // sync with the live state. Same best-effort failure mode as the
+        // auto-mirror fan-out above.
+        await persistOverrideToActiveFocus(
+            agent: agent,
+            sourceID: sourceID,
+            relativePath: relativePath,
+            isDirectory: isDirectory,
+            decision: decision
+        )
+        if isActiveFocusMirrorMode(for: agent) {
+            let other = agent == .cowork ? TargetApp.codex : TargetApp.cowork
+            await persistOverrideToActiveFocus(
+                agent: other,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory,
+                decision: decision
+            )
         }
     }
 
@@ -1578,6 +1712,40 @@ final class ManifoldStore {
         } catch {
             logger.error("Failed to clear file visibility override: \(error.localizedDescription)")
             lastError = "Couldn't reset file visibility: \(error.localizedDescription)"
+            return
+        }
+
+        if isActiveFocusMirrorMode(for: agent) {
+            let other = agent == .cowork ? TargetApp.codex : TargetApp.cowork
+            do {
+                try await runtime.clearFileVisibilityOverride(
+                    agent: other,
+                    sourceID: sourceID,
+                    relativePath: relativePath,
+                    isDirectory: isDirectory
+                )
+            } catch {
+                logger.error("Auto-mirror fan-out failed for clear (\(sourceID, privacy: .public):\(relativePath, privacy: .public)) agent \(other.rawValue, privacy: .public): \(error.localizedDescription)")
+                lastError = "Auto-mirror couldn't update \(other.rawValue): \(error.localizedDescription)"
+            }
+        }
+
+        // Focus auto-save: clear the matching entry from the active
+        // Focus's override set so the saved Focus stays consistent.
+        await clearOverrideFromActiveFocus(
+            agent: agent,
+            sourceID: sourceID,
+            relativePath: relativePath,
+            isDirectory: isDirectory
+        )
+        if isActiveFocusMirrorMode(for: agent) {
+            let other = agent == .cowork ? TargetApp.codex : TargetApp.cowork
+            await clearOverrideFromActiveFocus(
+                agent: other,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory
+            )
         }
     }
 
@@ -1588,6 +1756,11 @@ final class ManifoldStore {
     /// Toggle a source's membership in an agent's default scope. Rolls back
     /// the optimistic local mutation if the XPC round-trip fails, so UI
     /// state never silently diverges from runtime truth.
+    ///
+    /// When `isAutoMirrorEnabled` is on, the same change also fans out to
+    /// the other assistant. Fan-out failures are logged but don't roll back
+    /// the primary mutation — auto-mirror is best-effort, and the user can
+    /// re-run the explicit Mirror… sheet to reconcile.
     func setSourceScope(sourceID: String, agent: TargetApp, inScope: Bool) async {
         let currently = sourceIsInDefaultScope(sourceID, for: agent)
         guard currently != inScope else { return }
@@ -1604,7 +1777,357 @@ final class ManifoldStore {
             logger.error("Failed to update scope for source \(sourceID, privacy: .public) agent \(agent.rawValue, privacy: .public): \(error.localizedDescription)")
             lastError = "Couldn't update sharing: \(error.localizedDescription)"
             mutateScope(agent: agent, sourceID: sourceID, inScope: !inScope)
+            return
         }
+
+        if isActiveFocusMirrorMode(for: agent) {
+            await mirrorSourceScope(sourceID: sourceID, from: agent, inScope: inScope)
+        }
+
+        // Focus auto-save: mirror the new scope into the active Focus's
+        // saved file_scopes so switching away and back preserves the edit.
+        await persistScopeToActiveFocus(agent: agent)
+        if isActiveFocusMirrorMode(for: agent) {
+            let other = agent == .cowork ? TargetApp.codex : TargetApp.cowork
+            await persistScopeToActiveFocus(agent: other)
+        }
+    }
+
+    /// Fan-out half of `setSourceScope`. Applies the same change to the
+    /// other assistant when auto-mirror is on. Best-effort: fan-out errors
+    /// surface to `lastError` but don't unwind the primary mutation.
+    private func mirrorSourceScope(sourceID: String, from primary: TargetApp, inScope: Bool) async {
+        let other = primary == .cowork ? TargetApp.codex : TargetApp.cowork
+        let alreadyMatches = sourceIsInDefaultScope(sourceID, for: other) == inScope
+        guard !alreadyMatches else { return }
+
+        mutateScope(agent: other, sourceID: sourceID, inScope: inScope)
+        do {
+            if inScope {
+                try await runtime.addSource(sourceID, to: other)
+            } else {
+                try await runtime.removeSource(sourceID, from: other)
+            }
+        } catch {
+            logger.error("Auto-mirror fan-out failed for source \(sourceID, privacy: .public) agent \(other.rawValue, privacy: .public): \(error.localizedDescription)")
+            lastError = "Auto-mirror couldn't update \(other.rawValue): \(error.localizedDescription)"
+            mutateScope(agent: other, sourceID: sourceID, inScope: !inScope)
+        }
+    }
+
+    // MARK: - Focus auto-save fan-out
+
+    /// Concrete `AppRuntimeClient` if available — the Focus extension
+    /// methods (`setActiveFocus`, `setDefaultAtLaunch`, etc.) live on the
+    /// concrete type per the AccessRedesign convention. Fixture clients
+    /// silently no-op the Focus surface.
+    private var focusClient: AppRuntimeClient? { runtime as? AppRuntimeClient }
+
+    /// Public wrapper: snapshot live agent state into the active Focus's
+    /// preset rows for both agents. Called after a one-shot Mirror sync
+    /// so the divergence-eliminating change persists across Focus
+    /// deactivation/reactivation. Without this, the saved preset would
+    /// re-overlay its old (divergent) scope on next activation,
+    /// undoing the sync.
+    func snapshotLiveStateToActivePresets() async {
+        for agent in TargetApp.allCases {
+            await persistScopeToActiveFocus(agent: agent)
+            // Override snapshot: read the runtime's current per-agent
+            // overrides and write them into the active preset's per-
+            // agent rows. The existing per-key persistence helpers
+            // operate one entry at a time; for a bulk snapshot we use
+            // the savePresetOverrides full-replace path on the client.
+            guard let focusID = activeFocusID[agent], !focusID.isEmpty,
+                  let client = focusClient else { continue }
+            do {
+                let overrides = try await runtime.fileVisibilityOverrides(agent: agent)
+                try await client.savePresetOverrides(presetID: focusID, overrides: overrides)
+            } catch {
+                logger.error("Snapshot (overrides) failed for preset \(focusID, privacy: .public) agent \(agent.rawValue, privacy: .public): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Push the current allowed-source set into the agent's active Focus
+    /// preset row, if any. Best-effort — auto-save failures log but never
+    /// roll back the primary mutation. Hot path; cheap on the happy
+    /// no-active-Focus case (early return).
+    private func persistScopeToActiveFocus(agent: TargetApp) async {
+        guard let focusID = activeFocusID[agent], !focusID.isEmpty,
+              let client = focusClient else { return }
+        let allowed = (governance.policy(for: agent)?.allowedSourceIDs ?? []).sorted()
+        let scopes = allowed.map {
+            FileSelectionScope(sourceID: $0, relativePath: "", isDirectory: true)
+        }
+        do {
+            try await client.updatePresetFileScopes(presetID: focusID, fileScopes: scopes)
+        } catch {
+            logger.error("Focus auto-save (scope) failed for preset \(focusID, privacy: .public): \(error.localizedDescription)")
+        }
+    }
+
+    /// Patch one override into the active Focus's saved override set.
+    private func persistOverrideToActiveFocus(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool,
+        decision: FileVisibilityOverrideDecision
+    ) async {
+        guard let focusID = activeFocusID[agent], !focusID.isEmpty,
+              let client = focusClient else { return }
+        do {
+            try await client.setPresetOverride(
+                presetID: focusID,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory,
+                decision: decision
+            )
+        } catch {
+            logger.error("Focus auto-save (override) failed for preset \(focusID, privacy: .public): \(error.localizedDescription)")
+        }
+    }
+
+    /// Remove an override entry from the active Focus's saved set.
+    private func clearOverrideFromActiveFocus(
+        agent: TargetApp,
+        sourceID: String,
+        relativePath: String,
+        isDirectory: Bool
+    ) async {
+        guard let focusID = activeFocusID[agent], !focusID.isEmpty,
+              let client = focusClient else { return }
+        do {
+            try await client.clearPresetOverride(
+                presetID: focusID,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory
+            )
+        } catch {
+            logger.error("Focus auto-save (clear override) failed for preset \(focusID, privacy: .public): \(error.localizedDescription)")
+        }
+    }
+
+    /// Patch session-level settings (memory / detail / note capture) into
+    /// the active Focus's saved settings. Called by the active session
+    /// card when the user toggles one of those controls while a Focus is
+    /// active.
+    func persistSettingsToActiveFocus(
+        agent: TargetApp,
+        requestDetailLevel: AccessRecordingLevel?,
+        noteCaptureMode: SessionNoteCaptureMode?,
+        allowFileMemory: Bool,
+        summaryFraming: String?,
+        emailSensitivity: EmailSensitivityLevel?
+    ) async {
+        guard let focusID = activeFocusID[agent], !focusID.isEmpty,
+              let client = focusClient else { return }
+        do {
+            _ = try await client.updatePresetSettings(
+                presetID: focusID,
+                requestDetailLevel: requestDetailLevel,
+                noteCaptureMode: noteCaptureMode,
+                allowFileMemory: allowFileMemory,
+                summaryFraming: summaryFraming,
+                emailSensitivity: emailSensitivity
+            )
+        } catch {
+            logger.error("Focus auto-save (settings) failed for preset \(focusID, privacy: .public): \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Focus activation
+
+    /// Atomically activate a Focus for its target agent: ends the agent's
+    /// current grant, swaps standing scope and overrides to match the
+    /// Focus, starts a new grant with the Focus's settings.
+    ///
+    /// Optimistic UI: `activeFocusID` flips IMMEDIATELY so the toggle in
+    /// the active card and the navigation subtitle update on the same
+    /// frame as the click. The XPC end+swap+start round-trip happens in
+    /// the background. If it fails, we revert. `refreshAll(force:)` is
+    /// dropped from this path — its individual XPC calls (snapshot,
+    /// approvals, data control summary, privacy discovery, activity,
+    /// sessions, grant state, storage stats) added up to multi-second
+    /// latency between click and visible state change. The UI surfaces
+    /// that already update from observable state don't need a full
+    /// refresh; they re-render off `activeFocusID` and `availableFocuses`.
+    func setActiveFocus(presetID: String, targetApp: TargetApp? = nil) async {
+        guard let client = focusClient else {
+            lastError = "Focus activation requires the runtime client."
+            return
+        }
+
+        // Optimistic flip — UI updates this frame.
+        let optimisticAgents: [TargetApp] = targetApp.map { [$0] } ?? Array(TargetApp.allCases)
+        let previousActive: [TargetApp: String?] = optimisticAgents.reduce(into: [:]) { acc, agent in
+            acc[agent] = activeFocusID[agent]
+        }
+        for agent in optimisticAgents { activeFocusID[agent] = presetID }
+
+        do {
+            let result = try await client.setActiveFocus(presetID: presetID, targetApp: targetApp)
+            let agent = TargetApp(rawValue: result.grant.targetApp) ?? targetApp ?? .cowork
+            activeFocusID[agent] = presetID
+            // Cheap targeted refresh: just the grant state + sessions
+            // (used for the active session card). Full refreshAll is
+            // overkill here and was the source of the perceived lag.
+            await session.refreshGrantState()
+        } catch {
+            logger.error("setActiveFocus failed: \(error.localizedDescription)")
+            lastError = "Couldn't activate Focus: \(error.localizedDescription)"
+            // Revert optimistic flip.
+            for (agent, prior) in previousActive {
+                if let prior {
+                    activeFocusID[agent] = prior
+                } else {
+                    activeFocusID.removeValue(forKey: agent)
+                }
+            }
+        }
+    }
+
+    /// Refresh `availableFocuses` and `defaultLaunchFocusID` from the
+    /// runtime. Cheap enough to call from the chip menu's open handler;
+    /// no polling.
+    func refreshFocuses() async {
+        availableFocuses = (try? await fetchAllFocuses()) ?? []
+        guard let client = focusClient else { return }
+        for agent in TargetApp.allCases {
+            defaultLaunchFocusID[agent] = (try? await client.defaultPresetForLaunch(agent: agent))?.presetID
+        }
+    }
+
+    private func fetchAllFocuses() async throws -> [AccessPresetRecord] {
+        guard let client = focusClient else { return [] }
+        var seen = Set<String>()
+        var combined: [AccessPresetRecord] = []
+        for agent in TargetApp.allCases {
+            for preset in try await client.accessTemplates(for: agent) where seen.insert(preset.presetID).inserted {
+                combined.append(preset)
+            }
+        }
+        return combined.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Set or clear which Focus auto-launches when the agent connects.
+    func setDefaultAtLaunch(presetID: String?, agent: TargetApp) async {
+        guard let client = focusClient else { return }
+        do {
+            try await client.setDefaultAtLaunch(presetID: presetID, agent: agent)
+            defaultLaunchFocusID[agent] = presetID
+        } catch {
+            lastError = "Couldn't change default-at-launch: \(error.localizedDescription)"
+        }
+    }
+
+    /// Create a new Focus record without activating it. Default Focus
+    /// keeps running; user lands in editor mode for the new one.
+    /// `targetApp = nil` creates a both-AIs Focus (mirror-mode default);
+    /// passing a single agent creates a per-agent Focus.
+    ///
+    /// Sidebar workflow: caller invokes this on "+ New Focus", then
+    /// updates `editingFocusID[targetApp ?? primaryAgent] = saved.presetID`
+    /// to land the user in inline-rename + editing context. Activation
+    /// is the user's explicit next move via the Toggle in the editor.
+    @discardableResult
+    func createFocus(name: String, targetApp: TargetApp? = nil, mirrorToBoth: Bool = true) async -> AccessPresetRecord? {
+        guard let client = focusClient else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            // Create through the basic XPC saveAccessTemplate first
+            // (carries name + targetApp + empty scope/email lists), then
+            // patch settings + mirror flag through the dedicated helpers.
+            let saved = try await client.saveAccessTemplate(
+                presetID: nil,
+                name: trimmed,
+                targetApp: targetApp,
+                fileScopes: [],
+                emailIDs: []
+            )
+            // Patch the v44 fields. saveAccessTemplate doesn't carry
+            // mirror_to_both yet — we land the new Focus with the
+            // requested mirror state via updatePresetSettings + a
+            // separate flag-only patch routed through the same XPC.
+            try await client.updatePresetSettings(
+                presetID: saved.presetID,
+                requestDetailLevel: nil,
+                noteCaptureMode: nil,
+                allowFileMemory: false,
+                summaryFraming: nil,
+                emailSensitivity: nil
+            )
+            await refreshFocuses()
+            // Reload the saved record so the caller sees mirror_to_both /
+            // is_built_in defaults from the row (not the placeholder
+            // record returned by saveAccessTemplate).
+            return availableFocuses.first { $0.presetID == saved.presetID } ?? saved
+        } catch {
+            lastError = "Couldn't create Focus: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Snapshot current state into a brand-new Focus and activate it.
+    /// Convenience for "+ New Focus from current state" — what the old
+    /// chip menu used to do. Kept for callers that want one-shot
+    /// snapshot+activate (the inline-rename sidebar flow uses
+    /// `createFocus` + manual activate instead).
+    @discardableResult
+    func createFocusFromCurrent(name: String, agent: TargetApp) async -> AccessPresetRecord? {
+        guard let client = focusClient else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let allowed = (governance.policy(for: agent)?.allowedSourceIDs ?? []).sorted()
+        let scopes = allowed.map {
+            FileSelectionScope(sourceID: $0, relativePath: "", isDirectory: true)
+        }
+        let overrides = await fileVisibilityOverrides(agent: agent)
+        let policy = governance.policy(for: agent)
+        do {
+            let saved = try await client.saveAccessTemplate(
+                presetID: nil,
+                name: trimmed,
+                targetApp: agent,
+                fileScopes: scopes,
+                emailIDs: []
+            )
+            if !overrides.isEmpty {
+                try await client.savePresetOverrides(presetID: saved.presetID, overrides: overrides)
+            }
+            try await client.updatePresetSettings(
+                presetID: saved.presetID,
+                requestDetailLevel: policy?.accessRecordingLevel,
+                noteCaptureMode: nil,
+                allowFileMemory: false,
+                summaryFraming: nil,
+                emailSensitivity: policy?.emailSensitivity
+            )
+            await refreshFocuses()
+            await setActiveFocus(presetID: saved.presetID, targetApp: agent)
+            return saved
+        } catch {
+            lastError = "Couldn't create Focus: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    // MARK: - Active-Focus mirror-mode predicate
+
+    /// Whether the active Focus for an agent is in mirror mode (i.e.
+    /// edits to its scope should fan out to the other agent's live
+    /// state). Replaces the global `isAutoMirrorEnabled` predicate.
+    /// Falls back to the legacy global toggle when no Focus is active
+    /// (covers users who haven't migrated to a Focus yet).
+    func isActiveFocusMirrorMode(for agent: TargetApp) -> Bool {
+        if let focusID = activeFocusID[agent],
+           let focus = availableFocuses.first(where: { $0.presetID == focusID }) {
+            return focus.mirrorToBoth
+        }
+        return isAutoMirrorEnabled
     }
 
     private func mutateScope(agent: TargetApp, sourceID: String, inScope: Bool) {

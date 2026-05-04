@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-04
+
+Focus feature: rename the Work pane to Focus, replace ad-hoc session
+templates with first-class saved Focuses, and surface the picker as
+the primary mental model. Default Focus is always running on startup.
+A custom Focus saves a complete bundle of folder scope, per-file
+overrides, and runtime settings (request detail, file memory, note
+capture, email sensitivity), and switching between them is a one-click
+atomic swap.
+
+### Added
+- Focus pane (renamed from Work) with sidebar Focus picker, inline
+  rename, right-click context menu (Activate / Rename / Set as default
+  at launch / Delete), and ⌘1–⌘9 hot-switching.
+- Locked Down built-in Focus (empty scope, conservative settings) and
+  Default built-in Focus (per-agent independent like today's Access
+  matrix). Built-in Focuses cannot be deleted.
+- Active session card with Apple-native Toggle for activation, segmented
+  Apply-to picker (Claude / Codex / Both), and a per-Focus mirror
+  toggle that controls whether the scope editor links Claude and Codex
+  columns or treats them independently.
+- Inline Sync now button next to the mirror toggle, persisting the
+  one-shot mirror result into the active Focus's saved preset rows so
+  the change survives Focus deactivation/reactivation.
+- Optimistic UI flip on Focus activation: the toggle and navigation
+  subtitle update on the same frame as the click; full refresh
+  replaced with a targeted grant-state refresh.
+- Folder color cue based on per-AI sharing state (green = both AIs,
+  Claude orange = Claude only, Codex blue = Codex only, neutral =
+  neither). Mirror-state badge in the Folders matrix toolbar.
+- ContentUnavailableView empty states for Focuses, Activity timeline,
+  and the Inspector when nothing is selected.
+- Focus chip in the macOS title bar via .navigationTitle +
+  .navigationSubtitle so the running Focus is visible everywhere.
+
+### Changed
+- Toolbar consolidated to .toolbar { ToolbarItemGroup(placement:
+  .primaryAction) } for auto-Liquid-Glass on macOS 26.
+- Activity always shown; Approvals only render when viewing the
+  currently-active Focus.
+- Default Focus's "default-at-launch" indicator is now a star in the
+  sidebar row, not a separate pill.
+- Inspector defaults hidden until the user opens it via the toolbar.
+
+### Removed
+- Settings → Sessions tab (replaced by the Focus sidebar).
+- "Cross-agent mirror" section in Settings → Advanced (the Mirror sheet
+  is now inline in the active card; the global auto-mirror toggle is
+  obsolete because mirror state is per-Focus).
+- Custom chip controls (FocusChipMenu, DefaultAtLaunchChipMenu),
+  ManageFocusesSheet, NewFocusSheet — replaced by sidebar + inline
+  Toggle/Picker.
+
+### Fixed
+- Helper version drift: the runtime helper hardcoded "0.4.0" while the
+  app target was bumped to 0.4.2, triggering an auto-restart loop on
+  every launch that left the XPC connection in a fragile state.
+  Introduced ManifoldVersion.current as a single source of truth that
+  both the helper and the app read.
+- Stale-rebuild signature spam: privileged app commands now distinguish
+  a stale rebuild (on-disk binary still well-signed) from a genuinely-
+  invalid signature, so local-development rebuilds no longer flood the
+  log with "Caller signature is invalid".
+- Built-in Focus flags: a one-shot correction migration repairs Default
+  Focuses seeded under v43 that ended up with column-default values
+  (mirror_to_both=1, is_built_in=0) instead of the intended
+  (false, true).
+
 ## [0.4.0] - 2026-05-03
 
 Initial public release. The app, runtime, MCP bridge, on-device PII
