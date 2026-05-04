@@ -144,8 +144,15 @@ private struct InheritedSection: View {
                 Text("No default sources.").font(ManifoldType.caption).foregroundStyle(.tertiary).padding(.leading, 18)
             } else {
                 ForEach(visibleSources) { source in
+                    let cowork = store.governance.policy(for: .cowork)?.allowedSourceIDs.contains(source.sourceID) ?? false
+                    let codex = store.governance.policy(for: .codex)?.allowedSourceIDs.contains(source.sourceID) ?? false
                     HStack(spacing: Spacing.s2) {
-                        FileTypeIcon(filename: source.displayName, isFolder: true, size: 12)
+                        FileTypeIcon(
+                            filename: source.displayName,
+                            isFolder: true,
+                            size: 12,
+                            tint: ManifoldPalette.sharingTint(coworkShared: cowork, codexShared: codex)
+                        )
                         Text(source.displayName).font(ManifoldType.body)
                         Spacer()
                         Text(source.originalRootPath.shortenedPath)

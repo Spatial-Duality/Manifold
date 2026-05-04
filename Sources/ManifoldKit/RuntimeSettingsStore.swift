@@ -38,4 +38,29 @@ public actor RuntimeSettingsStore {
             params: ["session_access_mode", mode.rawValue, now]
         )
     }
+
+    /// Read a generic boolean flag from `runtime_settings`. Returns `nil`
+    /// when the key has never been set, so callers can distinguish
+    /// "never seeded" from "explicitly false." Used by one-shot
+    /// migration / seeding gates.
+    public func flag(forKey key: String) throws -> Bool? {
+        guard let raw = try db.queryScalar(
+            "SELECT value FROM runtime_settings WHERE key = ? LIMIT 1",
+            params: [key]
+        ) else { return nil }
+        return raw == "1" || raw.lowercased() == "true"
+    }
+
+    /// Persist a generic boolean flag in `runtime_settings`.
+    public func setFlag(forKey key: String, value: Bool) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO runtime_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            params: [key, value ? "1" : "0", now]
+        )
+    }
 }

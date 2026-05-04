@@ -47,12 +47,6 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.tab.privacy")
                 }
             }
-            Tab("Sessions", systemImage: "person.badge.clock", value: SettingsPane.sessions.rawValue) {
-                pane(.sessions) {
-                    SessionsSettingsPane()
-                        .accessibilityIdentifier("settings.tab.sessions")
-                }
-            }
             Tab("Advanced", systemImage: "slider.horizontal.3", value: SettingsPane.advanced.rawValue) {
                 pane(.advanced) {
                     AdvancedSettingsPane()
@@ -92,7 +86,6 @@ private enum SettingsPane: String {
     case storage
     case mail
     case privacy
-    case sessions
     case advanced
 }
 

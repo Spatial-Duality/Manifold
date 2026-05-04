@@ -110,6 +110,20 @@ enum ManifoldPalette {
     static func agentSoft(_ agent: TargetApp) -> Color {
         agent == .codex ? codexSoft : claudeSoft
     }
+
+    /// Tint for a folder/source icon based on which assistants have it
+    /// shared. Reuses agent identity tokens so the icon reads at a glance:
+    /// green = both, Claude orange = Claude only, Codex blue = Codex only,
+    /// `.secondary` (neutral) = unshared. Used by the Access matrix and
+    /// inspector to color-code source rows.
+    static func sharingTint(coworkShared: Bool, codexShared: Bool) -> Color {
+        switch (coworkShared, codexShared) {
+        case (true, true):   return active
+        case (true, false):  return claude
+        case (false, true):  return codex
+        case (false, false): return .secondary
+        }
+    }
 }
 
 // MARK: - AgentMeta

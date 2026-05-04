@@ -80,6 +80,20 @@ struct AdvancedSettingsPane: View {
                     }
                     .controlSize(.small)
                     .accessibilityIdentifier("settings.advanced.resetDemoData")
+
+                    Button("Use demo data in Claude and Codex") {
+                        store.installDemoMCP()
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("settings.advanced.installDemoMCP")
+
+                    if let status = store.demoMCPInstallStatus {
+                        Text(status)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("settings.advanced.demoMCPStatus")
+                    }
                 }
             }
 

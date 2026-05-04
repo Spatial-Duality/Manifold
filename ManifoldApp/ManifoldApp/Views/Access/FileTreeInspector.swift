@@ -82,9 +82,16 @@ struct FileTreeInspector: View {
     private func header(for source: SourceRecord) -> some View {
         // Stack title above chips — inline they'd squeeze each other in
         // the ~320pt inspector.
-        VStack(alignment: .leading, spacing: 6) {
+        let cowork = store.governance.policy(for: .cowork)?.allowedSourceIDs.contains(source.sourceID) ?? false
+        let codex = store.governance.policy(for: .codex)?.allowedSourceIDs.contains(source.sourceID) ?? false
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: Spacing.s2) {
-                FileTypeIcon(filename: source.displayName, isFolder: true, size: 14)
+                FileTypeIcon(
+                    filename: source.displayName,
+                    isFolder: true,
+                    size: 14,
+                    tint: ManifoldPalette.sharingTint(coworkShared: cowork, codexShared: codex)
+                )
                 VStack(alignment: .leading, spacing: 1) {
                     Text(source.displayName)
                         .font(ManifoldType.bodyMedium)

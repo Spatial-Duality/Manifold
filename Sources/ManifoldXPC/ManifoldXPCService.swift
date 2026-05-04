@@ -43,7 +43,11 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
     private let registry = XPCConnectionRegistry()
 
     /// Creates an exported XPC service backed by the shared runtime instance.
-    public init(runtime: ManifoldRuntime, version: String = "0.4.0") {
+    /// Version defaults to `ManifoldVersion.current`, the single source of
+    /// truth that mirrors the app target's MARKETING_VERSION. Hardcoding
+    /// a literal here previously drifted from the app version, firing the
+    /// auto-restart-on-version-mismatch path on every launch.
+    public init(runtime: ManifoldRuntime, version: String = ManifoldVersion.current) {
         self.runtime = runtime
         self.agentVersion = version
         super.init()

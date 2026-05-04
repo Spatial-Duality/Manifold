@@ -13,6 +13,10 @@ struct FileTypeIcon: View {
     let filename: String
     var isFolder: Bool = false
     var size: CGFloat = 14
+    /// Override the spec color. Used for source-folder rows that color-code
+    /// by sharing state (green = both AIs, orange = Claude only, etc.). Nil
+    /// keeps the existing per-extension/folder palette behavior.
+    var tint: Color? = nil
 
     private var ext: String {
         (filename as NSString).pathExtension.lowercased()
@@ -50,7 +54,7 @@ struct FileTypeIcon: View {
     var body: some View {
         Image(systemName: spec.symbol)
             .font(.system(size: size, weight: .medium))
-            .foregroundStyle(spec.color)
+            .foregroundStyle(tint ?? spec.color)
             .frame(width: size + 4, height: size + 4)
             .accessibilityHidden(true)
     }

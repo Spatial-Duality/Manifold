@@ -67,6 +67,7 @@ struct ManifoldMCPServer {
 
         let xpc = ManifoldXPCClient()
         let connectionState = MCPConnectionState()
+        let demoRuntime = DemoMCPRuntime.isEnabled() ? DemoMCPRuntime(targetApp: targetApp) : nil
 
         @Sendable func connectRuntime(initializeParams paramsOverride: JSONDict? = nil) async -> String? {
             let params: JSONDict
@@ -94,11 +95,15 @@ struct ManifoldMCPServer {
         // Create MCP server
         let server = MCPServer(name: "manifold", version: version)
         await server.registerInitializeHandler { params in
+            guard demoRuntime == nil else { return }
             _ = await connectRuntime(initializeParams: params)
         }
 
         // Register tools
         await server.registerTools(ToolDefinitions.allTools()) { name, arguments in
+            if let demoRuntime {
+                return JSONDict(demoRuntime.callTool(name: name, arguments: arguments.value))
+            }
             let existingConnectionID = await connectionState.get()
             let runtimeConnectionID: String?
             if let existingConnectionID {
@@ -133,6 +138,9 @@ struct ManifoldMCPServer {
             MCPResource(name: "Exec Status", uri: "manifold://exec/status", description: "ManifoldExec sandbox status"),
             MCPResource(name: "Knowledge Graph", uri: "manifold://graph", description: "Scoped graph query status"),
         ]) { uri in
+            if let demoRuntime, let text = demoRuntime.resourceText(uri: uri) {
+                return text
+            }
             let existingConnectionID = await connectionState.get()
             let runtimeConnectionID: String?
             if let existingConnectionID {

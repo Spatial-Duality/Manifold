@@ -189,6 +189,35 @@ extension ManifoldXPCService {
             try await runtime.fileVisibilityOverrideStore.setManyOverrides(overrides)
             return ["ok": true, "count": overrides.count]
 
+        case "previewScopeMirror":
+            // Compute the diff that would bring `to` into alignment with `from`.
+            // No side effects — the UI calls this to render a confirmation sheet.
+            guard let fromRaw = payload["from"] as? String,
+                  let from = TargetApp(rawValue: fromRaw),
+                  let toRaw = payload["to"] as? String,
+                  let to = TargetApp(rawValue: toRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let plan = try await ScopeMirror.preview(
+                from: from,
+                to: to,
+                policyStore: runtime.policyStore,
+                overrideStore: runtime.fileVisibilityOverrideStore
+            )
+            return ["plan": try XPCJSON.object(from: plan)]
+
+        case "applyScopeMirror":
+            // Apply a previously-computed plan. Idempotent and re-runnable.
+            guard let plan = try decodeOptionalPayload(ScopeMirrorPlan.self, key: "plan", from: payload) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await ScopeMirror.apply(
+                plan,
+                policyStore: runtime.policyStore,
+                overrideStore: runtime.fileVisibilityOverrideStore
+            )
+            return ["ok": true]
+
         case "listAccessTemplatesForAgent":
             guard let agentRaw = payload["agent"] as? String,
                   let agent = TargetApp(rawValue: agentRaw) else {
@@ -232,8 +261,137 @@ extension ManifoldXPCService {
             try await runtime.accessStore.deletePreset(id: presetID)
             return ["ok": true]
 
+        case "updatePresetMirror":
+            // Patch the mirror_to_both flag on a Focus. Drives the
+            // "Separate sharing" toggle.
+            guard let presetID = payload["presetID"] as? String,
+                  let mirror = payload["mirrorToBoth"] as? Bool else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let preset = try await runtime.accessStore.updatePresetMirror(
+                presetID: presetID, mirrorToBoth: mirror
+            )
+            return ["preset": try XPCJSON.object(from: preset)]
+
+        case "updatePresetTargetApp":
+            // Patch target_app on a Focus. nil clears (= both AIs).
+            guard let presetID = payload["presetID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let targetApp = (payload["targetApp"] as? String).flatMap(TargetApp.init(rawValue:))
+            let preset = try await runtime.accessStore.updatePresetTargetApp(
+                presetID: presetID, targetApp: targetApp
+            )
+            return ["preset": try XPCJSON.object(from: preset)]
+
+        case "updatePresetSettings":
+            // Settings-only patch for the Focus auto-save fan-out.
+            guard let presetID = payload["presetID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let requestDetail = (payload["requestDetailLevel"] as? String).flatMap(AccessRecordingLevel.init(rawValue:))
+            let noteCapture = (payload["noteCaptureMode"] as? String).flatMap(SessionNoteCaptureMode.init(rawValue:))
+            let allowMemory = payload["allowFileMemory"] as? Bool ?? false
+            let summaryFraming = payload["summaryFraming"] as? String
+            let sensitivity = (payload["emailSensitivity"] as? String).flatMap(EmailSensitivityLevel.init(rawValue:))
+            let preset = try await runtime.accessStore.updatePresetSettings(
+                presetID: presetID,
+                requestDetailLevel: requestDetail,
+                noteCaptureMode: noteCapture,
+                allowFileMemory: allowMemory,
+                summaryFraming: summaryFraming,
+                emailSensitivity: sensitivity
+            )
+            return ["preset": try XPCJSON.object(from: preset)]
+
+        case "updatePresetFileScopes":
+            guard let presetID = payload["presetID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let scopes = try decodePayload([FileSelectionScope].self, key: "fileScopes", from: payload, default: [])
+            try await runtime.accessStore.updatePresetFileScopes(presetID: presetID, fileScopes: scopes)
+            return ["ok": true]
+
+        case "setPresetOverride":
+            guard let presetID = payload["presetID"] as? String,
+                  let sourceID = payload["sourceID"] as? String,
+                  let relativePath = payload["relativePath"] as? String,
+                  let decisionRaw = payload["decision"] as? String,
+                  let decision = FileVisibilityOverrideDecision(rawValue: decisionRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let isDirectory = payload["isDirectory"] as? Bool ?? false
+            try await runtime.accessStore.setPresetOverride(
+                presetID: presetID,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory,
+                decision: decision
+            )
+            return ["ok": true]
+
+        case "clearPresetOverride":
+            guard let presetID = payload["presetID"] as? String,
+                  let sourceID = payload["sourceID"] as? String,
+                  let relativePath = payload["relativePath"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let isDirectory = payload["isDirectory"] as? Bool ?? false
+            try await runtime.accessStore.clearPresetOverride(
+                presetID: presetID,
+                sourceID: sourceID,
+                relativePath: relativePath,
+                isDirectory: isDirectory
+            )
+            return ["ok": true]
+
+        case "savePresetOverrides":
+            guard let presetID = payload["presetID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let overrides = try decodePayload([FileVisibilityOverrideRecord].self, key: "overrides", from: payload, default: [])
+            try await runtime.accessStore.savePresetOverrides(presetID: presetID, overrides: overrides)
+            return ["ok": true, "count": overrides.count]
+
+        case "presetOverrides":
+            guard let presetID = payload["presetID"] as? String,
+                  let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let overrides = try await runtime.accessStore.presetOverrides(presetID: presetID, agent: agent)
+            return ["overrides": try XPCJSON.object(from: overrides)]
+
         case "startSessionFromTemplate":
             return try await startSessionFromTemplateCommand(payload: payload)
+
+        case "setActiveFocus":
+            // Atomic Focus switch. Ends the current grant for the Focus's
+            // target agent, swaps the agent's standing scope + per-file
+            // overrides to match the saved Focus, then starts a new grant
+            // with the Focus's settings via the existing template path.
+            return try await setActiveFocusCommand(payload: payload)
+
+        case "setDefaultAtLaunch":
+            // Mark a preset as the default-at-launch for its target agent
+            // (or clear, by passing presetID = null/missing).
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let presetID = payload["presetID"] as? String
+            try await runtime.accessStore.setDefaultAtLaunch(presetID: presetID, for: agent)
+            return ["ok": true]
+
+        case "defaultPresetForLaunch":
+            guard let agentRaw = payload["agent"] as? String,
+                  let agent = TargetApp(rawValue: agentRaw) else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            if let preset = try await runtime.accessStore.defaultPresetForLaunch(agent: agent) {
+                return ["preset": try XPCJSON.object(from: preset)]
+            }
+            return [:]
 
         case "getFilterMode":
             // Effective per-agent mode (per-agent override > global > .off).
@@ -1331,9 +1489,17 @@ extension ManifoldXPCService {
         let allSources = try await runtime.grantStore.allSources()
         let knownDisplayNamesByID = Dictionary(uniqueKeysWithValues: allSources.map { ($0.sourceID, $0.displayName) })
 
+        // Per-agent scope read: a Focus in mirror mode has rows with
+        // agent='' that match every agent; a separate-sharing Focus has
+        // per-agent rows. The agent-aware accessor handles both cases.
+        // Falls back to the snapshot's union if the per-agent read
+        // returns empty AND the union is non-empty (defensive against
+        // legacy presets that might have rows without the agent column
+        // populated correctly).
         var skippedSources: [[String: String]] = []
         var seenSkipped = Set<String>()
-        let templateScopes = snapshot.fileScopes
+        let agentScopes = try await runtime.accessStore.fileScopes(presetID: presetID, agent: targetApp)
+        let templateScopes = !agentScopes.isEmpty ? agentScopes : snapshot.fileScopes
         let survivingScopes: [FileSelectionScope] = templateScopes.compactMap { scope in
             if activeIDs.contains(scope.sourceID) {
                 return scope
@@ -1347,8 +1513,10 @@ extension ManifoldXPCService {
             return nil
         }
 
-        // Email IDs: keep only ones the email store still knows about.
-        let templateEmailIDs = snapshot.emailIDs
+        // Email IDs: per-agent read with same agent='' OR agent=target
+        // semantics, falling back to the snapshot union if empty.
+        let agentEmailIDs = try await runtime.accessStore.emailIDs(presetID: presetID, agent: targetApp)
+        let templateEmailIDs = !agentEmailIDs.isEmpty ? agentEmailIDs : snapshot.emailIDs
         var missingEmailIDs: [String] = []
         let survivingEmailIDs: Set<String>
         if templateEmailIDs.isEmpty {
@@ -1359,9 +1527,31 @@ extension ManifoldXPCService {
             missingEmailIDs = templateEmailIDs.filter { !known.contains($0) }
         }
 
-        let summaryFraming = payload["summaryFraming"] as? String
-        let noteCaptureMode = (payload["noteCaptureMode"] as? String).flatMap(SessionNoteCaptureMode.init(rawValue:)) ?? .off
-        let sensitivity = (payload["emailSensitivity"] as? String).flatMap(EmailSensitivityFilter.Level.init(rawValue:))
+        // Settings flow from the saved Focus first, with caller-provided
+        // payload values taking precedence as one-shot overrides — matches
+        // how the UI passes through transient session-start parameters
+        // without rewriting the saved Focus.
+        let summaryFraming = (payload["summaryFraming"] as? String)
+            ?? snapshot.preset.summaryFraming
+        let noteCaptureMode = (payload["noteCaptureMode"] as? String)
+            .flatMap(SessionNoteCaptureMode.init(rawValue:))
+            ?? snapshot.preset.noteCaptureMode
+            ?? .off
+        let sensitivity: EmailSensitivityFilter.Level? = {
+            if let raw = payload["emailSensitivity"] as? String,
+               let level = EmailSensitivityFilter.Level(rawValue: raw) {
+                return level
+            }
+            if let saved = snapshot.preset.emailSensitivity {
+                return EmailSensitivityFilter.Level(rawValue: saved.rawValue)
+            }
+            return nil
+        }()
+        let requestDetailLevel: AccessRecordingLevel? = (payload["requestDetailLevel"] as? String)
+            .flatMap(AccessRecordingLevel.init(rawValue:))
+            ?? snapshot.preset.requestDetailLevel
+        let memoryAccessEnabled: Bool = (payload["memoryAccessEnabled"] as? Bool)
+            ?? snapshot.preset.allowFileMemory
 
         let state = try await startGatewaySession(
             targetApp: targetApp,
@@ -1369,8 +1559,8 @@ extension ManifoldXPCService {
             selectedEmailIDs: survivingEmailIDs,
             summaryFraming: summaryFraming,
             noteCaptureMode: noteCaptureMode,
-            requestDetailLevel: nil,
-            memoryAccessEnabled: false,
+            requestDetailLevel: requestDetailLevel,
+            memoryAccessEnabled: memoryAccessEnabled,
             sensitivityOverride: sensitivity
         )
 
@@ -1383,6 +1573,75 @@ extension ManifoldXPCService {
             "missingEmailIDs": missingEmailIDs,
             "selectedEmailCount": try activeEmailCount(for: state.grant),
         ]
+    }
+
+    /// Atomic Focus activation. Three-store swap per agent: end any
+    /// active grant, replace the agent's standing scope to match the
+    /// Focus's per-agent saved file_scopes, replace the agent's
+    /// file_visibility_overrides with the Focus's saved overrides, then
+    /// start a new grant via the template path (which carries the
+    /// Focus's settings forward).
+    ///
+    /// Multi-agent activation: when `target_app=NULL`, the swap+start
+    /// runs for each agent in `[.cowork, .codex]`. Each agent reads its
+    /// own filtered scope rows (`agent='' OR agent=current`) so
+    /// mirror-mode Focuses (single set with agent='') and
+    /// separate-sharing Focuses (per-agent rows) both work correctly.
+    ///
+    /// Idempotent. Re-running on the already-active Focus is safe.
+    private func setActiveFocusCommand(payload: [String: Any]) async throws -> [String: Any] {
+        guard let presetID = payload["presetID"] as? String else {
+            throw ManifoldXPCError.invalidPayload
+        }
+        guard let snapshot = try await runtime.accessStore.loadPreset(id: presetID) else {
+            throw ManifoldXPCError.invalidPayload
+        }
+
+        // Resolve the set of agents this activation targets.
+        // - Explicit payload override wins.
+        // - Otherwise, target_app=NULL → both AIs; specific agent → just that.
+        let explicitTargetApp = (payload["targetApp"] as? String).flatMap(TargetApp.init(rawValue:))
+        let targetAgents: [TargetApp]
+        if let explicit = explicitTargetApp {
+            targetAgents = [explicit]
+        } else if let presetAgent = snapshot.preset.targetApp {
+            targetAgents = [presetAgent]
+        } else {
+            targetAgents = TargetApp.allCases  // null → both
+        }
+
+        var lastResult: [String: Any]? = nil
+        for agent in targetAgents {
+            // 1. End any active grant for this agent (idempotent — no-op if none).
+            if let active = try await runtime.grantStore.activeGrant(targetApp: agent, profileID: "default") {
+                _ = try await endSessionGateway(grantID: active.grantID)
+            }
+
+            // 2. Swap standing scope: per-agent read from the Focus
+            //    (agent='' OR agent=current_agent) → agent's policy.
+            let agentScopes = try await runtime.accessStore.fileScopes(presetID: presetID, agent: agent)
+            var policy = try await runtime.policyStore.policy(for: agent)
+            policy.allowedSourceIDs = Set(agentScopes.map(\.sourceID))
+            try await runtime.policyStore.updatePolicy(policy)
+
+            // 3. Swap per-file overrides — same per-agent read filter.
+            try await runtime.fileVisibilityOverrideStore.clearAllOverrides(agent: agent)
+            let agentOverrides = try await runtime.accessStore.presetOverrides(presetID: presetID, agent: agent)
+            if !agentOverrides.isEmpty {
+                try await runtime.fileVisibilityOverrideStore.setManyOverrides(agentOverrides)
+            }
+
+            // 4. Start a new grant for this agent via the existing
+            //    template path (carries settings forward).
+            var startPayload: [String: Any] = ["presetID": presetID]
+            startPayload["targetApp"] = agent.rawValue
+            lastResult = try await startSessionFromTemplateCommand(payload: startPayload)
+        }
+
+        // Return the last agent's grant info — sufficient for the UI's
+        // single-grant-aware code paths. Multi-agent callers can re-query
+        // active grants if they need both.
+        return lastResult ?? ["ok": true]
     }
 
     private func activeGrantState(preferredAgent: TargetApp) async throws -> (grant: GrantRecord?, sources: [GrantSourceRecord], targetApp: TargetApp?) {

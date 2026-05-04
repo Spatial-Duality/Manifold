@@ -11,10 +11,15 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 public struct ConfigWriter {
     private let binaryPath: String
     private let homeDir: URL
+    private let demoMode: Bool
 
     /// Returns the CLI arguments that identify the target agent to `manifold-mcp`.
-    public static func expectedArguments(for agent: TargetApp) -> [String] {
-        ["--agent", agent.rawValue]
+    public static func expectedArguments(for agent: TargetApp, demoMode: Bool = false) -> [String] {
+        var arguments = ["--agent", agent.rawValue]
+        if demoMode {
+            arguments.append("--demo")
+        }
+        return arguments
     }
 
     /// Returns the Manifold MCP table from Codex TOML config, preserving TOML
@@ -49,14 +54,26 @@ public struct ConfigWriter {
 
     /// Creates a config writer rooted at the current user's home directory.
     public init(binaryPath: String) {
+        self.init(binaryPath: binaryPath, demoMode: false)
+    }
+
+    /// Creates a config writer rooted at the current user's home directory.
+    public init(binaryPath: String, demoMode: Bool) {
         self.binaryPath = binaryPath
         self.homeDir = FileManager.default.homeDirectoryForCurrentUser
+        self.demoMode = demoMode
     }
 
     /// Creates a config writer with a custom home directory for tests or controlled installs.
     public init(binaryPath: String, homeDir: URL) {
+        self.init(binaryPath: binaryPath, homeDir: homeDir, demoMode: false)
+    }
+
+    /// Creates a config writer with a custom home directory for tests or controlled installs.
+    public init(binaryPath: String, homeDir: URL, demoMode: Bool) {
         self.binaryPath = binaryPath
         self.homeDir = homeDir
+        self.demoMode = demoMode
     }
 
     /// Installs or updates Manifold config for Claude Desktop, Claude Code, and Codex,
@@ -279,7 +296,7 @@ public struct ConfigWriter {
     private func jsonMCPServerConfig(agent: TargetApp) -> [String: Any] {
         [
             "command": binaryPath,
-            "args": Self.expectedArguments(for: agent),
+            "args": Self.expectedArguments(for: agent, demoMode: demoMode),
         ]
     }
 
@@ -299,10 +316,13 @@ public struct ConfigWriter {
     }
 
     private func codexMCPServerBlock(agent: TargetApp) -> String {
-        """
+        let args = Self.expectedArguments(for: agent, demoMode: demoMode)
+            .map { "\"\($0)\"" }
+            .joined(separator: ", ")
+        return """
         [mcp_servers.manifold]
         command = "\(binaryPath)"
-        args = ["\(Self.expectedArguments(for: agent)[0])", "\(Self.expectedArguments(for: agent)[1])"]
+        args = [\(args)]
         """
     }
 

@@ -37,6 +37,23 @@ struct ConfigWriterTests {
         #expect(servers.count == 1, "Only manifold server should be present")
     }
 
+    @Test("Demo install configures Claude Desktop with demo argument")
+    func demoClaudeInstallAddsDemoArgument() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home, demoMode: true)
+        try writer.installClaudeDesktop()
+
+        let configFile = home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
+        let data = try Data(contentsOf: configFile)
+        let config = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let servers = config["mcpServers"] as! [String: Any]
+        let manifold = servers["manifold"] as! [String: Any]
+
+        #expect(manifold["args"] as? [String] == ["--agent", "cowork", "--demo"])
+    }
+
     @Test("Install preserves existing MCP servers")
     func preserveExistingServers() throws {
         let home = try makeTempHome()
@@ -151,6 +168,20 @@ struct ConfigWriterTests {
         #expect(content.contains("[mcp_servers.manifold]"))
         #expect(content.contains("command = \"/usr/bin/manifold-mcp\""))
         #expect(content.contains("args = [\"--agent\", \"codex\"]"))
+    }
+
+    @Test("Demo install configures Codex with demo argument")
+    func demoCodexInstallAddsDemoArgument() throws {
+        let home = try makeTempHome()
+        defer { cleanup(home) }
+
+        let writer = ConfigWriter(binaryPath: "/usr/bin/manifold-mcp", homeDir: home, demoMode: true)
+        try writer.installCodex()
+
+        let content = try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
+        #expect(content.contains("args = [\"--agent\", \"codex\", \"--demo\"]"))
+        let block = try #require(ConfigWriter.manifoldCodexServerBlock(in: content))
+        #expect(ConfigWriter.manifoldCodexServerArguments(in: block) == ["--agent", "codex", "--demo"])
     }
 
     @Test("Codex install appends to existing config")

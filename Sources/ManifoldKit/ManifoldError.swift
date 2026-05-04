@@ -13,6 +13,7 @@ public enum ManifoldError: Error, LocalizedError {
     case materialization(String)
     case promotion(String)
     case email(String)
+    case invalidState(String)
 
     public var errorDescription: String? {
         switch self {
@@ -25,6 +26,7 @@ public enum ManifoldError: Error, LocalizedError {
         case .materialization(let msg): return "Materialization error: \(msg)"
         case .promotion(let msg): return "Promotion error: \(msg)"
         case .email(let msg): return "Email error: \(msg)"
+        case .invalidState(let msg): return msg
         }
     }
 }

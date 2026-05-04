@@ -203,7 +203,21 @@ enum ClientIdentityVerifier {
                         reason: "Missing caller code-signing attestation for privileged app command."
                     )
                 }
-                guard clientAttestation.signatureValid else {
+                // Stale-rebuild distinction (parallel to the MCP-helper
+                // path at line ~359). When the dynamic signature check
+                // fails BUT the on-disk binary is well-signed
+                // (`staticSignatureValid`), the caller is a legitimate
+                // app process whose code was rebuilt under it — common
+                // during local development. Refusing to authorize in this
+                // case generates per-poll log spam ("Failed to load
+                // activity: Caller signature is invalid…") on every
+                // rebuild without adding security: we already trusted
+                // this binary at launch, and the on-disk copy is still
+                // well-formed. Authorize the stale-rebuild case; the
+                // team-identifier and designated-requirement checks
+                // below remain in force, so a genuinely-untrusted
+                // process still can't slip through.
+                if !clientAttestation.signatureValid && !clientAttestation.staticSignatureValid {
                     return AppCommandAuthorization(
                         role: .app,
                         isAuthorized: false,

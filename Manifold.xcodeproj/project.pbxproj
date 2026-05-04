@@ -16,11 +16,12 @@
 		124B765B5A4FCF6DAA85FF70 /* StorageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F98624E0F332E367EEC45F /* StorageModel.swift */; };
 		152085B000FDA2B89960DC53 /* HistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16F4BF0F58ACF058AB1474A /* HistoryModel.swift */; };
 		15DA67171F7D440A1374799B /* ManifoldStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1EABAD0A1EA2475E185D503 /* ManifoldStore.swift */; };
+		15FFCE3E4A969014935A3AFD /* MirrorScopeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECFD2B1D0E3E978E8F5243E /* MirrorScopeSheet.swift */; };
 		16ACE634A4D5085AFD147076 /* EmptyMailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7683F22760142789E9E2424 /* EmptyMailView.swift */; };
 		17F701EEBA3AA625259D7306 /* TimeLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83794677BF621BEDB36F8287 /* TimeLabel.swift */; };
 		196AE094B9F3745ABC23A2C5 /* MenuBarPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B357F3F429090B981E7B6892 /* MenuBarPanelView.swift */; };
+		1C66D4A255AD290333BD960B /* MenuBarManifoldIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3E97312A02CE3B0003E6CC /* MenuBarManifoldIcon.swift */; };
 		1E8D80EBDAD1320A3DBA030D /* EmptyStateIllustration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4331F73A42EB2B126226A9EB /* EmptyStateIllustration.swift */; };
-		1EF0A47D549ECFB495F6F88B /* MenuBarManifoldIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9CD474D151602E6ABECB50B /* MenuBarManifoldIcon.swift */; };
 		1F4BA2DB9FAB796928BC9A7F /* EmailAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18233197B24B119F64466148 /* EmailAccountModel.swift */; };
 		1F69A3306AEE8A8E59FB8E2E /* SessionChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5813EE1521D4B8443BA33982 /* SessionChip.swift */; };
 		2049BC2D5AA1902B06F61EF5 /* AppRuntimeClient+AccessRedesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B9947B6951D0CCEAC92D04 /* AppRuntimeClient+AccessRedesign.swift */; };
@@ -33,6 +34,7 @@
 		33F64AA5DA0EDD9AC03F8D5D /* EmailAccountSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2820904D17C49E1CF521450 /* EmailAccountSetupView.swift */; };
 		35F6C06532084D0C604F0CE3 /* ApprovalResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97FF52A70464D80386C328E6 /* ApprovalResolution.swift */; };
 		402B9C93576224F1E53A6C74 /* RuleListTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07663F34627D1E9A9D3283D9 /* RuleListTable.swift */; };
+		4313FA0008309800C4A522CE /* ManifoldMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C8D48BB1D7A49E96258BA1 /* ManifoldMark.swift */; };
 		44A5C067DED843768F7CAEB6 /* ManifoldStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D54697975287E64B2E0BE35 /* ManifoldStoreTests.swift */; };
 		46040B11E204F2D8966FA96B /* EmailRulesModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A77A01E8015C708884AEBE6D /* EmailRulesModelTests.swift */; };
 		4FCBD06463E38521207AEABC /* ManifoldTypeDynamicTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32DAF062A47D937C99B18745 /* ManifoldTypeDynamicTypeTests.swift */; };
@@ -131,11 +133,9 @@
 		E505F0349C209B2C41EE77E6 /* RuleInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BFC0D540BFCD85B2F8D3CE /* RuleInspector.swift */; };
 		E5E0C0630A050CEA7BED8AB8 /* StatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A51646FD4553B0768C3E88 /* StatusBar.swift */; };
 		E73ACFFE5B23740791F71E88 /* IntegrationHealthModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7981C30F5FF4898B4C65B0 /* IntegrationHealthModel.swift */; };
-		E9E298E427A7AA2F6835D58A /* SessionsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */; };
 		EB3874B6B5D6745667AA989A /* MailSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8049B04016C58516B4B28E34 /* MailSettingsPane.swift */; };
 		EDB5C5B83399E55B3E524DCC /* WorkModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8E4E39B96F337AFE711560 /* WorkModel.swift */; };
 		EEC5E06B942FC7FB102B405E /* DomainPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20C4114B01F2F0D7E024DD0 /* DomainPreset.swift */; };
-		EEEAACBFC93AEBE5F5ED34F9 /* ManifoldMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984F3F50906AC7AACDEF41EB /* ManifoldMark.swift */; };
 		F0957F35E632AD6870949211 /* AccessNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2A7E8264E1289A8C10061F /* AccessNavigator.swift */; };
 		F106EA06BC7844C1498C2662 /* EmptyFoldersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E25C1DC01DAEDD49918C3A1 /* EmptyFoldersView.swift */; };
 		F4125183FEADD113134BF557 /* AddMailAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C7CCA257A2A52565A9E8CD3 /* AddMailAccountSheet.swift */; };
@@ -201,18 +201,20 @@
 		4C53DB47E132540D46B662BD /* PolicyModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolicyModel.swift; sourceTree = "<group>"; };
 		4D54697975287E64B2E0BE35 /* ManifoldStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldStoreTests.swift; sourceTree = "<group>"; };
 		4E50FA851604BE30695DFD21 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
+		4ECFD2B1D0E3E978E8F5243E /* MirrorScopeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MirrorScopeSheet.swift; sourceTree = "<group>"; };
 		4FE9AE4B50EB41439D440FED /* ManifoldIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldIntents.swift; sourceTree = "<group>"; };
 		549CBBBB207F1B4B91F9BE55 /* FileTreeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeInspector.swift; sourceTree = "<group>"; };
 		564B55046AEBA3B1643FE2FE /* Manifold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manifold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		571405EF8AB67DEA07F1F219 /* Manifold.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manifold.entitlements; sourceTree = "<group>"; };
 		5813EE1521D4B8443BA33982 /* SessionChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionChip.swift; sourceTree = "<group>"; };
 		595F5C846507541ACA85E20B /* FileInspectorPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileInspectorPane.swift; sourceTree = "<group>"; };
+		59C8D48BB1D7A49E96258BA1 /* ManifoldMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldMark.swift; sourceTree = "<group>"; };
+		5B3E97312A02CE3B0003E6CC /* MenuBarManifoldIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarManifoldIcon.swift; sourceTree = "<group>"; };
 		5C2A7E8264E1289A8C10061F /* AccessNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessNavigator.swift; sourceTree = "<group>"; };
 		5D518E521BF7064410F259E4 /* SessionDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDiffView.swift; sourceTree = "<group>"; };
 		60C7BB3B39D5C42574132D78 /* RulesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesModel.swift; sourceTree = "<group>"; };
 		62382FE592DCD22D0AE9F7BE /* AccessHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessHistoryView.swift; sourceTree = "<group>"; };
 		63E586963394EC09E9DC6259 /* ManifoldAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManifoldAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsSettingsPane.swift; sourceTree = "<group>"; };
 		664794E534D54BE964BC7CFF /* GradientAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradientAvatar.swift; sourceTree = "<group>"; };
 		66D7A3DF542AE6F27162951B /* AtmosphericBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphericBackground.swift; sourceTree = "<group>"; };
 		6887F8452E06D8FB1F5BF979 /* TitleSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleSequence.swift; sourceTree = "<group>"; };
@@ -233,7 +235,6 @@
 		936284577C217445D9730BEA /* LedgerNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerNavigation.swift; sourceTree = "<group>"; };
 		978C2B7B76C981259BCA1651 /* ClaudeRelauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeRelauncher.swift; sourceTree = "<group>"; };
 		97FF52A70464D80386C328E6 /* ApprovalResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalResolution.swift; sourceTree = "<group>"; };
-		984F3F50906AC7AACDEF41EB /* ManifoldMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifoldMark.swift; sourceTree = "<group>"; };
 		98E2A236B1CF9FD5685429A9 /* ThreadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadsView.swift; sourceTree = "<group>"; };
 		9BBCC82BD36A4E9865B08D97 /* UnifiedLedgerSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedLedgerSidebar.swift; sourceTree = "<group>"; };
 		9FD5E23F7EE08EFAF8A9248B /* ConnectionEventsStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEventsStrip.swift; sourceTree = "<group>"; };
@@ -245,7 +246,6 @@
 		A7683F22760142789E9E2424 /* EmptyMailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyMailView.swift; sourceTree = "<group>"; };
 		A77A01E8015C708884AEBE6D /* EmailRulesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRulesModelTests.swift; sourceTree = "<group>"; };
 		A83032B9351A37B478098245 /* UpdaterModelClassifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterModelClassifyTests.swift; sourceTree = "<group>"; };
-		A9CD474D151602E6ABECB50B /* MenuBarManifoldIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarManifoldIcon.swift; sourceTree = "<group>"; };
 		AAF7A39E9DC920D0FFC0413F /* Manifold */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifold; path = .; sourceTree = SOURCE_ROOT; };
 		ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusDot.swift; sourceTree = "<group>"; };
 		ACE0BFDF787B5C2CB0D3B87C /* Pill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pill.swift; sourceTree = "<group>"; };
@@ -442,8 +442,8 @@
 				B082C6CC15B5FEB657FFA34A /* FilterModeSection.swift */,
 				EC65884C8C989BEB07CAD993 /* GeneralSettingsPane.swift */,
 				8049B04016C58516B4B28E34 /* MailSettingsPane.swift */,
+				4ECFD2B1D0E3E978E8F5243E /* MirrorScopeSheet.swift */,
 				134F1EB5D50773A5809E0E27 /* PrivacySettingsPane.swift */,
-				65844708C1365B2F3BA7DA1C /* SessionsSettingsPane.swift */,
 				C68384EB81C759FFC811CBBD /* SettingsView.swift */,
 				009EA04550A7634D95791F57 /* StorageSettingsPane.swift */,
 			);
@@ -458,7 +458,6 @@
 				ABDF483BEEFBCC0A7099CD93 /* AgentStatusDot.swift */,
 				97FF52A70464D80386C328E6 /* ApprovalResolution.swift */,
 				66D7A3DF542AE6F27162951B /* AtmosphericBackground.swift */,
-				984F3F50906AC7AACDEF41EB /* ManifoldMark.swift */,
 				B1B3C61AB4243F58346D1B8E /* CategoryChip.swift */,
 				2503627A27A75894E6EF02BF /* CommitLadder.swift */,
 				9FD5E23F7EE08EFAF8A9248B /* ConnectionEventsStrip.swift */,
@@ -467,7 +466,8 @@
 				2EB6201733D6CF2A55D93970 /* FileTypeIcon.swift */,
 				664794E534D54BE964BC7CFF /* GradientAvatar.swift */,
 				6F762E94653BA267336BB76A /* KbdLabel.swift */,
-				A9CD474D151602E6ABECB50B /* MenuBarManifoldIcon.swift */,
+				59C8D48BB1D7A49E96258BA1 /* ManifoldMark.swift */,
+				5B3E97312A02CE3B0003E6CC /* MenuBarManifoldIcon.swift */,
 				CE8504BD8549930002957BEF /* PathLabel.swift */,
 				ACE0BFDF787B5C2CB0D3B87C /* Pill.swift */,
 				A2C04D501D14B0B48930B94C /* PresetCard.swift */,
@@ -815,7 +815,6 @@
 				35F6C06532084D0C604F0CE3 /* ApprovalResolution.swift in Sources */,
 				909FC848710129D40CD5D96B /* Atmosphere.metal in Sources */,
 				D87630AB8C3F4543A734FD02 /* AtmosphericBackground.swift in Sources */,
-				EEEAACBFC93AEBE5F5ED34F9 /* ManifoldMark.swift in Sources */,
 				78C694F935FF22E93BE2F227 /* CategoryChip.swift in Sources */,
 				F7982EE1D1DA30013BE0677C /* ClaudeRelauncher.swift in Sources */,
 				C07539145FD00F66E2A60B46 /* CommitLadder.swift in Sources */,
@@ -863,13 +862,15 @@
 				5EEF5F79F25A66B50D2BCFBE /* MailWindowView.swift in Sources */,
 				9D0CFFFEBF16A5ABAE21E35B /* ManifoldApp.swift in Sources */,
 				81E9362D67F432609416C52C /* ManifoldIntents.swift in Sources */,
+				4313FA0008309800C4A522CE /* ManifoldMark.swift in Sources */,
 				A74EAF479C858C31957B4FD8 /* ManifoldStore+Commands.swift in Sources */,
 				AC07102B386DB0CB25D8E322 /* ManifoldStore+ConnectionState.swift in Sources */,
 				15DA67171F7D440A1374799B /* ManifoldStore.swift in Sources */,
 				B858CA7D0F09836A2CCC3E46 /* ManifoldTypes.swift in Sources */,
 				BA90100002414E7F10873EA2 /* MatchPreview.swift in Sources */,
-				1EF0A47D549ECFB495F6F88B /* MenuBarManifoldIcon.swift in Sources */,
+				1C66D4A255AD290333BD960B /* MenuBarManifoldIcon.swift in Sources */,
 				196AE094B9F3745ABC23A2C5 /* MenuBarPanelView.swift in Sources */,
+				15FFCE3E4A969014935A3AFD /* MirrorScopeSheet.swift in Sources */,
 				771A9CD50913839945E83A55 /* NewRuleSheet.swift in Sources */,
 				58DA505771335E7D8FA3C52B /* PathLabel.swift in Sources */,
 				8D67276510234D47B7ED9E1C /* Pill.swift in Sources */,
@@ -895,7 +896,6 @@
 				841965F5D9E60BE45FD9A022 /* SessionModel.swift in Sources */,
 				0260E84BE9451B7342295D1A /* SessionPrimitives.swift in Sources */,
 				83EFC6BC80C27D65B4B67E1D /* SessionWorkbenchModel.swift in Sources */,
-				E9E298E427A7AA2F6835D58A /* SessionsSettingsPane.swift in Sources */,
 				8B276B4DB9AE3C9EA9F0FFCA /* SettingsView.swift in Sources */,
 				B68F43799D17150AE093B5CC /* SetupModel.swift in Sources */,
 				81BF7B5E4D3BE68C54385120 /* SharingState.swift in Sources */,
@@ -1141,7 +1141,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.2;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold;
 				PRODUCT_NAME = Manifold;
 				SDKROOT = macosx;
@@ -1212,7 +1212,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.2;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.spatialduality.manifold;
 				PRODUCT_NAME = Manifold;
 				SDKROOT = macosx;

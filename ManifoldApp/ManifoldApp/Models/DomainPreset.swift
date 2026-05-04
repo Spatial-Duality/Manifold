@@ -71,7 +71,7 @@ struct DomainPreset: Identifiable, Hashable, Sendable {
             description: "No specific domain. Default settings for any type of work.",
             suggestedSources: [],
             emailSensitivity: .moderate,
-            summaryFraming: "Work session"
+            summaryFraming: "General Focus"
         ),
     ]
 }

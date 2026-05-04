@@ -218,4 +218,19 @@ struct FileVisibilityOverrideStoreTests {
         #expect(try await store.overrides(agent: .cowork).count == 1)
         #expect(try await store.overrides(agent: .codex).count == 1)
     }
+
+    @Test("clearAllOverrides wipes one agent's set without touching the other")
+    func clearAllOverridesScopedByAgent() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.setManyOverrides([
+            FileVisibilityOverrideRecord(agent: .cowork, sourceID: "s", relativePath: "a", isDirectory: false, decision: .allow),
+            FileVisibilityOverrideRecord(agent: .cowork, sourceID: "s", relativePath: "b", isDirectory: false, decision: .deny),
+            FileVisibilityOverrideRecord(agent: .codex, sourceID: "s", relativePath: "c", isDirectory: false, decision: .allow),
+        ])
+        try await store.clearAllOverrides(agent: .cowork)
+        #expect(try await store.overrides(agent: .cowork).isEmpty)
+        #expect(try await store.overrides(agent: .codex).count == 1)
+    }
 }
