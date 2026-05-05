@@ -11,7 +11,7 @@ actor PrivacySourceWatcher {
 
     init(source: SourceRecord, onEvents: @escaping @Sendable ([String]) async -> Void) {
         self.source = source
-        self.relay = Relay(rootPath: source.originalRootPath) { paths in
+        self.relay = Relay(rootPath: source.effectiveRootPath) { paths in
             Task { await onEvents(paths) }
         }
         relay.start()

@@ -108,6 +108,40 @@ struct FileVisibilityOverrideStoreTests {
         #expect(inheritedDeny.origin == .explicitDeny)
     }
 
+    @Test("Root deny plus file allow keeps single-file shares default-deny")
+    func rootDenyWithFileAllow() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        try await store.setOverride(
+            agent: .cowork,
+            sourceID: "src-1",
+            relativePath: "",
+            isDirectory: true,
+            decision: .deny
+        )
+        try await store.setOverride(
+            agent: .cowork,
+            sourceID: "src-1",
+            relativePath: "Selected.md",
+            isDirectory: false,
+            decision: .allow
+        )
+
+        let resolver = try await store.resolver(agent: .cowork)
+        let selected = resolver.evaluate(sourceID: "src-1", relativePath: "Selected.md", defaultVisible: true)
+        #expect(selected.isVisible)
+        #expect(selected.origin == .explicitAllow)
+
+        let futureSibling = resolver.evaluate(sourceID: "src-1", relativePath: "Future.md", defaultVisible: true)
+        #expect(!futureSibling.isVisible)
+        #expect(futureSibling.origin == .explicitDeny)
+
+        let nestedSibling = resolver.evaluate(sourceID: "src-1", relativePath: "Notes/Future.md", defaultVisible: true)
+        #expect(!nestedSibling.isVisible)
+        #expect(nestedSibling.origin == .explicitDeny)
+    }
+
     @Test("setManyOverrides empty input is a no-op")
     func setManyEmpty() async throws {
         let (store, _, tempDir) = try makeStore()

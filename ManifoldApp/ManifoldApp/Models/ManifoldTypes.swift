@@ -8,7 +8,7 @@ import ManifoldKit
 // MARK: - File Browser Types
 
 struct SourceFile: Identifiable, Sendable {
-    var id: String { path }
+    var id: String { canonicalPath }
     let name: String
     let path: String
     let canonicalPath: String

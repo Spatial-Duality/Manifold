@@ -816,4 +816,116 @@ final class ManifoldSyntheticMCPUITests: ManifoldUITestCase {
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.indexed").exists)
         XCTAssertTrue(element(in: app, id: "settings.privacy.index.stat.failed").exists)
     }
+
+    func testMCPFollowsBookmarkedSourceAfterFolderRename() throws {
+        let app = launchSyntheticMCPUI()
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 30))
+
+        let testHome = try XCTUnwrap(currentTestHome)
+        let sourceRoot = syntheticSourceURL(testHome: testHome)
+        let movedRoot = sourceRoot.deletingLastPathComponent()
+            .appendingPathComponent("Synthetic MCP UI Renamed", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceRoot.path), "Expected seeded source at \(sourceRoot.path)")
+
+        let codex = try MCPStdioClient(agent: "codex", testHome: testHome)
+        addTeardownBlock { codex.close() }
+
+        let before = try codex.callTool("read_file", arguments: ["path": "Docs/ReleaseNotes.md"])
+        XCTAssertFalse(before.isError, before.text)
+        XCTAssertTrue(before.text.contains("Team notes"), before.text)
+
+        try FileManager.default.moveItem(at: sourceRoot, to: movedRoot)
+
+        let after = try waitForMCPTool(
+            codex,
+            "read_file",
+            arguments: ["path": "Docs/ReleaseNotes.md"],
+            timeout: 20
+        ) { !$0.isError && $0.text.contains("Team notes") }
+        XCTAssertFalse(after.isError, after.text)
+        XCTAssertTrue(after.text.contains("Team notes"), after.text)
+
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app, timeout: 30)
+        XCTAssertTrue(app.staticTexts["Moved"].waitForExistence(timeout: 15))
+        XCTAssertTrue(element(in: app, labelContaining: "Synthetic MCP UI Renamed").waitForExistence(timeout: 15))
+    }
+
+    func testMCPFailsClosedWhenBookmarkedSourceIsDeleted() throws {
+        let app = launchSyntheticMCPUI()
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 30))
+
+        let testHome = try XCTUnwrap(currentTestHome)
+        let sourceRoot = syntheticSourceURL(testHome: testHome)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceRoot.path), "Expected seeded source at \(sourceRoot.path)")
+
+        let codex = try MCPStdioClient(agent: "codex", testHome: testHome)
+        addTeardownBlock { codex.close() }
+
+        try FileManager.default.removeItem(at: sourceRoot)
+
+        let files = try waitForMCPTool(codex, "list_files", timeout: 20) {
+            $0.isError || !$0.text.contains("Docs/ReleaseNotes.md")
+        }
+        XCTAssertFalse(files.text.contains("Docs/ReleaseNotes.md"), files.text)
+
+        let read = try codex.callTool("read_file", arguments: ["path": "Docs/ReleaseNotes.md"])
+        XCTAssertTrue(read.isError || !read.text.contains("Team notes"), read.text)
+
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app, timeout: 30)
+        XCTAssertTrue(app.staticTexts["Missing"].waitForExistence(timeout: 15))
+    }
+
+    func testMCPRejectsSamePathSourceReplacement() throws {
+        let app = launchSyntheticMCPUI()
+        XCTAssertTrue(element(in: app, id: "ledger.surface.work").waitForExistence(timeout: 30))
+
+        let testHome = try XCTUnwrap(currentTestHome)
+        let sourceRoot = syntheticSourceURL(testHome: testHome)
+        let replacementDocs = sourceRoot.appendingPathComponent("Docs", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceRoot.path), "Expected seeded source at \(sourceRoot.path)")
+
+        let codex = try MCPStdioClient(agent: "codex", testHome: testHome)
+        addTeardownBlock { codex.close() }
+
+        try FileManager.default.removeItem(at: sourceRoot)
+        try FileManager.default.createDirectory(at: replacementDocs, withIntermediateDirectories: true)
+        try "Replacement content must not be exposed.".write(
+            to: replacementDocs.appendingPathComponent("ReleaseNotes.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let files = try waitForMCPTool(codex, "list_files", timeout: 20) {
+            $0.isError || !$0.text.contains("Docs/ReleaseNotes.md")
+        }
+        XCTAssertFalse(files.text.contains("Docs/ReleaseNotes.md"), files.text)
+
+        let read = try codex.callTool("read_file", arguments: ["path": "Docs/ReleaseNotes.md"])
+        XCTAssertFalse(read.text.contains("Replacement content must not be exposed."), read.text)
+        XCTAssertTrue(read.isError || !read.text.contains("Team notes"), read.text)
+
+        openLedgerSpace("access", expectedSurface: "ledger.surface.access", in: app, timeout: 30)
+        XCTAssertTrue(app.staticTexts["Replaced"].waitForExistence(timeout: 15))
+    }
+
+    private func syntheticSourceURL(testHome: String) -> URL {
+        URL(fileURLWithPath: testHome, isDirectory: true)
+            .appendingPathComponent("sources/Synthetic MCP UI", isDirectory: true)
+    }
+
+    private func waitForMCPTool(
+        _ client: MCPStdioClient,
+        _ name: String,
+        arguments: [String: Any] = [:],
+        timeout: TimeInterval = 10,
+        until predicate: (MCPToolResult) -> Bool
+    ) throws -> MCPToolResult {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = try client.callTool(name, arguments: arguments)
+        while !predicate(last), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.5)
+            last = try client.callTool(name, arguments: arguments)
+        }
+        return last
+    }
 }

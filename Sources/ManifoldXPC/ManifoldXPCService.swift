@@ -356,7 +356,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             return ["exposures": exposures.map(Self.exposureJSON)]
 
         case "listSources":
-            let sources = try await runtime.grantStore.allSources().filter { !$0.isRemoved }
+            let sources = try await runtime.grantStore.refreshSourceHealth().filter { !$0.isRemoved }
             return ["sources": sources.map(Self.sourceJSON)]
 
         case "addSource":
@@ -364,7 +364,31 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                 throw ManifoldXPCError.invalidPayload
             }
             let displayName = (payload["displayName"] as? String) ?? URL(fileURLWithPath: path).lastPathComponent
-            let sourceID = try await runtime.grantStore.addSource(displayName: displayName, rootPath: path)
+            let bookmarkDataBase64 = payload["bookmarkDataBase64"] as? String
+            let sourceID = try await runtime.grantStore.addSource(
+                displayName: displayName,
+                rootPath: path,
+                bookmarkDataBase64: bookmarkDataBase64
+            )
+            try await runtime.privacyIndexCoordinator.sourceDidChange()
+            guard let source = try await runtime.grantStore.source(id: sourceID) else {
+                return ["ok": true]
+            }
+            return ["source": Self.sourceJSON(source)]
+
+        case "repairSource":
+            guard let sourceID = payload["sourceID"] as? String,
+                  let path = payload["path"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let displayName = payload["displayName"] as? String
+            let bookmarkDataBase64 = payload["bookmarkDataBase64"] as? String
+            try await runtime.grantStore.repairSource(
+                sourceID: sourceID,
+                rootPath: path,
+                displayName: displayName,
+                bookmarkDataBase64: bookmarkDataBase64
+            )
             try await runtime.privacyIndexCoordinator.sourceDidChange()
             guard let source = try await runtime.grantStore.source(id: sourceID) else {
                 return ["ok": true]
@@ -1045,6 +1069,13 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             "sourceID": source.sourceID,
             "displayName": source.displayName,
             "originalRootPath": source.originalRootPath,
+            "bookmarkDataBase64": source.bookmarkDataBase64 ?? NSNull(),
+            "resolvedRootPath": source.resolvedRootPath ?? NSNull(),
+            "sourceHealth": source.sourceHealth.rawValue,
+            "sourceHealthDetail": source.sourceHealthDetail ?? NSNull(),
+            "rootFileIdentity": source.rootFileIdentity ?? NSNull(),
+            "lastResolvedAt": source.lastResolvedAt ?? NSNull(),
+            "sourceKind": source.sourceKind.rawValue,
             "status": source.status,
             "createdAt": source.createdAt,
             "updatedAt": source.updatedAt,

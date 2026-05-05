@@ -21,6 +21,10 @@ private actor MCPConnectionState {
         }
     }
 
+    func updateInitializeParams(_ initializeParams: [String: Any]) {
+        self.initializeParams = initializeParams
+    }
+
     func fail(_ error: Error) {
         connectionID = nil
         connectionError = error.localizedDescription
@@ -96,7 +100,7 @@ struct ManifoldMCPServer {
         let server = MCPServer(name: "manifold", version: version)
         await server.registerInitializeHandler { params in
             guard demoRuntime == nil else { return }
-            _ = await connectRuntime(initializeParams: params)
+            await connectionState.updateInitializeParams(params.value)
         }
 
         // Register tools

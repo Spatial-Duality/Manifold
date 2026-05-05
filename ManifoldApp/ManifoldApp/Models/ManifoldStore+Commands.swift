@@ -104,7 +104,7 @@ extension ManifoldStore: ManifoldCommands {
 
     func revokeScope(entryID: String) async throws {
         if let source = sources.first(where: { $0.sourceID == entryID }) {
-            removeSource(path: source.originalRootPath)
+            await removeSource(sourceID: source.sourceID)
         }
     }
 

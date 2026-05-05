@@ -945,7 +945,7 @@ public actor ManifoldBridge {
             }
 
             // Resolve allowed source records
-            let allSources = try await grantStore.activeSources()
+            let allSources = try await grantStore.resolvedActiveSources()
             let allowedSources = allSources.filter {
                 policy.allowedSourceIDs.contains($0.sourceID)
                     || resolver.sourceIDsWithAllowOverrides.contains($0.sourceID)
@@ -983,7 +983,7 @@ public actor ManifoldBridge {
 
     private func scopedGrantSources(grant: GrantRecord, policy: AgentAccessPolicy?) async throws -> [GrantSourceRecord] {
         var grantSources = try await grantStore.grantSources(grantID: grant.grantID)
-        let activeSourceIDs = Set((try await grantStore.activeSources()).map(\.sourceID))
+        let activeSourceIDs = Set((try await grantStore.resolvedActiveSources()).map(\.sourceID))
         grantSources = grantSources.filter { activeSourceIDs.contains($0.sourceID) }
 
         guard let policy else { return grantSources }
@@ -1101,7 +1101,7 @@ public actor ManifoldBridge {
     /// Build mounts for standing access: each source gets a "mount" that points to the original path.
     private func standingMounts(sources: [SourceRecord]) -> [GrantMount] {
         sources.map { source in
-            GrantMount(sourceID: source.sourceID, mountName: source.canonicalMountName, mountPath: source.originalRootPath)
+            GrantMount(sourceID: source.sourceID, mountName: source.canonicalMountName, mountPath: source.effectiveRootPath)
         }
     }
 
@@ -1111,15 +1111,14 @@ public actor ManifoldBridge {
     private func originalMounts(sources grantSources: [GrantSourceRecord]) async throws -> [GrantMount] {
         var mounts: [GrantMount] = []
         for grantSource in grantSources {
-            guard let source = try await grantStore.source(id: grantSource.sourceID),
-                  source.isAccessible else {
+            guard let source = try await grantStore.resolvedSource(id: grantSource.sourceID) else {
                 continue
             }
             mounts.append(
                 GrantMount(
                     sourceID: grantSource.sourceID,
                     mountName: grantSource.mountName,
-                    mountPath: source.originalRootPath
+                    mountPath: source.effectiveRootPath
                 )
             )
         }
@@ -2852,8 +2851,7 @@ public actor ManifoldBridge {
                 }
             }
 
-            guard let source = try await grantStore.source(id: target.mount.sourceID),
-                  source.isAccessible else {
+            guard let source = try await grantStore.resolvedSource(id: target.mount.sourceID) else {
                 throw ManifoldMCPError.fileNotFound(target.canonicalPath)
             }
 
@@ -2861,7 +2859,7 @@ public actor ManifoldBridge {
                 GrantMount(
                     sourceID: source.sourceID,
                     mountName: target.mount.mountName,
-                    mountPath: source.originalRootPath
+                    mountPath: source.effectiveRootPath
                 )
             ]
             let currentTarget = try resolveWriteTarget(
@@ -2891,8 +2889,7 @@ public actor ManifoldBridge {
                   freshGrant.isActive else {
                 throw ManifoldMCPError.noActiveSession
             }
-            if let source = try await grantStore.source(id: target.mount.sourceID),
-               !source.isAccessible {
+            if try await grantStore.resolvedSource(id: target.mount.sourceID) == nil {
                 throw ManifoldMCPError.fileNotFound(target.canonicalPath)
             }
         }
@@ -3050,7 +3047,7 @@ public actor ManifoldBridge {
             return nil
         }
 
-        let allSources = try await grantStore.activeSources()
+        let allSources = try await grantStore.resolvedActiveSources()
         let allowedSources = allSources.filter { policy.allowedSourceIDs.contains($0.sourceID) }
         guard !allowedSources.isEmpty else { return nil }
 
@@ -3884,8 +3881,8 @@ public actor ManifoldBridge {
                         || record.filePath.hasSuffix("/\(resolved.relativePath)"))
             })?.afterHash {
                 baselineData = try await contentStore.retrieve(hash: fallbackHash)
-            } else if let source = try await grantStore.source(id: resolved.mount.sourceID) {
-                let originalURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(resolved.relativePath)
+            } else if let source = try await grantStore.resolvedSource(id: resolved.mount.sourceID) {
+                let originalURL = URL(fileURLWithPath: source.effectiveRootPath).appendingPathComponent(resolved.relativePath)
                 baselineData = try? Data(contentsOf: originalURL, options: [.mappedIfSafe])
             } else {
                 baselineData = nil

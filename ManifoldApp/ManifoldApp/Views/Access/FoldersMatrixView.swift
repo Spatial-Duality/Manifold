@@ -230,11 +230,12 @@ struct FoldersMatrixView: View {
                             .font(ManifoldType.body)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        if !source.isAccessible {
-                            Pill(text: "Offline", variant: .attention)
+                        if let health = sourceHealthLabel(for: source) {
+                            Pill(text: health.text, variant: health.variant, systemImage: health.systemImage)
+                                .help(health.help)
                         }
                     }
-                    Text(source.originalRootPath.shortenedPath)
+                    Text(source.effectiveRootPath.shortenedPath)
                         .font(ManifoldType.mono)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -374,6 +375,15 @@ struct FoldersMatrixView: View {
                         .help("Some files inside have explicit allow or deny overrides — open the inspector to see them.")
                         .accessibilityLabel("Has per-file overrides")
                 }
+                if source.sourceHealth != .available, source.sourceHealth != .unknown {
+                    let health = sourceHealthLabel(for: source)
+                    Pill(
+                        text: health?.text ?? source.sourceHealth.displayName,
+                        variant: health?.variant ?? .attention,
+                        systemImage: health?.systemImage
+                    )
+                    .help(health?.help ?? source.sourceHealthDetail ?? source.sourceHealth.displayName)
+                }
             }
         }
         .width(min: 110, ideal: 140, max: 180)
@@ -383,6 +393,77 @@ struct FoldersMatrixView: View {
         let text: String
         let variant: Pill.Variant
         let help: String
+    }
+
+    private struct SourceHealthLabel {
+        let text: String
+        let variant: Pill.Variant
+        let systemImage: String?
+        let help: String
+    }
+
+    private func sourceHealthLabel(for source: SourceRecord) -> SourceHealthLabel? {
+        if !source.isAccessible {
+            return SourceHealthLabel(
+                text: "Offline",
+                variant: .attention,
+                systemImage: "pause.circle",
+                help: "This source is paused or removed."
+            )
+        }
+        switch source.sourceHealth {
+        case .unknown:
+            return SourceHealthLabel(
+                text: "Check",
+                variant: .neutral,
+                systemImage: "questionmark.circle",
+                help: "Manifold has not verified this source yet."
+            )
+        case .available:
+            return nil
+        case .moved:
+            return SourceHealthLabel(
+                text: "Moved",
+                variant: .scope,
+                systemImage: "arrow.triangle.swap",
+                help: source.resolvedRootPath.map { "Resolved at \($0)" } ?? "Manifold followed this source to its new location."
+            )
+        case .staleBookmark:
+            return SourceHealthLabel(
+                text: "Refresh",
+                variant: .scope,
+                systemImage: "bookmark",
+                help: source.sourceHealthDetail ?? "The saved bookmark works but should be refreshed."
+            )
+        case .missing:
+            return SourceHealthLabel(
+                text: "Missing",
+                variant: .attention,
+                systemImage: "exclamationmark.triangle",
+                help: source.sourceHealthDetail ?? "The approved folder could not be found."
+            )
+        case .needsPermission:
+            return SourceHealthLabel(
+                text: "Permission",
+                variant: .attention,
+                systemImage: "lock",
+                help: source.sourceHealthDetail ?? "Manifold needs permission to access this source."
+            )
+        case .replaced:
+            return SourceHealthLabel(
+                text: "Replaced",
+                variant: .attention,
+                systemImage: "xmark.octagon",
+                help: source.sourceHealthDetail ?? "A different item exists at the approved location."
+            )
+        case .invalid:
+            return SourceHealthLabel(
+                text: "Invalid",
+                variant: .attention,
+                systemImage: "xmark.circle",
+                help: source.sourceHealthDetail ?? "This source is not valid."
+            )
+        }
     }
 
     private func writeLabel(for source: SourceRecord) -> SharingLabel {
@@ -550,11 +631,18 @@ struct FoldersMatrixView: View {
                 .controlSize(.small)
             }
 
+            if selectedIDs.count == 1, let selected = selectedSource {
+                Button {
+                    store.repairSourceFromPicker(sourceID: selected.sourceID)
+                } label: {
+                    Label("Locate", systemImage: "folder.badge.questionmark")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
             Button("Remove", role: .destructive) {
-                let paths = store.sources
-                    .filter { selectedIDs.contains($0.sourceID) }
-                    .map(\.originalRootPath)
-                store.removeSources(paths: Set(paths))
+                store.removeSources(sourceIDs: selectedIDs)
                 selectedIDs.removeAll()
             }
             .buttonStyle(.borderedProminent)

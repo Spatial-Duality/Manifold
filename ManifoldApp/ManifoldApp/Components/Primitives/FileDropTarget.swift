@@ -5,7 +5,8 @@
 // shared by FoldersMatrixView and FilesFlatView. Folders dropped on
 // either surface get added straight through; files raise a confirmation
 // dialog asking whether to add the whole containing folder or only
-// that file (with siblings denied via per-file overrides).
+    // that file (with the containing folder default-denied and the selected
+    // file explicitly allowed).
 
 import SwiftUI
 
@@ -82,11 +83,9 @@ private struct FileDropTargetModifier: ViewModifier {
     }
 
     private var message: String {
-        // "Add only this file" hides existing siblings via per-file deny
-        // overrides — files added later are visible by default.
         pendingFileDrops.count == 1
-            ? "Manifold tracks at folder granularity. Add the whole folder so every file in it is visible, or add only this file and Manifold will hide its current siblings."
-            : "Manifold tracks at folder granularity. Add the whole containing folder of each file, or add only the dropped files and hide existing siblings."
+            ? "Add the whole folder so every file in it is visible, or add only this file so new and existing siblings stay hidden."
+            : "Add the containing folders, or add only the dropped files so new and existing siblings stay hidden."
     }
 
     private func handleDroppedURLs(_ urls: [URL]) {

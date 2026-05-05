@@ -20,13 +20,50 @@ public actor GrantStore {
 
     /// Register a new source folder. Returns the source ID.
     @discardableResult
-    public func addSource(displayName: String, rootPath: String) throws -> String {
+    public func addSource(
+        displayName: String,
+        rootPath: String,
+        bookmarkDataBase64: String? = nil,
+        sourceKind: SourceKind = .folder
+    ) throws -> String {
         let sourceID = "src-\(UUID().uuidString.prefix(8).lowercased())"
         let now = ISO8601DateFormatter.shared.string(from: Date())
+        let bookmarkToStore = self.bookmarkDataBase64(rootPath: rootPath) ?? bookmarkDataBase64
+        let approvedIdentity = self.fileIdentity(rootPath: rootPath)
+        let draft = SourceRecord(
+            sourceID: sourceID,
+            displayName: displayName,
+            originalRootPath: rootPath,
+            bookmarkDataBase64: bookmarkToStore,
+            rootFileIdentity: approvedIdentity,
+            sourceKind: sourceKind,
+            status: "idle",
+            createdAt: now,
+            updatedAt: now
+        )
+        let resolution = SourceResolver.resolve(draft)
         try db.execute("""
-            INSERT INTO sources (source_id, display_name, original_root_path, status, created_at, updated_at)
-            VALUES (?, ?, ?, 'idle', ?, ?)
-        """, params: [sourceID, displayName, rootPath, now, now])
+            INSERT INTO sources (
+                source_id, display_name, original_root_path, bookmark_data_base64,
+                resolved_root_path, source_health, source_health_detail,
+                root_file_identity, last_resolved_at, source_kind,
+                status, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)
+        """, params: [
+            sourceID,
+            displayName,
+            rootPath,
+            bookmarkToStore,
+            resolution.resolvedRootPath,
+            resolution.health.rawValue,
+            resolution.detail,
+            resolution.rootFileIdentity,
+            resolution.lastResolvedAt,
+            sourceKind.rawValue,
+            now,
+            now,
+        ])
         logger.info("Added source \(sourceID): \(displayName)")
         return sourceID
     }
@@ -52,6 +89,97 @@ public actor GrantStore {
             params: [id]
         )
         return rows.first.flatMap { SourceRecord(row: $0) }
+    }
+
+    /// Status-active sources that currently resolve to the approved item.
+    /// This is the enforcement-facing API; UI inventory can still use
+    /// `allSources()` to show missing/repairable rows.
+    public func resolvedActiveSources() throws -> [SourceRecord] {
+        var result: [SourceRecord] = []
+        for source in try activeSources() {
+            let resolved = try resolveAndPersist(source)
+            if resolved.isResolvedForAccess {
+                result.append(resolved)
+            }
+        }
+        return result
+    }
+
+    public func resolvedSource(id sourceID: String) throws -> SourceRecord? {
+        guard let source = try source(id: sourceID) else { return nil }
+        let resolved = try resolveAndPersist(source)
+        return resolved.isResolvedForAccess ? resolved : nil
+    }
+
+    @discardableResult
+    public func resolveSourceHealth(sourceID: String) throws -> SourceRecord? {
+        guard let source = try source(id: sourceID) else { return nil }
+        return try resolveAndPersist(source)
+    }
+
+    public func refreshSourceHealth() throws -> [SourceRecord] {
+        try allSources().map { source in
+            try resolveAndPersist(source)
+        }
+    }
+
+    public func repairSource(
+        sourceID: String,
+        rootPath: String,
+        displayName: String? = nil,
+        bookmarkDataBase64: String? = nil
+    ) throws {
+        guard let source = try source(id: sourceID) else { return }
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        let bookmarkToStore = self.bookmarkDataBase64(rootPath: rootPath) ?? bookmarkDataBase64
+        let approvedIdentity = self.fileIdentity(rootPath: rootPath)
+        let draft = SourceRecord(
+            sourceID: source.sourceID,
+            displayName: displayName ?? source.displayName,
+            originalRootPath: rootPath,
+            bookmarkDataBase64: bookmarkToStore,
+            rootFileIdentity: approvedIdentity,
+            sourceKind: source.sourceKind,
+            status: source.status,
+            createdAt: source.createdAt,
+            updatedAt: now
+        )
+        let resolution = SourceResolver.resolve(draft)
+        try db.execute("""
+            UPDATE sources
+            SET display_name = ?,
+                original_root_path = ?,
+                bookmark_data_base64 = ?,
+                resolved_root_path = ?,
+                source_health = ?,
+                source_health_detail = ?,
+                root_file_identity = ?,
+                last_resolved_at = ?,
+                updated_at = ?
+            WHERE source_id = ?
+        """, params: [
+            displayName ?? source.displayName,
+            rootPath,
+            bookmarkToStore,
+            resolution.resolvedRootPath,
+            resolution.health.rawValue,
+            resolution.detail,
+            resolution.rootFileIdentity,
+            resolution.lastResolvedAt,
+            now,
+            sourceID,
+        ])
+    }
+
+    private func bookmarkDataBase64(rootPath: String) -> String? {
+        try? SourceResolver.bookmarkDataBase64(
+            for: URL(fileURLWithPath: rootPath).standardizedFileURL,
+            securityScoped: false
+        )
+    }
+
+    private func fileIdentity(rootPath: String) -> String? {
+        try? SourceResolver.fileIdentity(at: URL(fileURLWithPath: rootPath).standardizedFileURL)
     }
 
     /// Get a source by its original root path.
@@ -86,6 +214,30 @@ public actor GrantStore {
     /// Resume a paused source.
     public func resumeSource(sourceID: String) throws {
         try updateSourceStatus(sourceID: sourceID, status: "idle")
+    }
+
+    private func resolveAndPersist(_ source: SourceRecord) throws -> SourceRecord {
+        guard !source.isRemoved else { return source }
+        let resolution = SourceResolver.resolve(source)
+        try db.execute("""
+            UPDATE sources
+            SET resolved_root_path = ?,
+                source_health = ?,
+                source_health_detail = ?,
+                root_file_identity = ?,
+                last_resolved_at = ?,
+                updated_at = ?
+            WHERE source_id = ?
+        """, params: [
+            resolution.resolvedRootPath,
+            resolution.health.rawValue,
+            resolution.detail,
+            resolution.rootFileIdentity,
+            resolution.lastResolvedAt,
+            resolution.lastResolvedAt,
+            source.sourceID,
+        ])
+        return try self.source(id: source.sourceID) ?? source
     }
 
     // MARK: - Grants

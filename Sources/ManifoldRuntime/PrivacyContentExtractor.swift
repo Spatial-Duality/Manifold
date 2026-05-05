@@ -29,7 +29,7 @@ actor PrivacyContentExtractor {
         source: SourceRecord,
         relativePath: String
     ) async -> PrivacyExtractionResult {
-        let fileURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(relativePath)
+        let fileURL = URL(fileURLWithPath: source.effectiveRootPath).appendingPathComponent(relativePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return PrivacyExtractionResult(
                 text: nil,

@@ -28,7 +28,7 @@ final class ManifoldStore {
     var isCodexConnected: Bool { connectedAgents.contains(TargetApp.codex.rawValue) }
 
     var sources: [SourceRecord] = []
-    var approvedSources: [String] { sources.filter(\.isAccessible).map(\.originalRootPath) }
+    var approvedSources: [String] { sources.filter(\.isResolvedForAccess).map(\.effectiveRootPath) }
 
     var lastError: String?
 
@@ -517,7 +517,7 @@ final class ManifoldStore {
         }
 
         for path in paths {
-            if !sources.contains(where: { $0.originalRootPath == path }) {
+            if !sources.contains(where: { $0.originalRootPath == path || $0.effectiveRootPath == path }) {
                 addSource(path: path)
             }
         }
@@ -532,7 +532,8 @@ final class ManifoldStore {
                 return
             }
             do {
-                _ = try await runtime.addSource(path: path, displayName: folderName)
+                let bookmark = try? SourceResolver.bookmarkDataBase64(for: URL(fileURLWithPath: path))
+                _ = try await runtime.addSource(path: path, displayName: folderName, bookmarkDataBase64: bookmark)
                 await loadSources()
             } catch {
                 logger.error("Failed to add source \(folderName): \(error.localizedDescription)")
@@ -543,15 +544,19 @@ final class ManifoldStore {
 
     func removeSource(path: String) {
         Task {
-            do {
-                guard let source = sources.first(where: { $0.originalRootPath == path }) else { return }
-                try await runtime.removeSource(sourceID: source.sourceID)
-                await loadSources()
-                await refreshAll()
-            } catch {
-                logger.error("Failed to remove source: \(error.localizedDescription)")
-                lastError = "Failed to remove source"
-            }
+            guard let source = sources.first(where: { $0.originalRootPath == path || $0.effectiveRootPath == path }) else { return }
+            await removeSource(sourceID: source.sourceID)
+        }
+    }
+
+    func removeSource(sourceID: String) async {
+        do {
+            try await runtime.removeSource(sourceID: sourceID)
+            await loadSources()
+            await refreshAll()
+        } catch {
+            logger.error("Failed to remove source: \(error.localizedDescription)")
+            lastError = "Failed to remove source"
         }
     }
 
@@ -619,13 +624,54 @@ final class ManifoldStore {
         for path in paths { removeSource(path: path) }
     }
 
+    func removeSources(sourceIDs: Set<String>) {
+        Task {
+            for sourceID in sourceIDs {
+                await removeSource(sourceID: sourceID)
+            }
+        }
+    }
+
+    func repairSourceFromPicker(sourceID: String) {
+        guard let source = sources.first(where: { $0.sourceID == sourceID }) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = source.sourceKind == .file
+        panel.canChooseDirectories = source.sourceKind == .folder
+        panel.allowsMultipleSelection = false
+        panel.message = "Locate \(source.displayName)"
+        if panel.runModal() == .OK, let url = panel.urls.first {
+            Task { await repairSource(sourceID: sourceID, url: url) }
+        }
+    }
+
+    func repairSource(sourceID: String, url: URL) async {
+        do {
+            let resolved = url.standardizedFileURL
+            let bookmark = try? SourceResolver.bookmarkDataBase64(for: resolved)
+            let record = try await runtime.repairSource(
+                sourceID: sourceID,
+                path: resolved.path,
+                displayName: resolved.lastPathComponent,
+                bookmarkDataBase64: bookmark
+            )
+            if let index = sources.firstIndex(where: { $0.sourceID == sourceID }) {
+                sources[index] = record
+            }
+            await loadSources()
+            await refreshAll()
+        } catch {
+            logger.error("Failed to repair source: \(error.localizedDescription)")
+            lastError = "Couldn't reconnect source: \(error.localizedDescription)"
+        }
+    }
+
     /// File URLs resolve to the containing folder; existing sources are
     /// returned without re-adding so callers can chain follow-up overrides.
     @discardableResult
     func addSourceFromURL(_ url: URL) async -> SourceRecord? {
         let resolved = resolvedFolderURL(for: url)
         let path = resolved.path
-        if let existing = sources.first(where: { $0.originalRootPath == path }) {
+        if let existing = sources.first(where: { $0.originalRootPath == path || $0.effectiveRootPath == path }) {
             return existing
         }
         guard isRuntimeConnected else {
@@ -633,7 +679,12 @@ final class ManifoldStore {
             return nil
         }
         do {
-            let record = try await runtime.addSource(path: path, displayName: resolved.lastPathComponent)
+            let bookmark = try? SourceResolver.bookmarkDataBase64(for: resolved)
+            let record = try await runtime.addSource(
+                path: path,
+                displayName: resolved.lastPathComponent,
+                bookmarkDataBase64: bookmark
+            )
             await loadSources()
             return record
         } catch {
@@ -643,46 +694,34 @@ final class ManifoldStore {
         }
     }
 
-    /// Adds the parent folder, scopes it for every connected AI, then
-    /// denies existing top-level file siblings so only the dropped file
-    /// is visible. Subdirectories are left alone (denying a directory
-    /// would also hide its contents). New siblings appearing after this
-    /// call default to allowed — the runtime has no notion of a future-
-    /// proof default-deny per source yet.
+    /// Adds the parent folder but applies a default-deny root override plus
+    /// an explicit allow for the chosen file. This keeps future siblings
+    /// hidden without inventing a second single-file source model.
     func addSourceForSingleFile(_ fileURL: URL) async {
         let parent = fileURL.deletingLastPathComponent()
         guard let source = await addSourceFromURL(parent) else { return }
 
         let activeAgents = AgentMeta.connected(from: connectedAgents)
-        for agent in activeAgents {
-            await setSourceScope(sourceID: source.sourceID, agent: agent, inScope: true)
-        }
         guard !activeAgents.isEmpty else { return }
-
-        let siblings = (try? FileManager.default.contentsOfDirectory(
-            at: parent,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        let targetPath = fileURL.standardizedFileURL.path
-        let denyTargets: [URL] = siblings.compactMap { sibling in
-            let isFile = (try? sibling.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-            guard isFile else { return nil }
-            guard sibling.standardizedFileURL.path != targetPath else { return nil }
-            return sibling
-        }
-        guard !denyTargets.isEmpty else { return }
+        let relativePath = fileURL.lastPathComponent
 
         let batch = activeAgents.flatMap { agent in
-            denyTargets.map { sibling in
+            [
                 FileVisibilityOverrideRecord(
                     agent: agent,
                     sourceID: source.sourceID,
-                    relativePath: sibling.lastPathComponent,
-                    isDirectory: false,
+                    relativePath: "",
+                    isDirectory: true,
                     decision: .deny
-                )
-            }
+                ),
+                FileVisibilityOverrideRecord(
+                    agent: agent,
+                    sourceID: source.sourceID,
+                    relativePath: relativePath,
+                    isDirectory: false,
+                    decision: .allow
+                ),
+            ]
         }
 
         // Bulk endpoint is on the concrete AppRuntimeClient only; loop
@@ -691,8 +730,8 @@ final class ManifoldStore {
             do {
                 try await client.setManyFileVisibilityOverrides(batch)
             } catch {
-                logger.error("Single-file drop bulk deny failed: \(error.localizedDescription)")
-                lastError = "Added folder but couldn't restrict siblings: \(error.localizedDescription)"
+                logger.error("Single-file drop override failed: \(error.localizedDescription)")
+                lastError = "Added folder but couldn't restrict it to the selected file: \(error.localizedDescription)"
             }
             return
         }
@@ -706,8 +745,8 @@ final class ManifoldStore {
                     decision: record.decision
                 )
             } catch {
-                logger.error("Single-file drop deny failed for \(record.relativePath): \(error.localizedDescription)")
-                lastError = "Added folder but couldn't restrict siblings: \(error.localizedDescription)"
+                logger.error("Single-file drop override failed for \(record.relativePath): \(error.localizedDescription)")
+                lastError = "Added folder but couldn't restrict it to the selected file: \(error.localizedDescription)"
                 return
             }
         }
@@ -745,14 +784,14 @@ final class ManifoldStore {
     }
 
     func enumerateSourceFiles() async -> [SourceFile] {
-        let activeSources = Self.dedupedByPath(sources.filter { $0.isAccessible && !$0.isRemoved })
+        let activeSources = Self.dedupedByPath(sources.filter { $0.isResolvedForAccess && !$0.isRemoved })
         return await Task.detached(priority: .userInitiated) {
             Self.walkSourceFiles(sources: activeSources)
         }.value
     }
 
     func enumerateSourceFilesProgressively(batchSize: Int = 200) -> AsyncStream<[SourceFile]> {
-        let activeSources = Self.dedupedByPath(sources.filter { $0.isAccessible && !$0.isRemoved })
+        let activeSources = Self.dedupedByPath(sources.filter { $0.isResolvedForAccess && !$0.isRemoved })
         return AsyncStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 await Self.streamSourceFiles(
@@ -780,7 +819,7 @@ final class ManifoldStore {
         var seen: Set<String> = []
         var result: [SourceRecord] = []
         result.reserveCapacity(sources.count)
-        for source in sources where seen.insert(source.originalRootPath).inserted {
+        for source in sources where seen.insert(source.effectiveRootPath).inserted {
             result.append(source)
         }
         return result
@@ -796,7 +835,7 @@ final class ManifoldStore {
 
         for source in sources {
             guard !Task.isCancelled else { return }
-            let root = URL(fileURLWithPath: source.originalRootPath)
+            let root = URL(fileURLWithPath: source.effectiveRootPath)
             var didEmitSourceFile = false
             guard let enumerator = fm.enumerator(
                 at: root,
@@ -860,7 +899,7 @@ final class ManifoldStore {
 
         for source in sources {
             guard !Task.isCancelled else { return result }
-            let root = URL(fileURLWithPath: source.originalRootPath)
+            let root = URL(fileURLWithPath: source.effectiveRootPath)
             var didAppendSourceFile = false
             guard let enumerator = fm.enumerator(
                 at: root,
@@ -928,7 +967,7 @@ final class ManifoldStore {
             relativePaths = []
         }
 
-        let root = URL(fileURLWithPath: source.originalRootPath, isDirectory: true)
+        let root = URL(fileURLWithPath: source.effectiveRootPath, isDirectory: true)
         return relativePaths.map { relativePath in
             let url = root.appendingPathComponent(relativePath)
             return SourceFile(

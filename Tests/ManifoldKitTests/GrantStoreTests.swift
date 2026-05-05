@@ -53,6 +53,45 @@ struct GrantStoreTests {
         #expect(all.count == 2)
     }
 
+    @Test("Resolved active sources exclude missing roots")
+    func resolvedActiveSourcesExcludeMissingRoots() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let existing = tempDir.appendingPathComponent("Existing", isDirectory: true)
+        try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: true)
+
+        let existingID = try await store.addSource(displayName: "Existing", rootPath: existing.path)
+        let missingID = try await store.addSource(displayName: "Missing", rootPath: tempDir.appendingPathComponent("Missing").path)
+
+        let resolved = try await store.resolvedActiveSources()
+        #expect(resolved.map(\.sourceID) == [existingID])
+
+        let missing = try await store.source(id: missingID)
+        #expect(missing?.sourceHealth == .missing)
+        #expect(missing?.isResolvedForAccess == false)
+    }
+
+    @Test("Resolved source fails closed when approved root is replaced")
+    func resolvedSourceRejectsReplacedRoot() async throws {
+        let (store, _, tempDir) = try makeStore()
+        defer { cleanup(tempDir) }
+
+        let root = tempDir.appendingPathComponent("Root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let sourceID = try await store.addSource(displayName: "Root", rootPath: root.path)
+        #expect(try await store.resolvedSource(id: sourceID) != nil)
+
+        try FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let resolved = try await store.resolvedSource(id: sourceID)
+        #expect(resolved == nil)
+
+        let source = try await store.source(id: sourceID)
+        #expect(source?.sourceHealth == .replaced)
+    }
+
     @Test("Pause and resume source")
     func pauseResumeSource() async throws {
         let (store, _, tempDir) = try makeStore()

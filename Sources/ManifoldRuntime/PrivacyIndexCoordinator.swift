@@ -60,7 +60,7 @@ public actor PrivacyIndexCoordinator {
     }
 
     public func reconcileSources() async throws {
-        let sources = try await grantStore.allSources().filter { $0.isAccessible && !$0.isRemoved }
+        let sources = try await grantStore.resolvedActiveSources()
         let activeIDs = Set(sources.map(\.sourceID))
 
         for (sourceID, watcher) in sourceWatchers where !activeIDs.contains(sourceID) {
@@ -346,7 +346,7 @@ public actor PrivacyIndexCoordinator {
         case .sourceFile:
             guard let sourceID = record.sourceID,
                   let relativePath = record.relativePath,
-                  let source = try await grantStore.source(id: sourceID) else {
+                  let source = try await grantStore.resolvedSource(id: sourceID) else {
                 return PrivacyExtractionResult(
                     text: nil,
                     mimeType: record.mimeType,
@@ -455,7 +455,7 @@ public actor PrivacyIndexCoordinator {
     }
 
     private func enqueueBaselineForSource(_ source: SourceRecord) async throws {
-        let root = Self.canonicalFileURL(URL(fileURLWithPath: source.originalRootPath))
+        let root = Self.canonicalFileURL(URL(fileURLWithPath: source.effectiveRootPath))
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -556,7 +556,7 @@ public actor PrivacyIndexCoordinator {
     }
 
     private func handleSourceEvents(source: SourceRecord, changedPaths: [String]) async {
-        let root = Self.canonicalFileURL(URL(fileURLWithPath: source.originalRootPath))
+        let root = Self.canonicalFileURL(URL(fileURLWithPath: source.effectiveRootPath))
         for path in changedPaths {
             let url = Self.canonicalFileURL(URL(fileURLWithPath: path))
             guard url.path.hasPrefix(root.path) else { continue }

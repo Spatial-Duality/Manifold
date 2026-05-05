@@ -4,6 +4,7 @@
 import Testing
 import Foundation
 @testable import ManifoldKit
+@testable import ManifoldMCP
 
 // We can't directly test MCPServer (it's in ManifoldMCP target),
 // but we can test the JSON-RPC 2.0 protocol compliance by validating
@@ -138,5 +139,42 @@ struct MCPProtocolTests {
         #expect(messages.count == 2)
         #expect(messages[0]["method"] as? String == "initialize")
         #expect(messages[1]["method"] as? String == "tools/list")
+    }
+
+    @Test("Content-Length framed messages parse correctly")
+    func contentLengthFramedParsing() {
+        let msg1: [String: Any] = ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": [:] as [String: Any]]
+        let msg2: [String: Any] = ["jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": [:] as [String: Any]]
+
+        let data1 = try! JSONSerialization.data(withJSONObject: msg1)
+        let data2 = try! JSONSerialization.data(withJSONObject: msg2)
+
+        var combined = Data()
+        combined.append(Data("Content-Length: \(data1.count)\r\n\r\n".utf8))
+        combined.append(data1)
+        combined.append(Data("Content-Length: \(data2.count)\r\n\r\n".utf8))
+        combined.append(data2)
+
+        var parsed: [[String: Any]] = []
+        var buffer = combined
+        while let message = MCPStdioFramer.nextMessage(from: &buffer) {
+            if let json = try? JSONSerialization.jsonObject(with: message.body) as? [String: Any] {
+                parsed.append(json)
+            }
+        }
+
+        #expect(parsed.count == 2)
+        #expect(parsed[0]["method"] as? String == "initialize")
+        #expect(parsed[1]["method"] as? String == "tools/list")
+    }
+
+    @Test("Content-Length responses include MCP stdio header")
+    func contentLengthEncoding() {
+        let body = Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8)
+        let framed = MCPStdioFramer.encode(body, framing: .contentLength)
+        let text = String(data: framed, encoding: .utf8)
+
+        #expect(text?.hasPrefix("Content-Length: \(body.count)\r\n\r\n") == true)
+        #expect(text?.hasSuffix(String(data: body, encoding: .utf8) ?? "") == true)
     }
 }

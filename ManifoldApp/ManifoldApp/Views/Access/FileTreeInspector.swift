@@ -97,13 +97,36 @@ struct FileTreeInspector: View {
                         .font(ManifoldType.bodyMedium)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text(source.originalRootPath.shortenedPath)
+                    Text(source.effectiveRootPath.shortenedPath)
                         .font(ManifoldType.mono)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
+            }
+
+            if !source.isSourceHealthy || source.sourceHealth == .moved || source.sourceHealth == .staleBookmark {
+                HStack(spacing: Spacing.s2) {
+                    Pill(
+                        text: source.sourceHealth.displayName,
+                        variant: source.isSourceHealthy ? .scope : .attention,
+                        systemImage: source.isSourceHealthy ? "arrow.triangle.swap" : "exclamationmark.triangle"
+                    )
+                    if let detail = source.sourceHealthDetail {
+                        Text(detail)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                    Button {
+                        store.repairSourceFromPicker(sourceID: source.sourceID)
+                    } label: {
+                        Label("Locate", systemImage: "folder.badge.questionmark")
+                    }
+                    .controlSize(.small)
+                }
             }
 
             AccessCheckboxStrip(
@@ -572,7 +595,7 @@ private struct TreeNode: Identifiable, Sendable {
             return demoTree(from: source)
         }
 
-        let root = URL(fileURLWithPath: source.originalRootPath)
+        let root = URL(fileURLWithPath: source.effectiveRootPath)
         return await Task.detached(priority: .userInitiated) {
             walk(root: root, baseRoot: root, depth: 0, maxDepth: 2)
         }.value
@@ -584,7 +607,7 @@ private struct TreeNode: Identifiable, Sendable {
             root.insert(relativePath.split(separator: "/").map(String.init))
         }
         return root.render(
-            absolutePath: source.originalRootPath,
+            absolutePath: source.effectiveRootPath,
             relativePath: "",
             maxDepth: 2,
             depth: 0

@@ -553,7 +553,7 @@ public actor ManifoldRuntime {
             return
         }
 
-        let sourceIndex = ((try? await grantStore.allSources()) ?? []).reduce(into: [String: SourceRecord]()) { result, source in
+        let sourceIndex = ((try? await grantStore.resolvedActiveSources()) ?? []).reduce(into: [String: SourceRecord]()) { result, source in
             result[source.sourceID] = source
         }
         let workspaceURL = URL(fileURLWithPath: grant.materializationRoot)
@@ -569,7 +569,7 @@ public actor ManifoldRuntime {
             }
 
             for (relativePath, baselineHash) in baseline {
-                let originalURL = URL(fileURLWithPath: source.originalRootPath).appendingPathComponent(relativePath)
+                let originalURL = URL(fileURLWithPath: source.effectiveRootPath).appendingPathComponent(relativePath)
                 let currentHash = Self.hashForFile(at: originalURL) ?? "__missing__"
                 guard currentHash != baselineHash else { continue }
 

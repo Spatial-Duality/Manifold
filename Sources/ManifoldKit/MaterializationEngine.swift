@@ -82,7 +82,7 @@ public struct MaterializationEngine: Sendable {
 
         for input in sources {
             let source = input.source
-            let sourceURL = URL(fileURLWithPath: source.originalRootPath)
+            let sourceURL = URL(fileURLWithPath: source.effectiveRootPath)
             let resolvedSource = sourceURL.resolvingSymlinksInPath()
             let ignoreMatcher = GlobMatcher.load(from: sourceURL.appendingPathComponent(".manifoldignore"))
             let scopes = normalizedScopes(input.selectedScopes, for: source.sourceID)
@@ -216,10 +216,10 @@ public struct MaterializationEngine: Sendable {
             let source = input.source
             let mountName = input.mountName
             let mountURL = workspaceURL.appendingPathComponent(mountName)
-            let sourceURL = URL(fileURLWithPath: source.originalRootPath)
+            let sourceURL = URL(fileURLWithPath: source.effectiveRootPath)
 
             guard fm.fileExists(atPath: sourceURL.path) else {
-                logger.warning("Source path missing, skipping: \(source.originalRootPath)")
+                logger.warning("Source path missing, skipping: \(source.effectiveRootPath)")
                 continue
             }
 

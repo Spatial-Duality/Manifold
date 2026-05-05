@@ -9,10 +9,33 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 // MARK: - Source (persistent pointer to user-approved original folder)
 
 public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
+    enum CodingKeys: String, CodingKey {
+        case sourceID
+        case displayName
+        case originalRootPath
+        case bookmarkDataBase64
+        case resolvedRootPath
+        case sourceHealth
+        case sourceHealthDetail
+        case rootFileIdentity
+        case lastResolvedAt
+        case sourceKind
+        case status
+        case createdAt
+        case updatedAt
+    }
+
     public var id: String { sourceID }
     public let sourceID: String
     public let displayName: String
     public let originalRootPath: String
+    public let bookmarkDataBase64: String?
+    public let resolvedRootPath: String?
+    public let sourceHealth: SourceHealthStatus
+    public let sourceHealthDetail: String?
+    public let rootFileIdentity: String?
+    public let lastResolvedAt: String?
+    public let sourceKind: SourceKind
     public let status: String  // idle, active, paused, removed
     public let createdAt: String
     public let updatedAt: String
@@ -20,6 +43,13 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
     public var isAccessible: Bool { status == "idle" || status == "active" }
     public var isPaused: Bool { status == "paused" }
     public var isRemoved: Bool { status == "removed" }
+    public var isSourceHealthy: Bool { sourceHealth.isUsable }
+    public var isResolvedForAccess: Bool { isAccessible && isSourceHealthy }
+    public var effectiveRootPath: String { resolvedRootPath ?? originalRootPath }
+    public var hasMoved: Bool {
+        guard let resolvedRootPath else { return false }
+        return resolvedRootPath != originalRootPath
+    }
     public var canonicalMountName: String {
         let base = URL(fileURLWithPath: originalRootPath).lastPathComponent
         let sanitized = base
@@ -33,6 +63,13 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
         sourceID: String,
         displayName: String,
         originalRootPath: String,
+        bookmarkDataBase64: String? = nil,
+        resolvedRootPath: String? = nil,
+        sourceHealth: SourceHealthStatus = .unknown,
+        sourceHealthDetail: String? = nil,
+        rootFileIdentity: String? = nil,
+        lastResolvedAt: String? = nil,
+        sourceKind: SourceKind = .folder,
         status: String,
         createdAt: String,
         updatedAt: String
@@ -40,9 +77,50 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
         self.sourceID = sourceID
         self.displayName = displayName
         self.originalRootPath = originalRootPath
+        self.bookmarkDataBase64 = bookmarkDataBase64
+        self.resolvedRootPath = resolvedRootPath
+        self.sourceHealth = sourceHealth
+        self.sourceHealthDetail = sourceHealthDetail
+        self.rootFileIdentity = rootFileIdentity
+        self.lastResolvedAt = lastResolvedAt
+        self.sourceKind = sourceKind
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sourceID = try container.decode(String.self, forKey: .sourceID)
+        self.displayName = try container.decode(String.self, forKey: .displayName)
+        self.originalRootPath = try container.decode(String.self, forKey: .originalRootPath)
+        self.bookmarkDataBase64 = try container.decodeIfPresent(String.self, forKey: .bookmarkDataBase64)
+        self.resolvedRootPath = try container.decodeIfPresent(String.self, forKey: .resolvedRootPath)
+        self.sourceHealth = try container.decodeIfPresent(SourceHealthStatus.self, forKey: .sourceHealth) ?? .unknown
+        self.sourceHealthDetail = try container.decodeIfPresent(String.self, forKey: .sourceHealthDetail)
+        self.rootFileIdentity = try container.decodeIfPresent(String.self, forKey: .rootFileIdentity)
+        self.lastResolvedAt = try container.decodeIfPresent(String.self, forKey: .lastResolvedAt)
+        self.sourceKind = try container.decodeIfPresent(SourceKind.self, forKey: .sourceKind) ?? .folder
+        self.status = try container.decode(String.self, forKey: .status)
+        self.createdAt = try container.decode(String.self, forKey: .createdAt)
+        self.updatedAt = try container.decode(String.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourceID, forKey: .sourceID)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(originalRootPath, forKey: .originalRootPath)
+        try container.encodeIfPresent(bookmarkDataBase64, forKey: .bookmarkDataBase64)
+        try container.encodeIfPresent(resolvedRootPath, forKey: .resolvedRootPath)
+        try container.encode(sourceHealth, forKey: .sourceHealth)
+        try container.encodeIfPresent(sourceHealthDetail, forKey: .sourceHealthDetail)
+        try container.encodeIfPresent(rootFileIdentity, forKey: .rootFileIdentity)
+        try container.encodeIfPresent(lastResolvedAt, forKey: .lastResolvedAt)
+        try container.encode(sourceKind, forKey: .sourceKind)
+        try container.encode(status, forKey: .status)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
     }
 
     init?(row: [String: String]) {
@@ -58,9 +136,54 @@ public struct SourceRecord: Sendable, Hashable, Identifiable, Codable {
         self.sourceID = sourceID
         self.displayName = displayName
         self.originalRootPath = originalRootPath
+        self.bookmarkDataBase64 = row["bookmark_data_base64"]
+        self.resolvedRootPath = row["resolved_root_path"]
+        self.sourceHealth = SourceHealthStatus(rawValue: row["source_health"] ?? "") ?? .unknown
+        self.sourceHealthDetail = row["source_health_detail"]
+        self.rootFileIdentity = row["root_file_identity"]
+        self.lastResolvedAt = row["last_resolved_at"]
+        self.sourceKind = SourceKind(rawValue: row["source_kind"] ?? "") ?? .folder
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+public enum SourceKind: String, Sendable, Codable, CaseIterable {
+    case folder
+    case file
+}
+
+public enum SourceHealthStatus: String, Sendable, Codable, CaseIterable {
+    case unknown
+    case available
+    case moved
+    case missing
+    case needsPermission = "needs_permission"
+    case staleBookmark = "stale_bookmark"
+    case replaced
+    case invalid
+
+    public var isUsable: Bool {
+        switch self {
+        case .available, .moved, .staleBookmark:
+            return true
+        case .unknown, .missing, .needsPermission, .replaced, .invalid:
+            return false
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .unknown: return "Needs check"
+        case .available: return "Available"
+        case .moved: return "Moved"
+        case .missing: return "Missing"
+        case .needsPermission: return "Needs permission"
+        case .staleBookmark: return "Bookmark stale"
+        case .replaced: return "Replaced"
+        case .invalid: return "Invalid"
+        }
     }
 }
 

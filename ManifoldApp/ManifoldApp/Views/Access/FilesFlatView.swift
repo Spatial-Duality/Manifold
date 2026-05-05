@@ -236,7 +236,7 @@ struct FilesFlatView: View {
 
     private var selectedFile: SourceFile? {
         guard selectedFilePaths.count == 1, let path = selectedFilePaths.first else { return nil }
-        return files.first(where: { $0.path == path })
+        return files.first(where: { $0.canonicalPath == path })
     }
 
     // MARK: - Body
@@ -290,7 +290,7 @@ struct FilesFlatView: View {
         .task(id: selectedFilePaths) {
             guard selectedFilePaths.count == 1,
                   let path = selectedFilePaths.first,
-                  let file = files.first(where: { $0.path == path }) else {
+                  let file = files.first(where: { $0.canonicalPath == path }) else {
                 selectedHistory = []
                 return
             }
@@ -503,7 +503,7 @@ struct FilesFlatView: View {
 
             TableColumn("Name", value: \.name) { file in
                 Button {
-                    selectedFilePaths = [file.path]
+                    selectedFilePaths = [file.canonicalPath]
                 } label: {
                     HStack(spacing: Spacing.s2) {
                         FileTypeIcon(filename: file.name, size: 13)
@@ -595,7 +595,7 @@ struct FilesFlatView: View {
         .contextMenu(forSelectionType: String.self) { selection in
             contextMenu(for: selection)
         } primaryAction: { selection in
-            openWithDefaultApp(paths: selection)
+            openWithDefaultApp(files: files.filter { selection.contains($0.canonicalPath) })
         }
         .overlay {
             if isLoading && files.isEmpty {
@@ -616,9 +616,9 @@ struct FilesFlatView: View {
 
     @ViewBuilder
     private func contextMenu(for selection: Set<String>) -> some View {
-        let filesInSelection = files.filter { selection.contains($0.path) }
+        let filesInSelection = files.filter { selection.contains($0.canonicalPath) }
 
-        Button("Open") { openWithDefaultApp(paths: selection) }
+        Button("Open") { openWithDefaultApp(files: filesInSelection) }
             .disabled(filesInSelection.isEmpty)
         Button("Quick Look") {
             if let first = filesInSelection.first {
@@ -750,14 +750,14 @@ struct FilesFlatView: View {
     }
 
     private var filesInSelection: [SourceFile] {
-        files.filter { selectedFilePaths.contains($0.path) }
+        files.filter { selectedFilePaths.contains($0.canonicalPath) }
     }
 
     // MARK: - Actions
 
-    private func openWithDefaultApp(paths: Set<String>) {
-        for path in paths {
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    private func openWithDefaultApp(files: [SourceFile]) {
+        for file in files {
+            NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
         }
     }
 

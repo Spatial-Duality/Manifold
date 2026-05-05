@@ -279,6 +279,13 @@ public struct DatabaseMigrator {
                     source_id TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
                     original_root_path TEXT NOT NULL UNIQUE,
+                    bookmark_data_base64 TEXT,
+                    resolved_root_path TEXT,
+                    source_health TEXT NOT NULL DEFAULT 'unknown',
+                    source_health_detail TEXT,
+                    root_file_identity TEXT,
+                    last_resolved_at TEXT,
+                    source_kind TEXT NOT NULL DEFAULT 'folder',
                     status TEXT NOT NULL DEFAULT 'idle',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -2319,6 +2326,57 @@ public struct DatabaseMigrator {
             }
 
             logger.info("Migration 44: per-agent Focus scope + mirror_to_both + is_built_in")
+        },
+
+        // v45: Durable source identity for Apple-native file/folder tracking.
+        // Bookmarks let a source follow Finder moves; health columns let the
+        // runtime fail closed and the Access UI offer repair without overloading
+        // pause/remove status.
+        Migration(version: 45, name: "durable_source_identity") { db in
+            guard try tableExists(db, named: "sources") else { return }
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "bookmark_data_base64",
+                sql: "ALTER TABLE sources ADD COLUMN bookmark_data_base64 TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "resolved_root_path",
+                sql: "ALTER TABLE sources ADD COLUMN resolved_root_path TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "source_health",
+                sql: "ALTER TABLE sources ADD COLUMN source_health TEXT NOT NULL DEFAULT 'unknown'"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "source_health_detail",
+                sql: "ALTER TABLE sources ADD COLUMN source_health_detail TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "root_file_identity",
+                sql: "ALTER TABLE sources ADD COLUMN root_file_identity TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "last_resolved_at",
+                sql: "ALTER TABLE sources ADD COLUMN last_resolved_at TEXT"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sources",
+                column: "source_kind",
+                sql: "ALTER TABLE sources ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'folder'"
+            )
+            try db.execute("CREATE INDEX IF NOT EXISTS idx_sources_health ON sources(source_health)")
         },
     ]
 }

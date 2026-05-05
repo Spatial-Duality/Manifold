@@ -125,7 +125,7 @@ private struct InheritedSection: View {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return store.sources }
         return store.sources.filter { source in
-            "\(source.displayName)\n\(source.originalRootPath)"
+            "\(source.displayName)\n\(source.effectiveRootPath)"
                 .localizedCaseInsensitiveContains(trimmed)
         }
     }
@@ -155,7 +155,7 @@ private struct InheritedSection: View {
                         )
                         Text(source.displayName).font(ManifoldType.body)
                         Spacer()
-                        Text(source.originalRootPath.shortenedPath)
+                        Text(source.effectiveRootPath.shortenedPath)
                             .font(ManifoldType.mono)
                             .foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)

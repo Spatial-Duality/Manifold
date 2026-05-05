@@ -31,6 +31,125 @@ struct JSONDict: @unchecked Sendable {
 
 // MARK: - MCP Server (stdio JSON-RPC 2.0)
 
+enum MCPMessageFraming: Sendable {
+    case contentLength
+    case newline
+}
+
+struct MCPStdioMessage: Sendable {
+    let body: Data
+    let framing: MCPMessageFraming
+}
+
+enum MCPStdioFramer {
+    private static let crlfHeaderDelimiter = Data([13, 10, 13, 10])
+    private static let lfHeaderDelimiter = Data([10, 10])
+
+    static func nextMessage(from buffer: inout Data) -> MCPStdioMessage? {
+        trimLeadingNewlines(from: &buffer)
+        guard !buffer.isEmpty else { return nil }
+
+        if startsWithContentLengthHeader(buffer) {
+            return nextContentLengthMessage(from: &buffer)
+        }
+
+        return nextNewlineMessage(from: &buffer)
+    }
+
+    static func encode(_ body: Data, framing: MCPMessageFraming) -> Data {
+        switch framing {
+        case .contentLength:
+            var framed = Data("Content-Length: \(body.count)\r\n\r\n".utf8)
+            framed.append(body)
+            return framed
+        case .newline:
+            var framed = body
+            framed.append(UInt8(ascii: "\n"))
+            return framed
+        }
+    }
+
+    private static func nextContentLengthMessage(from buffer: inout Data) -> MCPStdioMessage? {
+        let delimiter: Data
+        let delimiterRange: Range<Data.Index>
+        if let range = buffer.range(of: crlfHeaderDelimiter) {
+            delimiter = crlfHeaderDelimiter
+            delimiterRange = range
+        } else if let range = buffer.range(of: lfHeaderDelimiter) {
+            delimiter = lfHeaderDelimiter
+            delimiterRange = range
+        } else {
+            return nil
+        }
+
+        let headerData = buffer[buffer.startIndex..<delimiterRange.lowerBound]
+        guard let header = String(data: Data(headerData), encoding: .utf8),
+              let contentLength = parseContentLength(from: header) else {
+            buffer.removeSubrange(buffer.startIndex..<delimiterRange.upperBound)
+            return nil
+        }
+
+        let bodyStart = delimiterRange.lowerBound + delimiter.count
+        let bodyEnd = bodyStart + contentLength
+        guard buffer.count >= bodyEnd else { return nil }
+
+        let body = Data(buffer[bodyStart..<bodyEnd])
+        buffer.removeSubrange(buffer.startIndex..<bodyEnd)
+        return MCPStdioMessage(body: body, framing: .contentLength)
+    }
+
+    private static func nextNewlineMessage(from buffer: inout Data) -> MCPStdioMessage? {
+        guard let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) else {
+            return nil
+        }
+
+        let lineData = buffer[buffer.startIndex..<newlineIndex]
+        buffer = Data(buffer[buffer.index(after: newlineIndex)...])
+        let body = Data(lineData).trimmingTrailingCarriageReturn()
+        guard !body.isEmpty else { return nextMessage(from: &buffer) }
+        return MCPStdioMessage(body: body, framing: .newline)
+    }
+
+    private static func startsWithContentLengthHeader(_ buffer: Data) -> Bool {
+        guard let firstLineEnd = buffer.firstIndex(of: UInt8(ascii: "\n")) else {
+            return String(data: buffer, encoding: .utf8)?
+                .lowercased()
+                .hasPrefix("content-length:") == true
+        }
+        let firstLine = buffer[buffer.startIndex..<firstLineEnd]
+        return String(data: Data(firstLine), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("content-length:") == true
+    }
+
+    private static func parseContentLength(from header: String) -> Int? {
+        for line in header.components(separatedBy: .newlines) {
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2,
+                  parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length",
+                  let length = Int(parts[1].trimmingCharacters(in: .whitespaces)) else {
+                continue
+            }
+            return length
+        }
+        return nil
+    }
+
+    private static func trimLeadingNewlines(from buffer: inout Data) {
+        while let first = buffer.first, first == UInt8(ascii: "\n") || first == UInt8(ascii: "\r") {
+            buffer.removeFirst()
+        }
+    }
+}
+
+private extension Data {
+    func trimmingTrailingCarriageReturn() -> Data {
+        guard last == UInt8(ascii: "\r") else { return self }
+        return dropLast()
+    }
+}
+
 /// Minimal MCP server. Reads JSON-RPC 2.0 from stdin, dispatches to handlers, writes responses to stdout.
 /// Zero external dependencies. Uses Foundation only.
 /// Actor ensures registration and start are serialized — no races on handler state.
@@ -79,16 +198,9 @@ actor MCPServer {
 
             buffer.append(chunk)
 
-            while let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                let lineData = buffer[buffer.startIndex..<newlineIndex]
-                buffer = Data(buffer[buffer.index(after: newlineIndex)...])
-
-                guard !lineData.isEmpty else { continue }
-
-                if let response = await handleMessage(Data(lineData)) {
-                    var out = response
-                    out.append(UInt8(ascii: "\n"))
-                    stdout.write(out)
+            while let message = MCPStdioFramer.nextMessage(from: &buffer) {
+                if let response = await handleMessage(message.body) {
+                    stdout.write(MCPStdioFramer.encode(response, framing: message.framing))
                 }
             }
         }

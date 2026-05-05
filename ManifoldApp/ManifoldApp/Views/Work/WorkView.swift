@@ -2013,7 +2013,7 @@ private struct WorkPreloadEditor: View {
                                 .background(.tertiary.opacity(0.15), in: Capsule())
                         }
                     }
-                    Text(source.originalRootPath)
+                    Text(source.effectiveRootPath)
                         .font(ManifoldType.tiny.monospaced())
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)

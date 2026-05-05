@@ -1454,7 +1454,7 @@ extension ManifoldXPCService {
             // to the UI, which renders the source rows without badges.
             return [:]
         }
-        let activeSources = try await runtime.grantStore.activeSources()
+        let activeSources = try await runtime.grantStore.resolvedActiveSources()
         var counts: [String: Int] = [:]
         for source in activeSources {
             let count = try await runtime.snapshotStore.driftCount(
@@ -1480,11 +1480,10 @@ extension ManifoldXPCService {
         let explicitTargetApp = (payload["targetApp"] as? String).flatMap(TargetApp.init(rawValue:))
         let targetApp: TargetApp = explicitTargetApp ?? snapshot.preset.targetApp ?? .cowork
 
-        // Filter stale source references. activeSources() already drops
-        // status='removed' rows; we additionally drop paused sources for
-        // template-driven runs (paused = "temporarily off" — the template
-        // shouldn't silently re-enable them).
-        let activeSources = try await runtime.grantStore.activeSources()
+        // Filter stale source references. resolvedActiveSources() drops
+        // removed, paused, missing, replaced, and permission-denied rows so
+        // template-driven runs cannot silently re-enable unavailable sources.
+        let activeSources = try await runtime.grantStore.resolvedActiveSources()
         let activeIDs = Set(activeSources.map(\.sourceID))
         let allSources = try await runtime.grantStore.allSources()
         let knownDisplayNamesByID = Dictionary(uniqueKeysWithValues: allSources.map { ($0.sourceID, $0.displayName) })
@@ -1680,7 +1679,7 @@ extension ManifoldXPCService {
         selectedEmailIDs: Set<String>,
         sensitivityOverride: EmailSensitivityFilter.Level?
     ) async throws -> [String: Any] {
-        let activeSources = try await runtime.grantStore.activeSources()
+        let activeSources = try await runtime.grantStore.resolvedActiveSources()
         let policy = try await runtime.policyStore.policy(for: targetApp)
         let defaultSources = policy.isPaused
             ? []
@@ -1755,7 +1754,7 @@ extension ManifoldXPCService {
         memoryAccessEnabled: Bool,
         sensitivityOverride: EmailSensitivityFilter.Level?
     ) async throws -> (grant: GrantRecord, sources: [GrantSourceRecord]) {
-        let activeSources = try await runtime.grantStore.activeSources()
+        let activeSources = try await runtime.grantStore.resolvedActiveSources()
         let policy = try await runtime.policyStore.policy(for: targetApp)
         let defaultSources = policy.isPaused
             ? []
@@ -1858,9 +1857,9 @@ extension ManifoldXPCService {
         var skipped = 0
 
         for grantSource in grantSources {
-            guard let source = try await runtime.grantStore.source(id: grantSource.sourceID) else { continue }
+            guard let source = try await runtime.grantStore.resolvedSource(id: grantSource.sourceID) else { continue }
             let mountURL = URL(fileURLWithPath: grant.materializationRoot).appendingPathComponent(grantSource.mountName)
-            let originalURL = URL(fileURLWithPath: source.originalRootPath)
+            let originalURL = URL(fileURLWithPath: source.effectiveRootPath)
             guard FileManager.default.fileExists(atPath: mountURL.path) else { continue }
 
             let (_, _, drySkipped, _) = try PromoteEngine.dryRun(mountURL: mountURL, originalURL: originalURL)
@@ -1925,7 +1924,7 @@ extension ManifoldXPCService {
         for grantSource in grantSources {
             guard let source = activeSources.first(where: { $0.sourceID == grantSource.sourceID }) else { continue }
             let mountURL = materializationRoot.appendingPathComponent(grantSource.mountName)
-            let originalURL = URL(fileURLWithPath: source.originalRootPath)
+            let originalURL = URL(fileURLWithPath: source.effectiveRootPath)
             guard FileManager.default.fileExists(atPath: mountURL.path) else { continue }
 
             let summary = try PromoteEngine.promote(
@@ -2106,8 +2105,7 @@ extension ManifoldXPCService {
                 return nil
             }
         }
-        guard let source = try await runtime.grantStore.source(id: snapshot.workspaceID),
-              !source.isRemoved else {
+        guard let source = try await runtime.grantStore.resolvedSource(id: snapshot.workspaceID) else {
             return RestoreSnapshotResult(
                 status: "missingSnapshot",
                 message: "Manifold couldn't find a live source folder for this snapshot."
@@ -2122,7 +2120,7 @@ extension ManifoldXPCService {
 
         let previousData = try? ScopedFileAccess.readData(
             relativePath: relativePath,
-            rootPath: source.originalRootPath
+            rootPath: source.effectiveRootPath
         ).data
         if let expectedHash = try await runtime.snapshotStore.latestHash(filePath: filePath) {
             guard let previousData,
@@ -2138,7 +2136,7 @@ extension ManifoldXPCService {
             _ = try ScopedFileAccess.writeDataAtomically(
                 data,
                 relativePath: relativePath,
-                rootPath: source.originalRootPath
+                rootPath: source.effectiveRootPath
             )
             try await runtime.snapshotStore.recordRestore(
                 runID: snapshot.runID,
@@ -2166,11 +2164,11 @@ extension ManifoldXPCService {
                 _ = try? ScopedFileAccess.writeDataAtomically(
                     previousData,
                     relativePath: relativePath,
-                    rootPath: source.originalRootPath
+                    rootPath: source.effectiveRootPath
                 )
             } else if let identity = try? ScopedFileAccess.resolve(
                 relativePath: relativePath,
-                rootPath: source.originalRootPath,
+                rootPath: source.effectiveRootPath,
                 allowMissingLeaf: true
             ), FileManager.default.fileExists(atPath: identity.fileURL.path) {
                 try? FileManager.default.removeItem(at: identity.fileURL)

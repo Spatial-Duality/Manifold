@@ -183,7 +183,8 @@ protocol RuntimeClientProtocol: Sendable {
     func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot
     func dataControlSummary() async throws -> DataControlSummary
     func listSources() async throws -> [SourceRecord]
-    func addSource(path: String, displayName: String) async throws -> SourceRecord
+    func addSource(path: String, displayName: String, bookmarkDataBase64: String?) async throws -> SourceRecord
+    func repairSource(sourceID: String, path: String, displayName: String?, bookmarkDataBase64: String?) async throws -> SourceRecord
     func removeSource(sourceID: String) async throws
     func pauseSource(sourceID: String) async throws
     func resumeSource(sourceID: String) async throws
@@ -544,7 +545,8 @@ extension RuntimeClientProtocol {
     func runtimeStatusSnapshot() async throws -> RuntimeStatusSnapshot { throw RuntimeClientStubError.unimplemented("runtimeStatusSnapshot") }
     func dataControlSummary() async throws -> DataControlSummary { throw RuntimeClientStubError.unimplemented("dataControlSummary") }
     func listSources() async throws -> [SourceRecord] { throw RuntimeClientStubError.unimplemented("listSources") }
-    func addSource(path: String, displayName: String) async throws -> SourceRecord { throw RuntimeClientStubError.unimplemented("addSource") }
+    func addSource(path: String, displayName: String, bookmarkDataBase64: String?) async throws -> SourceRecord { throw RuntimeClientStubError.unimplemented("addSource") }
+    func repairSource(sourceID: String, path: String, displayName: String?, bookmarkDataBase64: String?) async throws -> SourceRecord { throw RuntimeClientStubError.unimplemented("repairSource") }
     func removeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("removeSource") }
     func pauseSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("pauseSource") }
     func resumeSource(sourceID: String) async throws { throw RuntimeClientStubError.unimplemented("resumeSource") }
@@ -925,7 +927,12 @@ enum SyntheticMCPUITestBootstrap {
         try filterText.write(to: filterURL, atomically: true, encoding: .utf8)
         try Data([0, 1, 2, 3, 255, 0, 42]).write(to: unsupportedURL)
 
-        let sourceID = try await grantStore.addSource(displayName: "Synthetic MCP UI", rootPath: sourceRoot.path)
+        let sourceBookmark = try? SourceResolver.bookmarkDataBase64(for: sourceRoot)
+        let sourceID = try await grantStore.addSource(
+            displayName: "Synthetic MCP UI",
+            rootPath: sourceRoot.path,
+            bookmarkDataBase64: sourceBookmark
+        )
         let grant = try await grantStore.startGrant(
             targetApp: .codex,
             profileID: "ui-test-profile",
@@ -1532,17 +1539,45 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
 
     func listSources() async throws -> [SourceRecord] { state.sources }
 
-    func addSource(path: String, displayName: String) async throws -> SourceRecord {
+    func addSource(path: String, displayName: String, bookmarkDataBase64: String?) async throws -> SourceRecord {
         let source = SourceRecord(
             sourceID: "src-\(UUID().uuidString.prefix(8).lowercased())",
             displayName: displayName,
             originalRootPath: path,
+            bookmarkDataBase64: bookmarkDataBase64,
+            resolvedRootPath: path,
+            sourceHealth: .available,
+            rootFileIdentity: nil,
+            lastResolvedAt: ISO8601DateFormatter.shared.string(from: Date()),
             status: "idle",
             createdAt: ISO8601DateFormatter.shared.string(from: Date()),
             updatedAt: ISO8601DateFormatter.shared.string(from: Date())
         )
         state.sources.append(source)
         return source
+    }
+
+    func repairSource(sourceID: String, path: String, displayName: String?, bookmarkDataBase64: String?) async throws -> SourceRecord {
+        guard let index = state.sources.firstIndex(where: { $0.sourceID == sourceID }) else {
+            throw RuntimeClientStubError.unimplemented("repairSource missing source")
+        }
+        let existing = state.sources[index]
+        let updated = SourceRecord(
+            sourceID: existing.sourceID,
+            displayName: displayName ?? existing.displayName,
+            originalRootPath: path,
+            bookmarkDataBase64: bookmarkDataBase64,
+            resolvedRootPath: path,
+            sourceHealth: .available,
+            rootFileIdentity: existing.rootFileIdentity,
+            lastResolvedAt: ISO8601DateFormatter.shared.string(from: Date()),
+            sourceKind: existing.sourceKind,
+            status: existing.status,
+            createdAt: existing.createdAt,
+            updatedAt: ISO8601DateFormatter.shared.string(from: Date())
+        )
+        state.sources[index] = updated
+        return updated
     }
 
     func removeSource(sourceID: String) async throws {
@@ -1561,6 +1596,13 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             sourceID: source.sourceID,
             displayName: source.displayName,
             originalRootPath: source.originalRootPath,
+            bookmarkDataBase64: source.bookmarkDataBase64,
+            resolvedRootPath: source.resolvedRootPath,
+            sourceHealth: source.sourceHealth,
+            sourceHealthDetail: source.sourceHealthDetail,
+            rootFileIdentity: source.rootFileIdentity,
+            lastResolvedAt: source.lastResolvedAt,
+            sourceKind: source.sourceKind,
             status: "paused",
             createdAt: source.createdAt,
             updatedAt: ISO8601DateFormatter.shared.string(from: Date())
@@ -1575,6 +1617,13 @@ actor FixtureRuntimeClient: RuntimeClientProtocol {
             sourceID: source.sourceID,
             displayName: source.displayName,
             originalRootPath: source.originalRootPath,
+            bookmarkDataBase64: source.bookmarkDataBase64,
+            resolvedRootPath: source.resolvedRootPath,
+            sourceHealth: source.sourceHealth,
+            sourceHealthDetail: source.sourceHealthDetail,
+            rootFileIdentity: source.rootFileIdentity,
+            lastResolvedAt: source.lastResolvedAt,
+            sourceKind: source.sourceKind,
             status: "idle",
             createdAt: source.createdAt,
             updatedAt: ISO8601DateFormatter.shared.string(from: Date())
@@ -3778,10 +3827,26 @@ final class AppRuntimeClient: RuntimeClientProtocol, Sendable {
         try await command(name: "listSources", field: "sources", as: [SourceRecord].self)
     }
 
-    func addSource(path: String, displayName: String) async throws -> SourceRecord {
-        try await command(
+    func addSource(path: String, displayName: String, bookmarkDataBase64: String?) async throws -> SourceRecord {
+        var payload: [String: Any] = ["path": path, "displayName": displayName]
+        if let bookmarkDataBase64 {
+            payload["bookmarkDataBase64"] = bookmarkDataBase64
+        }
+        return try await command(
             name: "addSource",
-            payload: ["path": path, "displayName": displayName],
+            payload: payload,
+            field: "source",
+            as: SourceRecord.self
+        )
+    }
+
+    func repairSource(sourceID: String, path: String, displayName: String?, bookmarkDataBase64: String?) async throws -> SourceRecord {
+        var payload: [String: Any] = ["sourceID": sourceID, "path": path]
+        if let displayName { payload["displayName"] = displayName }
+        if let bookmarkDataBase64 { payload["bookmarkDataBase64"] = bookmarkDataBase64 }
+        return try await command(
+            name: "repairSource",
+            payload: payload,
             field: "source",
             as: SourceRecord.self
         )
