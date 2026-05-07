@@ -61,6 +61,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
     }
 
     public func connect(
+        requestID: String,
         agent: String,
         clientName: String,
         clientVersion: String,
@@ -86,6 +87,20 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                         "client_pid": "\(verifiedIdentity.clientProcessID)",
                     ],
                     dedupeKey: "verification:\(verifiedIdentity.clientProcessID):\(agent):\(verifiedIdentity.reason)"
+                )
+                try? await runtime.mcpFailureEventStore.record(
+                    MCPFailureEvent(
+                        requestID: requestID,
+                        agent: requestedTarget.rawValue,
+                        clientName: clientName,
+                        toolName: nil,
+                        boundary: .xpcService,
+                        phase: .authorize,
+                        classification: .identityVerificationFailed,
+                        isRetryable: false,
+                        redactedMessage: verifiedIdentity.reason,
+                        connectionID: nil
+                    )
                 )
             }
             replyBox.reply(
@@ -123,6 +138,7 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
 
     public func callTool(
         connectionID: String,
+        requestID: String,
         toolName: String,
         arguments: Data,
         reply: @escaping (Data, Bool) -> Void
@@ -130,27 +146,94 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         let replyBox = ToolReplyBox(reply: reply)
         Task {
             guard let bridge = await registry.bridge(for: connectionID) else {
-                let result = Self.errorResult("No active runtime connection for \(connectionID)")
+                let failure = MCPFailureEvent(
+                    requestID: requestID,
+                    agent: "unknown",
+                    toolName: toolName,
+                    boundary: .xpcService,
+                    phase: .connect,
+                    classification: .xpcRuntimeUnavailable,
+                    isRetryable: true,
+                    redactedMessage: "No active runtime connection.",
+                    connectionID: connectionID
+                )
+                try? await runtime.mcpFailureEventStore.record(failure)
+                let result = Self.annotatedResult(
+                    Self.errorResult("Manifold error \(requestID) at xpc_service/connect: No active runtime connection. Retry after reconnecting Manifold."),
+                    requestID: requestID,
+                    connectionID: connectionID,
+                    failure: failure
+                )
                 replyBox.reply((try? XPCJSON.data(from: result)) ?? Data(), true)
                 return
             }
 
             let args: [String: Any]
             do { args = try XPCJSON.dictionary(from: arguments) }
-            catch { args = [:]; xpcLogger.warning("Malformed tool arguments for \(toolName): \(error.localizedDescription, privacy: .public)") }
+            catch {
+                args = [:]
+                xpcLogger.warning("Malformed tool arguments for \(toolName): \(error.localizedDescription, privacy: .public)")
+                try? await runtime.mcpFailureEventStore.record(
+                    MCPFailureEvent(
+                        requestID: requestID,
+                        agent: bridge.agentName,
+                        toolName: toolName,
+                        boundary: .xpcService,
+                        phase: .decode,
+                        classification: .transportMalformedMessage,
+                        isRetryable: false,
+                        redactedMessage: "Malformed tool arguments.",
+                        connectionID: connectionID
+                    )
+                )
+            }
             let startedAt = Date()
+            await bridge.resetToolMetricContext(toolName: toolName)
             let result = await Self.handleTool(name: toolName, arguments: args, bridge: bridge)
             let isError = result["isError"] as? Bool ?? false
             let text = Self.textContent(from: result)
             let metricContext = await bridge.latestToolMetricContext(toolName: toolName)
+            let durationMS = Date().timeIntervalSince(startedAt) * 1_000
+            let failure = isError
+                ? Self.failureEvent(
+                    requestID: requestID,
+                    connectionID: connectionID,
+                    agent: bridge.agentName,
+                    toolName: toolName,
+                    text: text,
+                    metricContext: metricContext,
+                    durationMS: durationMS
+                )
+                : nil
+            if let failure {
+                try? await runtime.mcpFailureEventStore.record(failure)
+            }
+            let annotatedResult = Self.annotatedResult(
+                result,
+                requestID: requestID,
+                connectionID: connectionID,
+                failure: failure,
+                metricContext: metricContext
+            )
             let metric = ToolCallMetric(
                 connectionID: connectionID,
                 agent: bridge.agentName,
                 toolName: toolName,
-                durationMS: Date().timeIntervalSince(startedAt) * 1_000,
+                durationMS: durationMS,
                 outputBytes: Data(text.utf8).count,
                 truncated: text.contains("[Manifold note: output truncated"),
                 isError: isError,
+                requestID: requestID,
+                errorClassification: failure?.classification.rawValue,
+                errorBoundary: failure?.boundary.rawValue,
+                errorPhase: failure?.phase.rawValue,
+                isRetryable: failure?.isRetryable,
+                metadataJSON: Self.manifoldMetadataJSON(
+                    requestID: requestID,
+                    connectionID: connectionID,
+                    failure: failure,
+                    metricContext: metricContext
+                ),
                 exposureID: metricContext.exposureID,
                 grantID: metricContext.grantID,
                 sessionID: metricContext.sessionID
@@ -162,16 +245,17 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
                     subjectTable: "tool_call_metrics",
                     subjectID: metric.metricID,
                     payload: Self.canonicalJSON(metric),
-                    metadata: ["tool": toolName, "agent": bridge.agentName]
+                    metadata: ["tool": toolName, "agent": bridge.agentName, "request_id": requestID]
                 )
             } catch {
                 xpcLogger.warning("Failed to record tool metric: \(error.localizedDescription, privacy: .public)")
             }
-            replyBox.reply((try? XPCJSON.data(from: result)) ?? Data(), isError)
+            replyBox.reply((try? XPCJSON.data(from: annotatedResult)) ?? Data(), isError)
         }
     }
 
     public func command(
+        requestID: String,
         name: String,
         payload: Data,
         reply: @escaping (Data, NSError?) -> Void
@@ -182,6 +266,21 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             connection: NSXPCConnection.current()
         )
         guard authorization.isAuthorized else {
+            Task {
+                try? await runtime.mcpFailureEventStore.record(
+                    MCPFailureEvent(
+                        requestID: requestID,
+                        agent: "app",
+                        toolName: name,
+                        boundary: .xpcService,
+                        phase: .authorize,
+                        classification: .identityVerificationFailed,
+                        isRetryable: false,
+                        redactedMessage: authorization.reason,
+                        connectionID: nil
+                    )
+                )
+            }
             replyBox.reply(
                 Data(),
                 NSError(
@@ -503,6 +602,27 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
             case "get_status":
                 let status = await bridge.getStatus()
                 return textResult(formatStatus(status))
+
+            case "manifold_health":
+                let coverage = await bridge.currentCoverageSnapshot()
+                let payload: [String: Any] = [
+                    "runtime_reachable": true,
+                    "agent": bridge.agentName,
+                    "coverage_state": coverage.coverageState.rawValue,
+                    "verification_status": coverage.verificationStatus.rawValue,
+                    "effective_access_resolver_version": ManifoldReliabilityConstants.effectiveAccessResolverVersion,
+                ]
+                return textResult(
+                    """
+                    Manifold runtime health
+                    Runtime reachable: yes
+                    Agent: \(bridge.agentName)
+                    Coverage: \(coverage.coverageState.displayName)
+                    Verification: \(coverage.verificationStatus.displayName)
+                    Effective access resolver: \(ManifoldReliabilityConstants.effectiveAccessResolverVersion)
+                    """,
+                    manifoldMetadata: ["runtime_health": payload]
+                )
 
             case "get_coverage_status":
                 let coverage = await bridge.currentCoverageSnapshot()
@@ -842,8 +962,159 @@ public final class ManifoldXPCService: NSObject, NSXPCListenerDelegate, Manifold
         ["content": [["type": "text", "text": text]]]
     }
 
+    private static func textResult(
+        _ text: String,
+        manifoldMetadata: [String: Any]
+    ) -> [String: Any] {
+        [
+            "content": [["type": "text", "text": text]],
+            "_meta": ["manifold": manifoldMetadata],
+        ]
+    }
+
     private static func errorResult(_ text: String) -> [String: Any] {
         ["content": [["type": "text", "text": text]], "isError": true]
+    }
+
+    private static func annotatedResult(
+        _ result: [String: Any],
+        requestID: String,
+        connectionID: String?,
+        failure: MCPFailureEvent?,
+        metricContext: ToolMetricContext? = nil
+    ) -> [String: Any] {
+        var annotated = result
+        var meta = (annotated["_meta"] as? [String: Any]) ?? [:]
+        var manifold = (meta["manifold"] as? [String: Any]) ?? [:]
+        manifold["request_id"] = requestID
+        manifold["runtime_generation"] = failure?.runtimeGeneration ?? 0
+        if let connectionID {
+            manifold["connection_id"] = connectionID
+        }
+        if let effectiveAccess = metricContext?.effectiveAccess {
+            manifold["effective_access"] = effectiveAccessMetadataDictionary(effectiveAccess)
+        }
+        if let failure {
+            manifold["error"] = [
+                "boundary": failure.boundary.rawValue,
+                "phase": failure.phase.rawValue,
+                "classification": failure.classification.rawValue,
+                "retryable": failure.isRetryable,
+            ] as [String: Any]
+        }
+        meta["manifold"] = manifold
+        annotated["_meta"] = meta
+        return annotated
+    }
+
+    private static func manifoldMetadataJSON(
+        requestID: String,
+        connectionID: String?,
+        failure: MCPFailureEvent?,
+        metricContext: ToolMetricContext? = nil
+    ) -> String? {
+        let result = annotatedResult(
+            [:],
+            requestID: requestID,
+            connectionID: connectionID,
+            failure: failure,
+            metricContext: metricContext
+        )
+        guard let meta = result["_meta"],
+              JSONSerialization.isValidJSONObject(meta),
+              let data = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func effectiveAccessMetadataDictionary(_ metadata: EffectiveAccessMetadata) -> [String: Any] {
+        [
+            "snapshot_id": metadata.snapshotID,
+            "resolver_version": metadata.resolverVersion,
+            "domain": metadata.domain,
+            "mode": metadata.mode,
+            "source_count": metadata.sourceCount,
+        ]
+    }
+
+    private static func failureEvent(
+        requestID: String,
+        connectionID: String,
+        agent: String,
+        toolName: String,
+        text: String,
+        metricContext: ToolMetricContext,
+        durationMS: Double
+    ) -> MCPFailureEvent {
+        let lower = text.lowercased()
+        let classification: MCPFailureClassification
+        let boundary: MCPFailureBoundary
+        let phase: MCPFailurePhase
+        let retryable: Bool
+
+        if lower.contains("no active runtime connection") || lower.contains("unable to connect") {
+            classification = .xpcRuntimeUnavailable
+            boundary = .xpcService
+            phase = .connect
+            retryable = true
+        } else if lower.contains("access is paused") {
+            classification = .accessPaused
+            boundary = .bridgeResolver
+            phase = .resolve
+            retryable = false
+        } else if lower.contains("no file or email access configured") || lower.contains("no access configured") {
+            classification = .accessNoAccessConfigured
+            boundary = .bridgeResolver
+            phase = .resolve
+            retryable = false
+        } else if lower.contains("ambiguous path") {
+            classification = .pathAmbiguous
+            boundary = .bridgeTool
+            phase = .resolve
+            retryable = false
+        } else if lower.contains("outside") || lower.contains("symlink") {
+            classification = .pathOutsideRoot
+            boundary = .filesystem
+            phase = .resolve
+            retryable = false
+        } else if lower.contains("hash mismatch") || lower.contains("changed while") {
+            classification = .writeConflict
+            boundary = .bridgeTool
+            phase = .execute
+            retryable = true
+        } else if lower.contains("blocked by rule") || lower.contains("privacy") {
+            classification = .privacyBlocked
+            boundary = .privacyFilter
+            phase = .execute
+            retryable = false
+        } else {
+            classification = .unknown
+            boundary = .bridgeTool
+            phase = .execute
+            retryable = false
+        }
+
+        return MCPFailureEvent(
+            requestID: requestID,
+            agent: agent,
+            toolName: toolName,
+            boundary: boundary,
+            phase: phase,
+            classification: classification,
+            isRetryable: retryable,
+            redactedMessage: redactedMessage(text),
+            connectionID: connectionID,
+            grantID: metricContext.grantID,
+            workBlockID: metricContext.effectiveAccess?.workBlockID,
+            sourceIDs: metricContext.effectiveAccess?.sourceIDs ?? [],
+            durationMS: durationMS
+        )
+    }
+
+    private static func redactedMessage(_ text: String) -> String {
+        let firstLine = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
+        return String(firstLine.prefix(500))
     }
 
     private static func intArgument(_ value: Any?) -> Int? {

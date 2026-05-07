@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Foundation
+import ManifoldKit
 
 // MARK: - MCP Tool & Resource Types
 
@@ -154,14 +155,20 @@ private extension Data {
 /// Zero external dependencies. Uses Foundation only.
 /// Actor ensures registration and start are serialized — no races on handler state.
 actor MCPServer {
+    private static let supportedProtocolVersions = [
+        "2025-06-18",
+        "2025-03-26",
+        "2024-11-05",
+    ]
+
     let name: String
     let version: String
 
-    private var toolHandler: ((_ name: String, _ arguments: JSONDict) async -> JSONDict)?
+    private var toolHandler: ((_ name: String, _ arguments: JSONDict, _ requestID: ManifoldRequestID) async -> JSONDict)?
     private var initializeHandler: ((_ params: JSONDict) async -> Void)?
     private var tools: [MCPTool] = []
     private var resources: [MCPResource] = []
-    private var resourceReader: ((_ uri: String) async -> String)?
+    private var resourceReader: ((_ uri: String, _ requestID: ManifoldRequestID) async -> String)?
 
     init(name: String, version: String) {
         self.name = name
@@ -170,12 +177,18 @@ actor MCPServer {
 
     // MARK: - Registration
 
-    func registerTools(_ tools: [MCPTool], handler: @escaping @Sendable (_ name: String, _ arguments: JSONDict) async -> JSONDict) {
+    func registerTools(
+        _ tools: [MCPTool],
+        handler: @escaping @Sendable (_ name: String, _ arguments: JSONDict, _ requestID: ManifoldRequestID) async -> JSONDict
+    ) {
         self.tools = tools
         self.toolHandler = handler
     }
 
-    func registerResources(_ resources: [MCPResource], reader: @escaping @Sendable (_ uri: String) async -> String) {
+    func registerResources(
+        _ resources: [MCPResource],
+        reader: @escaping @Sendable (_ uri: String, _ requestID: ManifoldRequestID) async -> String
+    ) {
         self.resources = resources
         self.resourceReader = reader
     }
@@ -208,13 +221,24 @@ actor MCPServer {
 
     // MARK: - Message Handling
 
-    private func handleMessage(_ data: Data) async -> Data? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let method = json["method"] as? String else {
-            return nil
+    func handleMessage(_ data: Data) async -> Data? {
+        let decoded: Any
+        do {
+            decoded = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            return makeErrorResponse(id: NSNull(), code: -32700, message: "Parse error")
+        }
+
+        guard let json = decoded as? [String: Any] else {
+            return makeErrorResponse(id: NSNull(), code: -32600, message: "Invalid Request")
+        }
+
+        guard let method = json["method"] as? String else {
+            return makeErrorResponse(id: json["id"] ?? NSNull(), code: -32600, message: "Invalid Request")
         }
 
         let id = json["id"]
+        let requestID = ManifoldRequestID.make(jsonRPCID: id)
         let params = json["params"] as? [String: Any] ?? [:]
 
         let result: Any?
@@ -226,11 +250,11 @@ actor MCPServer {
         case "tools/list":
             result = handleToolsList()
         case "tools/call":
-            result = await handleToolCall(params: params)
+            result = await handleToolCall(params: params, requestID: requestID)
         case "resources/list":
             result = handleResourcesList()
         case "resources/read":
-            result = await handleResourceRead(params: params)
+            result = await handleResourceRead(params: params, requestID: requestID)
         case "ping":
             result = [String: Any]()
         default:
@@ -247,8 +271,12 @@ actor MCPServer {
         if let initializeHandler {
             await initializeHandler(JSONDict(params))
         }
+        let requestedProtocolVersion = params["protocolVersion"] as? String
+        let protocolVersion = requestedProtocolVersion
+            .flatMap { Self.supportedProtocolVersions.contains($0) ? $0 : nil }
+            ?? Self.supportedProtocolVersions[0]
         return [
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": protocolVersion,
             "capabilities": [
                 "tools": ["listChanged": true],
                 "resources": ["listChanged": true],
@@ -264,29 +292,51 @@ actor MCPServer {
         ["tools": tools.map(\.jsonDict)]
     }
 
-    private func handleToolCall(params: [String: Any]) async -> [String: Any] {
+    private func handleToolCall(params: [String: Any], requestID: ManifoldRequestID) async -> [String: Any] {
         guard let name = params["name"] as? String else {
-            return ["content": [["type": "text", "text": "Missing tool name"]], "isError": true]
+            return annotatedError("Missing tool name", requestID: requestID, classification: .transportMalformedMessage)
         }
         let arguments = JSONDict(params["arguments"] as? [String: Any] ?? [:])
 
         if let handler = toolHandler {
-            return await handler(name, arguments).value
+            return await handler(name, arguments, requestID).value
         }
-        return ["content": [["type": "text", "text": "No handler registered"]], "isError": true]
+        return annotatedError("No handler registered", requestID: requestID, classification: .unknown)
     }
 
     private func handleResourcesList() -> [String: Any] {
         ["resources": resources.map { ["name": $0.name, "uri": $0.uri, "description": $0.description] }]
     }
 
-    private func handleResourceRead(params: [String: Any]) async -> [String: Any] {
+    private func handleResourceRead(params: [String: Any], requestID: ManifoldRequestID) async -> [String: Any] {
         guard let uri = params["uri"] as? String else { return ["contents": []] }
         if let reader = resourceReader {
-            let text = await reader(uri)
+            let text = await reader(uri, requestID)
             return ["contents": [["uri": uri, "text": text]]]
         }
         return ["contents": []]
+    }
+
+    private func annotatedError(
+        _ message: String,
+        requestID: ManifoldRequestID,
+        classification: MCPFailureClassification
+    ) -> [String: Any] {
+        [
+            "content": [["type": "text", "text": "Manifold error \(requestID.rawValue) at mcp_adapter/decode: \(message)"]],
+            "isError": true,
+            "_meta": [
+                "manifold": [
+                    "request_id": requestID.rawValue,
+                    "error": [
+                        "boundary": MCPFailureBoundary.mcpAdapter.rawValue,
+                        "phase": MCPFailurePhase.decode.rawValue,
+                        "classification": classification.rawValue,
+                        "retryable": false,
+                    ] as [String: Any],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
     }
 
     // MARK: - JSON-RPC Encoding

@@ -8,6 +8,14 @@ import ManifoldXPC
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "mcp")
 
+private extension JSONEncoder {
+    static var manifoldFailureSpool: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
+}
+
 private actor MCPConnectionState {
     private var connectionID: String?
     private var connectionError: String?
@@ -72,8 +80,18 @@ struct ManifoldMCPServer {
         let xpc = ManifoldXPCClient()
         let connectionState = MCPConnectionState()
         let demoRuntime = DemoMCPRuntime.isEnabled() ? DemoMCPRuntime(targetApp: targetApp) : nil
+        let diagnostics = DiagnosticsRecorder(process: .agent)
+        let failureRecorder = makeFailureEventRecorder()
 
-        @Sendable func connectRuntime(initializeParams paramsOverride: JSONDict? = nil) async -> String? {
+        @Sendable func recordFailure(_ event: MCPFailureEvent) async {
+            await Self.recordFailureEvent(event, recorder: failureRecorder, diagnostics: diagnostics)
+        }
+
+        @Sendable func connectRuntime(
+            requestID: ManifoldRequestID = ManifoldRequestID(),
+            toolName: String? = nil,
+            initializeParams paramsOverride: JSONDict? = nil
+        ) async -> String? {
             let params: JSONDict
             if let paramsOverride {
                 params = paramsOverride
@@ -82,6 +100,7 @@ struct ManifoldMCPServer {
             }
             do {
                 let connectionID = try await xpc.connectAgent(
+                    requestID: requestID.rawValue,
                     agent: targetApp.rawValue,
                     clientName: "manifold-mcp",
                     clientVersion: version,
@@ -91,6 +110,17 @@ struct ManifoldMCPServer {
                 return connectionID
             } catch {
                 await connectionState.fail(error)
+                await recordFailure(MCPFailureEvent(
+                    requestID: requestID.rawValue,
+                    agent: targetApp.rawValue,
+                    clientName: "manifold-mcp",
+                    toolName: toolName,
+                    boundary: .xpcClient,
+                    phase: .connect,
+                    classification: .xpcRuntimeUnavailable,
+                    isRetryable: true,
+                    redactedMessage: error.localizedDescription
+                ))
                 logger.error("Failed to connect MCP client to runtime: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
@@ -104,29 +134,88 @@ struct ManifoldMCPServer {
         }
 
         // Register tools
-        await server.registerTools(ToolDefinitions.allTools()) { name, arguments in
+        await server.registerTools(ToolDefinitions.allTools()) { name, arguments, requestID in
             if let demoRuntime {
-                return JSONDict(demoRuntime.callTool(name: name, arguments: arguments.value))
+                return JSONDict(annotateResult(demoRuntime.callTool(name: name, arguments: arguments.value), requestID: requestID))
+            }
+            if name == "manifold_health" {
+                let existingConnectionID = await connectionState.get()
+                let connectionID: String?
+                if let existingConnectionID {
+                    connectionID = existingConnectionID
+                } else {
+                    connectionID = await connectRuntime(requestID: requestID, toolName: name)
+                }
+                return JSONDict(Self.healthResult(
+                    requestID: requestID,
+                    version: version,
+                    targetApp: targetApp,
+                    connectionID: connectionID,
+                    failureRecorderAvailable: failureRecorder != nil,
+                    env: ProcessInfo.processInfo.environment
+                ))
             }
             let existingConnectionID = await connectionState.get()
             let runtimeConnectionID: String?
             if let existingConnectionID {
                 runtimeConnectionID = existingConnectionID
             } else {
-                runtimeConnectionID = await connectRuntime()
+                runtimeConnectionID = await connectRuntime(requestID: requestID, toolName: name)
             }
             guard let connectionID = runtimeConnectionID else {
-                return JSONDict(["content": [["type": "text", "text": await connectionState.unavailableMessage()]], "isError": true])
+                return JSONDict(annotatedError(
+                    await connectionState.unavailableMessage(),
+                    requestID: requestID,
+                    boundary: .xpcClient,
+                    phase: .connect,
+                    classification: .xpcRuntimeUnavailable,
+                    retryable: true
+                ))
             }
             do {
-                var result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments.value)
+                var result = try await xpc.callTool(
+                    connectionID: connectionID,
+                    requestID: requestID.rawValue,
+                    toolName: name,
+                    arguments: arguments.value
+                )
                 if isInactiveRuntimeResult(result),
-                   let reconnectedID = await connectRuntime() {
-                    result = try await xpc.callTool(connectionID: reconnectedID, toolName: name, arguments: arguments.value)
+                   let reconnectedID = await connectRuntime(requestID: requestID, toolName: name) {
+                    result = try await xpc.callTool(
+                        connectionID: reconnectedID,
+                        requestID: requestID.rawValue,
+                        toolName: name,
+                        arguments: arguments.value
+                    )
                 }
-                return JSONDict(result)
+                return JSONDict(annotateResult(result, requestID: requestID))
             } catch {
-                return JSONDict(["content": [["type": "text", "text": error.localizedDescription]], "isError": true])
+                let classification: MCPFailureClassification
+                if let xpcError = error as? ManifoldXPCError, case .timeout = xpcError {
+                    classification = .xpcTimeout
+                } else {
+                    classification = .xpcConnectionInvalidated
+                }
+                await recordFailure(MCPFailureEvent(
+                    requestID: requestID.rawValue,
+                    agent: targetApp.rawValue,
+                    clientName: "manifold-mcp",
+                    toolName: name,
+                    boundary: .xpcClient,
+                    phase: .reply,
+                    classification: classification,
+                    isRetryable: true,
+                    redactedMessage: error.localizedDescription,
+                    connectionID: connectionID
+                ))
+                return JSONDict(annotatedError(
+                    error.localizedDescription,
+                    requestID: requestID,
+                    boundary: .xpcClient,
+                    phase: .reply,
+                    classification: classification,
+                    retryable: true
+                ))
             }
         }
 
@@ -141,7 +230,7 @@ struct ManifoldMCPServer {
             MCPResource(name: "Saved Skills", uri: "manifold://skills", description: "Saved skill manifests"),
             MCPResource(name: "Exec Status", uri: "manifold://exec/status", description: "ManifoldExec sandbox status"),
             MCPResource(name: "Knowledge Graph", uri: "manifold://graph", description: "Scoped graph query status"),
-        ]) { uri in
+        ]) { uri, requestID in
             if let demoRuntime, let text = demoRuntime.resourceText(uri: uri) {
                 return text
             }
@@ -150,20 +239,42 @@ struct ManifoldMCPServer {
             if let existingConnectionID {
                 runtimeConnectionID = existingConnectionID
             } else {
-                runtimeConnectionID = await connectRuntime()
+                runtimeConnectionID = await connectRuntime(requestID: requestID)
             }
             guard let connectionID = runtimeConnectionID else {
                 return await connectionState.unavailableMessage()
             }
             func toolText(_ name: String, arguments: [String: Any] = [:]) async -> String {
                 do {
-                    var result = try await xpc.callTool(connectionID: connectionID, toolName: name, arguments: arguments)
+                    var result = try await xpc.callTool(
+                        connectionID: connectionID,
+                        requestID: requestID.rawValue,
+                        toolName: name,
+                        arguments: arguments
+                    )
                     if isInactiveRuntimeResult(result),
-                       let reconnectedID = await connectRuntime() {
-                        result = try await xpc.callTool(connectionID: reconnectedID, toolName: name, arguments: arguments)
+                       let reconnectedID = await connectRuntime(requestID: requestID, toolName: name) {
+                        result = try await xpc.callTool(
+                            connectionID: reconnectedID,
+                            requestID: requestID.rawValue,
+                            toolName: name,
+                            arguments: arguments
+                        )
                     }
                     return textContent(from: result)
                 } catch {
+                    await recordFailure(MCPFailureEvent(
+                        requestID: requestID.rawValue,
+                        agent: targetApp.rawValue,
+                        clientName: "manifold-mcp",
+                        toolName: name,
+                        boundary: .xpcClient,
+                        phase: .reply,
+                        classification: .xpcConnectionInvalidated,
+                        isRetryable: true,
+                        redactedMessage: error.localizedDescription,
+                        connectionID: connectionID
+                    ))
                     return error.localizedDescription
                 }
             }
@@ -195,6 +306,16 @@ struct ManifoldMCPServer {
         do {
             try await server.start()
         } catch {
+            await recordFailure(MCPFailureEvent(
+                requestID: ManifoldRequestID().rawValue,
+                agent: targetApp.rawValue,
+                clientName: "manifold-mcp",
+                boundary: .stdio,
+                phase: .disconnect,
+                classification: .transportStdinEOF,
+                isRetryable: true,
+                redactedMessage: error.localizedDescription
+            ))
             if let connectionID = await connectionState.get() {
                 xpc.disconnectAgent(connectionID: connectionID)
             }
@@ -215,6 +336,189 @@ struct ManifoldMCPServer {
     static func textContent(from result: [String: Any]) -> String {
         guard let content = result["content"] as? [[String: Any]] else { return "" }
         return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    static func makeFailureEventRecorder(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> (any MCPFailureEventRecording)? {
+        guard let rootURL = ManifoldRuntimeEnvironment.runtimeStoreURL(env: env) else {
+            return nil
+        }
+        do {
+            let db = try DatabaseConnection(url: rootURL.appendingPathComponent("manifold.db", isDirectory: false))
+            return try MCPFailureEventWriter(db: db)
+        } catch {
+            logger.error("Failed to open MCP failure event store: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    @discardableResult
+    static func recordFailureEvent(
+        _ event: MCPFailureEvent,
+        recorder: (any MCPFailureEventRecording)?,
+        diagnostics: DiagnosticsRecorder?,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) async -> Bool {
+        diagnostics?.record(event.classification == .xpcConnectionInvalidated ? .mcpTransportClosed : .mcpRequestFailed)
+        if let recorder {
+            do {
+                try await recorder.record(event)
+                return true
+            } catch {
+                logger.error("Failed to persist MCP failure event \(event.eventID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        } else {
+            logger.error("MCP failure event store unavailable for request \(event.requestID, privacy: .public)")
+        }
+
+        if let spoolURL = spoolFailureEvent(event, env: env) {
+            logger.error("Spooled MCP failure event \(event.eventID, privacy: .public) to \(spoolURL.path, privacy: .public)")
+        } else {
+            logger.error("Failed to spool MCP failure event \(event.eventID, privacy: .public)")
+        }
+        return false
+    }
+
+    static func failureSpoolURL(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard let diagnosticsURL = ManifoldRuntimeEnvironment.diagnosticsDirectoryURL(env: env) else {
+            return nil
+        }
+        return diagnosticsURL.appendingPathComponent("mcp-failure-events-spool.jsonl", isDirectory: false)
+    }
+
+    static func spoolFailureEvent(
+        _ event: MCPFailureEvent,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard let url = failureSpoolURL(env: env) else { return nil }
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder.manifoldFailureSpool.encode(event) + Data("\n".utf8)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } else {
+                try data.write(to: url, options: .atomic)
+            }
+            return url
+        } catch {
+            logger.error("Failed to append MCP failure spool: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    static func healthResult(
+        requestID: ManifoldRequestID,
+        version: String,
+        targetApp: TargetApp,
+        connectionID: String?,
+        failureRecorderAvailable: Bool,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: Any] {
+        let runtimeStoreURL = ManifoldRuntimeEnvironment.runtimeStoreURL(env: env)
+        let dbURL = runtimeStoreURL?.appendingPathComponent("manifold.db", isDirectory: false)
+        let spoolURL = failureSpoolURL(env: env)
+        let xpcReachable = connectionID != nil
+
+        var health: [String: Any] = [
+            "mcp_binary": CommandLine.arguments.first ?? "manifold-mcp",
+            "mcp_version": version,
+            "agent": targetApp.rawValue,
+            "xpc_service": ManifoldRuntimeEnvironment.xpcServiceName(env: env),
+            "xpc_reachable": xpcReachable,
+            "failure_ledger": failureRecorderAvailable ? "database" : "spool",
+            "effective_access_resolver_version": ManifoldReliabilityConstants.effectiveAccessResolverVersion,
+        ]
+        if let dbURL {
+            health["store_path"] = dbURL.path
+            health["store_open"] = failureRecorderAvailable
+        } else {
+            health["store_open"] = false
+        }
+        if let spoolURL {
+            health["failure_spool_path"] = spoolURL.path
+        }
+        if let connectionID {
+            health["connection_id"] = connectionID
+        }
+
+        let text = [
+            "Manifold MCP health",
+            "MCP helper: \(health["mcp_binary"] ?? "manifold-mcp")",
+            "MCP version: \(version)",
+            "Agent: \(targetApp.rawValue)",
+            "Failure ledger: \(health["failure_ledger"] ?? "unknown")",
+            "Store open: \(health["store_open"] ?? false)",
+            "XPC service: \(health["xpc_service"] ?? "")",
+            "XPC reachable: \(xpcReachable ? "yes" : "no")",
+            "Effective access resolver: \(ManifoldReliabilityConstants.effectiveAccessResolverVersion)",
+        ].joined(separator: "\n")
+
+        var manifoldMeta: [String: Any] = [
+            "request_id": requestID.rawValue,
+            "health": health,
+        ]
+        var result: [String: Any] = [
+            "content": [["type": "text", "text": text]],
+            "_meta": ["manifold": manifoldMeta],
+        ]
+        if !xpcReachable {
+            manifoldMeta["error"] = [
+                "boundary": MCPFailureBoundary.xpcClient.rawValue,
+                "phase": MCPFailurePhase.connect.rawValue,
+                "classification": MCPFailureClassification.xpcRuntimeUnavailable.rawValue,
+                "retryable": true,
+            ] as [String: Any]
+            result["isError"] = true
+            result["_meta"] = ["manifold": manifoldMeta]
+        }
+        return result
+    }
+
+    static func annotateResult(_ result: [String: Any], requestID: ManifoldRequestID) -> [String: Any] {
+        var annotated = result
+        var meta = (annotated["_meta"] as? [String: Any]) ?? [:]
+        var manifold = (meta["manifold"] as? [String: Any]) ?? [:]
+        manifold["request_id"] = manifold["request_id"] ?? requestID.rawValue
+        meta["manifold"] = manifold
+        annotated["_meta"] = meta
+        return annotated
+    }
+
+    static func annotatedError(
+        _ message: String,
+        requestID: ManifoldRequestID,
+        boundary: MCPFailureBoundary,
+        phase: MCPFailurePhase,
+        classification: MCPFailureClassification,
+        retryable: Bool
+    ) -> [String: Any] {
+        [
+            "content": [[
+                "type": "text",
+                "text": "Manifold error \(requestID.rawValue) at \(boundary.rawValue)/\(phase.rawValue): \(message)",
+            ]],
+            "isError": true,
+            "_meta": [
+                "manifold": [
+                    "request_id": requestID.rawValue,
+                    "error": [
+                        "boundary": boundary.rawValue,
+                        "phase": phase.rawValue,
+                        "classification": classification.rawValue,
+                        "retryable": retryable,
+                    ] as [String: Any],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
     }
 
     static func isInactiveRuntimeResult(_ result: [String: Any]) -> Bool {

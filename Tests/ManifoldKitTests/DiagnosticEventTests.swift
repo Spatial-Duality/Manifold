@@ -21,6 +21,10 @@ struct DiagnosticEventTests {
                 == "runtimeUnexpectedExit")
         #expect(DiagnosticEvent.versionMismatchRestart(appVersion: "a", runtimeVersion: "b").name
                 == "versionMismatchRestart")
+        #expect(DiagnosticEvent.runtimeRestartStarted.name == "runtimeRestartStarted")
+        #expect(DiagnosticEvent.xpcConnectionInterrupted.name == "xpcConnectionInterrupted")
+        #expect(DiagnosticEvent.mcpRequestFailed.name == "mcpRequestFailed")
+        #expect(DiagnosticEvent.mcpTransportClosed.name == "mcpTransportClosed")
         #expect(DiagnosticEvent.privacyModelInstallStateChanged(.installed).name
                 == "privacyModelInstallStateChanged")
         #expect(DiagnosticEvent.sparkleUpdateApplied(from: "0.4.0", to: "0.4.1").name
@@ -61,6 +65,12 @@ struct DiagnosticEventTests {
                       .runtimeRegistrationSucceeded,
                       .runtimeRegistrationFailedHelperMissing,
                       .runtimePingTimeout,
+                      .runtimeRestartStarted,
+                      .runtimeRestartSucceeded,
+                      .runtimeRestartFailed,
+                      .xpcConnectionInterrupted,
+                      .mcpRequestFailed,
+                      .mcpTransportClosed,
                       .ruleSeedFailure,
                       .sparkleUpdateChecked] {
             #expect(event.payload == .empty, "Expected empty payload for \(event.name)")

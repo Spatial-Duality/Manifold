@@ -10,6 +10,8 @@ public actor PrivacyIndexCoordinator {
     private let grantStore: GrantStore
     private let emailStore: EmailStore
     private let emailSyncEngine: EmailSyncEngine
+    private let runtimeSettingsStore: RuntimeSettingsStore
+    private let finderTagLedgerStore: FinderTagLedgerStore
     private let defaultStoragePath: String
     private let rulesOnlyBackend: RulesOnlyPrivacyBackend
     private let mlxBackend: MLXPrivacyBackend
@@ -28,6 +30,8 @@ public actor PrivacyIndexCoordinator {
         grantStore: GrantStore,
         emailStore: EmailStore,
         emailSyncEngine: EmailSyncEngine,
+        runtimeSettingsStore: RuntimeSettingsStore,
+        finderTagLedgerStore: FinderTagLedgerStore,
         defaultStoragePath: String,
         rulesOnlyBackend: RulesOnlyPrivacyBackend,
         mlxBackend: MLXPrivacyBackend
@@ -36,6 +40,8 @@ public actor PrivacyIndexCoordinator {
         self.grantStore = grantStore
         self.emailStore = emailStore
         self.emailSyncEngine = emailSyncEngine
+        self.runtimeSettingsStore = runtimeSettingsStore
+        self.finderTagLedgerStore = finderTagLedgerStore
         self.defaultStoragePath = defaultStoragePath
         self.rulesOnlyBackend = rulesOnlyBackend
         self.mlxBackend = mlxBackend
@@ -456,8 +462,20 @@ public actor PrivacyIndexCoordinator {
 
     private func enqueueBaselineForSource(_ source: SourceRecord) async throws {
         let root = Self.canonicalFileURL(URL(fileURLWithPath: source.effectiveRootPath))
+        try await enqueueBaselineForDirectory(source: source, root: root, directory: root, reason: "backfill", priority: 4)
+    }
+
+    private func enqueueBaselineForDirectory(
+        source: SourceRecord,
+        root: URL,
+        directory: URL,
+        reason: String,
+        priority: Int
+    ) async throws {
+        let directory = Self.canonicalFileURL(directory)
+        guard directory.path == root.path || directory.path.hasPrefix(root.path + "/") else { return }
         guard let enumerator = FileManager.default.enumerator(
-            at: root,
+            at: directory,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return }
@@ -469,7 +487,7 @@ public actor PrivacyIndexCoordinator {
             guard values?.isRegularFile == true else { continue }
             guard canonicalURL.path.hasPrefix(basePath) else { continue }
             let relativePath = String(canonicalURL.path.dropFirst(basePath.count))
-            try await enqueueSourceFile(source: source, relativePath: relativePath, reason: "backfill", priority: 4)
+            try await enqueueSourceFile(source: source, relativePath: relativePath, reason: reason, priority: priority)
         }
     }
 
@@ -557,11 +575,33 @@ public actor PrivacyIndexCoordinator {
 
     private func handleSourceEvents(source: SourceRecord, changedPaths: [String]) async {
         let root = Self.canonicalFileURL(URL(fileURLWithPath: source.effectiveRootPath))
+        let finderTagSettings = await finderTagSettingsForSource(source)
         for path in changedPaths {
             let url = Self.canonicalFileURL(URL(fileURLWithPath: path))
             guard url.path.hasPrefix(root.path) else { continue }
             let relativePath = Self.relativePath(file: url, base: root)
-            if FileManager.default.fileExists(atPath: url.path) {
+            if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
+               FileManager.default.fileExists(atPath: url.path) {
+                if let finderTagSettings {
+                    await applyFinderTagToChangedItem(
+                        url,
+                        source: source,
+                        tagName: finderTagSettings,
+                        recursive: values.isDirectory == true
+                    )
+                }
+                guard values.isRegularFile == true else {
+                    if values.isDirectory == true {
+                        try? await enqueueBaselineForDirectory(
+                            source: source,
+                            root: root,
+                            directory: url,
+                            reason: "file_change",
+                            priority: 2
+                        )
+                    }
+                    continue
+                }
                 try? await enqueueSourceFile(source: source, relativePath: relativePath, reason: "file_change", priority: 2)
             } else {
                 let contentID = Self.contentIDForSource(sourceID: source.sourceID, relativePath: relativePath)
@@ -569,6 +609,47 @@ public actor PrivacyIndexCoordinator {
             }
         }
         startProcessingLoopIfNeeded()
+    }
+
+    private func finderTagSettingsForSource(_ source: SourceRecord) async -> String? {
+        do {
+            guard try await runtimeSettingsStore.flag(forKey: "finder.integration.tags_enabled") == true else {
+                return nil
+            }
+            let tagName = FinderTagService.normalizedTagName(
+                try await runtimeSettingsStore.string(forKey: "finder.integration.tag_name") ?? "Manifold"
+            )
+            guard !tagName.isEmpty else { return nil }
+            guard try await finderTagLedgerStore.sourceHasTaggedRoot(
+                sourceID: source.sourceID,
+                rootPath: source.effectiveRootPath
+            ) else {
+                return nil
+            }
+            return tagName
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func applyFinderTagToChangedItem(
+        _ url: URL,
+        source: SourceRecord,
+        tagName: String,
+        recursive: Bool
+    ) async {
+        let records = FinderTagService.tagItems(
+            at: url,
+            sourceID: source.sourceID,
+            tagName: tagName,
+            recursive: recursive
+        )
+        do {
+            try await finderTagLedgerStore.record(records)
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     private func seedPrivacySmartMailboxes() throws {

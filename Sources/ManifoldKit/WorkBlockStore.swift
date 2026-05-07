@@ -7,8 +7,9 @@ import os
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "workblock")
 
 /// Manages optional tracked work blocks with snapshot/promote lifecycle.
-/// Work blocks freeze the access scope at start and use MaterializationEngine
-/// for workspace isolation. Standing access continues to work independently.
+/// Explicit work blocks freeze their selected scope at start. Default work
+/// blocks are launched from standing access; the runtime bridge re-resolves the
+/// current Access matrix so sharing toggles are visible on the next tool call.
 public actor WorkBlockStore {
     private let db: DatabaseConnection
 

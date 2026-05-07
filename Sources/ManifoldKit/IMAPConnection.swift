@@ -7,21 +7,6 @@ import os
 
 private let logger = Logger(subsystem: "com.spatialduality.manifold", category: "imap")
 
-/// Thread-safe flag for guarding single-resume of continuations.
-private final class AtomicFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _value = false
-
-    /// Returns true if this is the first call that sets the flag. Returns false on subsequent calls.
-    func testAndSet() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if _value { return false }
-        _value = true
-        return true
-    }
-}
-
 /// IMAP client built on Network.framework with TLS support.
 /// Manages a single connection to an IMAP server, providing tagged
 /// command/response protocol handling.
@@ -73,46 +58,46 @@ public actor IMAPConnection {
         let connQueue = DispatchQueue(label: "com.spatialduality.manifold.imap.\(UUID().uuidString.prefix(8))")
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let flag = AtomicFlag()
+            let reply = SingleShotThrowingContinuation<Void>(continuation)
 
             // Timeout via GCD timer
             let timer = DispatchSource.makeTimerSource(queue: connQueue)
             timer.schedule(deadline: .now() + self.connectTimeout)
             timer.setEventHandler {
-                guard flag.testAndSet() else { return }
-                timer.cancel()
-                conn.stateUpdateHandler = nil
-                conn.cancel()
-                logger.error("IMAP connection timed out after \(self.connectTimeout)s")
-                continuation.resume(throwing: IMAPError.timeout)
+                if reply.resume(throwing: IMAPError.timeout) {
+                    timer.cancel()
+                    conn.stateUpdateHandler = nil
+                    conn.cancel()
+                    logger.error("IMAP connection timed out after \(self.connectTimeout)s")
+                }
             }
             timer.resume()
 
             conn.stateUpdateHandler = { [weak conn] state in
                 switch state {
                 case .ready:
-                    guard flag.testAndSet() else { return }
-                    timer.cancel()
-                    conn?.stateUpdateHandler = nil
-                    logger.info("IMAP connection ready")
-                    continuation.resume()
+                    if reply.resume(returning: ()) {
+                        timer.cancel()
+                        conn?.stateUpdateHandler = nil
+                        logger.info("IMAP connection ready")
+                    }
                 case .failed(let error):
-                    guard flag.testAndSet() else { return }
-                    timer.cancel()
-                    conn?.stateUpdateHandler = nil
-                    logger.error("IMAP connection failed: \(error.localizedDescription)")
-                    continuation.resume(throwing: IMAPError.connectionFailed(error.localizedDescription))
+                    if reply.resume(throwing: IMAPError.connectionFailed(error.localizedDescription)) {
+                        timer.cancel()
+                        conn?.stateUpdateHandler = nil
+                        logger.error("IMAP connection failed: \(error.localizedDescription)")
+                    }
                 case .waiting(let error):
-                    guard flag.testAndSet() else { return }
-                    timer.cancel()
-                    conn?.stateUpdateHandler = nil
-                    logger.error("IMAP connection waiting (likely TLS issue): \(error.localizedDescription)")
-                    continuation.resume(throwing: IMAPError.connectionFailed("Connection stalled: \(error.localizedDescription)"))
+                    if reply.resume(throwing: IMAPError.connectionFailed("Connection stalled: \(error.localizedDescription)")) {
+                        timer.cancel()
+                        conn?.stateUpdateHandler = nil
+                        logger.error("IMAP connection waiting (likely TLS issue): \(error.localizedDescription)")
+                    }
                 case .cancelled:
-                    guard flag.testAndSet() else { return }
-                    timer.cancel()
-                    conn?.stateUpdateHandler = nil
-                    continuation.resume(throwing: IMAPError.disconnected)
+                    if reply.resume(throwing: IMAPError.disconnected) {
+                        timer.cancel()
+                        conn?.stateUpdateHandler = nil
+                    }
                 case .preparing:
                     logger.debug("IMAP connection preparing...")
                 default:
@@ -490,11 +475,12 @@ public actor IMAPConnection {
 
     private func send(data: Data, on conn: NWConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let reply = SingleShotThrowingContinuation<Void>(continuation)
             conn.send(content: data, completion: .contentProcessed { error in
                 if let error {
-                    continuation.resume(throwing: IMAPError.connectionFailed(error.localizedDescription))
+                    reply.resume(throwing: IMAPError.connectionFailed(error.localizedDescription))
                 } else {
-                    continuation.resume()
+                    reply.resume(returning: ())
                 }
             })
         }
@@ -556,33 +542,38 @@ public actor IMAPConnection {
         guard let conn = connection else { throw IMAPError.disconnected }
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            let flag = AtomicFlag()
+            let reply = SingleShotThrowingContinuation<Data>(continuation)
             let timeoutSeconds = self.commandTimeout
 
             let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
             timer.schedule(deadline: .now() + timeoutSeconds)
             timer.setEventHandler {
-                guard flag.testAndSet() else { return }
-                timer.cancel()
-                logger.warning("IMAP read timed out after \(timeoutSeconds)s")
-                continuation.resume(throwing: IMAPError.timeout)
+                if reply.resume(throwing: IMAPError.timeout) {
+                    timer.cancel()
+                    logger.warning("IMAP read timed out after \(timeoutSeconds)s")
+                }
             }
             timer.resume()
 
             conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { content, _, isComplete, error in
-                guard flag.testAndSet() else { return }
-                timer.cancel()
-
                 if let error {
-                    logger.error("IMAP read error: \(error.localizedDescription)")
-                    continuation.resume(throwing: IMAPError.connectionFailed(error.localizedDescription))
+                    if reply.resume(throwing: IMAPError.connectionFailed(error.localizedDescription)) {
+                        timer.cancel()
+                        logger.error("IMAP read error: \(error.localizedDescription)")
+                    }
                 } else if let data = content, !data.isEmpty {
-                    continuation.resume(returning: data)
+                    if reply.resume(returning: data) {
+                        timer.cancel()
+                    }
                 } else if isComplete {
-                    logger.info("IMAP connection closed by server")
-                    continuation.resume(throwing: IMAPError.disconnected)
+                    if reply.resume(throwing: IMAPError.disconnected) {
+                        timer.cancel()
+                        logger.info("IMAP connection closed by server")
+                    }
                 } else {
-                    continuation.resume(throwing: IMAPError.disconnected)
+                    if reply.resume(throwing: IMAPError.disconnected) {
+                        timer.cancel()
+                    }
                 }
             }
         }

@@ -87,6 +87,11 @@ enum ToolDefinitions {
                 inputSchema: emptySchema
             ),
             MCPTool(
+                name: "manifold_health",
+                description: "Run a local Manifold MCP preflight. Returns helper, failure-ledger, XPC reachability, and resolver metadata without exposing user files or emails.",
+                inputSchema: emptySchema
+            ),
+            MCPTool(
                 name: "get_coverage_status",
                 description: "Check whether the current connection is Manifold-routed, using a draft workspace, or outside coverage.",
                 inputSchema: emptySchema

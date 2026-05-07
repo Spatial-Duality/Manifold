@@ -32,7 +32,7 @@ private func menuBarManifoldImage() -> NSImage {
 private func configureApplicationIconImage() {
     if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
        let icon = NSImage(contentsOf: iconURL) {
-        NSApplication.shared.applicationIconImage = icon
+        NSApp.applicationIconImage = icon
     }
 }
 
@@ -52,7 +52,6 @@ struct ManifoldApp: App {
     @State private var store: ManifoldStore
 
     init() {
-        configureApplicationIconImage()
         _store = State(initialValue: Self.bootstrapStore())
     }
 
@@ -61,6 +60,7 @@ struct ManifoldApp: App {
             AppRootView()
                 .environment(store)
                 .frame(minWidth: 920, minHeight: 600)
+                .onAppear { configureApplicationIconImage() }
         }
         .defaultSize(width: 1100, height: 720)
         .windowStyle(.automatic)

@@ -93,6 +93,30 @@ struct GeneralSettingsPane: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section {
+                LabeledContent("Finder extension") {
+                    Text(store.finderExtensionStatusText)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Spacer()
+                    Button("Manage Finder Extension") {
+                        store.openFinderExtensionSettings()
+                    }
+                    .controlSize(.small)
+                }
+                Toggle("Tag items added to Manifold", isOn: $store.finderIntegrationTagsEnabled)
+                TextField("Tag name", text: $store.finderIntegrationTagName)
+                    .disabled(!store.finderIntegrationTagsEnabled)
+            } header: {
+                Text("Finder Integration")
+            } footer: {
+                Text("Finder tags are optional. Manifold adds only the configured tag and removes only the tag entries it owns; other user tags are preserved.")
+                    .font(ManifoldType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Notifications") {
                 Toggle("Session start and finish", isOn: $store.notifyOnSessionEnd)
                 Toggle("Access denied alerts", isOn: $store.notifyOnAccessDenied)

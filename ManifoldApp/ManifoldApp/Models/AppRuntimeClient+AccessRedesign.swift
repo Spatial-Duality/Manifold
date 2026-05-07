@@ -213,13 +213,19 @@ extension AppRuntimeClient {
     }
 
     /// Replace a preset's file scopes in one transaction.
-    func updatePresetFileScopes(presetID: String, fileScopes: [FileSelectionScope]) async throws {
+    func updatePresetFileScopes(
+        presetID: String,
+        fileScopes: [FileSelectionScope],
+        agent: TargetApp? = nil
+    ) async throws {
+        var payload: [String: Any] = [
+            "presetID": presetID,
+            "fileScopes": try XPCJSON.object(from: fileScopes),
+        ]
+        if let agent { payload["agent"] = agent.rawValue }
         _ = try await xpc.command(
             name: "updatePresetFileScopes",
-            payload: [
-                "presetID": presetID,
-                "fileScopes": try XPCJSON.object(from: fileScopes),
-            ]
+            payload: payload
         )
     }
 
@@ -229,17 +235,20 @@ extension AppRuntimeClient {
         sourceID: String,
         relativePath: String,
         isDirectory: Bool,
-        decision: FileVisibilityOverrideDecision
+        decision: FileVisibilityOverrideDecision,
+        agent: TargetApp? = nil
     ) async throws {
+        var payload: [String: Any] = [
+            "presetID": presetID,
+            "sourceID": sourceID,
+            "relativePath": relativePath,
+            "isDirectory": isDirectory,
+            "decision": decision.rawValue,
+        ]
+        if let agent { payload["agent"] = agent.rawValue }
         _ = try await xpc.command(
             name: "setPresetOverride",
-            payload: [
-                "presetID": presetID,
-                "sourceID": sourceID,
-                "relativePath": relativePath,
-                "isDirectory": isDirectory,
-                "decision": decision.rawValue,
-            ]
+            payload: payload
         )
     }
 
@@ -248,15 +257,73 @@ extension AppRuntimeClient {
         presetID: String,
         sourceID: String,
         relativePath: String,
-        isDirectory: Bool
+        isDirectory: Bool,
+        agent: TargetApp? = nil
     ) async throws {
+        var payload: [String: Any] = [
+            "presetID": presetID,
+            "sourceID": sourceID,
+            "relativePath": relativePath,
+            "isDirectory": isDirectory,
+        ]
+        if let agent { payload["agent"] = agent.rawValue }
         _ = try await xpc.command(
             name: "clearPresetOverride",
+            payload: payload
+        )
+    }
+
+    func recordFinderTags(_ records: [FinderTaggedItemRecord]) async throws {
+        guard !records.isEmpty else { return }
+        _ = try await xpc.command(
+            name: "recordFinderTags",
+            payload: ["records": try XPCJSON.object(from: records)]
+        )
+    }
+
+    func finderTagRecords(sourceID: String) async throws -> [FinderTaggedItemRecord] {
+        let response = try await xpc.command(
+            name: "finderTagRecordsForSource",
+            payload: ["sourceID": sourceID]
+        )
+        guard let object = response["records"], !(object is NSNull) else {
+            throw ManifoldXPCError.malformedReply
+        }
+        return try XPCJSON.decode([FinderTaggedItemRecord].self, from: object)
+    }
+
+    func hasOtherFinderTagOwner(
+        fileIdentity: String?,
+        path: String,
+        tagName: String,
+        excluding sourceID: String
+    ) async throws -> Bool {
+        var payload: [String: Any] = [
+            "path": path,
+            "tagName": tagName,
+            "excludingSourceID": sourceID,
+        ]
+        if let fileIdentity { payload["fileIdentity"] = fileIdentity }
+        let response = try await xpc.command(
+            name: "hasOtherFinderTagOwner",
+            payload: payload
+        )
+        return response["hasOtherOwner"] as? Bool ?? false
+    }
+
+    func removeFinderTagRecords(sourceID: String) async throws {
+        _ = try await xpc.command(
+            name: "removeFinderTagRecordsForSource",
+            payload: ["sourceID": sourceID]
+        )
+    }
+
+    func setFinderIntegrationSettings(tagsEnabled: Bool, tagName: String) async throws {
+        _ = try await xpc.command(
+            name: "setFinderIntegrationSettings",
             payload: [
-                "presetID": presetID,
-                "sourceID": sourceID,
-                "relativePath": relativePath,
-                "isDirectory": isDirectory,
+                "tagsEnabled": tagsEnabled,
+                "tagName": tagName,
             ]
         )
     }

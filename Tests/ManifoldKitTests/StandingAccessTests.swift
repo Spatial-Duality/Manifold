@@ -2280,6 +2280,35 @@ struct StandingAccessTests {
         #expect(files.contains { $0.sourceName == "unshared" } == false)
     }
 
+    @Test("Active default work block picks up sources newly shared in Access")
+    func activeWorkBlockPicksUpNewlySharedSources() async throws {
+        let h = try makeHarness(targetApp: .codex)
+        defer { cleanup(h.tempDir) }
+
+        let sourceID = try await createAndRegisterSource(harness: h, name: "HR")
+        let grant = try await h.grantStore.startGrant(
+            targetApp: .codex,
+            profileID: "default",
+            sourceIDs: [],
+            materializationRoot: h.tempDir.appendingPathComponent("default-grant").path,
+            explicitSelection: false
+        )
+        _ = try await h.workBlockStore.startBlock(
+            agent: .codex,
+            grantID: grant.grantID,
+            sourceIDs: []
+        )
+
+        let before = try await h.bridge.listFiles()
+        #expect(before.isEmpty)
+
+        try await h.policyStore.addSource(sourceID, to: .codex)
+
+        let after = try await h.bridge.listFiles()
+        #expect(after.contains { $0.path == "hr/README.md" && $0.sourceName == "hr" })
+        #expect(after.contains { $0.path == "hr/src/main.swift" && $0.sourceName == "hr" })
+    }
+
     @Test("Active default work block respects current file visibility overrides")
     func activeWorkBlockRespectsFileVisibilityOverrides() async throws {
         let h = try makeHarness()

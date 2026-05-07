@@ -234,8 +234,7 @@ struct ConnectCodexSheet: View {
         actionError = nil
         defer { isAdding = false }
         do {
-            let writer = ConfigWriter(binaryPath: ManifoldStore.mcpBinaryPath)
-            try writer.installCodex()
+            try store.installCodexMCP()
             await store.integrationHealth.checkCodex()
         } catch {
             actionError = error.localizedDescription

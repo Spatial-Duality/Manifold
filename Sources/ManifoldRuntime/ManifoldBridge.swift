@@ -72,6 +72,7 @@ public actor ManifoldBridge {
     let profileID: String
     var runtimeContext: AgentRuntimeContext
     var connectionLogged = false
+    var latestEffectiveAccessMetadataByTool: [String: EffectiveAccessMetadata] = [:]
 
     public init(
         db: DatabaseConnection,
@@ -982,9 +983,10 @@ public actor ManifoldBridge {
     }
 
     private func scopedGrantSources(grant: GrantRecord, policy: AgentAccessPolicy?) async throws -> [GrantSourceRecord] {
-        var grantSources = try await grantStore.grantSources(grantID: grant.grantID)
-        let activeSourceIDs = Set((try await grantStore.resolvedActiveSources()).map(\.sourceID))
-        grantSources = grantSources.filter { activeSourceIDs.contains($0.sourceID) }
+        let activeSources = try await grantStore.resolvedActiveSources()
+        let activeSourceIDs = Set(activeSources.map(\.sourceID))
+        let grantSources = try await grantStore.grantSources(grantID: grant.grantID)
+            .filter { activeSourceIDs.contains($0.sourceID) }
 
         guard let policy else { return grantSources }
         guard policy.agent.rawValue == grant.targetApp, !policy.isPaused else { return [] }
@@ -997,7 +999,49 @@ public actor ManifoldBridge {
 
         let resolver = try await standingFileVisibilityResolver(for: policy)
         let allowedSourceIDs = policy.allowedSourceIDs.union(resolver.sourceIDsWithAllowOverrides)
-        return grantSources.filter { allowedSourceIDs.contains($0.sourceID) }
+        return currentPolicyGrantSources(
+            grantID: grant.grantID,
+            activeSources: activeSources,
+            existingGrantSources: grantSources,
+            allowedSourceIDs: allowedSourceIDs
+        )
+    }
+
+    /// Default work blocks are launched from standing access, so the Access
+    /// matrix remains authoritative while the block is active. Re-synthesizing
+    /// grant-source rows here lets newly shared folders appear on the next MCP
+    /// call without weakening explicit one-off session scopes.
+    private func currentPolicyGrantSources(
+        grantID: String,
+        activeSources: [SourceRecord],
+        existingGrantSources: [GrantSourceRecord],
+        allowedSourceIDs: Set<String>
+    ) -> [GrantSourceRecord] {
+        let existingBySourceID = Dictionary(uniqueKeysWithValues: existingGrantSources.map { ($0.sourceID, $0) })
+        var usedMountNames = Set<String>()
+
+        return activeSources.compactMap { source in
+            guard allowedSourceIDs.contains(source.sourceID) else { return nil }
+            let preferredMountName = existingBySourceID[source.sourceID]?.mountName ?? source.canonicalMountName
+            let mountName = Self.uniqueMountName(preferredMountName, used: &usedMountNames)
+            return GrantSourceRecord(
+                grantID: grantID,
+                sourceID: source.sourceID,
+                mountName: mountName
+            )
+        }
+    }
+
+    private static func uniqueMountName(_ preferred: String, used: inout Set<String>) -> String {
+        let base = preferred.isEmpty ? "source" : preferred
+        var candidate = base
+        var suffix = 2
+        while used.contains(candidate) {
+            candidate = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        used.insert(candidate)
+        return candidate
     }
 
     private func explicitGrantEmailIDs(for grant: GrantRecord, limit: Int) throws -> Set<String>? {
@@ -1135,13 +1179,31 @@ public actor ManifoldBridge {
         }
     }
 
-    /// Resolved mounts + optional grant for read operations.
-    /// Standing access and normal sessions point to original source paths.
-    /// Legacy grants and explicit draft workspaces point to materialized roots.
-    private struct ResolvedMounts {
+    /// Single resolved view of the effective access boundary for one MCP call.
+    /// File tools consume the mount fields; email tools consume `context`.
+    /// Keeping both domains in one snapshot prevents file/email visibility drift
+    /// from callers independently re-reading policy, grant, work-block, or source
+    /// tables during a single request.
+    private struct EffectiveAccessSnapshot {
+        enum Domain: String {
+            case files
+            case email
+        }
+
+        enum Mode: String {
+            case standing
+            case workBlock
+            case legacyGrant
+        }
+
+        let domain: Domain
+        let mode: Mode
+        let context: AccessContext?
         let mounts: [GrantMount]
         let grantID: String?
         let grant: GrantRecord?
+        let workBlockID: String?
+        let sourceIDs: [String]
         let isStanding: Bool
         let usesOriginalSources: Bool
         let decisionID: String?
@@ -1150,6 +1212,52 @@ public actor ManifoldBridge {
         /// Nil means no grant-scoped file filter; non-nil means the listed
         /// source-relative scopes are the complete session file gateway.
         let fileScopes: [FileSelectionScope]?
+    }
+
+    private typealias ResolvedMounts = EffectiveAccessSnapshot
+
+    private func rememberEffectiveAccess(
+        _ snapshot: EffectiveAccessSnapshot,
+        toolName: String
+    ) -> EffectiveAccessSnapshot {
+        latestEffectiveAccessMetadataByTool[toolName] = effectiveAccessMetadata(for: snapshot)
+        return snapshot
+    }
+
+    private func effectiveAccessMetadata(for snapshot: EffectiveAccessSnapshot) -> EffectiveAccessMetadata {
+        let sourceIDs = snapshot.sourceIDs.sorted()
+        let fileScopes = snapshot.fileScopes?
+            .map { "\($0.sourceID):\($0.relativePath):\($0.isDirectory ? "dir" : "file")" }
+            .sorted()
+            .joined(separator: ",") ?? ""
+        let policySourceIDs = snapshot.standingPolicy?.allowedSourceIDs.sorted().joined(separator: ",") ?? ""
+        let policyEmailDomains = snapshot.standingPolicy?.allowedEmailDomains.sorted().joined(separator: ",") ?? ""
+        let fingerprintMaterial = [
+            ManifoldReliabilityConstants.effectiveAccessResolverVersion,
+            targetApp.rawValue,
+            snapshot.domain.rawValue,
+            snapshot.mode.rawValue,
+            snapshot.grantID ?? "",
+            snapshot.workBlockID ?? "",
+            sourceIDs.joined(separator: ","),
+            fileScopes,
+            policySourceIDs,
+            policyEmailDomains,
+            snapshot.standingPolicy?.emailSensitivity.rawValue ?? "",
+            snapshot.standingPolicy?.defaultEmailPolicy.rawValue ?? "",
+            snapshot.standingPolicy?.isPaused == true ? "paused" : "active",
+        ].joined(separator: "|")
+        let digest = SHA256.hash(data: Data(fingerprintMaterial.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return EffectiveAccessMetadata(
+            snapshotID: "eas-\(digest.prefix(16))",
+            domain: snapshot.domain.rawValue,
+            mode: snapshot.mode.rawValue,
+            sourceCount: sourceIDs.count,
+            workBlockID: snapshot.workBlockID,
+            sourceIDs: sourceIDs
+        )
     }
 
     /// Resolve access and return mounts suitable for file operations.
@@ -1169,18 +1277,23 @@ public actor ManifoldBridge {
         switch context {
         case .standing(let policy, let sources):
             let resolver = try await standingFileVisibilityResolver(for: policy)
-            return ResolvedMounts(
+            return rememberEffectiveAccess(ResolvedMounts(
+                domain: .files,
+                mode: .standing,
+                context: context,
                 mounts: standingMounts(sources: sources),
                 grantID: nil,
                 grant: nil,
+                workBlockID: nil,
+                sourceIDs: sources.map(\.sourceID),
                 isStanding: true,
                 usesOriginalSources: true,
                 decisionID: decisionID,
                 standingPolicy: policy,
                 standingResolver: resolver,
                 fileScopes: nil
-            )
-        case .workBlock(let grant, let grantSources, _):
+            ), toolName: toolName)
+        case .workBlock(let grant, let grantSources, let block):
             if !Self.isDraftWorkspaceGrant(grant) {
                 let policy = try await policyStore?.policy(for: targetApp)
                 let resolver: FileVisibilityResolver?
@@ -1189,41 +1302,123 @@ public actor ManifoldBridge {
                 } else {
                     resolver = nil
                 }
-                return ResolvedMounts(
+                return rememberEffectiveAccess(ResolvedMounts(
+                    domain: .files,
+                    mode: .workBlock,
+                    context: context,
                     mounts: try await originalMounts(sources: grantSources),
                     grantID: grant.grantID,
                     grant: grant,
+                    workBlockID: block.id,
+                    sourceIDs: grantSources.map(\.sourceID),
                     isStanding: false,
                     usesOriginalSources: true,
                     decisionID: decisionID,
                     standingPolicy: grant.explicitSelection ? nil : policy,
                     standingResolver: grant.explicitSelection ? nil : resolver,
                     fileScopes: grant.explicitSelection ? try await grantFileScopes(for: grant) : nil
-                )
+                ), toolName: toolName)
             }
-            return ResolvedMounts(
+            return rememberEffectiveAccess(ResolvedMounts(
+                domain: .files,
+                mode: .workBlock,
+                context: context,
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
+                workBlockID: block.id,
+                sourceIDs: grantSources.map(\.sourceID),
                 isStanding: false,
                 usesOriginalSources: false,
                 decisionID: decisionID,
                 standingPolicy: nil,
                 standingResolver: nil,
                 fileScopes: nil
-            )
+            ), toolName: toolName)
         case .legacyGrant(let grant, let grantSources):
-            return ResolvedMounts(
+            return rememberEffectiveAccess(ResolvedMounts(
+                domain: .files,
+                mode: .legacyGrant,
+                context: context,
                 mounts: grantMounts(grant: grant, sources: grantSources),
                 grantID: grant.grantID,
                 grant: grant,
+                workBlockID: nil,
+                sourceIDs: grantSources.map(\.sourceID),
                 isStanding: false,
                 usesOriginalSources: false,
                 decisionID: decisionID,
                 standingPolicy: nil,
                 standingResolver: nil,
                 fileScopes: nil
-            )
+            ), toolName: toolName)
+        }
+    }
+
+    private func resolveEmailAccessSnapshot(
+        toolName: String,
+        action: String,
+        resourcePath: String? = nil,
+        intent: AccessIntent? = nil
+    ) async throws -> EffectiveAccessSnapshot {
+        let (context, decisionID) = try await resolveEmailAccessForTool(
+            toolName: toolName,
+            action: action,
+            resourcePath: resourcePath,
+            intent: intent
+        )
+        switch context {
+        case .standing(let policy, let sources):
+            return rememberEffectiveAccess(EffectiveAccessSnapshot(
+                domain: .email,
+                mode: .standing,
+                context: context,
+                mounts: [],
+                grantID: nil,
+                grant: nil,
+                workBlockID: nil,
+                sourceIDs: sources.map(\.sourceID),
+                isStanding: true,
+                usesOriginalSources: true,
+                decisionID: decisionID,
+                standingPolicy: policy,
+                standingResolver: nil,
+                fileScopes: nil
+            ), toolName: toolName)
+        case .workBlock(let grant, let grantSources, let block):
+            return rememberEffectiveAccess(EffectiveAccessSnapshot(
+                domain: .email,
+                mode: .workBlock,
+                context: context,
+                mounts: [],
+                grantID: grant.grantID,
+                grant: grant,
+                workBlockID: block.id,
+                sourceIDs: grantSources.map(\.sourceID),
+                isStanding: false,
+                usesOriginalSources: true,
+                decisionID: decisionID,
+                standingPolicy: nil,
+                standingResolver: nil,
+                fileScopes: nil
+            ), toolName: toolName)
+        case .legacyGrant(let grant, let grantSources):
+            return rememberEffectiveAccess(EffectiveAccessSnapshot(
+                domain: .email,
+                mode: .legacyGrant,
+                context: context,
+                mounts: [],
+                grantID: grant.grantID,
+                grant: grant,
+                workBlockID: nil,
+                sourceIDs: grantSources.map(\.sourceID),
+                isStanding: false,
+                usesOriginalSources: false,
+                decisionID: decisionID,
+                standingPolicy: nil,
+                standingResolver: nil,
+                fileScopes: nil
+            ), toolName: toolName)
         }
     }
 
@@ -1447,6 +1642,41 @@ public actor ManifoldBridge {
             explicitGrantEmailIDs: explicitGrantEmailIDs(for: grant, limit: 1_000)
         )
         return EmailPolicyEngine.decision(for: email, context: context)
+    }
+
+    private func requireEmailAccessContext(_ snapshot: EffectiveAccessSnapshot) throws -> AccessContext {
+        guard snapshot.domain == .email, let context = snapshot.context else {
+            throw ManifoldMCPError.invalidPath("Internal error: email tool received a non-email access snapshot")
+        }
+        return context
+    }
+
+    private func accessibleEmails(snapshot: EffectiveAccessSnapshot, limit: Int) async throws -> [EmailMessageRecord] {
+        switch try requireEmailAccessContext(snapshot) {
+        case .standing(let policy, _):
+            return try await accessibleEmails(policy: policy, limit: limit)
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            return try await accessibleEmails(grant: grant, limit: limit)
+        }
+    }
+
+    private func emailRuleDecision(
+        for email: EmailMessageRecord,
+        snapshot: EffectiveAccessSnapshot
+    ) async throws -> (decision: EmailRuleDecision, grantID: String?) {
+        switch try requireEmailAccessContext(snapshot) {
+        case .standing(let policy, _):
+            return (try await emailRuleDecision(for: email, policy: policy), nil)
+        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
+            return (try await emailRuleDecision(for: email, grant: grant), grant.grantID)
+        }
+    }
+
+    private func isEmailAccessible(
+        email: EmailMessageRecord,
+        snapshot: EffectiveAccessSnapshot
+    ) async throws -> Bool {
+        try await emailRuleDecision(for: email, snapshot: snapshot).decision.allowed
     }
 
     private func emailPolicyContext(
@@ -2541,14 +2771,16 @@ public actor ManifoldBridge {
                 return result
             }
 
-        case .workBlock(let grant, let grantSources, _):
+        case .workBlock(let grant, let grantSources, let block):
             if Self.isDraftWorkspaceGrant(grant) {
                 let resolved = try await resolveTrackedWrite(
                     cleanedPath: cleaned,
                     grant: grant,
                     grantSources: grantSources,
                     toolName: options.toolName,
-                    intent: validatedIntent
+                    intent: validatedIntent,
+                    mode: .workBlock,
+                    workBlockID: block.id
                 )
                 access = resolved.access
                 writeID = grant.grantID
@@ -2561,7 +2793,8 @@ public actor ManifoldBridge {
                     grant: grant,
                     grantSources: grantSources,
                     toolName: options.toolName,
-                    intent: validatedIntent
+                    intent: validatedIntent,
+                    workBlockID: block.id
                 )
                 access = resolved.access
                 writeID = grant.grantID
@@ -2576,7 +2809,8 @@ public actor ManifoldBridge {
                 grant: grant,
                 grantSources: grantSources,
                 toolName: options.toolName,
-                intent: validatedIntent
+                intent: validatedIntent,
+                mode: .legacyGrant
             )
             access = resolved.access
             writeID = grant.grantID
@@ -3171,9 +3405,14 @@ public actor ManifoldBridge {
         )
         return .ready(
             access: ResolvedMounts(
+                domain: .files,
+                mode: .standing,
+                context: nil,
                 mounts: mounts,
                 grantID: nil,
                 grant: nil,
+                workBlockID: nil,
+                sourceIDs: sources.map(\.sourceID),
                 isStanding: true,
                 usesOriginalSources: true,
                 decisionID: accessDecisionID,
@@ -3193,7 +3432,9 @@ public actor ManifoldBridge {
         grant: GrantRecord,
         grantSources: [GrantSourceRecord],
         toolName: String,
-        intent: AccessIntent?
+        intent: AccessIntent?,
+        mode: EffectiveAccessSnapshot.Mode = .workBlock,
+        workBlockID: String? = nil
     ) async throws -> (access: ResolvedMounts, target: ResolvedWriteTarget) {
         let accessDecisionID = await recordAccessDecision(
             toolName: toolName,
@@ -3205,9 +3446,14 @@ public actor ManifoldBridge {
             intent: intent
         )
         let access = ResolvedMounts(
+            domain: .files,
+            mode: mode,
+            context: nil,
             mounts: grantMounts(grant: grant, sources: grantSources),
             grantID: grant.grantID,
             grant: grant,
+            workBlockID: workBlockID,
+            sourceIDs: grantSources.map(\.sourceID),
             isStanding: false,
             usesOriginalSources: false,
             decisionID: accessDecisionID,
@@ -3225,7 +3471,8 @@ public actor ManifoldBridge {
         grant: GrantRecord,
         grantSources: [GrantSourceRecord],
         toolName: String,
-        intent: AccessIntent?
+        intent: AccessIntent?,
+        workBlockID: String? = nil
     ) async throws -> (access: ResolvedMounts, target: ResolvedWriteTarget) {
         let policy = try await policyStore?.policy(for: targetApp)
         let resolver: FileVisibilityResolver?
@@ -3246,9 +3493,14 @@ public actor ManifoldBridge {
             intent: intent
         )
         let access = ResolvedMounts(
+            domain: .files,
+            mode: .workBlock,
+            context: nil,
             mounts: try await originalMounts(sources: grantSources),
             grantID: grant.grantID,
             grant: grant,
+            workBlockID: workBlockID,
+            sourceIDs: grantSources.map(\.sourceID),
             isStanding: false,
             usesOriginalSources: true,
             decisionID: accessDecisionID,
@@ -4322,14 +4574,8 @@ public actor ManifoldBridge {
     public func listEmails(intent: AccessIntent? = nil) async throws -> [EmailSummary] {
         await logToolCall(tool: "list_emails")
         let validatedIntent = try await validatedAccessIntent(for: "list_emails", provided: intent)
-        let (context, decisionID) = try await resolveEmailAccessForTool(toolName: "list_emails", action: "list", intent: validatedIntent)
-        let emails: [EmailMessageRecord]
-        switch context {
-        case .standing(let policy, _):
-            emails = try await accessibleEmails(policy: policy, limit: 200)
-        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
-            emails = try await accessibleEmails(grant: grant, limit: 200)
-        }
+        let access = try await resolveEmailAccessSnapshot(toolName: "list_emails", action: "list", intent: validatedIntent)
+        let emails = try await accessibleEmails(snapshot: access, limit: 200)
         let summaries = emails.map {
             EmailSummary(id: $0.emailID, from: $0.sender, subject: $0.subject, date: $0.receivedAt)
         }
@@ -4339,7 +4585,7 @@ public actor ManifoldBridge {
                 resourcePath: summary.id,
                 text: "\(summary.from)\n\(summary.subject)\n\(summary.date)",
                 exposureType: "email_preview",
-                decisionID: decisionID,
+                decisionID: access.decisionID,
                 intent: validatedIntent
             )
         }
@@ -4350,7 +4596,7 @@ public actor ManifoldBridge {
     public func readEmail(id: String, intent: AccessIntent? = nil) async throws -> String {
         await logToolCall(tool: "read_email", arguments: ["id": id])
         let validatedIntent = try await validatedAccessIntent(for: "read_email", provided: intent)
-        let (context, decisionID) = try await resolveEmailAccessForTool(
+        let access = try await resolveEmailAccessSnapshot(
             toolName: "read_email",
             action: "read",
             resourcePath: id,
@@ -4361,23 +4607,9 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
         }
 
-        let grantID: String?
-        let emailDecision: EmailRuleDecision
-        switch context {
-        case .standing(let policy, _):
-            let decision = try await emailRuleDecision(for: email, policy: policy)
-            guard decision.allowed else {
-                throw ManifoldMCPError.fileNotFound("Email not accessible with current standing access rules")
-            }
-            emailDecision = decision
-            grantID = nil
-        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
-            let decision = try await emailRuleDecision(for: email, grant: grant)
-            guard decision.allowed else {
-                throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
-            }
-            emailDecision = decision
-            grantID = grant.grantID
+        let (emailDecision, grantID) = try await emailRuleDecision(for: email, snapshot: access)
+        guard emailDecision.allowed else {
+            throw ManifoldMCPError.fileNotFound("Email not accessible with current effective access snapshot")
         }
 
         try await enforceEmailReadRules(email: email, grantID: grantID)
@@ -4397,12 +4629,12 @@ public actor ManifoldBridge {
                 toolName: "read_email",
                 resourcePath: id,
                 text: content,
-                decisionID: decisionID,
+                decisionID: access.decisionID,
                 grantID: grantID,
                 contentKind: .email
             )
             await auditEmailRead(email: email, grantID: grantID, decision: emailDecision)
-            await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredText, exposureType: "email_body", decisionID: decisionID, intent: validatedIntent)
+            await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredText, exposureType: "email_body", decisionID: access.decisionID, intent: validatedIntent)
             return deliveredText
         }
 
@@ -4421,11 +4653,11 @@ public actor ManifoldBridge {
             toolName: "read_email",
             resourcePath: id,
             text: preview,
-            decisionID: decisionID,
+            decisionID: access.decisionID,
             grantID: grantID,
             contentKind: .email
         )
-        await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredPreview, exposureType: "email_preview", decisionID: decisionID, intent: validatedIntent)
+        await recordExposure(toolName: "read_email", resourcePath: id, text: deliveredPreview, exposureType: "email_preview", decisionID: access.decisionID, intent: validatedIntent)
         return deliveredPreview
     }
 
@@ -4435,7 +4667,7 @@ public actor ManifoldBridge {
     public func readEmailEML(id: String, intent: AccessIntent? = nil) async throws -> EmailEMLExport {
         await logToolCall(tool: "read_email_eml", arguments: ["id": id])
         let validatedIntent = try await validatedAccessIntent(for: "read_email_eml", provided: intent)
-        let (context, decisionID) = try await resolveEmailAccessForTool(
+        let access = try await resolveEmailAccessSnapshot(
             toolName: "read_email_eml",
             action: "read",
             resourcePath: id,
@@ -4446,23 +4678,9 @@ public actor ManifoldBridge {
             throw ManifoldMCPError.fileNotFound("Email not found: \(id)")
         }
 
-        let grantID: String?
-        let emailDecision: EmailRuleDecision
-        switch context {
-        case .standing(let policy, _):
-            let decision = try await emailRuleDecision(for: email, policy: policy)
-            guard decision.allowed else {
-                throw ManifoldMCPError.fileNotFound("Email not accessible with current standing access rules")
-            }
-            emailDecision = decision
-            grantID = nil
-        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
-            let decision = try await emailRuleDecision(for: email, grant: grant)
-            guard decision.allowed else {
-                throw ManifoldMCPError.fileNotFound("Email not accessible with current sensitivity settings")
-            }
-            emailDecision = decision
-            grantID = grant.grantID
+        let (emailDecision, grantID) = try await emailRuleDecision(for: email, snapshot: access)
+        guard emailDecision.allowed else {
+            throw ManifoldMCPError.fileNotFound("Email not accessible with current effective access snapshot")
         }
 
         try await enforceEmailReadRules(email: email, grantID: grantID)
@@ -4480,7 +4698,7 @@ public actor ManifoldBridge {
             toolName: "read_email_eml",
             resourcePath: id,
             text: rawText,
-            decisionID: decisionID,
+            decisionID: access.decisionID,
             grantID: grantID,
             contentKind: .email
         )
@@ -4497,7 +4715,7 @@ public actor ManifoldBridge {
             resourcePath: id,
             data: data,
             exposureType: "email_raw_eml",
-            decisionID: decisionID,
+            decisionID: access.decisionID,
             intent: validatedIntent
         )
 
@@ -4560,30 +4778,15 @@ public actor ManifoldBridge {
     public func searchEmails(query: String, intent: AccessIntent? = nil) async throws -> [EmailMessageRecord] {
         await logToolCall(tool: "search_emails", arguments: ["query": query])
         let validatedIntent = try await validatedAccessIntent(for: "search_emails", provided: intent)
-        let (context, decisionID) = try await resolveEmailAccessForTool(toolName: "search_emails", action: "search", resourcePath: query, intent: validatedIntent)
+        let access = try await resolveEmailAccessSnapshot(toolName: "search_emails", action: "search", resourcePath: query, intent: validatedIntent)
         let results = try emailStore.searchEmailMessages(freeText: query, limit: 200)
-        let visible: [EmailMessageRecord]
-        let grantID: String?
-        switch context {
-        case .standing(let policy, _):
-            var allowed: [EmailMessageRecord] = []
-            for email in results {
-                if try await isEmailAccessible(email: email, policy: policy) {
-                    allowed.append(email)
-                }
+        var visible: [EmailMessageRecord] = []
+        for email in results {
+            if try await isEmailAccessible(email: email, snapshot: access) {
+                visible.append(email)
             }
-            visible = allowed
-            grantID = nil
-        case .workBlock(let grant, _, _), .legacyGrant(let grant, _):
-            var allowed: [EmailMessageRecord] = []
-            for email in results {
-                if try await isEmailAccessible(email: email, grant: grant) {
-                    allowed.append(email)
-                }
-            }
-            visible = allowed
-            grantID = grant.grantID
         }
+        let grantID = access.grantID
         var delivered: [EmailMessageRecord] = []
         for email in visible {
             let preview = [email.sender, email.subject, email.preview ?? ""]
@@ -4594,7 +4797,7 @@ public actor ManifoldBridge {
                     toolName: "search_emails",
                     resourcePath: email.emailID,
                     text: preview,
-                    decisionID: decisionID,
+                    decisionID: access.decisionID,
                     grantID: grantID,
                     contentKind: .email
                 )
@@ -4632,7 +4835,7 @@ public actor ManifoldBridge {
                     resourcePath: email.emailID,
                     text: deliveredPreview,
                     exposureType: "email_preview",
-                    decisionID: decisionID,
+                    decisionID: access.decisionID,
                     intent: validatedIntent
                 )
             } catch {

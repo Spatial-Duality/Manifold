@@ -60,6 +60,7 @@ public enum LedgerEntryType: String, Sendable, Codable, CaseIterable {
     case skill
     case graph
     case fabricationFinding = "fabrication_finding"
+    case mcpFailure = "mcp_failure"
 }
 
 public struct LedgerEntry: Sendable, Identifiable, Codable {
@@ -120,11 +121,18 @@ public struct ToolMetricContext: Sendable, Codable {
     public let exposureID: String?
     public let grantID: String?
     public let sessionID: String?
+    public let effectiveAccess: EffectiveAccessMetadata?
 
-    public init(exposureID: String? = nil, grantID: String? = nil, sessionID: String? = nil) {
+    public init(
+        exposureID: String? = nil,
+        grantID: String? = nil,
+        sessionID: String? = nil,
+        effectiveAccess: EffectiveAccessMetadata? = nil
+    ) {
         self.exposureID = exposureID
         self.grantID = grantID
         self.sessionID = sessionID
+        self.effectiveAccess = effectiveAccess
     }
 }
 
@@ -138,6 +146,13 @@ public struct ToolCallMetric: Sendable, Identifiable, Codable {
     public let outputBytes: Int
     public let truncated: Bool
     public let isError: Bool
+    public let requestID: String?
+    public let errorClassification: String?
+    public let errorBoundary: String?
+    public let errorPhase: String?
+    public let isRetryable: Bool?
+    public let runtimeGeneration: Int
+    public let metadataJSON: String?
     public let exposureID: String?
     public let grantID: String?
     public let sessionID: String?
@@ -152,6 +167,13 @@ public struct ToolCallMetric: Sendable, Identifiable, Codable {
         outputBytes: Int,
         truncated: Bool,
         isError: Bool,
+        requestID: String? = nil,
+        errorClassification: String? = nil,
+        errorBoundary: String? = nil,
+        errorPhase: String? = nil,
+        isRetryable: Bool? = nil,
+        runtimeGeneration: Int = 0,
+        metadataJSON: String? = nil,
         exposureID: String? = nil,
         grantID: String? = nil,
         sessionID: String? = nil,
@@ -165,6 +187,13 @@ public struct ToolCallMetric: Sendable, Identifiable, Codable {
         self.outputBytes = outputBytes
         self.truncated = truncated
         self.isError = isError
+        self.requestID = requestID
+        self.errorClassification = errorClassification
+        self.errorBoundary = errorBoundary
+        self.errorPhase = errorPhase
+        self.isRetryable = isRetryable
+        self.runtimeGeneration = runtimeGeneration
+        self.metadataJSON = metadataJSON
         self.exposureID = exposureID
         self.grantID = grantID
         self.sessionID = sessionID

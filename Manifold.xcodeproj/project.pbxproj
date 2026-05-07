@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F1D3A1000000000000000001 /* FinderIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D3A1000000000000000011 /* FinderIntegration.swift */; };
+		F1D3A1000000000000000002 /* FinderTagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D3A1000000000000000012 /* FinderTagService.swift */; };
+		F1D3A1000000000000000030 /* FinderTagRecoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D3A1000000000000000031 /* FinderTagRecoveryService.swift */; };
+		F1D3A1000000000000000003 /* FinderSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D3A1000000000000000013 /* FinderSync.swift */; };
+		F1D3A1000000000000000004 /* ManifoldFinderSync.appex in Embed Finder Extension */ = {isa = PBXBuildFile; fileRef = F1D3A1000000000000000016 /* ManifoldFinderSync.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		004EF9A5AA1121DDB0CCE1DF /* ManifoldXPC in Frameworks */ = {isa = PBXBuildFile; productRef = 4D2FD3A168147341D2B2B3D4 /* ManifoldXPC */; };
 		0260E84BE9451B7342295D1A /* SessionPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2C3550A7F5EE69EDB1285F /* SessionPrimitives.swift */; };
 		045A18D0B9D5EC53F16E88C0 /* AgentCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB438FF3647437EBED8BF70D /* AgentCard.swift */; };
@@ -148,6 +153,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		F1D3A1000000000000000022 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 410CD3A96BEA1EBB97FBA054 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F1D3A1000000000000000020;
+			remoteInfo = ManifoldFinderSync;
+		};
 		B944E34971E7D9E987B025C7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 410CD3A96BEA1EBB97FBA054 /* Project object */;
@@ -164,7 +176,28 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		F1D3A1000000000000000017 /* Embed Finder Extension */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F1D3A1000000000000000004 /* ManifoldFinderSync.appex in Embed Finder Extension */,
+			);
+			name = "Embed Finder Extension";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		F1D3A1000000000000000011 /* FinderIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderIntegration.swift; sourceTree = "<group>"; };
+		F1D3A1000000000000000012 /* FinderTagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderTagService.swift; sourceTree = "<group>"; };
+		F1D3A1000000000000000031 /* FinderTagRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderTagRecoveryService.swift; sourceTree = "<group>"; };
+		F1D3A1000000000000000013 /* FinderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderSync.swift; sourceTree = "<group>"; };
+		F1D3A1000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F1D3A1000000000000000015 /* ManifoldFinderSync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ManifoldFinderSync.entitlements; sourceTree = "<group>"; };
+		F1D3A1000000000000000016 /* ManifoldFinderSync.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ManifoldFinderSync.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0095F0998503E87F97508D06 /* FoldersMatrixView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldersMatrixView.swift; sourceTree = "<group>"; };
 		009EA04550A7634D95791F57 /* StorageSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageSettingsPane.swift; sourceTree = "<group>"; };
 		0283F724FBEDA2995DC661A3 /* InspectorContextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorContextProvider.swift; sourceTree = "<group>"; };
@@ -305,6 +338,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		F1D3A1000000000000000018 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		380E85CDE3445A5CAE94FE21 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -377,6 +417,7 @@
 			isa = PBXGroup;
 			children = (
 				564B55046AEBA3B1643FE2FE /* Manifold.app */,
+				F1D3A1000000000000000016 /* ManifoldFinderSync.appex */,
 				F0A975D2F645FEB19DF74F76 /* ManifoldAppTests.xctest */,
 				63E586963394EC09E9DC6259 /* ManifoldAppUITests.xctest */,
 			);
@@ -427,6 +468,7 @@
 			isa = PBXGroup;
 			children = (
 				A6F4968BF6A0BCAE922FEE85 /* ManifoldApp */,
+				F1D3A1000000000000000019 /* ManifoldFinderSync */,
 				D0537F88400B152A5A67AE49 /* ManifoldAppTests */,
 				D0531B7D8460165F830D109B /* ManifoldAppUITests */,
 				745D681E70055A184477B1F0 /* Packages */,
@@ -540,6 +582,16 @@
 			path = MenuBar;
 			sourceTree = "<group>";
 		};
+		F1D3A1000000000000000019 /* ManifoldFinderSync */ = {
+			isa = PBXGroup;
+			children = (
+				F1D3A1000000000000000013 /* FinderSync.swift */,
+				F1D3A1000000000000000014 /* Info.plist */,
+				F1D3A1000000000000000015 /* ManifoldFinderSync.entitlements */,
+			);
+			path = ManifoldApp/ManifoldFinderSync;
+			sourceTree = SOURCE_ROOT;
+		};
 		A6F4968BF6A0BCAE922FEE85 /* ManifoldApp */ = {
 			isa = PBXGroup;
 			children = (
@@ -615,6 +667,9 @@
 				3F37BF1876CC8B3D18D265A5 /* EmailRulesModel.swift */,
 				23760AEA487279BB56652F47 /* EmailSelectionModel.swift */,
 				A43BA689161AF82B93E21E11 /* FileNode.swift */,
+				F1D3A1000000000000000011 /* FinderIntegration.swift */,
+				F1D3A1000000000000000031 /* FinderTagRecoveryService.swift */,
+				F1D3A1000000000000000012 /* FinderTagService.swift */,
 				D16F4BF0F58ACF058AB1474A /* HistoryModel.swift */,
 				262241B9FB8C4EC6B26D9918 /* InspectorContext.swift */,
 				0283F724FBEDA2995DC661A3 /* InspectorContextProvider.swift */,
@@ -643,6 +698,25 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		F1D3A1000000000000000020 /* ManifoldFinderSync */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1D3A1000000000000000023 /* Build configuration list for PBXNativeTarget "ManifoldFinderSync" */;
+			buildPhases = (
+				F1D3A1000000000000000024 /* Sources */,
+				F1D3A1000000000000000025 /* Resources */,
+				F1D3A1000000000000000018 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ManifoldFinderSync;
+			packageProductDependencies = (
+			);
+			productName = ManifoldFinderSync;
+			productReference = F1D3A1000000000000000016 /* ManifoldFinderSync.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		9BFDA9E65C644407209A6256 /* ManifoldAppUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A286828D0D375C8321AE23C7 /* Build configuration list for PBXNativeTarget "ManifoldAppUITests" */;
@@ -689,11 +763,13 @@
 				8263F2E00A2E489F2090951C /* Sources */,
 				CB43CC9BCDF2633E75D318C8 /* Resources */,
 				380E85CDE3445A5CAE94FE21 /* Frameworks */,
+				F1D3A1000000000000000017 /* Embed Finder Extension */,
 				3C737C8CF544A60588263AE2 /* Bundle Launch Agent */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F1D3A1000000000000000021 /* PBXTargetDependency */,
 			);
 			name = Manifold;
 			packageProductDependencies = (
@@ -726,6 +802,10 @@
 						DevelopmentTeam = 9FHKB788RP;
 						ProvisioningStyle = Automatic;
 					};
+					F1D3A1000000000000000020 = {
+						DevelopmentTeam = 9FHKB788RP;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 144A63EFAA67611546BCC811 /* Build configuration list for PBXProject "Manifold" */;
@@ -747,6 +827,7 @@
 			projectRoot = "";
 			targets = (
 				A6679FE56DC4150E476E48D5 /* Manifold */,
+				F1D3A1000000000000000020 /* ManifoldFinderSync */,
 				A227F0E313129DE30F0086F0 /* ManifoldAppTests */,
 				9BFDA9E65C644407209A6256 /* ManifoldAppUITests */,
 			);
@@ -754,6 +835,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		F1D3A1000000000000000025 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CB43CC9BCDF2633E75D318C8 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -843,6 +931,9 @@
 				CC21D9FF87A4036B5A9BEC18 /* FileTypeIcon.swift in Sources */,
 				D10DDBE51F4AA051C0B52A98 /* FilesFlatView.swift in Sources */,
 				CC344FCCF506B5ED7C10554D /* FilterModeSection.swift in Sources */,
+				F1D3A1000000000000000001 /* FinderIntegration.swift in Sources */,
+				F1D3A1000000000000000030 /* FinderTagRecoveryService.swift in Sources */,
+				F1D3A1000000000000000002 /* FinderTagService.swift in Sources */,
 				DFDCA6688406932807587BCC /* FirstRunFlow.swift in Sources */,
 				BB08EB9B2BE1ED8745795EBA /* FirstRunPanels.swift in Sources */,
 				0FBBB43C0AB9648016121C75 /* FoldersMatrixView.swift in Sources */,
@@ -944,9 +1035,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F1D3A1000000000000000024 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F1D3A1000000000000000003 /* FinderSync.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		F1D3A1000000000000000021 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F1D3A1000000000000000020 /* ManifoldFinderSync */;
+			targetProxy = F1D3A1000000000000000022 /* PBXContainerItemProxy */;
+		};
 		B9C3F3BB256A90AE0BA56B26 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A6679FE56DC4150E476E48D5 /* Manifold */;
@@ -960,6 +1064,60 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		F1D3A1000000000000000026 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ManifoldApp/ManifoldFinderSync/ManifoldFinderSync.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9FHKB788RP;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ManifoldApp/ManifoldFinderSync/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.5.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.spatialduality.manifold.finder-sync";
+				PRODUCT_NAME = ManifoldFinderSync;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		F1D3A1000000000000000027 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ManifoldApp/ManifoldFinderSync/ManifoldFinderSync.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9FHKB788RP;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ManifoldApp/ManifoldFinderSync/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.5.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.spatialduality.manifold.finder-sync";
+				PRODUCT_NAME = ManifoldFinderSync;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 		1CDE67986754134AA2695C18 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1224,6 +1382,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		F1D3A1000000000000000023 /* Build configuration list for PBXNativeTarget "ManifoldFinderSync" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1D3A1000000000000000026 /* Debug */,
+				F1D3A1000000000000000027 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		144A63EFAA67611546BCC811 /* Build configuration list for PBXProject "Manifold" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

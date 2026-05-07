@@ -20,6 +20,7 @@ final class ManifoldStore {
     var connectedAgent: String?
     var connectedAgents: [String] = []
     var runtimeLaunchError: String?
+    var runtimeSupervisor = RuntimeSupervisor()
     var dataControlSummary: DataControlSummary?
 
     /// Whether Claude (cowork) has an active MCP bridge connection to the runtime.
@@ -47,13 +48,15 @@ final class ManifoldStore {
 
     var runtime: any RuntimeClientProtocol
     private let defaults: UserDefaults
-    private let canStartRuntimeServices: Bool
+    let canStartRuntimeServices: Bool
     private let gatesRuntimeStartup: Bool
     private var runtimeServicesStarted = false
 
     static let demoModeDefaultsKey = "manifold.demoMode"
     static let demoWarningDefaultsKey = "manifold.demoMode.showWarning"
     static let autoMirrorDefaultsKey = "manifold.autoMirrorSharing"
+    static let finderIntegrationTagsEnabledDefaultsKey = "manifold.finderIntegration.tagsEnabled"
+    static let finderIntegrationTagNameDefaultsKey = "manifold.finderIntegration.tagName"
 
     var isDemoModeEnabled: Bool {
         didSet { defaults.set(isDemoModeEnabled, forKey: Self.demoModeDefaultsKey) }
@@ -70,6 +73,23 @@ final class ManifoldStore {
     /// sheet for that.
     var isAutoMirrorEnabled: Bool {
         didSet { defaults.set(isAutoMirrorEnabled, forKey: Self.autoMirrorDefaultsKey) }
+    }
+
+    var finderIntegrationTagsEnabled: Bool {
+        didSet {
+            defaults.set(finderIntegrationTagsEnabled, forKey: Self.finderIntegrationTagsEnabledDefaultsKey)
+            writeFinderIntegrationSnapshot()
+            syncFinderIntegrationSettingsToRuntime()
+        }
+    }
+
+    var finderIntegrationTagName: String {
+        didSet {
+            let trimmed = finderIntegrationTagName.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaults.set(trimmed.isEmpty ? "Manifold" : trimmed, forKey: Self.finderIntegrationTagNameDefaultsKey)
+            writeFinderIntegrationSnapshot()
+            syncFinderIntegrationSettingsToRuntime()
+        }
     }
 
     /// Active Focus (preset_id) per agent. Tracked in-memory and mirrored
@@ -166,6 +186,11 @@ final class ManifoldStore {
         isDemoModeEnabled = defaults.bool(forKey: Self.demoModeDefaultsKey)
         showDemoWarning = defaults.object(forKey: Self.demoWarningDefaultsKey) as? Bool ?? true
         isAutoMirrorEnabled = defaults.bool(forKey: Self.autoMirrorDefaultsKey)
+        finderIntegrationTagsEnabled = defaults.bool(forKey: Self.finderIntegrationTagsEnabledDefaultsKey)
+        finderIntegrationTagName = (
+            defaults.string(forKey: Self.finderIntegrationTagNameDefaultsKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        ).flatMap { $0.isEmpty ? nil : $0 } ?? "Manifold"
         if let stored = defaults.dictionary(forKey: Self.activeFocusDefaultsKey) as? [String: String] {
             var restored: [TargetApp: String] = [:]
             for (rawAgent, presetID) in stored {
@@ -387,6 +412,7 @@ final class ManifoldStore {
         isConnected = pingResult.ok
 
         guard pingResult.ok else {
+            _ = runtimeSupervisor.markDegraded(issue: "runtime_unavailable")
             connectedAgent = nil
             connectedAgents = []
             dataControlSummary = nil
@@ -397,6 +423,7 @@ final class ManifoldStore {
         }
 
         runtimeLaunchError = nil
+        _ = runtimeSupervisor.markHealthy()
 
         // XPC version check: auto-restart agent on mismatch (once per app launch)
         let appVersion = Bundle.main.shortVersionString
@@ -404,6 +431,8 @@ final class ManifoldStore {
             didAttemptAgentRestart = true
             logger.notice("Agent version \(agentVersion) != app version \(appVersion). Restarting agent.")
             diagnostics.record(.versionMismatchRestart(appVersion: appVersion, runtimeVersion: agentVersion))
+            _ = runtimeSupervisor.markRestarting(reason: .versionMismatch)
+            diagnostics.record(.runtimeRestartStarted)
             unregisterAgent()
             registerAgent()
             try? await Task.sleep(for: .seconds(1))
@@ -412,8 +441,18 @@ final class ManifoldStore {
             isConnected = retry.ok
             guard retry.ok else {
                 lastError = runtimeLaunchError ?? "Unable to reconnect to the Manifold runtime after restarting it."
+                _ = runtimeSupervisor.markFailed(issue: "version_mismatch_restart_failed")
+                diagnostics.record(.runtimeRestartFailed)
                 return
             }
+            if let retryAgentVersion = retry.agentVersion, retryAgentVersion != appVersion {
+                lastError = "The Manifold runtime is still version \(retryAgentVersion) after restart, but the app is \(appVersion)."
+                _ = runtimeSupervisor.markFailed(issue: "version_mismatch_unresolved")
+                diagnostics.record(.runtimeRestartFailed)
+                return
+            }
+            _ = runtimeSupervisor.markHealthy()
+            diagnostics.record(.runtimeRestartSucceeded)
         }
 
         do {
@@ -453,7 +492,10 @@ final class ManifoldStore {
 
         await governance.loadPrivacyDiscovery()
 
-        consumePendingFinderRequest()
+        await refreshFocuses()
+        syncFinderIntegrationSettingsToRuntime()
+        writeFinderIntegrationSnapshot()
+        await consumePendingFinderCommands()
 
         await activity.loadActivity()
         await activity.loadSessions()
@@ -1326,9 +1368,15 @@ final class ManifoldStore {
     }
 
     func restartRuntimeHelper() async {
+        await restartRuntimeHelper(reason: .manual)
+    }
+
+    func restartRuntimeHelper(reason: RuntimeSupervisorRestartReason) async {
         runtimeLaunchError = nil
         lastError = nil
         setup.runtimeEnabled = true
+        _ = runtimeSupervisor.markRestarting(reason: reason)
+        diagnostics.record(.runtimeRestartStarted)
         guard canStartRuntimeServices else {
             await refreshAll(force: true)
             await integrationHealth.checkAll(force: true)
@@ -1341,8 +1389,10 @@ final class ManifoldStore {
             await integrationHealth.checkAll(force: true)
             return
         }
+        syncInstalledMCPHelperIfNeeded()
         unregisterAgent()
         registerAgent()
+        Self.terminateStaleMCPHelpers()
         try? await Task.sleep(for: .seconds(1))
         await refreshAll(force: true)
         await integrationHealth.checkAll(force: true)
@@ -1535,7 +1585,9 @@ final class ManifoldStore {
 
     func installMCP() {
         do {
-            try Self.installBundledMCPHelper(force: true)
+            if try Self.installBundledMCPHelper(force: true) {
+                Self.terminateStaleMCPHelpers()
+            }
             try ConfigWriter(binaryPath: Self.mcpBinaryPath).installAll()
             Task { await integrationHealth.checkAll(force: true) }
         } catch {
@@ -1543,9 +1595,18 @@ final class ManifoldStore {
         }
     }
 
+    func installCodexMCP() throws {
+        if try Self.installBundledMCPHelper(force: true) {
+            Self.terminateStaleMCPHelpers()
+        }
+        try ConfigWriter(binaryPath: Self.mcpBinaryPath).installCodex()
+    }
+
     func installDemoMCP() {
         do {
-            try Self.installBundledMCPHelper(force: true)
+            if try Self.installBundledMCPHelper(force: true) {
+                Self.terminateStaleMCPHelpers()
+            }
             try ConfigWriter(binaryPath: Self.mcpBinaryPath, demoMode: true).installAll()
             demoMCPInstallStatus = "Claude and Codex are configured to use Demo Mode data. Restart those apps to pick it up."
             Task { await integrationHealth.checkAll(force: true) }
@@ -1555,14 +1616,18 @@ final class ManifoldStore {
         }
     }
 
-    private func syncInstalledMCPHelperIfNeeded() {
+    @discardableResult
+    private func syncInstalledMCPHelperIfNeeded() -> Bool {
         do {
-            guard try Self.installBundledMCPHelper(force: false) else { return }
+            guard try Self.installBundledMCPHelper(force: false) else { return false }
             logger.info("Updated installed manifold-mcp helper from bundled copy")
+            Self.terminateStaleMCPHelpers()
             Task { await integrationHealth.checkAll(force: true) }
+            return true
         } catch {
             logger.warning("Unable to update installed manifold-mcp helper: \(error.localizedDescription, privacy: .public)")
             integrationHealth.claude.errorDetail = error.localizedDescription
+            return false
         }
     }
 
@@ -1620,13 +1685,31 @@ final class ManifoldStore {
         let rhsHash = rhsInfo[kSecCodeInfoUnique as String] as? Data
         let lhsTeam = lhsInfo[kSecCodeInfoTeamIdentifier as String] as? String
         let rhsTeam = rhsInfo[kSecCodeInfoTeamIdentifier as String] as? String
+        let lhsValidationStatus = codeSigningValidationStatus(at: lhs)
+        let rhsValidationStatus = codeSigningValidationStatus(at: rhs)
         guard let lhsHash, let rhsHash, lhsHash == rhsHash else { return false }
-        // Allow either side to be team-less (ad-hoc) but require equality
-        // when both have a team.
-        if let lhsTeam, let rhsTeam, lhsTeam != rhsTeam {
+        // A team/ad-hoc mismatch can still break a team-signed runtime's
+        // helper verification even when the code hash matches. Treat it
+        // as stale and reinstall from the active app bundle.
+        if lhsTeam != rhsTeam {
+            return false
+        }
+        // `SecCodeCopySigningInformation` can still return metadata for a
+        // modified binary. Keep the installed helper only when its static
+        // validation result matches the bundled source of truth too. This
+        // tolerates local Debug certificates that are not trusted on this
+        // machine while still replacing genuinely corrupted helpers.
+        if lhsValidationStatus != rhsValidationStatus {
             return false
         }
         return true
+    }
+
+    private nonisolated static func codeSigningValidationStatus(at url: URL) -> OSStatus {
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(url as CFURL, SecCSFlags(), &staticCode)
+        guard createStatus == errSecSuccess, let staticCode else { return createStatus }
+        return SecStaticCodeCheckValidity(staticCode, SecCSFlags(), nil)
     }
 
     private nonisolated static func codeSigningInfo(at url: URL) -> [String: Any]? {
@@ -1860,7 +1943,7 @@ final class ManifoldStore {
     /// methods (`setActiveFocus`, `setDefaultAtLaunch`, etc.) live on the
     /// concrete type per the AccessRedesign convention. Fixture clients
     /// silently no-op the Focus surface.
-    private var focusClient: AppRuntimeClient? { runtime as? AppRuntimeClient }
+    var focusClient: AppRuntimeClient? { runtime as? AppRuntimeClient }
 
     /// Public wrapper: snapshot live agent state into the active Focus's
     /// preset rows for both agents. Called after a one-shot Mirror sync
@@ -2201,12 +2284,18 @@ final class ManifoldStore {
 
     func registerAgent() {
         diagnostics.record(.runtimeRegistrationAttempted)
+        if case .restarting = runtimeSupervisor.state {
+            // Preserve the restart generation assigned by the supervisor.
+        } else {
+            _ = runtimeSupervisor.markStarting()
+        }
 
         let bundledAgent = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/LaunchServices/ManifoldAgent")
         guard FileManager.default.isExecutableFile(atPath: bundledAgent.path) else {
             runtimeLaunchError = "ManifoldAgent is missing from the app bundle, so the runtime cannot start."
             lastError = runtimeLaunchError
+            _ = runtimeSupervisor.markFailed(issue: "helper_missing")
             logger.warning("ManifoldAgent not found at \(bundledAgent.path, privacy: .public)")
             diagnostics.record(.runtimeRegistrationFailedHelperMissing)
             return
@@ -2240,6 +2329,7 @@ final class ManifoldStore {
             let detail = (error as? RuntimeRegistrationError)?.message ?? error.localizedDescription
             runtimeLaunchError = "Failed to register the Manifold runtime: \(detail)"
             lastError = runtimeLaunchError
+            _ = runtimeSupervisor.markFailed(issue: "launchctl_bootstrap_failed")
             logger.error("Failed to register ManifoldAgent via launchd: \(detail, privacy: .public)")
         }
     }
@@ -2280,6 +2370,8 @@ final class ManifoldStore {
             let pingResult = await runtime.ping()
             if pingResult.ok {
                 runtimeLaunchError = nil
+                _ = runtimeSupervisor.markHealthy()
+                diagnostics.record(.runtimeRestartSucceeded)
                 if lastError?.contains("runtime") == true || lastError?.contains("ManifoldAgent") == true {
                     lastError = nil
                 }
@@ -2292,6 +2384,8 @@ final class ManifoldStore {
 
         runtimeLaunchError = "The Manifold runtime did not respond after launchd registration. Check the launch agent and bundled helper path."
         lastError = runtimeLaunchError
+        _ = runtimeSupervisor.markFailed(issue: "health_timeout")
+        diagnostics.record(.runtimeRestartFailed)
     }
 
     private struct RuntimeRegistrationError: Error {

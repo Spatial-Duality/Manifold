@@ -24,6 +24,14 @@ public enum DiagnosticEvent: Sendable, Hashable {
     case runtimeInitFailure(phase: RuntimeInitPhase)
     case runtimeUnexpectedExit(launchUUID: String, lastState: AgentLastState)
     case versionMismatchRestart(appVersion: String, runtimeVersion: String)
+    case runtimeRestartStarted
+    case runtimeRestartSucceeded
+    case runtimeRestartFailed
+    case xpcConnectionInterrupted
+
+    // MCP reliability
+    case mcpRequestFailed
+    case mcpTransportClosed
 
     // Rules / storage
     case ruleSeedFailure
@@ -146,6 +154,12 @@ extension DiagnosticEvent {
         case .runtimeInitFailure: return "runtimeInitFailure"
         case .runtimeUnexpectedExit: return "runtimeUnexpectedExit"
         case .versionMismatchRestart: return "versionMismatchRestart"
+        case .runtimeRestartStarted: return "runtimeRestartStarted"
+        case .runtimeRestartSucceeded: return "runtimeRestartSucceeded"
+        case .runtimeRestartFailed: return "runtimeRestartFailed"
+        case .xpcConnectionInterrupted: return "xpcConnectionInterrupted"
+        case .mcpRequestFailed: return "mcpRequestFailed"
+        case .mcpTransportClosed: return "mcpTransportClosed"
         case .ruleSeedFailure: return "ruleSeedFailure"
         case .sparkleUpdateChecked: return "sparkleUpdateChecked"
         case .sparkleUpdateApplied: return "sparkleUpdateApplied"
@@ -158,6 +172,9 @@ extension DiagnosticEvent {
         case .appLaunch, .appWillTerminate, .onboardingCompleted,
              .runtimeRegistrationAttempted, .runtimeRegistrationSucceeded,
              .runtimeRegistrationFailedHelperMissing, .runtimePingTimeout,
+             .runtimeRestartStarted, .runtimeRestartSucceeded,
+             .runtimeRestartFailed, .xpcConnectionInterrupted,
+             .mcpRequestFailed, .mcpTransportClosed,
              .ruleSeedFailure, .sparkleUpdateChecked:
             return .empty
         case .privacyModelInstallStateChanged(let state):

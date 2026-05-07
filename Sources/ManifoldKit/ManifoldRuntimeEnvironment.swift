@@ -10,10 +10,12 @@ public enum ManifoldRuntimeEnvironment {
     public static let runtimeStoreURLKey = "MANIFOLD_RUNTIME_STORE_URL"
     public static let appSupportRootURLKey = "MANIFOLD_APP_SUPPORT_ROOT"
     public static let launchAgentPlistURLKey = "MANIFOLD_LAUNCH_AGENT_PLIST_URL"
+    public static let diagnosticsDirectoryURLKey = "MANIFOLD_DIAGNOSTICS_DIR"
     public static let testHomeKey = "MANIFOLD_TEST_HOME"
     public static let testScenarioKey = "MANIFOLD_TEST_SCENARIO"
     public static let protectedStorageTestKey = "MANIFOLD_TEST_PROTECTED_STORAGE_KEY"
     public static let allowUITestRunnerMCPKey = "MANIFOLD_TEST_ALLOW_UI_RUNNER_MCP"
+    public static let testAgentVersionOverrideKey = "MANIFOLD_TEST_AGENT_VERSION_OVERRIDE"
 
     public static func string(
         for key: String,
@@ -58,7 +60,12 @@ public enum ManifoldRuntimeEnvironment {
         if let explicit = url(for: runtimeStoreURLKey, env: env) {
             return explicit
         }
-        return testHomeURL(env: env)?.appendingPathComponent("runtime-store", isDirectory: true)
+        if let testHome = testHomeURL(env: env) {
+            return testHome.appendingPathComponent("runtime-store", isDirectory: true)
+        }
+        return appSupportRootURL(env: env)?
+            .appendingPathComponent("Manifold", isDirectory: true)
+            .appendingPathComponent("store", isDirectory: true)
     }
 
     public static func appSupportRootURL(
@@ -67,7 +74,24 @@ public enum ManifoldRuntimeEnvironment {
         if let explicit = url(for: appSupportRootURLKey, env: env) {
             return explicit
         }
-        return testHomeURL(env: env)?.appendingPathComponent("app-support", isDirectory: true)
+        if let testHome = testHomeURL(env: env) {
+            return testHome.appendingPathComponent("app-support", isDirectory: true)
+        }
+        return userApplicationSupportRootURL()
+    }
+
+    public static func diagnosticsDirectoryURL(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        if let explicit = url(for: diagnosticsDirectoryURLKey, env: env) {
+            return explicit
+        }
+        if let testHome = testHomeURL(env: env) {
+            return testHome.appendingPathComponent("diagnostics", isDirectory: true)
+        }
+        return appSupportRootURL(env: env)?
+            .appendingPathComponent("Manifold", isDirectory: true)
+            .appendingPathComponent("Diagnostics", isDirectory: true)
     }
 
     public static func launchAgentPlistURL(
@@ -91,9 +115,11 @@ public enum ManifoldRuntimeEnvironment {
             runtimeStoreURLKey,
             appSupportRootURLKey,
             launchAgentPlistURLKey,
+            diagnosticsDirectoryURLKey,
             testHomeKey,
             protectedStorageTestKey,
             allowUITestRunnerMCPKey,
+            testAgentVersionOverrideKey,
         ] {
             if let value = string(for: key, env: env) {
                 forwarded[key] = value
@@ -109,5 +135,12 @@ public enum ManifoldRuntimeEnvironment {
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         guard !suffix.isEmpty else { return defaultXPCServiceName }
         return "\(defaultXPCServiceName).\(suffix)"
+    }
+
+    private static func userApplicationSupportRootURL() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
     }
 }

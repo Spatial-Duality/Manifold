@@ -137,7 +137,16 @@ extension ManifoldBridge {
         } else {
             sessionID = nil
         }
-        return ToolMetricContext(exposureID: exposure?.id, grantID: grantID, sessionID: sessionID)
+        return ToolMetricContext(
+            exposureID: exposure?.id,
+            grantID: grantID,
+            sessionID: sessionID,
+            effectiveAccess: latestEffectiveAccessMetadataByTool[toolName]
+        )
+    }
+
+    public func resetToolMetricContext(toolName: String) {
+        latestEffectiveAccessMetadataByTool[toolName] = nil
     }
 
     public func toolCostReport(limit: Int = 100) async throws -> String {

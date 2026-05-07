@@ -7,6 +7,7 @@ public enum ManifoldXPCError: LocalizedError {
     case runtimeUnavailable
     case malformedReply
     case invalidPayload
+    case timeout(String)
 
     public var errorDescription: String? {
         switch self {
@@ -16,6 +17,8 @@ public enum ManifoldXPCError: LocalizedError {
             return "The Manifold runtime returned an unexpected response."
         case .invalidPayload:
             return "The Manifold runtime received invalid JSON."
+        case .timeout(let operation):
+            return "Timed out waiting for the Manifold runtime during \(operation)."
         }
     }
 }

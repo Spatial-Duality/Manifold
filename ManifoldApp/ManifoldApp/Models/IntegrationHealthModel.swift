@@ -147,6 +147,12 @@ struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
         guard FileManager.default.isExecutableFile(atPath: command) || FileManager.default.fileExists(atPath: command) else {
             return .init(status: .error, detail: "Codex Manifold command path does not exist: \(command)")
         }
+        guard canonicalPath(command) == canonicalPath(expectedMCPBinaryPath) else {
+            return .init(
+                status: .error,
+                detail: "Codex Manifold config points to \(command), but Manifold manages \(expectedMCPBinaryPath). Re-add Manifold to refresh the helper."
+            )
+        }
 
         let expectedArgs = ConfigWriter.expectedArguments(for: agent)
         guard ConfigWriter.manifoldCodexServerArguments(in: block) == expectedArgs else {
@@ -166,6 +172,12 @@ struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
         guard FileManager.default.isExecutableFile(atPath: command) || FileManager.default.fileExists(atPath: command) else {
             return .init(status: .error, detail: "\(label) Manifold command path does not exist: \(command)")
         }
+        guard canonicalPath(command) == canonicalPath(expectedMCPBinaryPath) else {
+            return .init(
+                status: .error,
+                detail: "\(label) Manifold config points to \(command), but Manifold manages \(expectedMCPBinaryPath). Re-install Manifold to refresh the helper."
+            )
+        }
 
         let expectedArgs = ConfigWriter.expectedArguments(for: agent)
         let args = server["args"] as? [String] ?? []
@@ -176,6 +188,17 @@ struct SystemIntegrationHealthChecker: IntegrationHealthChecking {
             )
         }
         return .init(status: .installed)
+    }
+
+    private var expectedMCPBinaryPath: String {
+        (ManifoldRuntimeEnvironment.appSupportRootURL()
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
+            .appendingPathComponent("Manifold/bin/manifold-mcp")
+            .path
+    }
+
+    private func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     private func firstCapture(in text: String, pattern: String, group: Int = 1) -> String? {

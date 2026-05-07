@@ -28,6 +28,8 @@ struct PrivacyIndexCoordinatorTests {
         let grantStore = GrantStore(db: db)
         let emailStore = EmailStore(db: db)
         let privacyStore = PrivacyStore(db: db)
+        let runtimeSettingsStore = RuntimeSettingsStore(db: db)
+        let finderTagLedgerStore = try FinderTagLedgerStore(db: db)
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
         let runtimeManager = PrivacyRuntimeManager(
             storageURL: tempDir.appendingPathComponent("privacy-models", isDirectory: true)
@@ -38,6 +40,8 @@ struct PrivacyIndexCoordinatorTests {
             grantStore: grantStore,
             emailStore: emailStore,
             emailSyncEngine: emailSyncEngine,
+            runtimeSettingsStore: runtimeSettingsStore,
+            finderTagLedgerStore: finderTagLedgerStore,
             defaultStoragePath: tempDir.appendingPathComponent("privacy-models", isDirectory: true).path,
             rulesOnlyBackend: RulesOnlyPrivacyBackend(),
             mlxBackend: mlxBackend

@@ -44,7 +44,10 @@ do {
         throw error
     }
 
-    let service = ManifoldXPCService(runtime: runtime)
+    let serviceVersion = ManifoldRuntimeEnvironment.string(
+        for: ManifoldRuntimeEnvironment.testAgentVersionOverrideKey
+    ) ?? ManifoldVersion.current
+    let service = ManifoldXPCService(runtime: runtime, version: serviceVersion)
     let listener = NSXPCListener(
         machServiceName: ManifoldRuntimeEnvironment.xpcServiceName()
     )

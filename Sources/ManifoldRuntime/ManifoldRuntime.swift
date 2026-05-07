@@ -46,6 +46,8 @@ public actor ManifoldRuntime {
     public nonisolated let fileVisibilityOverrideStore: FileVisibilityOverrideStore
     /// Saved access presets and per-agent named-session templates.
     public nonisolated let accessStore: AccessStore
+    /// Runtime-owned ledger of Finder tags applied by Manifold.
+    public nonisolated let finderTagLedgerStore: FinderTagLedgerStore
     /// Per-agent filter mode preferences and grant-scoped override approvals.
     public nonisolated let filterModeStore: FilterModeStore
     /// Pluggable findings provider used by ManifoldBridge.enforceFileReadRules
@@ -66,6 +68,8 @@ public actor ManifoldRuntime {
     public nonisolated let ledgerStore: LedgerStore
     /// Per-tool cost metrics used to measure context and latency reductions.
     public nonisolated let toolMetricsStore: ToolMetricsStore
+    /// Durable typed MCP failure events keyed by request ID.
+    public nonisolated let mcpFailureEventStore: MCPFailureEventStore
     /// User-owned derived memory with lineage and retention state.
     public nonisolated let memoryStore: MemoryStore
     /// Saved skill manifests. Invocation is gated until ManifoldExec is enabled.
@@ -124,6 +128,7 @@ public actor ManifoldRuntime {
         let workBlockStore = WorkBlockStore(db: db)
         let fileVisibilityOverrideStore = FileVisibilityOverrideStore(db: db)
         let accessStore = AccessStore(db: db)
+        let finderTagLedgerStore = try FinderTagLedgerStore(db: db)
         let filterModeStore = FilterModeStore(db: db)
         let filterModeFindingsProvider: any FilterModeFindingsProvider = RegexFilterFindingsProvider()
         let emailSyncEngine = EmailSyncEngine(emailStore: emailStore)
@@ -133,6 +138,7 @@ public actor ManifoldRuntime {
         let exposureStore = ExposureStore(db: db)
         let ledgerStore = try LedgerStore(db: db)
         let toolMetricsStore = try ToolMetricsStore(db: db)
+        let mcpFailureEventStore = try MCPFailureEventStore(db: db)
         let memoryStore = try MemoryStore(db: db)
         let skillStore = try SkillStore(db: db)
         let capabilityHandleStore = try CapabilityHandleStore(db: db)
@@ -157,6 +163,8 @@ public actor ManifoldRuntime {
             grantStore: grantStore,
             emailStore: emailStore,
             emailSyncEngine: emailSyncEngine,
+            runtimeSettingsStore: runtimeSettingsStore,
+            finderTagLedgerStore: finderTagLedgerStore,
             defaultStoragePath: privacyStorageURL.path,
             rulesOnlyBackend: rulesOnlyBackend,
             mlxBackend: mlxPrivacyBackend
@@ -180,6 +188,7 @@ public actor ManifoldRuntime {
         self.workBlockStore = workBlockStore
         self.fileVisibilityOverrideStore = fileVisibilityOverrideStore
         self.accessStore = accessStore
+        self.finderTagLedgerStore = finderTagLedgerStore
         self.filterModeStore = filterModeStore
         self.filterModeFindingsProvider = filterModeFindingsProvider
         self.emailSyncEngine = emailSyncEngine
@@ -189,6 +198,7 @@ public actor ManifoldRuntime {
         self.exposureStore = exposureStore
         self.ledgerStore = ledgerStore
         self.toolMetricsStore = toolMetricsStore
+        self.mcpFailureEventStore = mcpFailureEventStore
         self.memoryStore = memoryStore
         self.skillStore = skillStore
         self.capabilityHandleStore = capabilityHandleStore

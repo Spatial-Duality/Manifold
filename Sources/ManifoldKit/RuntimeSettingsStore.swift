@@ -63,4 +63,23 @@ public actor RuntimeSettingsStore {
             params: [key, value ? "1" : "0", now]
         )
     }
+
+    public func string(forKey key: String) throws -> String? {
+        try db.queryScalar(
+            "SELECT value FROM runtime_settings WHERE key = ? LIMIT 1",
+            params: [key]
+        )
+    }
+
+    public func setString(forKey key: String, value: String) throws {
+        let now = ISO8601DateFormatter.shared.string(from: Date())
+        try db.execute(
+            """
+            INSERT INTO runtime_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            params: [key, value, now]
+        )
+    }
 }

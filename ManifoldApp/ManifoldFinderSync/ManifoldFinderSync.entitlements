@@ -6,9 +6,5 @@
 	<array>
 		<string>group.com.spatialduality.manifold</string>
 	</array>
-	<key>keychain-access-groups</key>
-	<array>
-		<string>$(AppIdentifierPrefix)com.spatialduality.manifold</string>
-	</array>
 </dict>
 </plist>

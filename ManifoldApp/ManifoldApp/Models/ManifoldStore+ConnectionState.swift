@@ -61,6 +61,14 @@ extension ManifoldStore {
                     self.isConnected = false
                     self.connectedAgent = nil
                     self.connectedAgents = []
+                    _ = self.runtimeSupervisor.markDegraded(issue: "xpc_interrupted")
+                    self.diagnostics.record(.xpcConnectionInterrupted)
+                    if self.canStartRuntimeServices,
+                       self.runtimeSupervisor.consumeAutomaticRestartSlot() {
+                        Task { @MainActor [weak self] in
+                            await self?.restartRuntimeHelper(reason: .xpcInterrupted)
+                        }
+                    }
                 }
             }
         }
@@ -115,11 +123,14 @@ extension ManifoldStore {
                     self.isRuntimeConnected = connected
                     self.isConnected = connected
                     if !connected {
+                        self.runtimeSupervisor.markDegraded(issue: "runtime_unavailable")
                         self.connectedAgent = nil
                         self.connectedAgents = []
                         if self.lastError == nil, let runtimeLaunchError = self.runtimeLaunchError {
                             self.lastError = runtimeLaunchError
                         }
+                    } else {
+                        self.runtimeSupervisor.markHealthy()
                     }
                 }
 

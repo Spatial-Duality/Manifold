@@ -13,6 +13,10 @@ private let logger = Logger(subsystem: "com.spatialduality.manifold", category: 
 public struct DatabaseMigrator {
     private let db: DatabaseConnection
 
+    public static var currentSchemaVersion: Int {
+        migrations.last?.version ?? 0
+    }
+
     public init(db: DatabaseConnection) throws {
         self.db = db
         try db.execute("""
@@ -65,6 +69,9 @@ public struct DatabaseMigrator {
         try repairStandingWriteGrants(db)
         try repairRuntimeSettings(db)
         try repairGrants(db)
+        try ToolMetricsStore.ensureSchema(db)
+        try MCPFailureEventStore.ensureSchema(db)
+        try FinderTagLedgerStore.ensureSchema(db)
         try MemoryStore.ensureSchema(db)
     }
 
@@ -2377,6 +2384,18 @@ public struct DatabaseMigrator {
                 sql: "ALTER TABLE sources ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'folder'"
             )
             try db.execute("CREATE INDEX IF NOT EXISTS idx_sources_health ON sources(source_health)")
+        },
+
+        // v46: Ledger of Finder tags Manifold applied. The app uses this
+        // to remove only Manifold-owned tags and preserve unrelated user tags.
+        Migration(version: 46, name: "finder_tag_ledger") { db in
+            try FinderTagLedgerStore.ensureSchema(db)
+        },
+
+        // v47: Durable MCP failure events and richer tool metrics.
+        Migration(version: 47, name: "mcp_reliability_events") { db in
+            try ToolMetricsStore.ensureSchema(db)
+            try MCPFailureEventStore.ensureSchema(db)
         },
     ]
 }

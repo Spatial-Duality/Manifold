@@ -417,14 +417,15 @@ actor PrivacyContentExtractor {
 
     private func recognizeText(in cgImage: CGImage) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
+            let reply = SingleShotThrowingContinuation<String>(continuation)
             let request = VNRecognizeTextRequest { request, error in
                 if let error {
-                    continuation.resume(throwing: error)
+                    reply.resume(throwing: error)
                     return
                 }
                 let observations = request.results as? [VNRecognizedTextObservation] ?? []
                 let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-                continuation.resume(returning: text)
+                reply.resume(returning: text)
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
@@ -433,7 +434,7 @@ actor PrivacyContentExtractor {
             do {
                 try handler.perform([request])
             } catch {
-                continuation.resume(throwing: error)
+                reply.resume(throwing: error)
             }
         }
     }

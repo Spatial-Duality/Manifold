@@ -53,6 +53,9 @@ public final class DiagnosticsRecorder: @unchecked Sendable {
 
     /// Default location: `~/Library/Application Support/Manifold/Diagnostics/`.
     public static func defaultDirectory() -> URL {
+        if let override = ManifoldRuntimeEnvironment.diagnosticsDirectoryURL() {
+            return override
+        }
         let base = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask

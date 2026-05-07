@@ -19,6 +19,7 @@ public final class ManifoldXPCClient: @unchecked Sendable {
     public static let connectionStateChangedNotification =
         Notification.Name("manifold.xpc.connectionStateChanged")
 
+    private let requestTimeout: TimeInterval = 12
     private let lock = NSLock()
     private var connection: NSXPCConnection?
 
@@ -28,55 +29,67 @@ public final class ManifoldXPCClient: @unchecked Sendable {
     /// Calls a governed MCP-style tool on behalf of an existing runtime connection.
     public func callTool(
         connectionID: String,
+        requestID: String = ManifoldRequestID().rawValue,
         toolName: String,
         arguments: [String: Any] = [:]
     ) async throws -> [String: Any] {
         let payload = try XPCJSON.data(from: arguments)
         return try await withCheckedThrowingContinuation { continuation in
+            let reply = SingleShotThrowingContinuation<[String: Any]>(continuation)
+            let timeout = timeoutWorkItem(operation: "tool \(toolName)", reply: reply)
             do {
                 let proxy = try remoteProxy { error in
-                    continuation.resume(throwing: error)
+                    if reply.resume(throwing: error) { timeout.cancel() }
                 }
-                proxy.callTool(connectionID: connectionID, toolName: toolName, arguments: payload) { data, _ in
+                DispatchQueue.global().asyncAfter(deadline: .now() + requestTimeout, execute: timeout)
+                proxy.callTool(connectionID: connectionID, requestID: requestID, toolName: toolName, arguments: payload) { data, _ in
                     do {
-                        continuation.resume(returning: try XPCJSON.dictionary(from: data))
+                        if reply.resume(returning: try XPCJSON.dictionary(from: data)) { timeout.cancel() }
                     } catch {
-                        continuation.resume(throwing: error)
+                        if reply.resume(throwing: error) { timeout.cancel() }
                     }
                 }
             } catch {
-                continuation.resume(throwing: error)
+                if reply.resume(throwing: error) { timeout.cancel() }
             }
         }
     }
 
     /// Sends an app command to the runtime and returns the decoded JSON payload.
-    public func command(name: String, payload: [String: Any] = [:]) async throws -> [String: Any] {
+    public func command(
+        requestID: String = ManifoldRequestID().rawValue,
+        name: String,
+        payload: [String: Any] = [:]
+    ) async throws -> [String: Any] {
         let request = try XPCJSON.data(from: payload)
         return try await withCheckedThrowingContinuation { continuation in
+            let reply = SingleShotThrowingContinuation<[String: Any]>(continuation)
+            let timeout = timeoutWorkItem(operation: "command \(name)", reply: reply)
             do {
                 let proxy = try remoteProxy { error in
-                    continuation.resume(throwing: error)
+                    if reply.resume(throwing: error) { timeout.cancel() }
                 }
-                proxy.command(name: name, payload: request) { data, error in
+                DispatchQueue.global().asyncAfter(deadline: .now() + requestTimeout, execute: timeout)
+                proxy.command(requestID: requestID, name: name, payload: request) { data, error in
                     if let error {
-                        continuation.resume(throwing: error)
+                        if reply.resume(throwing: error) { timeout.cancel() }
                         return
                     }
                     do {
-                        continuation.resume(returning: try XPCJSON.dictionary(from: data))
+                        if reply.resume(returning: try XPCJSON.dictionary(from: data)) { timeout.cancel() }
                     } catch {
-                        continuation.resume(throwing: error)
+                        if reply.resume(throwing: error) { timeout.cancel() }
                     }
                 }
             } catch {
-                continuation.resume(throwing: error)
+                if reply.resume(throwing: error) { timeout.cancel() }
             }
         }
     }
 
     /// Opens a runtime connection for the named agent client and returns the connection identifier.
     public func connectAgent(
+        requestID: String = ManifoldRequestID().rawValue,
         agent: String,
         clientName: String,
         clientVersion: String,
@@ -84,28 +97,32 @@ public final class ManifoldXPCClient: @unchecked Sendable {
     ) async throws -> String {
         let payload = try XPCJSON.data(from: initializeParams)
         return try await withCheckedThrowingContinuation { continuation in
+            let reply = SingleShotThrowingContinuation<String>(continuation)
+            let timeout = timeoutWorkItem(operation: "connect", reply: reply)
             do {
                 let proxy = try remoteProxy { error in
-                    continuation.resume(throwing: error)
+                    if reply.resume(throwing: error) { timeout.cancel() }
                 }
+                DispatchQueue.global().asyncAfter(deadline: .now() + requestTimeout, execute: timeout)
                 proxy.connect(
+                    requestID: requestID,
                     agent: agent,
                     clientName: clientName,
                     clientVersion: clientVersion,
                     initializeParams: payload
                 ) { connectionID, error in
                     if let error {
-                        continuation.resume(throwing: error)
+                        if reply.resume(throwing: error) { timeout.cancel() }
                         return
                     }
                     guard let connectionID else {
-                        continuation.resume(throwing: ManifoldXPCError.runtimeUnavailable)
+                        if reply.resume(throwing: ManifoldXPCError.runtimeUnavailable) { timeout.cancel() }
                         return
                     }
-                    continuation.resume(returning: connectionID)
+                    if reply.resume(returning: connectionID) { timeout.cancel() }
                 }
             } catch {
-                continuation.resume(throwing: error)
+                if reply.resume(throwing: error) { timeout.cancel() }
             }
         }
     }
@@ -122,6 +139,15 @@ public final class ManifoldXPCClient: @unchecked Sendable {
             throw ManifoldXPCError.runtimeUnavailable
         }
         return proxy
+    }
+
+    private func timeoutWorkItem<Value>(
+        operation: String,
+        reply: SingleShotThrowingContinuation<Value>
+    ) -> DispatchWorkItem {
+        DispatchWorkItem {
+            _ = reply.resume(throwing: ManifoldXPCError.timeout(operation))
+        }
     }
 
     private func activeConnection() -> NSXPCConnection {

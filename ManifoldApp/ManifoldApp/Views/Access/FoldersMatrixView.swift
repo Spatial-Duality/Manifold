@@ -9,6 +9,7 @@
 // Cells are interactive: clicking a coverage dot toggles the source's
 // membership in that agent's default scope.
 
+import AppKit
 import SwiftUI
 import ManifoldKit
 
@@ -31,6 +32,10 @@ struct FoldersMatrixView: View {
     /// explicit allow overrides on individual files reads as "Some files
     /// shared" instead of the misleading "Not shared".
     @State private var overridesByAgent: [TargetApp: [FileVisibilityOverrideRecord]] = [:]
+    @State private var recoverySource: SourceRecord?
+    @State private var recoverySuggestions: [FinderTagRecoverySuggestion] = []
+    @State private var recoverySearchInFlight = false
+    @State private var showingRecoverySheet = false
 
     init(
         searchText: Binding<String> = .constant(""),
@@ -105,6 +110,21 @@ struct FoldersMatrixView: View {
         .task(id: connectedAgentsKey) {
             await loadDriftCounts()
             await loadOverrides()
+        }
+        .sheet(isPresented: $showingRecoverySheet) {
+            FinderTagRecoverySheet(
+                source: recoverySource,
+                suggestions: recoverySuggestions,
+                onReconnect: { suggestion in
+                    guard suggestion.isSourceRoot, suggestion.isDirectory else { return }
+                    Task {
+                        await store.repairSource(
+                            sourceID: suggestion.sourceID,
+                            url: URL(fileURLWithPath: suggestion.suggestedPath)
+                        )
+                    }
+                }
+            )
         }
         .manifoldFileDropTarget(store: store)
     }
@@ -639,6 +659,16 @@ struct FoldersMatrixView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+
+                Button {
+                    Task { await loadFinderTagRecoverySuggestions(for: selected) }
+                } label: {
+                    Label(recoverySearchInFlight ? "Searching" : "Tagged Items", systemImage: "tag")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(recoverySearchInFlight)
+                .help("Search Finder tags recorded for this source.")
             }
 
             Button("Remove", role: .destructive) {
@@ -679,9 +709,102 @@ struct FoldersMatrixView: View {
         await loadOverrides()
     }
 
+    private func loadFinderTagRecoverySuggestions(for source: SourceRecord) async {
+        recoverySearchInFlight = true
+        recoverySource = source
+        recoverySuggestions = await store.finderTagRecoverySuggestions(for: source)
+        recoverySearchInFlight = false
+        showingRecoverySheet = true
+    }
+
     private var selectedSource: SourceRecord? {
         guard let id = selectedIDs.first else { return nil }
         return store.sources.first(where: { $0.sourceID == id })
+    }
+}
+
+private struct FinderTagRecoverySheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let source: SourceRecord?
+    let suggestions: [FinderTagRecoverySuggestion]
+    let onReconnect: (FinderTagRecoverySuggestion) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s4) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tagged Items")
+                        .font(ManifoldType.heading)
+                    if let source {
+                        Text(source.displayName)
+                            .font(ManifoldType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            if suggestions.isEmpty {
+                ContentUnavailableView(
+                    "No Moved Tagged Items",
+                    systemImage: "tag.slash",
+                    description: Text("Spotlight did not return a renamed or moved item for this source.")
+                )
+                .frame(minWidth: 440, minHeight: 220)
+            } else {
+                List(suggestions) { suggestion in
+                    HStack(spacing: Spacing.s3) {
+                        Image(systemName: suggestion.isDirectory ? "folder" : "doc")
+                            .foregroundStyle(suggestion.isSourceRoot ? ManifoldPalette.active : .secondary)
+                            .frame(width: 18)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(suggestion.suggestedPath.shortenedPath)
+                                .font(ManifoldType.body)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("Was \(suggestion.originalPath.shortenedPath)")
+                                .font(ManifoldType.mono)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+
+                        Spacer()
+
+                        Pill(
+                            text: suggestion.matchKind == .fileIdentity ? "Identity" : "Tag",
+                            variant: suggestion.matchKind == .fileIdentity ? .defaultScope : .neutral
+                        )
+
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([
+                                URL(fileURLWithPath: suggestion.suggestedPath),
+                            ])
+                        } label: {
+                            Image(systemName: "eye")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Reveal in Finder")
+
+                        if suggestion.isSourceRoot, suggestion.isDirectory {
+                            Button("Reconnect") {
+                                onReconnect(suggestion)
+                                dismiss()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(minWidth: 560, minHeight: 320)
+            }
+        }
+        .padding(Spacing.s5)
     }
 }
 

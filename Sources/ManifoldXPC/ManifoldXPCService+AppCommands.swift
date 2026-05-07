@@ -309,7 +309,8 @@ extension ManifoldXPCService {
                 throw ManifoldXPCError.invalidPayload
             }
             let scopes = try decodePayload([FileSelectionScope].self, key: "fileScopes", from: payload, default: [])
-            try await runtime.accessStore.updatePresetFileScopes(presetID: presetID, fileScopes: scopes)
+            let agent = (payload["agent"] as? String).flatMap(TargetApp.init(rawValue:))
+            try await runtime.accessStore.updatePresetFileScopes(presetID: presetID, fileScopes: scopes, agent: agent)
             return ["ok": true]
 
         case "setPresetOverride":
@@ -321,12 +322,14 @@ extension ManifoldXPCService {
                 throw ManifoldXPCError.invalidPayload
             }
             let isDirectory = payload["isDirectory"] as? Bool ?? false
+            let agent = (payload["agent"] as? String).flatMap(TargetApp.init(rawValue:))
             try await runtime.accessStore.setPresetOverride(
                 presetID: presetID,
                 sourceID: sourceID,
                 relativePath: relativePath,
                 isDirectory: isDirectory,
-                decision: decision
+                decision: decision,
+                agent: agent
             )
             return ["ok": true]
 
@@ -337,12 +340,63 @@ extension ManifoldXPCService {
                 throw ManifoldXPCError.invalidPayload
             }
             let isDirectory = payload["isDirectory"] as? Bool ?? false
+            let agent = (payload["agent"] as? String).flatMap(TargetApp.init(rawValue:))
             try await runtime.accessStore.clearPresetOverride(
                 presetID: presetID,
                 sourceID: sourceID,
                 relativePath: relativePath,
-                isDirectory: isDirectory
+                isDirectory: isDirectory,
+                agent: agent
             )
+            return ["ok": true]
+
+        case "recordFinderTags":
+            let records = try decodePayload([FinderTaggedItemRecord].self, key: "records", from: payload, default: [])
+            try await runtime.finderTagLedgerStore.record(records)
+            return ["ok": true, "count": records.count]
+
+        case "finderTagRecordsForSource":
+            guard let sourceID = payload["sourceID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let records = try await runtime.finderTagLedgerStore.records(sourceID: sourceID)
+            return ["records": try XPCJSON.object(from: records)]
+
+        case "hasOtherFinderTagOwner":
+            guard let path = payload["path"] as? String,
+                  let tagName = payload["tagName"] as? String,
+                  let excludingSourceID = payload["excludingSourceID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            let hasOtherOwner = try await runtime.finderTagLedgerStore.hasOtherOwner(
+                fileIdentity: payload["fileIdentity"] as? String,
+                path: path,
+                tagName: tagName,
+                excluding: excludingSourceID
+            )
+            return ["hasOtherOwner": hasOtherOwner]
+
+        case "removeFinderTagRecordsForSource":
+            guard let sourceID = payload["sourceID"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.finderTagLedgerStore.removeRecords(sourceID: sourceID)
+            return ["ok": true]
+
+        case "setFinderIntegrationSettings":
+            guard let tagsEnabled = payload["tagsEnabled"] as? Bool,
+                  let tagName = payload["tagName"] as? String else {
+                throw ManifoldXPCError.invalidPayload
+            }
+            try await runtime.runtimeSettingsStore.setFlag(
+                forKey: "finder.integration.tags_enabled",
+                value: tagsEnabled
+            )
+            try await runtime.runtimeSettingsStore.setString(
+                forKey: "finder.integration.tag_name",
+                value: FinderTagService.normalizedTagName(tagName).isEmpty ? "Manifold" : FinderTagService.normalizedTagName(tagName)
+            )
+            try await runtime.privacyIndexCoordinator.sourceDidChange()
             return ["ok": true]
 
         case "savePresetOverrides":
