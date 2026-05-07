@@ -16,8 +16,15 @@ Public builds are distributed from [GitHub Releases](https://github.com/Spatial-
 
 Manifold is a native macOS app. Release builds are Developer ID signed, notarized, and updated with Sparkle.
 
+## Focus update
+
+Based on feedback from alpha testers, Manifold is adopting a Focus-first naming and layout scheme. A Focus is a saved bundle of folders, mailboxes, per-file decisions, and runtime settings for a specific job, such as reviewing a contract or preparing a brief.
+
+The Work pane is becoming Focus, the sidebar is becoming the Focus picker, and switching Focuses swaps the active Claude/Codex access state in one click. We plan to make this Focus-first layout live for the public during the week of May 4, 2026.
+
 ## What it gives you that the AI apps don't
 
+- **Task-specific Focuses.** Save the exact files, mailboxes, and settings for a job, then switch Claude or Codex into that context without rebuilding permissions from scratch.
 - **Multi-inbox.** Apple, Google, Microsoft 365, IMAP. All in one view. None shared with any AI by default.
 - **Version history per file.** AI edits your brief; you see the diff and can roll back from any new chat, even on a different AI.
 - **An AI-usage audit log that's yours to keep.** What each AI read, what it changed, when. Lives on your Mac, independent of which AI did the work.
