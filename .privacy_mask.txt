@@ -1,1 +1,2 @@
 Scheduled activity: feat: extend runtime bridge controls at 2026-06-01T10:36:03+0100
+Scheduled activity: feat: extend privacy filter controls at 2026-06-01T10:37:27+0100
