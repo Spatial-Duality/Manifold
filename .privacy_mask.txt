@@ -2,3 +2,4 @@ Scheduled activity: feat: extend runtime bridge controls at 2026-06-01T10:36:03+
 Scheduled activity: feat: extend privacy filter controls at 2026-06-01T10:37:27+0100
 Scheduled activity: feat: extend activity timeline controls at 2026-06-01T14:23:52+0100
 Scheduled activity: feat: extend camera fallback controls at 2026-06-01T14:12:29+0100
+Scheduled activity: feat: extend agent session controls at 2026-06-01T15:39:44+0100
