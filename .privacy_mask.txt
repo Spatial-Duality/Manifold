@@ -4,3 +4,4 @@ Scheduled activity: feat: extend activity timeline controls at 2026-06-01T14:23:
 Scheduled activity: feat: extend camera fallback controls at 2026-06-01T14:12:29+0100
 Scheduled activity: feat: extend agent session controls at 2026-06-01T15:39:44+0100
 Scheduled activity: feat: extend event store controls at 2026-06-01T16:43:22+0100
+Scheduled activity: test: extend runtime bridge regression coverage at 2026-06-03T09:25:17+0100
