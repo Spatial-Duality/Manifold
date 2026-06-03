@@ -7,3 +7,4 @@ Scheduled activity: feat: extend event store controls at 2026-06-01T16:43:22+010
 Scheduled activity: test: extend runtime bridge regression coverage at 2026-06-03T09:25:17+0100
 Scheduled activity: test: extend activity timeline regression coverage at 2026-06-03T10:23:46+0100
 Scheduled activity: test: extend event store regression coverage at 2026-06-03T10:45:43+0100
+Scheduled activity: test: extend local model status regression coverage at 2026-06-03T14:08:42+0100
