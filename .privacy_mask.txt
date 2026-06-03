@@ -9,3 +9,4 @@ Scheduled activity: test: extend activity timeline regression coverage at 2026-0
 Scheduled activity: test: extend event store regression coverage at 2026-06-03T10:45:43+0100
 Scheduled activity: test: extend local model status regression coverage at 2026-06-03T14:08:42+0100
 Scheduled activity: fix: stabilize activity timeline retry path at 2026-06-03T14:55:52+0100
+Scheduled activity: fix: stabilize event store retry path at 2026-06-03T16:25:46+0100
