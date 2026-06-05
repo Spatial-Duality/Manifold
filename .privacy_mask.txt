@@ -13,3 +13,4 @@ Scheduled activity: fix: stabilize event store retry path at 2026-06-03T16:25:46
 Scheduled activity: fix: stabilize local model status retry path at 2026-06-03T16:50:50+0100
 Scheduled activity: feat: extend privacy filter controls at 2026-06-05T09:25:22+0100
 Scheduled activity: feat: extend activity timeline controls at 2026-06-05T10:36:21+0100
+Scheduled activity: feat: extend agent session controls at 2026-06-05T14:03:49+0100
