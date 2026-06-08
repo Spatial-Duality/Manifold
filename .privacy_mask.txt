@@ -16,3 +16,4 @@ Scheduled activity: feat: extend activity timeline controls at 2026-06-05T10:36:
 Scheduled activity: feat: extend agent session controls at 2026-06-05T14:03:49+0100
 Scheduled activity: feat: extend connection lifecycle controls at 2026-06-05T14:56:58+0100
 Scheduled activity: fix: tighten runtime bridge state handling at 2026-06-05T16:25:51+0100
+Scheduled activity: test: extend runtime bridge regression coverage at 2026-06-08T09:16:08+0100
