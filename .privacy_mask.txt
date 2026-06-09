@@ -20,3 +20,4 @@ Scheduled activity: test: extend runtime bridge regression coverage at 2026-06-0
 Scheduled activity: test: extend camera fallback regression coverage at 2026-06-08T14:15:44+0100
 Scheduled activity: test: extend connection lifecycle regression coverage at 2026-06-08T16:48:00+0100
 Scheduled activity: fix: trace runtime bridge state transition at 2026-06-09T09:34:48+0100
+Scheduled activity: fix: trace privacy filter state transition at 2026-06-09T13:59:31+0100
