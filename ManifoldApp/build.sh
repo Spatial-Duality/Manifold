@@ -184,6 +184,23 @@ if [[ "$CONFIG" == "release" ]]; then
         fi
         sign_runtime "$MCP_BINARY_PATH"
         sign_runtime "$AGENT_BINARY_PATH"
+
+        # App extensions build unsigned under CODE_SIGNING_ALLOWED=NO, so sign
+        # them before the outer bundle or verification fails on the nested
+        # component. Each appex carries the entitlements file from its own
+        # source target (e.g. ManifoldFinderSync needs its app group).
+        if [[ -d "$BUNDLE/Contents/PlugIns" ]]; then
+            while IFS= read -r -d '' appex; do
+                appex_name="$(basename "$appex" .appex)"
+                appex_entitlements="$PROJECT_DIR/ManifoldApp/$appex_name/$appex_name.entitlements"
+                if [[ -f "$appex_entitlements" ]]; then
+                    sign_runtime --entitlements "$appex_entitlements" "$appex"
+                else
+                    sign_runtime "$appex"
+                fi
+            done < <(find "$BUNDLE/Contents/PlugIns" -mindepth 1 -maxdepth 1 -name "*.appex" -print0)
+        fi
+
         /usr/bin/codesign \
             --force \
             --sign "$APP_IDENTITY" \
