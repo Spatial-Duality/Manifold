@@ -105,6 +105,10 @@ public struct EmailStoreMailAccountCreator: MailAccountCreating {
 }
 
 public actor MailAccountSetupService {
+    /// Resolves an IMAP endpoint for an unknown domain. Injectable so tests
+    /// can stub the network-backed autoconfig/SRV chain.
+    public typealias EndpointDiscovery = @Sendable (_ domain: String) async -> MailDiscoveryService.IMAPServer?
+
     private struct StagedCredential: Sendable {
         let endpoint: MailEndpoint
         let username: String
@@ -116,6 +120,7 @@ public actor MailAccountSetupService {
     private let accountCreator: any MailAccountCreating
     private let authConfig: LocalAuthConfig
     private let microsoftOAuthClient: MicrosoftOAuthClient
+    private let discovery: EndpointDiscovery
 
     private var sessions: [UUID: MailAccountSetupSession] = [:]
     private var stagedCredentials: [UUID: StagedCredential] = [:]
@@ -125,12 +130,14 @@ public actor MailAccountSetupService {
         validator: any MailAccountCredentialValidating = AppPasswordIMAPValidator(),
         accountCreator: any MailAccountCreating,
         authConfig: LocalAuthConfig = .load(),
-        microsoftOAuthClient: MicrosoftOAuthClient? = nil
+        microsoftOAuthClient: MicrosoftOAuthClient? = nil,
+        discovery: @escaping EndpointDiscovery = { await MailDiscoveryService.discover(domain: $0) }
     ) {
         self.validator = validator
         self.accountCreator = accountCreator
         self.authConfig = authConfig
         self.microsoftOAuthClient = microsoftOAuthClient ?? MicrosoftOAuthClient(config: authConfig)
+        self.discovery = discovery
     }
 
     public func session(id: UUID) -> MailAccountSetupSession? {
@@ -197,6 +204,50 @@ public actor MailAccountSetupService {
             password: password,
             usernameRule: profile.usernameRule,
             credentialKind: .appPassword
+        )
+    }
+
+    /// Validate a password for an unknown-domain account by discovering the
+    /// IMAP endpoint first (autoconfig chain, then DNS SRV), so custom-domain
+    /// users enter only their address and password. When discovery finds
+    /// nothing, the session returns to `.waitingForCredential` and the UI
+    /// falls back to its manual server fields.
+    @discardableResult
+    public func submitDiscoveredCredential(
+        sessionID: UUID,
+        password: String
+    ) async throws -> MailAccountSetupSession {
+        var session = try requireSession(sessionID)
+        guard let email = session.emailAddress?.nilIfBlank,
+              let domain = email.components(separatedBy: "@").last?.nilIfBlank?.lowercased() else {
+            session.state = .failed
+            session.failureReason = .invalidEmail
+            sessions[sessionID] = session
+            return session
+        }
+
+        session.state = .validatingCredential
+        session.failureReason = nil
+        session.progressMessage = "Looking up mail server settings for \(domain)."
+        sessions[sessionID] = session
+
+        guard let discovered = await discovery(domain) else {
+            session.state = .waitingForCredential
+            session.progressMessage = "No published server settings for \(domain). Enter the IMAP server manually."
+            sessions[sessionID] = session
+            return session
+        }
+
+        let endpoint = MailEndpoint(host: discovered.host, port: Int(discovered.port), security: .tlsOnConnect)
+        let usernameRule: MailUsernameRule =
+            discovered.usernameTemplate == "%EMAILLOCALPART%" ? .localPartThenFullEmailFallback : .fullEmail
+        return try await validatePasswordCredential(
+            session: session,
+            endpoint: endpoint,
+            username: email,
+            password: password,
+            usernameRule: usernameRule,
+            credentialKind: .manualPassword
         )
     }
 

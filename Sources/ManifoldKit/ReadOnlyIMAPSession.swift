@@ -173,4 +173,14 @@ public struct ReadOnlyIMAPSession: Sendable {
         _ = try IMAPCommandBuilder.build(.uidFetch(uidSet: "\(uid)", items: "BODY.PEEK[]"))
         return try await connection.fetchBody(uid: uid, toFileAt: destinationURL)
     }
+
+    public func fetchBodies(
+        uids: [UInt32],
+        stagingDirectory: URL
+    ) async throws -> [IMAPConnection.FetchedBodyFile] {
+        guard !uids.isEmpty else { return [] }
+        let uidSet = uids.map(String.init).joined(separator: ",")
+        _ = try IMAPCommandBuilder.build(.uidFetch(uidSet: uidSet, items: "BODY.PEEK[]"))
+        return try await connection.fetchBodies(uids: uids, stagingDirectory: stagingDirectory)
+    }
 }

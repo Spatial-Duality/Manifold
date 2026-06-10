@@ -255,4 +255,20 @@ struct IMAPParserTests {
         #expect(result.flags.contains("\\Answered"))
         #expect(result.rfc822Size == 1234)
     }
+
+    @Test("Parse batched body FETCH line with UID before the literal")
+    func parseBatchedBodyFetchLine() {
+        let line = "23 FETCH (UID 4577 BODY[] {12345}"
+        #expect(IMAPParser.literalCount(in: line) == 12345)
+        #expect(IMAPParser.parseFetchResponse(line).uid == 4577)
+        #expect(IMAPParser.uidValue(inFetchFragment: line) == 4577)
+    }
+
+    @Test("Extract UID from FETCH remnant after the literal")
+    func uidFromFetchRemnant() {
+        #expect(IMAPParser.uidValue(inFetchFragment: " UID 4577)") == 4577)
+        #expect(IMAPParser.uidValue(inFetchFragment: " FLAGS (\\Seen) UID 99)") == 99)
+        #expect(IMAPParser.uidValue(inFetchFragment: ")") == nil)
+        #expect(IMAPParser.uidValue(inFetchFragment: " UID )") == nil)
+    }
 }

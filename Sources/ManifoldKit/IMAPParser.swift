@@ -289,6 +289,17 @@ public struct IMAPParser: Sendable {
 
     // MARK: - Literal Detection
 
+    /// Extract a `UID <n>` data item from a FETCH response fragment.
+    /// Servers may order FETCH data items arbitrarily, so in a body fetch the
+    /// UID can appear either before the literal or in the remnant after it
+    /// (e.g. ` UID 4577)`).
+    public static func uidValue(inFetchFragment fragment: String) -> UInt32? {
+        guard let uidRange = fragment.range(of: "UID ", options: .caseInsensitive) else { return nil }
+        let digits = fragment[uidRange.upperBound...].prefix(while: { $0.isNumber })
+        guard !digits.isEmpty else { return nil }
+        return UInt32(digits)
+    }
+
     /// Check if a line ends with a literal count: `{N}` and return N.
     public static func literalCount(in line: String) -> Int? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)

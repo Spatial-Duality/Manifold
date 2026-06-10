@@ -288,6 +288,73 @@ public actor IMAPConnection {
         }
     }
 
+    /// One message body landed by a batched body fetch.
+    public struct FetchedBodyFile: Sendable {
+        public let uid: UInt32
+        public let fileURL: URL
+        public let byteCount: Int
+    }
+
+    /// FETCH full bodies for multiple UIDs in a single round trip, streaming
+    /// each literal to its own owner-only file under `stagingDirectory`.
+    ///
+    /// Servers silently omit UIDs that were expunged after the preceding
+    /// SEARCH, so the result can be smaller than `uids` — callers treat
+    /// missing UIDs as skipped messages, exactly like a failed single fetch.
+    public func fetchBodies(
+        uids: [UInt32],
+        stagingDirectory: URL
+    ) async throws -> [FetchedBodyFile] {
+        guard !uids.isEmpty else { return [] }
+        guard let conn = connection else { throw IMAPError.disconnected }
+        let uidSet = uids.map(String.init).joined(separator: ",")
+        _ = try IMAPCommandBuilder.build(.uidFetch(uidSet: uidSet, items: "BODY.PEEK[]"))
+
+        let tag = nextTag()
+        let cmd = "\(tag) UID FETCH \(uidSet) (BODY.PEEK[])\r\n"
+
+        try await send(data: Data(cmd.utf8), on: conn)
+        logger.debug("C: \(tag) UID FETCH [\(uids.count) uid(s)] (BODY.PEEK[])")
+
+        var results: [FetchedBodyFile] = []
+        var literalIndex = 0
+
+        while true {
+            let line = try await readLine()
+
+            let classified = IMAPParser.classifyLine(line)
+            switch classified {
+            case .tagged(let respTag, let status, let text):
+                guard respTag == tag else { continue }
+                guard status == "OK" else {
+                    throw IMAPError.serverError("FETCH BODY failed: \(text)")
+                }
+                return results
+            case .untagged(let text):
+                guard let literalSize = IMAPParser.literalCount(in: text) else { continue }
+                literalIndex += 1
+                var uid = IMAPParser.uidValue(inFetchFragment: text) ?? 0
+                let fileURL = stagingDirectory
+                    .appendingPathComponent("\(literalIndex)-\(UUID().uuidString).rfc822")
+                try await readExactly(count: literalSize, toFileAt: fileURL)
+                // Remnant of this FETCH response after the literal; some
+                // servers place the UID data item after the body.
+                let remnant = try await readLine()
+                if uid == 0 {
+                    uid = IMAPParser.uidValue(inFetchFragment: remnant) ?? 0
+                }
+                guard uid != 0 else {
+                    try? FileManager.default.removeItem(at: fileURL)
+                    logger.warning("IMAP batched body fetch: literal without UID, skipping message")
+                    continue
+                }
+                results.append(FetchedBodyFile(uid: uid, fileURL: fileURL, byteCount: literalSize))
+            case .continuation:
+                break
+            }
+        }
+    }
+
     /// FETCH the full body for a single UID and stream the literal to an
     /// owner-only local file. This keeps large RFC822 literals off the heap
     /// before archive-v2 encryption.

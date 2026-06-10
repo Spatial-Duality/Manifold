@@ -15,6 +15,7 @@ struct ReadOnlyIMAPSessionTests {
         #expect(try IMAPCommandBuilder.build(.uidSearch(criteria: "ALL")) == "UID SEARCH ALL")
         #expect(try IMAPCommandBuilder.build(.uidFetch(uidSet: "1:10", items: "UID FLAGS ENVELOPE RFC822.SIZE")) == "UID FETCH 1:10 (UID FLAGS ENVELOPE RFC822.SIZE)")
         #expect(try IMAPCommandBuilder.build(.uidFetch(uidSet: "42", items: "BODY.PEEK[]")) == "UID FETCH 42 (BODY.PEEK[])")
+        #expect(try IMAPCommandBuilder.build(.uidFetch(uidSet: "1,2,42", items: "BODY.PEEK[]")) == "UID FETCH 1,2,42 (BODY.PEEK[])")
         #expect(try IMAPCommandBuilder.build(.enableQResync) == "ENABLE QRESYNC")
     }
 

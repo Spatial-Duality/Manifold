@@ -103,6 +103,49 @@ struct MailAccountSetupServiceTests {
         #expect(updated.state == .waitingForOAuth)
         #expect(updated.failureReason == nil)
     }
+
+    @Test("Discovered endpoint setup needs only email and password")
+    func discoveredCredentialUsesAutoconfigEndpoint() async throws {
+        let creator = RecordingMailAccountCreator()
+        let service = MailAccountSetupService(
+            validator: StubCredentialValidator(validatedUsername: "person@customdomain.co"),
+            accountCreator: creator,
+            authConfig: LocalAuthConfig(),
+            discovery: { domain in
+                domain == "customdomain.co"
+                    ? MailDiscoveryService.IMAPServer(host: "mail.customdomain.co", port: 993, priority: 0)
+                    : nil
+            }
+        )
+
+        let session = await service.startSetup(emailAddress: "person@customdomain.co")
+        _ = try await service.selectProvider(sessionID: session.id, providerID: .otherIMAP)
+        let validated = try await service.submitDiscoveredCredential(sessionID: session.id, password: "secret")
+        #expect(validated.state == .choosingMailboxes)
+
+        _ = try await service.createAccount(sessionID: session.id, selectedMailboxIDs: ["INBOX"])
+        let request = try #require(await creator.requests().first)
+        #expect(request.endpoint == MailEndpoint(host: "mail.customdomain.co", port: 993))
+        #expect(request.username == "person@customdomain.co")
+        #expect(request.credentialKind == .manualPassword)
+    }
+
+    @Test("Discovery miss falls back to manual server entry without failing")
+    func discoveryMissFallsBackToManualEntry() async throws {
+        let creator = RecordingMailAccountCreator()
+        let service = MailAccountSetupService(
+            validator: StubCredentialValidator(validatedUsername: "person@obscuredomain.net"),
+            accountCreator: creator,
+            authConfig: LocalAuthConfig(),
+            discovery: { _ in nil }
+        )
+
+        let session = await service.startSetup(emailAddress: "person@obscuredomain.net")
+        let outcome = try await service.submitDiscoveredCredential(sessionID: session.id, password: "secret")
+        #expect(outcome.state == .waitingForCredential)
+        #expect(outcome.failureReason == nil)
+        #expect(await creator.requestCount() == 0)
+    }
 }
 
 private actor StubCredentialValidator: MailAccountCredentialValidating {

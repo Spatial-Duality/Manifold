@@ -1363,4 +1363,65 @@ struct EmailStoreTests {
             #expect(count == "0", "\(table) should be empty after account removal")
         }
     }
+
+    // MARK: - Batched Sync Writes
+
+    @Test("performBatch commits grouped writes")
+    func performBatchCommits() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        try store.performBatch {
+            for index in 0..<3 {
+                try store.upsertEmailMessage(
+                    emailID: "batch-\(index)",
+                    accountID: Self.testAccountID,
+                    mailbox: "INBOX",
+                    sender: "Sender <sender@example.com>",
+                    recipients: "recipient@example.com",
+                    subject: "Batched \(index)",
+                    receivedAt: "2026-06-10T12:00:0\(index)Z",
+                    emlPath: nil,
+                    sizeBytes: 100,
+                    preview: nil
+                )
+                try store.upsertMailboxMembership(
+                    accountID: Self.testAccountID,
+                    mailbox: "INBOX",
+                    imapUID: UInt32(100 + index),
+                    emailID: "batch-\(index)"
+                )
+            }
+        }
+
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM email_messages") == "3")
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM email_mailbox_membership") == "3")
+    }
+
+    @Test("performBatch rolls back every write when the block throws")
+    func performBatchRollsBack() async throws {
+        let (store, db, tempDir) = try await makeStore()
+        defer { cleanup(tempDir) }
+
+        struct Boom: Error {}
+        #expect(throws: Boom.self) {
+            try store.performBatch {
+                try store.upsertEmailMessage(
+                    emailID: "rollback-1",
+                    accountID: Self.testAccountID,
+                    mailbox: "INBOX",
+                    sender: "Sender <sender@example.com>",
+                    recipients: "recipient@example.com",
+                    subject: "Doomed",
+                    receivedAt: "2026-06-10T12:00:00Z",
+                    emlPath: nil,
+                    sizeBytes: 100,
+                    preview: nil
+                )
+                throw Boom()
+            }
+        }
+
+        #expect(try db.queryScalar("SELECT COUNT(*) FROM email_messages") == "0")
+    }
 }

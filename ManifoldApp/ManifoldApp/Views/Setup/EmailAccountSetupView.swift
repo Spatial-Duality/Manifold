@@ -31,7 +31,9 @@ struct EmailAccountSetupView: View {
         _displayName = State(initialValue: preset.displayName)
         _server = State(initialValue: preset.server)
         _portText = State(initialValue: "\(preset.port)")
-        _connectionDetailsExpanded = State(initialValue: provider == .other)
+        // Collapsed by default: unknown domains resolve their server via
+        // discovery on connect, so manual entry is the fallback, not the norm.
+        _connectionDetailsExpanded = State(initialValue: false)
     }
 
     var body: some View {
@@ -164,8 +166,11 @@ struct EmailAccountSetupView: View {
                     LabeledContent("Server", value: server)
                     LabeledContent("Port", value: portText)
                 } else {
-                    TextField("Server", text: $server)
-                        .accessibilityIdentifier("settings.mail.account.server")
+                    TextField(
+                        provider == .other ? "Automatic (leave blank to detect)" : "Server",
+                        text: $server
+                    )
+                    .accessibilityIdentifier("settings.mail.account.server")
                     TextField("Port", text: $portText)
                         .frame(width: 96)
                         .accessibilityIdentifier("settings.mail.account.port")
@@ -225,16 +230,24 @@ struct EmailAccountSetupView: View {
 
     private var canSubmit: Bool {
         guard displayName.trimmedForForm != nil,
-              server.trimmedForForm != nil,
               username.trimmedForForm != nil,
               Int(portText) != nil,
               trustAccepted else {
             return false
         }
         if isOAuthProvider {
-            return oauthUnavailableMessage == nil
+            return server.trimmedForForm != nil && oauthUnavailableMessage == nil
         }
-        return password.trimmedForForm != nil
+        guard password.trimmedForForm != nil else { return false }
+        // A blank server is allowed for unknown domains: it resolves through
+        // the discovery chain when the user connects.
+        return server.trimmedForForm != nil || canDiscoverServer
+    }
+
+    private var canDiscoverServer: Bool {
+        guard provider == .other, let address = username.trimmedForForm else { return false }
+        let parts = address.components(separatedBy: "@")
+        return parts.count == 2 && !(parts.last?.isEmpty ?? true)
     }
 
     private func submit() {
@@ -253,11 +266,35 @@ struct EmailAccountSetupView: View {
         isSaving = true
 
         Task {
+            var resolvedServer = server.trimmedForForm
+            var resolvedPort = port
+
+            if resolvedServer == nil {
+                // One-field path: resolve the endpoint from the address domain
+                // (domain autoconfig → ISPDB → DNS SRV; TLS-on-connect only).
+                guard let domain = username.trimmedForForm?
+                    .components(separatedBy: "@").last?.lowercased(), !domain.isEmpty else {
+                    errorMessage = "Enter a valid email address."
+                    isSaving = false
+                    return
+                }
+                guard let discovered = await MailDiscoveryService.discover(domain: domain) else {
+                    errorMessage = "Couldn't find mail server settings for \(domain). Enter the IMAP server below."
+                    connectionDetailsExpanded = true
+                    isSaving = false
+                    return
+                }
+                resolvedServer = discovered.host
+                resolvedPort = Int(discovered.port)
+                server = discovered.host
+                portText = "\(discovered.port)"
+            }
+
             let error = await store.mailAccounts.addIMAPAccount(
                 displayName: displayName.trimmedForForm ?? displayName,
                 provider: providerToStore,
-                server: server.trimmedForForm ?? server,
-                port: port,
+                server: resolvedServer ?? server,
+                port: resolvedPort,
                 username: username.trimmedForForm ?? username,
                 password: password.trimmedForForm ?? password
             )

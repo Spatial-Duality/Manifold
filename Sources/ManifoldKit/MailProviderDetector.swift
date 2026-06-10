@@ -54,7 +54,8 @@ public struct MailProviderDetector: Sendable {
         )
     }
 
-    /// Detect and, for unknown domains, attempt RFC 6186 SRV discovery.
+    /// Detect and, for unknown domains, run the autoconfig discovery chain
+    /// (domain autoconfig → .well-known → Thunderbird ISPDB → RFC 6186 SRV).
     public static func detectWithDiscovery(email: String) async -> DetectionResult {
         let initial = detect(email: email)
 
@@ -63,10 +64,9 @@ public struct MailProviderDetector: Sendable {
             return initial
         }
 
-        // Try RFC 6186 SRV lookup for the domain
         let domain = email.lowercased().components(separatedBy: "@").last ?? ""
-        if let discovered = await MailDiscoveryService.discoverIMAP(domain: domain) {
-            logger.info("SRV discovery found \(discovered.host):\(discovered.port) for \(domain)")
+        if let discovered = await MailDiscoveryService.discover(domain: domain) {
+            logger.info("Discovery found \(discovered.host):\(discovered.port) for \(domain)")
             return DetectionResult(
                 provider: .other,
                 authMethod: .password,

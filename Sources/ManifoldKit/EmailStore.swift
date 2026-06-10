@@ -258,6 +258,17 @@ public struct EmailStore: Sendable {
         try db.execute("DELETE FROM email_attachments WHERE email_id = ?", params: [emailID])
     }
 
+    /// Groups many small sync writes into one SQLite transaction.
+    ///
+    /// Keep the block to plain statement execution: it runs with BEGIN held on
+    /// the shared connection, so parsing, crypto, or file I/O inside widens the
+    /// window where another store's transaction on this connection would fail.
+    /// Do not call self-transactional methods (`replacePrivateTokenIndex`,
+    /// `removeEmailAccount`, ...) from inside the block — BEGIN does not nest.
+    public func performBatch(_ block: () throws -> Void) throws {
+        try db.transaction(block)
+    }
+
     public func recordMailBlob(_ object: MailArchiveStoredObject) throws {
         try db.execute("""
             INSERT INTO mail_blobs (
