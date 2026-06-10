@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-05-04
+## [0.5.0] - 2026-06-10
 
 Focus feature: rename the Work pane to Focus, replace ad-hoc session
 templates with first-class saved Focuses, and surface the picker as
@@ -41,8 +41,26 @@ atomic swap.
   and the Inspector when nothing is selected.
 - Focus chip in the macOS title bar via .navigationTitle +
   .navigationSubtitle so the running Focus is visible everywhere.
+- Durable source identity. Sources carry a security-scoped bookmark,
+  resolved root path, and health status, so a shared folder follows
+  Finder moves and renames instead of breaking, the runtime fails closed
+  when a source disappears, and the Access UI offers repair.
+- One-field mail setup for custom-domain accounts. "Other IMAP" setup
+  resolves the server automatically (domain autoconfig, the Thunderbird
+  ISPDB, then DNS SRV — TLS-on-connect results only), so most accounts
+  need just an address and password. Manual server entry stays as the
+  fallback when discovery finds nothing.
 
 ### Changed
+- Mail sync is substantially faster. Message bodies download in batched
+  IMAP fetches, and the next batch downloads while the current one is
+  parsed, encrypted, and indexed. Per-message database writes are now
+  grouped into one transaction per batch, and envelope metadata fetches
+  in batches of 200 instead of 50.
+- Access and Finder workflows hardened from alpha feedback, with MCP
+  health checks, request IDs, effective access snapshots, durable
+  failure recording, and restart/disconnect probes to reduce flaky
+  runtime failures.
 - Toolbar consolidated to .toolbar { ToolbarItemGroup(placement:
   .primaryAction) } for auto-Liquid-Glass on macOS 26.
 - Activity always shown; Approvals only render when viewing the
@@ -109,5 +127,6 @@ filter, version history, and audit log are all in this version.
 - Audit trail records both what was exposed and whether the PII
   filter ran.
 
-[Unreleased]: https://github.com/Spatial-Duality/Manifold/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Spatial-Duality/Manifold/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Spatial-Duality/Manifold/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Spatial-Duality/Manifold/releases/tag/v0.4.0
