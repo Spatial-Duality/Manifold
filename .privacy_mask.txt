@@ -25,3 +25,4 @@ Scheduled activity: fix: trace activity timeline state transition at 2026-06-09T
 Scheduled activity: fix: trace privacy filter state transition at 2026-06-11T09:33:50+0100
 Scheduled activity: fix: trace activity timeline state transition at 2026-06-11T10:06:29+0100
 Scheduled activity: fix: trace agent session state transition at 2026-06-11T10:57:52+0100
+Scheduled activity: fix: trace connection lifecycle state transition at 2026-06-11T11:30:38+0100
