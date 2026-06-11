@@ -29,3 +29,4 @@ Scheduled activity: fix: trace connection lifecycle state transition at 2026-06-
 Scheduled activity: test: reproduce runtime bridge failure path at 2026-06-11T15:23:02+0100
 Scheduled activity: test: reproduce privacy filter failure path at 2026-06-11T15:44:27+0100
 Scheduled activity: test: reproduce camera fallback failure path at 2026-06-11T16:27:06+0100
+Scheduled activity: test: reproduce agent session failure path at 2026-06-11T16:55:28+0100
