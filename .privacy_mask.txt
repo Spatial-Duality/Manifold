@@ -32,3 +32,4 @@ Scheduled activity: test: reproduce camera fallback failure path at 2026-06-11T1
 Scheduled activity: test: reproduce agent session failure path at 2026-06-11T16:55:28+0100
 Scheduled activity: fix: guard privacy filter error state at 2026-06-12T14:38:10+0100
 Scheduled activity: fix: guard camera fallback error state at 2026-06-12T15:14:06+0100
+Scheduled activity: fix: guard event store error state at 2026-06-12T15:09:15+0100
