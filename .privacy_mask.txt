@@ -41,3 +41,4 @@ Scheduled activity: test: narrow privacy filter replay case at 2026-06-12T17:36:
 Scheduled activity: test: narrow camera fallback replay case at 2026-06-12T17:43:03+0100
 Scheduled activity: bench: capture local model status baseline at 2026-06-13T22:46:31+0100
 Scheduled activity: test: add runtime bridge evaluation case at 2026-06-13T23:33:48+0100
+Scheduled activity: fix: stabilize privacy filter retry path at 2026-06-15T22:17:18+0100
