@@ -48,3 +48,4 @@ Scheduled activity: feat: wire runtime bridge into local flow at 2026-06-16T09:2
 Scheduled activity: feat: wire privacy filter into local flow at 2026-06-16T10:57:51+0100
 Scheduled activity: feat: wire activity timeline into local flow at 2026-06-16T13:38:57+0100
 Scheduled activity: feat: wire camera fallback into local flow at 2026-06-16T14:55:30+0100
+Scheduled activity: feat: wire agent session into local flow at 2026-06-16T16:34:48+0100
