@@ -46,3 +46,4 @@ Scheduled activity: fix: stabilize activity timeline retry path at 2026-06-15T23
 Scheduled activity: fix: stabilize camera fallback retry path at 2026-06-15T22:44:40+0100
 Scheduled activity: feat: wire runtime bridge into local flow at 2026-06-16T09:20:02+0100
 Scheduled activity: feat: wire privacy filter into local flow at 2026-06-16T10:57:51+0100
+Scheduled activity: feat: wire activity timeline into local flow at 2026-06-16T13:38:57+0100
