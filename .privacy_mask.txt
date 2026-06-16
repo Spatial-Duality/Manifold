@@ -44,3 +44,4 @@ Scheduled activity: test: add runtime bridge evaluation case at 2026-06-13T23:33
 Scheduled activity: fix: stabilize privacy filter retry path at 2026-06-15T22:17:18+0100
 Scheduled activity: fix: stabilize activity timeline retry path at 2026-06-15T23:37:33+0100
 Scheduled activity: fix: stabilize camera fallback retry path at 2026-06-15T22:44:40+0100
+Scheduled activity: feat: wire runtime bridge into local flow at 2026-06-16T09:20:02+0100
