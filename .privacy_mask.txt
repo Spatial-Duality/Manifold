@@ -53,3 +53,4 @@ Scheduled activity: feat: wire privacy filter into local flow at 2026-06-17T09:4
 Scheduled activity: feat: wire camera fallback into local flow at 2026-06-17T09:42:57+0100
 Scheduled activity: feat: wire agent session into local flow at 2026-06-17T10:09:20+0100
 Scheduled activity: feat: wire connection lifecycle into local flow at 2026-06-17T11:11:58+0100
+Scheduled activity: feat: wire local model status into local flow at 2026-06-17T11:20:52+0100
