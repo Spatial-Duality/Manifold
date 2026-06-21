@@ -65,3 +65,4 @@ Scheduled activity: test: add privacy filter evaluation case at 2026-06-20T23:02
 Scheduled activity: test: add activity timeline evaluation case at 2026-06-20T23:27:02+0100
 Scheduled activity: fix: trace runtime bridge state transition at 2026-06-21T10:18:34+0100
 Scheduled activity: fix: trace privacy filter state transition at 2026-06-21T11:11:28+0100
+Scheduled activity: fix: trace activity timeline state transition at 2026-06-21T14:28:55+0100
