@@ -67,3 +67,4 @@ Scheduled activity: fix: trace runtime bridge state transition at 2026-06-21T10:
 Scheduled activity: fix: trace privacy filter state transition at 2026-06-21T11:11:28+0100
 Scheduled activity: fix: trace activity timeline state transition at 2026-06-21T14:28:55+0100
 Scheduled activity: fix: trace camera fallback state transition at 2026-06-21T16:03:47+0100
+Scheduled activity: feat: wire privacy filter into local flow at 2026-06-22T10:35:25+0100
