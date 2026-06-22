@@ -70,3 +70,4 @@ Scheduled activity: fix: trace camera fallback state transition at 2026-06-21T16
 Scheduled activity: feat: wire privacy filter into local flow at 2026-06-22T10:35:25+0100
 Scheduled activity: feat: wire activity timeline into local flow at 2026-06-22T10:26:20+0100
 Scheduled activity: feat: wire agent session into local flow at 2026-06-22T11:34:55+0100
+Scheduled activity: feat: wire event store into local flow at 2026-06-22T14:40:49+0100
