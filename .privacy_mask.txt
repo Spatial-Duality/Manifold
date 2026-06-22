@@ -72,3 +72,4 @@ Scheduled activity: feat: wire activity timeline into local flow at 2026-06-22T1
 Scheduled activity: feat: wire agent session into local flow at 2026-06-22T11:34:55+0100
 Scheduled activity: feat: wire event store into local flow at 2026-06-22T14:40:49+0100
 Scheduled activity: feat: wire local model status into local flow at 2026-06-22T15:22:38+0100
+Scheduled activity: feat: expose runtime bridge controls at 2026-06-22T16:41:18+0100
