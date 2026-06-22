@@ -71,3 +71,4 @@ Scheduled activity: feat: wire privacy filter into local flow at 2026-06-22T10:3
 Scheduled activity: feat: wire activity timeline into local flow at 2026-06-22T10:26:20+0100
 Scheduled activity: feat: wire agent session into local flow at 2026-06-22T11:34:55+0100
 Scheduled activity: feat: wire event store into local flow at 2026-06-22T14:40:49+0100
+Scheduled activity: feat: wire local model status into local flow at 2026-06-22T15:22:38+0100
