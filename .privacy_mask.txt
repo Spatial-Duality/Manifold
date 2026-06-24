@@ -77,3 +77,4 @@ Scheduled activity: refactor: streamline local model status module boundary at 2
 Scheduled activity: ci: stabilize runtime bridge verification job at 2026-06-23T22:48:04+0100
 Scheduled activity: test: extend runtime bridge regression coverage at 2026-06-24T08:24:26+0100
 Scheduled activity: test: extend privacy filter regression coverage at 2026-06-24T08:52:53+0100
+Scheduled activity: test: extend camera fallback regression coverage at 2026-06-24T08:57:22+0100
