@@ -75,3 +75,4 @@ Scheduled activity: feat: wire local model status into local flow at 2026-06-22T
 Scheduled activity: feat: expose runtime bridge controls at 2026-06-22T16:41:18+0100
 Scheduled activity: refactor: streamline local model status module boundary at 2026-06-23T21:59:35+0100
 Scheduled activity: ci: stabilize runtime bridge verification job at 2026-06-23T22:48:04+0100
+Scheduled activity: test: extend runtime bridge regression coverage at 2026-06-24T08:24:26+0100
