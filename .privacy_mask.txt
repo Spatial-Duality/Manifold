@@ -87,3 +87,4 @@ Scheduled activity: test: record activity timeline fallback behavior at 2026-06-
 Scheduled activity: test: record agent session fallback behavior at 2026-06-24T11:33:33+0100
 Scheduled activity: test: record local model status fallback behavior at 2026-06-24T13:45:04+0100
 Scheduled activity: fix: guard privacy filter error state at 2026-06-24T13:47:13+0100
+Scheduled activity: fix: guard camera fallback error state at 2026-06-24T14:16:16+0100
