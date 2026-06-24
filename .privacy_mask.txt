@@ -80,3 +80,4 @@ Scheduled activity: test: extend privacy filter regression coverage at 2026-06-2
 Scheduled activity: test: extend camera fallback regression coverage at 2026-06-24T08:57:22+0100
 Scheduled activity: test: extend event store regression coverage at 2026-06-24T09:37:37+0100
 Scheduled activity: fix: stabilize runtime bridge retry path at 2026-06-24T09:49:00+0100
+Scheduled activity: fix: stabilize activity timeline retry path at 2026-06-24T10:30:02+0100
