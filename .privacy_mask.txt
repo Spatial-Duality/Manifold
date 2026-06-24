@@ -82,3 +82,4 @@ Scheduled activity: test: extend event store regression coverage at 2026-06-24T0
 Scheduled activity: fix: stabilize runtime bridge retry path at 2026-06-24T09:49:00+0100
 Scheduled activity: fix: stabilize activity timeline retry path at 2026-06-24T10:30:02+0100
 Scheduled activity: fix: stabilize event store retry path at 2026-06-24T10:24:15+0100
+Scheduled activity: fix: stabilize local model status retry path at 2026-06-24T10:45:39+0100
