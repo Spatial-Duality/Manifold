@@ -93,3 +93,4 @@ Scheduled activity: perf: reduce activity timeline setup overhead at 2026-06-25T
 Scheduled activity: perf: reduce camera fallback setup overhead at 2026-06-25T22:13:28+0100
 Scheduled activity: perf: reduce agent session setup overhead at 2026-06-25T23:36:04+0100
 Scheduled activity: perf: reduce event store setup overhead at 2026-06-25T23:06:34+0100
+Scheduled activity: perf: reduce connection lifecycle setup overhead at 2026-06-25T23:40:14+0100
