@@ -95,3 +95,4 @@ Scheduled activity: perf: reduce agent session setup overhead at 2026-06-25T23:3
 Scheduled activity: perf: reduce event store setup overhead at 2026-06-25T23:06:34+0100
 Scheduled activity: perf: reduce connection lifecycle setup overhead at 2026-06-25T23:40:14+0100
 Scheduled activity: bench: capture runtime bridge baseline at 2026-06-26T10:17:21+0100
+Scheduled activity: bench: capture camera fallback baseline at 2026-06-26T10:08:15+0100
