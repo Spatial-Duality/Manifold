@@ -98,3 +98,4 @@ Scheduled activity: bench: capture runtime bridge baseline at 2026-06-26T10:17:2
 Scheduled activity: bench: capture camera fallback baseline at 2026-06-26T10:08:15+0100
 Scheduled activity: bench: capture event store baseline at 2026-06-26T13:08:26+0100
 Scheduled activity: test: add privacy filter evaluation case at 2026-06-26T15:25:31+0100
+Scheduled activity: test: add camera fallback evaluation case at 2026-06-26T16:43:50+0100
