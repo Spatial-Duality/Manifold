@@ -101,3 +101,4 @@ Scheduled activity: test: add privacy filter evaluation case at 2026-06-26T15:25
 Scheduled activity: test: add camera fallback evaluation case at 2026-06-26T16:43:50+0100
 Scheduled activity: refactor: streamline runtime bridge module boundary at 2026-06-29T09:32:19+0100
 Scheduled activity: refactor: streamline camera fallback module boundary at 2026-06-29T11:25:09+0100
+Scheduled activity: refactor: streamline event store module boundary at 2026-06-29T13:28:21+0100
