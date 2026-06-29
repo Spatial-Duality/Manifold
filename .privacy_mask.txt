@@ -103,3 +103,4 @@ Scheduled activity: refactor: streamline runtime bridge module boundary at 2026-
 Scheduled activity: refactor: streamline camera fallback module boundary at 2026-06-29T11:25:09+0100
 Scheduled activity: refactor: streamline event store module boundary at 2026-06-29T13:28:21+0100
 Scheduled activity: ci: stabilize runtime bridge verification job at 2026-06-29T15:25:57+0100
+Scheduled activity: ci: stabilize camera fallback verification job at 2026-06-29T17:12:36+0100
