@@ -107,3 +107,4 @@ Scheduled activity: ci: stabilize camera fallback verification job at 2026-06-29
 Scheduled activity: fix: stabilize connection lifecycle retry path at 2026-07-03T23:01:12+0100
 Scheduled activity: test: reproduce connection lifecycle failure path at 2026-07-05T15:42:26+0100
 Scheduled activity: test: reproduce local model status failure path at 2026-07-05T16:36:33+0100
+Scheduled activity: fix: handle empty privacy filter response at 2026-07-05T16:14:23+0100
