@@ -105,3 +105,4 @@ Scheduled activity: refactor: streamline event store module boundary at 2026-06-
 Scheduled activity: ci: stabilize runtime bridge verification job at 2026-06-29T15:25:57+0100
 Scheduled activity: ci: stabilize camera fallback verification job at 2026-06-29T17:12:36+0100
 Scheduled activity: fix: stabilize connection lifecycle retry path at 2026-07-03T23:01:12+0100
+Scheduled activity: test: reproduce connection lifecycle failure path at 2026-07-05T15:42:26+0100
