@@ -110,3 +110,4 @@ Scheduled activity: test: reproduce local model status failure path at 2026-07-0
 Scheduled activity: fix: handle empty privacy filter response at 2026-07-05T16:14:23+0100
 Scheduled activity: fix: handle empty activity timeline response at 2026-07-05T16:24:18+0100
 Scheduled activity: feat: expose camera fallback controls at 2026-07-06T15:46:46+0100
+Scheduled activity: feat: expose event store controls at 2026-07-06T16:58:14+0100
