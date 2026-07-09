@@ -116,3 +116,4 @@ Scheduled activity: ci: stabilize runtime bridge verification job at 2026-07-08T
 Scheduled activity: chore: remove stale runtime bridge path at 2026-07-08T15:53:43+0100
 Scheduled activity: chore: remove stale agent session path at 2026-07-08T16:18:23+0100
 Scheduled activity: fix: trace privacy filter state transition at 2026-07-09T09:13:02+0100
+Scheduled activity: fix: trace activity timeline state transition at 2026-07-09T10:01:06+0100
