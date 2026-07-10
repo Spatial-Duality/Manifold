@@ -124,3 +124,4 @@ Scheduled activity: test: reproduce privacy filter failure path at 2026-07-09T14
 Scheduled activity: test: reproduce activity timeline failure path at 2026-07-09T14:45:51+0100
 Scheduled activity: fix: trace activity timeline state transition at 2026-07-10T08:58:01+0100
 Scheduled activity: fix: trace camera fallback state transition at 2026-07-10T09:55:18+0100
+Scheduled activity: fix: trace event store state transition at 2026-07-10T11:08:24+0100
