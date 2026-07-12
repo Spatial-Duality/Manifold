@@ -128,3 +128,4 @@ Scheduled activity: fix: trace event store state transition at 2026-07-10T11:08:
 Scheduled activity: fix: trace local model status state transition at 2026-07-10T11:38:18+0100
 Scheduled activity: test: reproduce runtime bridge failure path at 2026-07-10T14:17:03+0100
 Scheduled activity: test: reproduce camera fallback failure path at 2026-07-10T14:36:49+0100
+Scheduled activity: ci: stabilize privacy filter verification job at 2026-07-12T22:10:18+0100
