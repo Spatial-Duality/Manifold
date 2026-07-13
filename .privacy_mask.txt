@@ -132,3 +132,4 @@ Scheduled activity: ci: stabilize privacy filter verification job at 2026-07-12T
 Scheduled activity: bench: capture runtime bridge baseline at 2026-07-13T09:18:48+0100
 Scheduled activity: bench: capture agent session baseline at 2026-07-13T10:08:38+0100
 Scheduled activity: test: add privacy filter evaluation case at 2026-07-13T11:22:09+0100
+Scheduled activity: test: add camera fallback evaluation case at 2026-07-13T14:10:27+0100
