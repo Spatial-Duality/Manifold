@@ -130,3 +130,4 @@ Scheduled activity: test: reproduce runtime bridge failure path at 2026-07-10T14
 Scheduled activity: test: reproduce camera fallback failure path at 2026-07-10T14:36:49+0100
 Scheduled activity: ci: stabilize privacy filter verification job at 2026-07-12T22:10:18+0100
 Scheduled activity: bench: capture runtime bridge baseline at 2026-07-13T09:18:48+0100
+Scheduled activity: bench: capture agent session baseline at 2026-07-13T10:08:38+0100
