@@ -136,3 +136,4 @@ Scheduled activity: test: add camera fallback evaluation case at 2026-07-13T14:1
 Scheduled activity: perf: reduce privacy filter setup overhead at 2026-07-13T16:05:50+0100
 Scheduled activity: perf: reduce agent session setup overhead at 2026-07-13T16:52:04+0100
 Scheduled activity: fix: trace privacy filter state transition at 2026-07-14T09:29:02+0100
+Scheduled activity: fix: trace camera fallback state transition at 2026-07-14T10:48:41+0100
