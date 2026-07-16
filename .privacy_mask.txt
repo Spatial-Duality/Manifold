@@ -160,3 +160,4 @@ Scheduled activity: bench: capture runtime bridge baseline at 2026-07-19T09:40:5
 Scheduled activity: bench: capture event store baseline at 2026-07-19T13:45:32+0100
 Scheduled activity: test: add runtime bridge evaluation case at 2026-07-19T14:27:23+0100
 Scheduled activity: test: add camera fallback evaluation case at 2026-07-19T16:14:32+0100
+Scheduled activity: refactor: streamline runtime bridge module boundary at 2026-07-16T10:12:43+0100
