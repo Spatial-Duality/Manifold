@@ -145,3 +145,4 @@ Scheduled activity: fix: tighten camera fallback state handling at 2026-07-15T16
 Scheduled activity: fix: trace privacy filter state transition at 2026-07-17T09:32:27+0100
 Scheduled activity: fix: trace activity timeline state transition at 2026-07-17T10:30:11+0100
 Scheduled activity: fix: trace agent session state transition at 2026-07-17T10:09:44+0100
+Scheduled activity: fix: trace event store state transition at 2026-07-17T10:57:16+0100
