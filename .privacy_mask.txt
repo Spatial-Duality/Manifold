@@ -148,3 +148,4 @@ Scheduled activity: fix: trace agent session state transition at 2026-07-17T10:0
 Scheduled activity: fix: trace event store state transition at 2026-07-17T10:57:16+0100
 Scheduled activity: fix: trace connection lifecycle state transition at 2026-07-17T11:28:31+0100
 Scheduled activity: test: reproduce runtime bridge failure path at 2026-07-17T13:23:47+0100
+Scheduled activity: test: reproduce activity timeline failure path at 2026-07-17T14:35:03+0100
