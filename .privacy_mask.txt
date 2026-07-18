@@ -155,3 +155,4 @@ Scheduled activity: feat: extend camera fallback controls at 2026-07-18T09:57:06
 Scheduled activity: feat: extend event store controls at 2026-07-18T10:57:23+0100
 Scheduled activity: feat: extend local model status controls at 2026-07-18T13:54:03+0100
 Scheduled activity: fix: tighten runtime bridge state handling at 2026-07-18T14:21:55+0100
+Scheduled activity: fix: tighten activity timeline state handling at 2026-07-18T14:44:30+0100
