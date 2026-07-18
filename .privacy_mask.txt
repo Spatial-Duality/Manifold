@@ -153,3 +153,4 @@ Scheduled activity: test: reproduce agent session failure path at 2026-07-17T15:
 Scheduled activity: feat: extend privacy filter controls at 2026-07-18T09:39:35+0100
 Scheduled activity: feat: extend camera fallback controls at 2026-07-18T09:57:06+0100
 Scheduled activity: feat: extend event store controls at 2026-07-18T10:57:23+0100
+Scheduled activity: feat: extend local model status controls at 2026-07-18T13:54:03+0100
