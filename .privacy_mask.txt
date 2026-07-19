@@ -158,3 +158,4 @@ Scheduled activity: fix: tighten runtime bridge state handling at 2026-07-18T14:
 Scheduled activity: fix: tighten activity timeline state handling at 2026-07-18T14:44:30+0100
 Scheduled activity: bench: capture runtime bridge baseline at 2026-07-19T09:40:57+0100
 Scheduled activity: bench: capture event store baseline at 2026-07-19T13:45:32+0100
+Scheduled activity: test: add runtime bridge evaluation case at 2026-07-19T14:27:23+0100
