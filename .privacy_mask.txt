@@ -156,3 +156,4 @@ Scheduled activity: feat: extend event store controls at 2026-07-18T10:57:23+010
 Scheduled activity: feat: extend local model status controls at 2026-07-18T13:54:03+0100
 Scheduled activity: fix: tighten runtime bridge state handling at 2026-07-18T14:21:55+0100
 Scheduled activity: fix: tighten activity timeline state handling at 2026-07-18T14:44:30+0100
+Scheduled activity: bench: capture runtime bridge baseline at 2026-07-19T09:40:57+0100
