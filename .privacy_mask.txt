@@ -165,3 +165,4 @@ Scheduled activity: refactor: streamline privacy filter module boundary at 2026-
 Scheduled activity: test: add privacy filter evaluation case at 2026-07-21T22:07:17+0100
 Scheduled activity: test: reproduce activity timeline failure path at 2026-07-22T15:50:59+0100
 Scheduled activity: test: reproduce agent session failure path at 2026-07-22T17:13:57+0100
+Scheduled activity: fix: align runtime bridge output state at 2026-07-23T16:07:42+0100
