@@ -170,3 +170,4 @@ Scheduled activity: fix: align activity timeline output state at 2026-07-23T16:3
 Scheduled activity: fix: trace privacy filter state transition at 2026-07-25T09:22:04+0100
 Scheduled activity: fix: trace camera fallback state transition at 2026-07-25T10:35:44+0100
 Scheduled activity: fix: trace event store state transition at 2026-07-25T11:12:03+0100
+Scheduled activity: fix: trace connection lifecycle state transition at 2026-07-25T10:37:28+0100
