@@ -167,3 +167,4 @@ Scheduled activity: test: reproduce activity timeline failure path at 2026-07-22
 Scheduled activity: test: reproduce agent session failure path at 2026-07-22T17:13:57+0100
 Scheduled activity: fix: align runtime bridge output state at 2026-07-23T16:07:42+0100
 Scheduled activity: fix: align activity timeline output state at 2026-07-23T16:31:40+0100
+Scheduled activity: fix: trace privacy filter state transition at 2026-07-25T09:22:04+0100
