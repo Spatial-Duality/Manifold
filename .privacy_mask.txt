@@ -176,3 +176,4 @@ Scheduled activity: test: reproduce privacy filter failure path at 2026-07-25T13
 Scheduled activity: test: reproduce activity timeline failure path at 2026-07-25T14:35:52+0100
 Scheduled activity: test: reproduce agent session failure path at 2026-07-25T15:20:32+0100
 Scheduled activity: chore: remove stale activity timeline path at 2026-07-26T22:00:08+0100
+Scheduled activity: chore: remove stale camera fallback path at 2026-07-26T22:58:16+0100
