@@ -179,3 +179,4 @@ Scheduled activity: chore: remove stale activity timeline path at 2026-07-26T22:
 Scheduled activity: chore: remove stale camera fallback path at 2026-07-26T22:58:16+0100
 Scheduled activity: chore: remove stale agent session path at 2026-07-26T23:12:59+0100
 Scheduled activity: bench: capture runtime bridge baseline at 2026-07-27T09:47:37+0100
+Scheduled activity: bench: capture event store baseline at 2026-07-27T13:53:48+0100
