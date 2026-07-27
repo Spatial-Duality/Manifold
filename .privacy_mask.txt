@@ -181,3 +181,4 @@ Scheduled activity: chore: remove stale agent session path at 2026-07-26T23:12:5
 Scheduled activity: bench: capture runtime bridge baseline at 2026-07-27T09:47:37+0100
 Scheduled activity: bench: capture event store baseline at 2026-07-27T13:53:48+0100
 Scheduled activity: test: add runtime bridge evaluation case at 2026-07-27T14:29:55+0100
+Scheduled activity: test: add camera fallback evaluation case at 2026-07-27T16:18:48+0100
