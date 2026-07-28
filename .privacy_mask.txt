@@ -187,3 +187,4 @@ Scheduled activity: bench: capture activity timeline baseline at 2026-07-28T09:3
 Scheduled activity: bench: capture event store baseline at 2026-07-28T09:43:26+0100
 Scheduled activity: test: add runtime bridge evaluation case at 2026-07-28T10:48:39+0100
 Scheduled activity: test: add camera fallback evaluation case at 2026-07-28T10:42:31+0100
+Scheduled activity: test: add local model status evaluation case at 2026-07-28T10:51:51+0100
