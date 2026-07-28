@@ -193,3 +193,4 @@ Scheduled activity: chore: normalize runtime bridge result metadata at 2026-07-2
 Scheduled activity: chore: normalize camera fallback result metadata at 2026-07-28T14:34:18+0100
 Scheduled activity: chore: normalize connection lifecycle result metadata at 2026-07-28T15:21:45+0100
 Scheduled activity: bench: compare activity timeline variants at 2026-07-28T15:12:10+0100
+Scheduled activity: bench: compare connection lifecycle variants at 2026-07-28T15:55:47+0100
