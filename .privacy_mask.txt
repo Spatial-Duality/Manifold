@@ -195,3 +195,4 @@ Scheduled activity: chore: normalize connection lifecycle result metadata at 202
 Scheduled activity: bench: compare activity timeline variants at 2026-07-28T15:12:10+0100
 Scheduled activity: bench: compare connection lifecycle variants at 2026-07-28T15:55:47+0100
 Scheduled activity: docs: note privacy filter evaluation assumptions at 2026-07-28T16:14:20+0100
+Scheduled activity: docs: note agent session evaluation assumptions at 2026-07-28T17:11:54+0100
