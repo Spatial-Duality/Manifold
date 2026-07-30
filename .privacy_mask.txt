@@ -252,3 +252,4 @@ Scheduled activity: fix: strengthen validation and consistency when processing e
 Scheduled activity: test: add test coverage for runtime bridge edge cases, including unusual inputs and boundary conditions at 2026-08-04T17:04:05+0100
 Scheduled activity: test: expand regression coverage for privacy filter to prevent previously fixed behavior from returning at 2026-07-30T09:18:26+0100
 Scheduled activity: fix: make the runtime bridge retry path more reliable when transient failures or delayed responses occur at 2026-07-30T14:35:09+0100
+Scheduled activity: fix: make the event store retry path more reliable when transient failures or delayed responses occur at 2026-07-30T20:31:22+0100
