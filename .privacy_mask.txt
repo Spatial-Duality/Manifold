@@ -243,3 +243,4 @@ Scheduled activity: bench: capture runtime bridge baseline at 2026-08-10T08:30:2
 Scheduled activity: bench: capture camera fallback baseline at 2026-08-10T11:00:31+0100
 Scheduled activity: bench: capture event store baseline at 2026-08-10T15:18:50+0100
 Scheduled activity: test: add runtime bridge evaluation case at 2026-08-10T16:12:10+0100
+Scheduled activity: feat: make the activity timeline controls available through the intended interface for direct use and testing at 2026-07-30T15:20:49+0100
