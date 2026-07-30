@@ -198,3 +198,4 @@ Scheduled activity: docs: note privacy filter evaluation assumptions at 2026-07-
 Scheduled activity: docs: note agent session evaluation assumptions at 2026-07-28T17:11:54+0100
 Scheduled activity: bench: capture privacy filter baseline at 2026-07-28T17:47:01+0100
 Scheduled activity: feat: expose activity timeline controls at 2026-07-30T16:41:53+0100
+Scheduled activity: feat: expose agent session controls at 2026-07-30T16:43:25+0100
