@@ -200,3 +200,4 @@ Scheduled activity: bench: capture privacy filter baseline at 2026-07-28T17:47:0
 Scheduled activity: feat: expose activity timeline controls at 2026-07-30T16:41:53+0100
 Scheduled activity: feat: expose agent session controls at 2026-07-30T16:43:25+0100
 Scheduled activity: feat: expose privacy filter controls at 2026-07-31T15:47:06+0100
+Scheduled activity: feat: expose camera fallback controls at 2026-07-31T16:47:55+0100
