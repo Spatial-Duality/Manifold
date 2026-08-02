@@ -213,3 +213,4 @@ Scheduled activity: refactor: isolate privacy filter recovery logic at 2026-08-0
 Scheduled activity: feat: extend privacy filter controls at 2026-08-02T09:38:40+0100
 Scheduled activity: feat: extend activity timeline controls at 2026-08-02T10:03:45+0100
 Scheduled activity: feat: extend agent session controls at 2026-08-02T13:23:57+0100
+Scheduled activity: feat: extend event store controls at 2026-08-02T13:47:42+0100
