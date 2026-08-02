@@ -215,3 +215,4 @@ Scheduled activity: feat: extend activity timeline controls at 2026-08-02T10:03:
 Scheduled activity: feat: extend agent session controls at 2026-08-02T13:23:57+0100
 Scheduled activity: feat: extend event store controls at 2026-08-02T13:47:42+0100
 Scheduled activity: feat: extend local model status controls at 2026-08-02T15:29:57+0100
+Scheduled activity: fix: tighten privacy filter state handling at 2026-08-02T15:43:56+0100
