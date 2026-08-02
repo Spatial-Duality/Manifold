@@ -258,3 +258,4 @@ Scheduled activity: test: add a focused test that reproduces the event store fai
 Scheduled activity: refactor: isolate privacy filter recovery logic so failure handling can be tested and maintained independently at 2026-08-06T14:43:15+0100
 Scheduled activity: feat: expand the privacy filter controls to support a broader set of user and runtime actions at 2026-08-02T09:15:58+0100
 Scheduled activity: feat: expand the activity timeline controls to support a broader set of user and runtime actions at 2026-08-02T10:16:45+0100
+Scheduled activity: feat: expand the agent session controls to support a broader set of user and runtime actions at 2026-08-02T13:29:22+0100
