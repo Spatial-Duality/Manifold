@@ -219,3 +219,4 @@ Scheduled activity: fix: tighten privacy filter state handling at 2026-08-02T15:
 Scheduled activity: fix: tighten activity timeline state handling at 2026-08-02T16:16:12+0100
 Scheduled activity: test: align activity timeline checks at 2026-08-03T22:00:15+0100
 Scheduled activity: test: align agent session checks at 2026-08-03T22:23:47+0100
+Scheduled activity: test: align connection lifecycle checks at 2026-08-03T23:23:07+0100
