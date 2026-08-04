@@ -221,3 +221,4 @@ Scheduled activity: test: align activity timeline checks at 2026-08-03T22:00:15+
 Scheduled activity: test: align agent session checks at 2026-08-03T22:23:47+0100
 Scheduled activity: test: align connection lifecycle checks at 2026-08-03T23:23:07+0100
 Scheduled activity: feat: extend runtime bridge controls at 2026-08-04T09:30:10+0100
+Scheduled activity: feat: extend local model status controls at 2026-08-04T14:24:28+0100
