@@ -266,3 +266,4 @@ Scheduled activity: fix: strengthen validation and consistency when processing a
 Scheduled activity: test: update the activity timeline checks so they consistently validate the current expected behavior at 2026-08-03T21:52:52+0100
 Scheduled activity: test: update the agent session checks so they consistently validate the current expected behavior at 2026-08-03T22:43:22+0100
 Scheduled activity: test: update the connection lifecycle checks so they consistently validate the current expected behavior at 2026-08-03T23:30:37+0100
+Scheduled activity: feat: expand the runtime bridge controls to support a broader set of user and runtime actions at 2026-08-04T09:06:47+0100
