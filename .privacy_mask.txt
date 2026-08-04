@@ -202,3 +202,4 @@ Scheduled activity: feat: expose agent session controls at 2026-07-30T16:43:25+0
 Scheduled activity: feat: expose privacy filter controls at 2026-07-31T15:47:06+0100
 Scheduled activity: feat: expose camera fallback controls at 2026-07-31T16:47:55+0100
 Scheduled activity: fix: tighten agent session state handling at 2026-08-04T15:04:30+0100
+Scheduled activity: fix: tighten event store state handling at 2026-08-04T15:59:44+0100
