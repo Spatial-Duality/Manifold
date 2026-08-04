@@ -269,3 +269,4 @@ Scheduled activity: test: update the connection lifecycle checks so they consist
 Scheduled activity: feat: expand the runtime bridge controls to support a broader set of user and runtime actions at 2026-08-04T09:06:47+0100
 Scheduled activity: feat: expand the local model status controls to support a broader set of user and runtime actions at 2026-08-04T13:38:36+0100
 Scheduled activity: fix: strengthen validation and consistency when processing activity timeline state changes at 2026-08-04T16:15:47+0100
+Scheduled activity: fix: strengthen validation and consistency when processing connection lifecycle state changes at 2026-08-04T16:41:36+0100
