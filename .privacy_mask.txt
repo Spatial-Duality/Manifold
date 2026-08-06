@@ -228,3 +228,4 @@ Scheduled activity: test: extend privacy filter regression coverage at 2026-08-0
 Scheduled activity: test: extend activity timeline regression coverage at 2026-08-06T22:13:25+0100
 Scheduled activity: test: extend camera fallback regression coverage at 2026-08-06T22:37:32+0100
 Scheduled activity: test: extend event store regression coverage at 2026-08-06T22:37:19+0100
+Scheduled activity: test: extend connection lifecycle regression coverage at 2026-08-06T22:39:29+0100
