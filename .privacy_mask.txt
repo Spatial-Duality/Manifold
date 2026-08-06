@@ -207,3 +207,4 @@ Scheduled activity: test: cover runtime bridge edge cases at 2026-08-04T16:58:46
 Scheduled activity: test: extend privacy filter regression coverage at 2026-07-30T09:01:14+0100
 Scheduled activity: fix: stabilize runtime bridge retry path at 2026-07-30T14:56:39+0100
 Scheduled activity: fix: stabilize event store retry path at 2026-07-30T21:42:42+0100
+Scheduled activity: fix: trace connection lifecycle state transition at 2026-08-06T10:18:53+0100
