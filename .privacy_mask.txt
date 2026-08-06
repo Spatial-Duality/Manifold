@@ -224,3 +224,4 @@ Scheduled activity: feat: extend runtime bridge controls at 2026-08-04T09:30:10+
 Scheduled activity: feat: extend local model status controls at 2026-08-04T14:24:28+0100
 Scheduled activity: fix: tighten activity timeline state handling at 2026-08-04T14:51:51+0100
 Scheduled activity: fix: tighten connection lifecycle state handling at 2026-08-04T16:23:37+0100
+Scheduled activity: test: extend privacy filter regression coverage at 2026-08-06T21:28:33+0100
