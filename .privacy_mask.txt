@@ -226,3 +226,4 @@ Scheduled activity: fix: tighten activity timeline state handling at 2026-08-04T
 Scheduled activity: fix: tighten connection lifecycle state handling at 2026-08-04T16:23:37+0100
 Scheduled activity: test: extend privacy filter regression coverage at 2026-08-06T21:28:33+0100
 Scheduled activity: test: extend activity timeline regression coverage at 2026-08-06T22:13:25+0100
+Scheduled activity: test: extend camera fallback regression coverage at 2026-08-06T22:37:32+0100
