@@ -253,3 +253,4 @@ Scheduled activity: test: add test coverage for runtime bridge edge cases, inclu
 Scheduled activity: test: expand regression coverage for privacy filter to prevent previously fixed behavior from returning at 2026-07-30T09:18:26+0100
 Scheduled activity: fix: make the runtime bridge retry path more reliable when transient failures or delayed responses occur at 2026-07-30T14:35:09+0100
 Scheduled activity: fix: make the event store retry path more reliable when transient failures or delayed responses occur at 2026-07-30T20:31:22+0100
+Scheduled activity: fix: add diagnostic tracing for connection lifecycle state transitions so lifecycle changes are easier to follow and debug at 2026-08-06T10:39:07+0100
