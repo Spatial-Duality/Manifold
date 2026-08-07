@@ -231,3 +231,4 @@ Scheduled activity: test: extend event store regression coverage at 2026-08-06T2
 Scheduled activity: test: extend connection lifecycle regression coverage at 2026-08-06T22:39:29+0100
 Scheduled activity: test: extend local model status regression coverage at 2026-08-06T23:25:51+0100
 Scheduled activity: fix: stabilize activity timeline retry path at 2026-08-07T22:00:23+0100
+Scheduled activity: fix: stabilize camera fallback retry path at 2026-08-07T22:39:54+0100
