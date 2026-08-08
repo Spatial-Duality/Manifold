@@ -284,3 +284,4 @@ Scheduled activity: fix: make the connection lifecycle retry path more reliable 
 Scheduled activity: feat: expand the privacy filter controls to support a broader set of user and runtime actions at 2026-08-08T10:42:32+0100
 Scheduled activity: feat: harden Manifold's retry coordination to avoid duplicate work when several operations complete at nearly the same time at 2026-08-08T11:10:32+0100
 Scheduled activity: feat: expand the activity timeline controls to support a broader set of user and runtime actions at 2026-08-08T11:11:49+0100
+Scheduled activity: feat: add a validation pass in Manifold so asynchronous state updates remain consistent during rapid user interactions at 2026-08-08T12:15:14+0100
