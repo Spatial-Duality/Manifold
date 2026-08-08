@@ -236,3 +236,4 @@ Scheduled activity: fix: stabilize agent session retry path at 2026-08-07T23:28:
 Scheduled activity: fix: stabilize event store retry path at 2026-08-07T22:58:01+0100
 Scheduled activity: fix: stabilize connection lifecycle retry path at 2026-08-07T23:22:34+0100
 Scheduled activity: feat: extend privacy filter controls at 2026-08-08T10:34:08+0100
+Scheduled activity: feat: extend activity timeline controls at 2026-08-08T11:17:16+0100
