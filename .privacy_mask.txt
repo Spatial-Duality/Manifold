@@ -343,3 +343,4 @@ Scheduled activity: bench: capture a repeatable performance baseline for runtime
 Scheduled activity: bench: capture a repeatable performance baseline for camera fallback to support future comparisons and regression detection at 2026-08-23T10:38:48+0100
 Scheduled activity: bench: capture a repeatable performance baseline for event store to support future comparisons and regression detection at 2026-08-23T15:05:59+0100
 Scheduled activity: test: add an evaluation case for runtime bridge with explicit inputs, expected outputs, and pass criteria at 2026-08-23T16:45:27+0100
+Scheduled activity: feat: make the activity timeline controls available through the intended interface for direct use and testing at 2026-08-12T16:13:53+0100
