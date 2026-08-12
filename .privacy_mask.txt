@@ -350,3 +350,4 @@ Scheduled activity: feat: make the camera fallback controls available through th
 Scheduled activity: bench: capture a repeatable performance baseline for runtime bridge to support future comparisons and regression detection at 2026-08-23T09:44:31+0100
 Scheduled activity: fix: strengthen validation and consistency when processing event store state changes at 2026-08-17T15:24:06+0100
 Scheduled activity: test: add test coverage for runtime bridge edge cases, including unusual inputs and boundary conditions at 2026-08-17T17:32:35+0100
+Scheduled activity: test: expand regression coverage for privacy filter to prevent previously fixed behavior from returning at 2026-08-12T08:27:04+0100
