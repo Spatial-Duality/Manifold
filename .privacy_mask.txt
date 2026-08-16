@@ -359,3 +359,4 @@ Scheduled activity: feat: expand the agent session controls to support a broader
 Scheduled activity: feat: expand the event store controls to support a broader set of user and runtime actions at 2026-08-15T13:33:20+0100
 Scheduled activity: feat: expand the local model status controls to support a broader set of user and runtime actions at 2026-08-15T15:39:16+0100
 Scheduled activity: fix: strengthen validation and consistency when processing privacy filter state changes at 2026-08-15T17:17:30+0100
+Scheduled activity: test: update the activity timeline checks so they consistently validate the current expected behavior at 2026-08-16T21:18:57+0100
