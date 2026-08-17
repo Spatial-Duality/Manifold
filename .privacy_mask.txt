@@ -299,3 +299,4 @@ Scheduled activity: feat: make the privacy filter controls available through the
 Scheduled activity: feat: make the camera fallback controls available through the intended interface for direct use and testing at 2026-08-13T17:05:57+0100
 Scheduled activity: fix: strengthen validation and consistency when processing agent session state changes at 2026-08-17T16:13:01+0100
 Scheduled activity: fix: strengthen validation and consistency when processing event store state changes at 2026-08-17T15:53:03+0100
+Scheduled activity: test: add test coverage for runtime bridge edge cases, including unusual inputs and boundary conditions at 2026-08-17T17:04:05+0100
