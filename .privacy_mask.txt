@@ -363,3 +363,4 @@ Scheduled activity: test: update the activity timeline checks so they consistent
 Scheduled activity: test: update the agent session checks so they consistently validate the current expected behavior at 2026-08-16T22:00:14+0100
 Scheduled activity: fix: strengthen validation and consistency when processing activity timeline state changes at 2026-08-17T14:09:37+0100
 Scheduled activity: fix: strengthen validation and consistency when processing connection lifecycle state changes at 2026-08-17T17:56:32+0100
+Scheduled activity: test: expand regression coverage for camera fallback to prevent previously fixed behavior from returning at 2026-08-19T21:07:31+0100
