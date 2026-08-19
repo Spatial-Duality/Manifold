@@ -325,3 +325,4 @@ Scheduled activity: test: expand regression coverage for activity timeline to pr
 Scheduled activity: test: expand regression coverage for camera fallback to prevent previously fixed behavior from returning at 2026-08-19T21:56:42+0100
 Scheduled activity: test: expand regression coverage for event store to prevent previously fixed behavior from returning at 2026-08-19T22:48:02+0100
 Scheduled activity: test: expand regression coverage for connection lifecycle to prevent previously fixed behavior from returning at 2026-08-19T22:53:34+0100
+Scheduled activity: test: expand regression coverage for local model status to prevent previously fixed behavior from returning at 2026-08-19T22:42:15+0100
