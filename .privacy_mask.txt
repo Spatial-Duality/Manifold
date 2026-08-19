@@ -365,3 +365,4 @@ Scheduled activity: fix: strengthen validation and consistency when processing a
 Scheduled activity: fix: strengthen validation and consistency when processing connection lifecycle state changes at 2026-08-17T17:56:32+0100
 Scheduled activity: test: expand regression coverage for camera fallback to prevent previously fixed behavior from returning at 2026-08-19T21:07:31+0100
 Scheduled activity: test: expand regression coverage for connection lifecycle to prevent previously fixed behavior from returning at 2026-08-19T23:26:01+0100
+Scheduled activity: test: expand regression coverage for local model status to prevent previously fixed behavior from returning at 2026-08-19T23:28:41+0100
