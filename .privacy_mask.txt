@@ -369,3 +369,4 @@ Scheduled activity: test: expand regression coverage for local model status to p
 Scheduled activity: test: add test coverage for runtime bridge edge cases, including unusual inputs and boundary conditions at 2026-08-17T17:18:35+0100
 Scheduled activity: fix: make the activity timeline retry path more reliable when transient failures or delayed responses occur at 2026-08-20T21:06:43+0100
 Scheduled activity: fix: make the camera fallback retry path more reliable when transient failures or delayed responses occur at 2026-08-20T21:46:42+0100
+Scheduled activity: fix: make the agent session retry path more reliable when transient failures or delayed responses occur at 2026-08-20T22:06:06+0100
