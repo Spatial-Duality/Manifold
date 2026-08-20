@@ -330,3 +330,4 @@ Scheduled activity: fix: make the activity timeline retry path more reliable whe
 Scheduled activity: fix: make the camera fallback retry path more reliable when transient failures or delayed responses occur at 2026-08-20T22:05:17+0100
 Scheduled activity: fix: make the agent session retry path more reliable when transient failures or delayed responses occur at 2026-08-20T23:14:08+0100
 Scheduled activity: fix: make the event store retry path more reliable when transient failures or delayed responses occur at 2026-08-20T23:37:34+0100
+Scheduled activity: fix: make the connection lifecycle retry path more reliable when transient failures or delayed responses occur at 2026-08-21T00:24:40+0100
