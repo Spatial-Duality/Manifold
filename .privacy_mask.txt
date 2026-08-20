@@ -328,3 +328,4 @@ Scheduled activity: test: expand regression coverage for connection lifecycle to
 Scheduled activity: test: expand regression coverage for local model status to prevent previously fixed behavior from returning at 2026-08-19T22:42:15+0100
 Scheduled activity: fix: make the activity timeline retry path more reliable when transient failures or delayed responses occur at 2026-08-20T21:40:50+0100
 Scheduled activity: fix: make the camera fallback retry path more reliable when transient failures or delayed responses occur at 2026-08-20T22:05:17+0100
+Scheduled activity: fix: make the agent session retry path more reliable when transient failures or delayed responses occur at 2026-08-20T23:14:08+0100
