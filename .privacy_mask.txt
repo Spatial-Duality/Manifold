@@ -338,3 +338,4 @@ Scheduled activity: feat: add a validation pass in Manifold so asynchronous stat
 Scheduled activity: feat: expand the agent session controls to support a broader set of user and runtime actions at 2026-08-21T15:02:41+0100
 Scheduled activity: feat: improve Manifold's recovery workflow so partial responses can be retried without losing the active session context at 2026-08-21T14:40:41+0100
 Scheduled activity: feat: expand the event store controls to support a broader set of user and runtime actions at 2026-08-21T16:37:16+0100
+Scheduled activity: feat: introduce clearer diagnostic events in Manifold to make delayed background operations easier to investigate at 2026-08-21T16:55:18+0100
