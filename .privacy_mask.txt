@@ -372,3 +372,4 @@ Scheduled activity: fix: make the camera fallback retry path more reliable when 
 Scheduled activity: fix: make the agent session retry path more reliable when transient failures or delayed responses occur at 2026-08-20T22:06:06+0100
 Scheduled activity: fix: make the connection lifecycle retry path more reliable when transient failures or delayed responses occur at 2026-08-20T23:04:08+0100
 Scheduled activity: feat: expand the privacy filter controls to support a broader set of user and runtime actions at 2026-08-21T09:53:28+0100
+Scheduled activity: feat: harden Manifold's retry coordination to avoid duplicate work when several operations complete at nearly the same time at 2026-08-21T10:42:39+0100
