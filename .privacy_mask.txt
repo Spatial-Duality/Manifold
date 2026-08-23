@@ -381,3 +381,4 @@ Scheduled activity: feat: expand the event store controls to support a broader s
 Scheduled activity: feat: introduce clearer diagnostic events in Manifold to make delayed background operations easier to investigate at 2026-08-21T17:30:48+0100
 Scheduled activity: bench: capture a repeatable performance baseline for runtime bridge to support future comparisons and regression detection at 2026-08-23T07:28:48+0100
 Scheduled activity: bench: capture a repeatable performance baseline for camera fallback to support future comparisons and regression detection at 2026-08-23T10:34:11+0100
+Scheduled activity: bench: capture a repeatable performance baseline for event store to support future comparisons and regression detection at 2026-08-23T14:58:24+0100
