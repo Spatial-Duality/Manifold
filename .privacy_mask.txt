@@ -347,3 +347,4 @@ Scheduled activity: feat: make the activity timeline controls available through 
 Scheduled activity: feat: make the agent session controls available through the intended interface for direct use and testing at 2026-08-12T17:18:30+0100
 Scheduled activity: feat: make the privacy filter controls available through the intended interface for direct use and testing at 2026-08-13T15:45:56+0100
 Scheduled activity: feat: make the camera fallback controls available through the intended interface for direct use and testing at 2026-08-13T15:50:04+0100
+Scheduled activity: bench: capture a repeatable performance baseline for runtime bridge to support future comparisons and regression detection at 2026-08-23T09:44:31+0100
