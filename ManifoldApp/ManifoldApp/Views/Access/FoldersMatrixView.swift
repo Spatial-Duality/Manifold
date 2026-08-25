@@ -382,12 +382,14 @@ struct FoldersMatrixView: View {
     private var statusColumn: TableColumn<SourceRecord, Never, some View, Text> {
         TableColumn("Sharing") { (source: SourceRecord) in
             HStack(spacing: 4) {
+                // One pill, not two: the write pill ("Versioned writes" /
+                // "Read only") is a pure function of the sharing state, so
+                // it repeated the same fact on every row and forced both
+                // pills to truncate. Its explanation lives in the tooltip.
                 let label = sharingLabel(for: source)
-                Pill(text: label.text, variant: label.variant)
-                    .help(label.help)
                 let write = writeLabel(for: source)
-                Pill(text: write.text, variant: write.variant)
-                    .help(write.help)
+                Pill(text: label.text, variant: label.variant)
+                    .help("\(label.help) \(write.help)")
                 if hasFileOverrides(for: source) {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 5))
@@ -406,7 +408,7 @@ struct FoldersMatrixView: View {
                 }
             }
         }
-        .width(min: 110, ideal: 140, max: 180)
+        .width(min: 150, ideal: 190, max: 260)
     }
 
     private struct SharingLabel {
@@ -434,7 +436,7 @@ struct FoldersMatrixView: View {
         switch source.sourceHealth {
         case .unknown:
             return SourceHealthLabel(
-                text: "Check",
+                text: "Unverified",
                 variant: .neutral,
                 systemImage: "questionmark.circle",
                 help: "Manifold has not verified this source yet."
