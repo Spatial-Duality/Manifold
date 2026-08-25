@@ -28,7 +28,7 @@ struct AgentsSettingsPane: View {
                    store.governance.codexPolicy != nil {
                     AgentPolicyTable()
                 } else {
-                    ProgressView("Loading agent policies...")
+                    ProgressView("Loading agent policies…")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } header: {

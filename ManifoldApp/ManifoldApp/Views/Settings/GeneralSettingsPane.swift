@@ -276,17 +276,17 @@ private struct ConfiguredSoftwareUpdateSettings: View {
         case .ready:
             return "Ready to check."
         case .checking:
-            return "Checking for updates..."
+            return "Checking for updates…"
         case .updateAvailable(let version):
             return "Update \(version) is available."
         case .downloading(let version):
-            return "Downloading \(version)..."
+            return "Downloading \(version)…"
         case .downloaded(let version):
             return "Update \(version) is ready to install."
         case .installing(let version):
-            return "Installing \(version)..."
+            return "Installing \(version)…"
         case .relaunching:
-            return "Restarting Manifold..."
+            return "Restarting Manifold…"
         case .upToDate(let date):
             return "Up to date. Checked \(date.formatted(date: .omitted, time: .shortened))."
         case .skipped(let version):

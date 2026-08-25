@@ -56,7 +56,7 @@ struct PrivacySettingsPane: View {
                let status = store.governance.privacyRuntimeStatus {
                 PrivacyModelCard(settings: settings, status: status)
             } else {
-                ProgressView("Loading privacy model...")
+                ProgressView("Loading privacy model…")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
