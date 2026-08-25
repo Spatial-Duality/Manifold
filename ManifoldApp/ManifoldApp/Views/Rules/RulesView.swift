@@ -30,7 +30,7 @@ struct RulesView: View {
         }
         .inspector(isPresented: $inspectorVisible) {
             RuleInspector(model: store.rules)
-                .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
+                .inspectorColumnWidth(min: 300, ideal: 340, max: 460)
         }
         .task {
             if store.rules.rules.isEmpty {
