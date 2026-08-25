@@ -75,6 +75,11 @@ struct LedgerView: View {
                 .navigationTitle(destination.title)
         }
         .navigationSplitViewStyle(.balanced)
+        // Principle 10: the honest-state strip is always visible at the
+        // bottom of the Ledger window — no green dot over an XPC failure.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            LedgerStatusBar()
+        }
         .searchable(
             text: searchBinding,
             isPresented: $isSearchPresented,
