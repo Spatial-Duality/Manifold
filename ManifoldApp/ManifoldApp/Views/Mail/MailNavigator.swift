@@ -235,7 +235,7 @@ private struct MailAccountRemovalSheet: View {
                 }
                 if let errorMessage {
                     Text(errorMessage)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ManifoldPalette.danger)
                 }
             }
         }

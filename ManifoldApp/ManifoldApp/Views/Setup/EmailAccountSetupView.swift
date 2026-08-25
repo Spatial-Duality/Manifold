@@ -47,7 +47,7 @@ struct EmailAccountSetupView: View {
             if let errorMessage {
                 Section("Status") {
                     Text(errorMessage)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ManifoldPalette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(guide.validationHelp)
                         .font(.caption)
@@ -107,7 +107,7 @@ struct EmailAccountSetupView: View {
             Section("Sign-in") {
                 if let oauthUnavailableMessage {
                     Text(oauthUnavailableMessage)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ManifoldPalette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(guide.validationHelp)
                         .font(.caption)

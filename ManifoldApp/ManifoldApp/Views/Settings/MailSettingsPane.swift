@@ -60,7 +60,7 @@ struct MailSettingsPane: View {
                     }
                     if let error = store.mailAccounts.lastRemovalError {
                         Text(error)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(ManifoldPalette.danger)
                     }
                 }
             }

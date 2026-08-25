@@ -52,7 +52,7 @@ struct FilterModeSection: View {
                 if let error {
                     Text(error)
                         .font(ManifoldType.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ManifoldPalette.danger)
                 }
             }
         }

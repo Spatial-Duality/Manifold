@@ -122,7 +122,7 @@ struct MirrorScopeSheet: View {
                 if let error {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(ManifoldPalette.danger)
                             .font(ManifoldType.caption)
                     }
                 }

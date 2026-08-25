@@ -333,7 +333,7 @@ private struct WorkCurrentSessionSummary: View {
             if let error = store.sessionWorkbench.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(ManifoldType.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(ManifoldPalette.danger)
             }
 
             sessionRequestDetailControl
@@ -1894,7 +1894,7 @@ private struct WorkPreloadEditor: View {
                 if let error = store.sessionWorkbench.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(ManifoldType.tiny)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ManifoldPalette.danger)
                 }
             }
             .task(id: preload.agent) {
@@ -2070,7 +2070,7 @@ private struct WorkPreloadEditor: View {
             } else if let emailLoadError {
                 Text(emailLoadError)
                     .font(ManifoldType.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(ManifoldPalette.danger)
             } else if availableEmails.isEmpty {
                 Text("No synced emails available. Add mail in Mail first.")
                     .font(ManifoldType.caption)
