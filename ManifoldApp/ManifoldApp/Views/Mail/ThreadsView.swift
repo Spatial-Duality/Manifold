@@ -887,7 +887,8 @@ private struct ThreadInspector: View {
                     if selectedMessage.attachmentCount > 0 || !attachments.isEmpty {
                         VStack(alignment: .leading, spacing: Spacing.s2) {
                             Text("Attachments")
-                                .font(ManifoldType.tiny.weight(.semibold))
+                                .font(ManifoldType.tiny)
+                                .textCase(.uppercase)
                                 .foregroundStyle(.secondary)
                                 .tracking(0.4)
 
@@ -939,7 +940,8 @@ private struct ThreadInspector: View {
                     VStack(alignment: .leading, spacing: Spacing.s2) {
                         HStack {
                             Text("Message")
-                                .font(ManifoldType.tiny.weight(.semibold))
+                                .font(ManifoldType.tiny)
+                                .textCase(.uppercase)
                                 .foregroundStyle(.secondary)
                                 .tracking(0.4)
                             Spacer()
@@ -974,7 +976,8 @@ private struct ThreadInspector: View {
 
                     VStack(alignment: .leading, spacing: Spacing.s2) {
                         Text("Conversation context")
-                            .font(ManifoldType.tiny.weight(.semibold))
+                            .font(ManifoldType.tiny)
+                            .textCase(.uppercase)
                             .foregroundStyle(.secondary)
                             .tracking(0.4)
 

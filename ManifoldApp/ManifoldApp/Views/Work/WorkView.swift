@@ -1544,8 +1544,8 @@ private struct WorkRequestInspector: View {
     private func divider(label: String) -> some View {
         HStack(spacing: Spacing.s2) {
             Text(label.uppercased())
-                .font(ManifoldType.tiny.weight(.semibold))
-                .tracking(0.5)
+                .font(ManifoldType.tiny)
+                .tracking(0.4)
                 .foregroundStyle(.tertiary)
             Rectangle()
                 .fill(ManifoldPalette.border)
@@ -1585,7 +1585,9 @@ private struct WorkActivityInspector: View {
             }
             if let metadata = entry.metadata, !metadata.isEmpty {
                 Text("Metadata")
-                    .font(ManifoldType.tiny.weight(.semibold))
+                    .font(ManifoldType.tiny)
+                    .textCase(.uppercase)
+                    .tracking(0.4)
                     .foregroundStyle(.tertiary)
                 Text(metadata)
                     .font(.system(.caption, design: .monospaced))

@@ -614,9 +614,10 @@ private struct RecentSessionsBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Recent sessions")
-                .font(ManifoldType.tiny.weight(.semibold))
+                .font(ManifoldType.tiny)
+                .textCase(.uppercase)
                 .foregroundStyle(.secondary)
-                .tracking(0.5)
+                .tracking(0.4)
                 .padding(.horizontal, Spacing.s4)
                 .padding(.top, Spacing.s2)
                 .padding(.bottom, Spacing.s1)
