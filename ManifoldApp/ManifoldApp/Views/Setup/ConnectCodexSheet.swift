@@ -301,10 +301,10 @@ private struct StepProgressBar: View {
                 if stepIndex > index {
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(ManifoldPalette.onAccent)
                 } else if stepIndex == index {
                     Circle()
-                        .fill(.white)
+                        .fill(ManifoldPalette.onAccent)
                         .frame(width: 6, height: 6)
                 }
             }

@@ -363,16 +363,18 @@ private struct StepProgressBar: View {
     private func stepDot(index: Int, label: String) -> some View {
         VStack(spacing: 4) {
             ZStack {
+                // Claude identity fill (mirrors ConnectCodexSheet); onAccent
+                // glyphs — white on these light fills sat under 3:1.
                 Circle()
-                    .fill(stepIndex >= index ? ManifoldPalette.accent : ManifoldPalette.surface3)
+                    .fill(stepIndex >= index ? ManifoldPalette.claude : ManifoldPalette.surface3)
                     .frame(width: 18, height: 18)
                 if stepIndex > index {
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(ManifoldPalette.onAccent)
                 } else if stepIndex == index {
                     Circle()
-                        .fill(.white)
+                        .fill(ManifoldPalette.onAccent)
                         .frame(width: 6, height: 6)
                 }
             }
