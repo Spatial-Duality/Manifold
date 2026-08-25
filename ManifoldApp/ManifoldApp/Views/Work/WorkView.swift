@@ -962,26 +962,11 @@ private struct WorkTimelineSection: View {
 
             HStack(spacing: Spacing.s2) {
                 ForEach(WorkTimelineFilter.allCases) { filter in
-                    Button {
-                        work.timelineFilter = filter
-                    } label: {
-                        Label(filter.label, systemImage: filter.systemImage)
-                            .labelStyle(.titleAndIcon)
-                            .font(ManifoldType.captionMedium)
-                            .padding(.horizontal, Spacing.s2)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule().fill(work.timelineFilter == filter ? ManifoldPalette.selectionSoft : Color.clear)
-                            )
-                            .foregroundStyle(work.timelineFilter == filter ? ManifoldPalette.selection : ManifoldPalette.text2)
-                            .overlay(
-                                Capsule().strokeBorder(
-                                    work.timelineFilter == filter ? ManifoldPalette.selection.opacity(0.35) : ManifoldPalette.border,
-                                    lineWidth: 0.5
-                                )
-                            )
-                    }
-                    .buttonStyle(.plain)
+                    TimelineFilterChip(
+                        filter: filter,
+                        isSelected: work.timelineFilter == filter,
+                        select: { work.timelineFilter = filter }
+                    )
                     .accessibilityIdentifier("work.timeline.filter.\(filter.id)")
                 }
             }
@@ -1105,9 +1090,49 @@ private struct WorkTimelineSection: View {
     }
 }
 
+/// Timeline filter chip with the app-standard hover treatment
+/// (surface3 fill, micro motion) its sibling controls already use.
+private struct TimelineFilterChip: View {
+    let filter: WorkTimelineFilter
+    let isSelected: Bool
+    let select: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: select) {
+            Label(filter.label, systemImage: filter.systemImage)
+                .labelStyle(.titleAndIcon)
+                .font(ManifoldType.captionMedium)
+                .padding(.horizontal, Spacing.s2)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(isSelected ? ManifoldPalette.selectionSoft
+                                   : isHovering ? ManifoldPalette.surface3
+                                   : Color.clear)
+                )
+                .foregroundStyle(isSelected ? ManifoldPalette.selection : ManifoldPalette.text2)
+                .overlay(
+                    Capsule().strokeBorder(
+                        isSelected ? ManifoldPalette.selection.opacity(0.35) : ManifoldPalette.border,
+                        lineWidth: 0.5
+                    )
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(ManifoldMotion.effective(ManifoldMotion.micro,
+                                            reduceMotion: reduceMotion),
+                   value: isHovering)
+    }
+}
+
 private struct WorkTimelineCard: View {
     let entry: AuditEntry
     @Bindable var work: WorkModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
 
     var body: some View {
         Button {
@@ -1154,12 +1179,18 @@ private struct WorkTimelineCard: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
-                .fill(isSelected ? ManifoldPalette.selectionSoft : ManifoldPalette.surface2.opacity(0.5))
+                .fill(isSelected ? ManifoldPalette.selectionSoft
+                      : isHovering ? ManifoldPalette.surface3
+                      : ManifoldPalette.surface2.opacity(0.5))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Spacing.r3, style: .continuous)
                 .strokeBorder(isSelected ? ManifoldPalette.selection.opacity(0.4) : ManifoldPalette.border, lineWidth: 0.5)
         )
+        .onHover { isHovering = $0 }
+        .animation(ManifoldMotion.effective(ManifoldMotion.micro,
+                                            reduceMotion: reduceMotion),
+                   value: isHovering)
     }
 
     private var presentation: ActivityEventPresentation {
