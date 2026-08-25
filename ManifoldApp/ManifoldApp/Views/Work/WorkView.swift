@@ -722,6 +722,7 @@ private struct WorkCurrentSessionSummary: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .accessibilityIdentifier("work.summary.requestDetail")
             Text("\(detail.subtitle) \(scopeLabel)")
                 .font(ManifoldType.tiny)
@@ -1934,6 +1935,7 @@ private struct WorkPreloadEditor: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .accessibilityIdentifier("work.preload.requestDetail")
             Text(preload.requestDetailOverride == nil
                  ? "Will use \(store.displayName(for: preload.agent))'s default request detail."
