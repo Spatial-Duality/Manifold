@@ -23,7 +23,10 @@ struct FileTypeIcon: View {
     }
 
     private var spec: (symbol: String, color: Color) {
-        if isFolder { return ("folder.fill", ManifoldPalette.claude) }
+        // Neutral chrome, not an agent identity color: a Claude-orange
+        // folder sitting next to sharingTint-coded rows reads as
+        // "shared with Claude" when it isn't.
+        if isFolder { return ("folder.fill", ManifoldPalette.selection) }
 
         switch ext {
         case "swift":                          return ("swift", Color(red: 0.95, green: 0.36, blue: 0.18))
@@ -35,18 +38,18 @@ struct FileTypeIcon: View {
         case "rs":                              return ("gearshape", Color(red: 0.85, green: 0.40, blue: 0.20))
         case "go":                              return ("arrow.triangle.branch", Color(red: 0.20, green: 0.65, blue: 0.80))
         case "c", "cpp", "h", "hpp", "m", "mm":return ("curlybraces", ManifoldPalette.text2)
-        case "html", "css", "scss":             return ("globe", ManifoldPalette.codex)
+        case "html", "css", "scss":             return ("globe", Color(red: 0.32, green: 0.63, blue: 0.88))
         case "txt":                             return ("doc.text", ManifoldPalette.text3)
         case "pdf":                             return ("doc.richtext", ManifoldPalette.danger)
         case "png", "jpg", "jpeg", "heic", "webp", "gif":
             return ("photo", Color(red: 0.25, green: 0.75, blue: 0.50))
-        case "mov", "mp4", "m4v":               return ("film", ManifoldPalette.codex)
+        case "mov", "mp4", "m4v":               return ("film", ManifoldPalette.text2)
         case "mp3", "m4a", "wav", "flac":      return ("waveform", ManifoldPalette.active)
         case "zip", "tar", "gz", "bz2", "7z":  return ("archivebox", ManifoldPalette.paused)
         case "env", "pem", "key":              return ("key.fill", ManifoldPalette.danger)
         case "log":                             return ("scroll", ManifoldPalette.text2)
         case "sh", "bash", "zsh":              return ("terminal", ManifoldPalette.text2)
-        case "sql":                             return ("cylinder.split.1x2", ManifoldPalette.codex)
+        case "sql":                             return ("cylinder.split.1x2", Color(red: 0.32, green: 0.63, blue: 0.88))
         default:                                return ("doc", ManifoldPalette.text3)
         }
     }
