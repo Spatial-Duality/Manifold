@@ -521,12 +521,7 @@ struct FilesFlatView: View {
                                 .accessibilityLabel("Agent-touched")
                         }
                         if file.isDraftWorkspace {
-                            Text("DRAFT")
-                                .font(ManifoldType.captionMedium)
-                                .foregroundStyle(ManifoldPalette.paused)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(ManifoldPalette.pausedSoft, in: Capsule())
+                            Pill(text: "Draft", variant: .seeded)
                         }
                     }
                     .contentShape(Rectangle())
