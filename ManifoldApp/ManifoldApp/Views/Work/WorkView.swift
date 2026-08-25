@@ -316,7 +316,7 @@ private struct WorkCurrentSessionSummary: View {
                     metric(systemImage: "folder", title: "Folders", value: "\(summary.folders)")
                     metric(systemImage: "envelope", title: "Mailboxes", value: "\(summary.mailboxes)")
                     metric(systemImage: "hand.raised", title: "Pending", value: "\(store.pendingRequests.count)", tint: store.pendingRequests.isEmpty ? nil : ManifoldPalette.attention)
-                    metric(systemImage: "doc.text.magnifyingglass", title: "Detail", value: detailLabel(for: summary.agent))
+                    metric(systemImage: "doc.text.magnifyingglass", title: "Request detail", value: detailLabel(for: summary.agent))
                     metric(systemImage: "clock.arrow.circlepath", title: "File Memory", value: memoryLabel(for: summary.agent))
                 }
             }
