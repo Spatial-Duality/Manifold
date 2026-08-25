@@ -82,6 +82,10 @@ private struct SidebarIdentityHeader: View {
     }
 
     private var sessionState: SessionState {
+        // Runtime failure outranks every session signal — same priority
+        // order as LedgerStatusBar, so the two honest-state surfaces
+        // can never disagree (no green mark over an XPC failure).
+        if (store.runtimeLaunchError ?? store.lastError) != nil { return .disconnected }
         if !store.isRuntimeConnected { return .disconnected }
 
         // Active states take precedence — session running is the
