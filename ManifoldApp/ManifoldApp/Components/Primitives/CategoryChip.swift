@@ -40,14 +40,19 @@ struct CategoryChip: View {
     }
 
     static func color(for category: PrivacyCategory) -> Color {
+        // No agent-identity colors here: a chip in Claude orange or
+        // Codex blue reads as "this agent touched it", and those hues
+        // are reserved (DesignTokens Principle 6). The glyph carries
+        // identity; color is a redundant channel, so shared hues are
+        // fine.
         switch category {
         case .secret:         return ManifoldPalette.danger
         case .accountNumber:  return ManifoldPalette.attention
-        case .privatePerson:  return ManifoldPalette.codex
-        case .email:          return ManifoldPalette.claude
-        case .phone:          return ManifoldPalette.claude
-        case .address:        return ManifoldPalette.selection
-        case .url:            return ManifoldPalette.preview
+        case .privatePerson:  return ManifoldPalette.paused
+        case .email:          return ManifoldPalette.selection
+        case .phone:          return ManifoldPalette.selection
+        case .address:        return ManifoldPalette.preview
+        case .url:            return ManifoldPalette.text2
         case .date:           return ManifoldPalette.text3
         }
     }
