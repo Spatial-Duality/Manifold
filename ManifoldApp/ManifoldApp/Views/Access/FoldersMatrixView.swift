@@ -19,6 +19,7 @@ struct FoldersMatrixView: View {
 
     @Binding private var searchText: String
     @State private var selectedIDs: Set<String> = []
+    @State private var removeConfirmationPresented = false
     @State private var sortOrder: [KeyPathComparator<SourceRecord>] = [
         KeyPathComparator(\SourceRecord.displayName)
     ]
@@ -674,12 +675,26 @@ struct FoldersMatrixView: View {
             }
 
             Button("Remove", role: .destructive) {
-                store.removeSources(sourceIDs: selectedIDs)
-                selectedIDs.removeAll()
+                removeConfirmationPresented = true
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .tint(ManifoldPalette.attention)
+            .tint(ManifoldPalette.danger)
+            .confirmationDialog(
+                selectedIDs.count == 1
+                    ? "Remove this folder from Manifold?"
+                    : "Remove \(selectedIDs.count) folders from Manifold?",
+                isPresented: $removeConfirmationPresented,
+                titleVisibility: .visible
+            ) {
+                Button(selectedIDs.count == 1 ? "Remove Folder" : "Remove \(selectedIDs.count) Folders",
+                       role: .destructive) {
+                    store.removeSources(sourceIDs: selectedIDs)
+                    selectedIDs.removeAll()
+                }
+            } message: {
+                Text("Agents lose access immediately. The folders stay on disk; Manifold stops governing them.")
+            }
         }
         .padding(.horizontal, Spacing.s4)
         .padding(.vertical, Spacing.s2)
