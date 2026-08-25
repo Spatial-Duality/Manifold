@@ -147,7 +147,7 @@ private struct MailAccountRow: View {
 
                 Spacer()
 
-                Button("Sync Now", systemImage: "arrow.clockwise") {
+                Button("Sync now", systemImage: "arrow.clockwise") {
                     onSyncNow()
                 }
                 .controlSize(.small)

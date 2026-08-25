@@ -297,7 +297,7 @@ private struct MailSyncActivityPopover: View {
                 ProgressView()
                     .controlSize(.small)
             }
-            Button("Sync Now", systemImage: "arrow.clockwise") {
+            Button("Sync now", systemImage: "arrow.clockwise") {
                 Task {
                     if selectedAccountID == snapshot.accountID {
                         await mailReview.syncSelectedAccount()

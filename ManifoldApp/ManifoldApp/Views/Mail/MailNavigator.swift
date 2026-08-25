@@ -113,7 +113,7 @@ struct MailNavigator: View {
                             Button("Mailbox Settings…", systemImage: "gearshape") {
                                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                             }
-                            Button("Sync Now", systemImage: "arrow.clockwise") {
+                            Button("Sync now", systemImage: "arrow.clockwise") {
                                 Task { await store.mailAccounts.syncNow(accountID: account.accountID) }
                             }
                             Divider()
