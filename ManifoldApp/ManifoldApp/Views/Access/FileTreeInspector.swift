@@ -365,11 +365,15 @@ private struct TreeRow: View {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
-                            .frame(width: 12)
+                            // 20pt hit target (12pt was below the macOS
+                            // minimum); the glyph stays optically small.
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "Collapse folder" : "Expand folder")
                 } else {
-                    Color.clear.frame(width: 12)
+                    Color.clear.frame(width: 20)
                 }
 
                 FileTypeIcon(filename: node.name, isFolder: node.isDirectory, size: 12)
