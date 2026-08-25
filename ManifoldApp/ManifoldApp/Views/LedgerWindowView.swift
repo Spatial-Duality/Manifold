@@ -71,15 +71,18 @@ struct LedgerView: View {
             // it.
             content
                 .frame(minWidth: 720, minHeight: 480)
+                // Principle 10: the honest-state strip is always visible
+                // at the bottom of the detail column — no green dot over
+                // an XPC failure. (Inset on the detail content, not the
+                // split view: the sidebar column ignores outer insets and
+                // its Settings row would sit underneath the strip.)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    LedgerStatusBar()
+                }
                 .overlay(trackedEditFrame)
                 .navigationTitle(destination.title)
         }
         .navigationSplitViewStyle(.balanced)
-        // Principle 10: the honest-state strip is always visible at the
-        // bottom of the Ledger window — no green dot over an XPC failure.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            LedgerStatusBar()
-        }
         .searchable(
             text: searchBinding,
             isPresented: $isSearchPresented,
