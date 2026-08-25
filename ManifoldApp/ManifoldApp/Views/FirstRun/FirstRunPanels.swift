@@ -47,7 +47,12 @@ struct ConceptPanel: View {
                         .accessibilityIdentifier("onboarding.concept.demo")
 
                     Button("Continue", action: next)
-                        .buttonStyle(.borderedProminent).saffronProminent()
+                        .buttonStyle(.borderedProminent)
+                        // On the saffron hero a saffron CTA is
+                        // tone-on-tone; charcoal echoes the mark and
+                        // pops (white label ≈16:1). Later panels sit on
+                        // neutral bg and keep saffronProminent().
+                        .tint(ManifoldPalette.onAccent)
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("onboarding.concept.continue")
