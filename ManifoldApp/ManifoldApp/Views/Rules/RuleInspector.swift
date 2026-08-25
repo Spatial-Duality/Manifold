@@ -16,6 +16,7 @@ struct RuleInspector: View {
     @State private var draft: RuleRecord?
     @State private var validationError: String?
     @State private var isConditionEditorExpanded = false
+    @State private var deleteConfirmationPresented = false
     @FocusState private var nameFocused: Bool
 
     var body: some View {
@@ -233,9 +234,20 @@ struct RuleInspector: View {
 
             if rule.source.isMutable {
                 Button("Delete", role: .destructive) {
-                    Task { await model.delete(id: rule.id) }
+                    deleteConfirmationPresented = true
                 }
                 .accessibilityIdentifier("rules.inspector.delete")
+                .confirmationDialog(
+                    "Delete this rule?",
+                    isPresented: $deleteConfirmationPresented,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete Rule", role: .destructive) {
+                        Task { await model.delete(id: rule.id) }
+                    }
+                } message: {
+                    Text("The rule stops governing access immediately. This cannot be undone.")
+                }
 
                 Button("Save Changes") { commit() }
                     .buttonStyle(.borderedProminent)
