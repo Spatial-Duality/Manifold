@@ -43,7 +43,7 @@ struct SessionChip: View {
             Text("SESSION")
                 .font(ManifoldType.tiny)
                 .foregroundStyle(.secondary)
-                .tracking(0.5)
+                .tracking(0.4)
 
             Text(name)
                 .font(ManifoldType.bodyMedium)

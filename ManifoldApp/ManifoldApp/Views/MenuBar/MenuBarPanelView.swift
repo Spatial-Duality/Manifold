@@ -244,13 +244,14 @@ private struct TrackedEditStrip: View {
                 .font(ManifoldType.caption)
                 .foregroundStyle(ManifoldPalette.claude)
             VStack(alignment: .leading, spacing: 1) {
+                // Kicker secondary, name primary — the same hierarchy as
+                // SessionChipStrip and the SessionChip primitive.
                 Text("SESSION")
                     .font(ManifoldType.tiny)
-                    .foregroundStyle(.primary)
-                    .tracking(0.5)
-                Text(session.name)
-                    .font(ManifoldType.caption)
                     .foregroundStyle(.secondary)
+                    .tracking(0.4)
+                Text(session.name)
+                    .font(ManifoldType.bodyMedium)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
