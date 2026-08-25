@@ -14,6 +14,7 @@ import ManifoldKit
 
 struct FirstRunFlow: View {
     @Environment(ManifoldStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var panel: Panel = .concept
     @State private var selectedPaths: [String] = []
 
@@ -23,27 +24,37 @@ struct FirstRunFlow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            switch panel {
-            case .concept:
-                ConceptPanel(next: advance, tryDemo: startDemo)
-            case .defaults:
-                DefaultsPanel(next: advance, back: back)
-            case .runtime:
-                RuntimePanel(enable: enableRuntime, back: back)
-            case .helpImprove:
-                HelpImprovePanel(
-                    diagnostics: store.diagnostics,
-                    supportsSoftwareUpdates: store.updater != nil,
-                    next: advance,
-                    back: back
-                )
-            case .guidedAdd:
-                GuidedAddPanel(choose: chooseFirstProject, back: back)
-            case .scopeReview:
-                ScopeReviewPanel(selectedPaths: selectedPaths, finish: advance, back: back)
-            case .connectAgent:
-                ConnectAgentPanel(finish: finish, back: back)
+            // Panels land with the .landing token instead of a hard cut.
+            // Reduce-motion collapses this to an instant swap with
+            // identical meaning.
+            Group {
+                switch panel {
+                case .concept:
+                    ConceptPanel(next: advance, tryDemo: startDemo)
+                case .defaults:
+                    DefaultsPanel(next: advance, back: back)
+                case .runtime:
+                    RuntimePanel(enable: enableRuntime, back: back)
+                case .helpImprove:
+                    HelpImprovePanel(
+                        diagnostics: store.diagnostics,
+                        supportsSoftwareUpdates: store.updater != nil,
+                        next: advance,
+                        back: back
+                    )
+                case .guidedAdd:
+                    GuidedAddPanel(choose: chooseFirstProject, back: back)
+                case .scopeReview:
+                    ScopeReviewPanel(selectedPaths: selectedPaths, finish: advance, back: back)
+                case .connectAgent:
+                    ConnectAgentPanel(finish: finish, back: back)
+                }
             }
+            .id(panel)
+            .transition(.opacity)
+            .animation(ManifoldMotion.effective(ManifoldMotion.landing,
+                                                reduceMotion: reduceMotion),
+                       value: panel)
 
             Divider()
 
