@@ -220,7 +220,7 @@ private struct SessionChipStrip: View {
                     .font(ManifoldType.numericCaption)
                     .foregroundStyle(.secondary)
             }
-            Button("Finish") {
+            Button("End session") {
                 Task { try? await store.finishActiveSession() }
             }
             .buttonStyle(.bordered)
@@ -256,7 +256,7 @@ private struct TrackedEditStrip: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: Spacing.s2)
-            Button("Finish") {
+            Button("End session") {
                 Task { try? await store.finishActiveSession() }
             }
             .buttonStyle(.bordered)
@@ -658,7 +658,7 @@ private struct FooterActions: View {
         VStack(spacing: 0) {
             if state == .trackedEdit {
                 openSessionRecapFooterItem
-                FooterItem(icon: "checkmark.seal", label: "End Session", shortcut: "⇧⌘F") {
+                FooterItem(icon: "checkmark.seal", label: "End session", shortcut: "⇧⌘F") {
                     Task { try? await store.finishActiveSession() }
                 }
                 FooterDivider()
