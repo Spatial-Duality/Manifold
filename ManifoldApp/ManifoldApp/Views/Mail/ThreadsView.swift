@@ -502,6 +502,14 @@ private struct MailReviewTableArea: View {
                                 onOpenInspector()
                             }
                         )
+                        // The tap gesture is invisible to VoiceOver;
+                        // expose the same behavior as the default action.
+                        .accessibilityElement(children: .combine)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction {
+                            selection = row.emailID
+                            onOpenInspector()
+                        }
                     }
                     .width(min: 110, ideal: 150, max: 200)
 
@@ -532,6 +540,13 @@ private struct MailReviewTableArea: View {
                                 onOpenInspector()
                             }
                         )
+                        // The tap gesture is invisible to VoiceOver;
+                        // expose the same behavior as the default action.
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction {
+                            selection = row.emailID
+                            onOpenInspector()
+                        }
                     }
                     .width(min: 240, ideal: 420)
 
