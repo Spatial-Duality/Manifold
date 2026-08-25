@@ -112,12 +112,8 @@ struct LedgerView: View {
         .toolbar {
             if store.isDemoModeEnabled && store.showDemoWarning {
                 ToolbarItem(placement: .automatic) {
-                    Text("Demo")
-                        .font(ManifoldType.captionMedium)
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(.orange.opacity(0.12), in: Capsule())
+                    Pill(text: "Demo", variant: .preview)
+                        .help("Demo mode — sample data, no real agent traffic.")
                         .accessibilityIdentifier("ledger.toolbar.demoBadge")
                 }
             }
