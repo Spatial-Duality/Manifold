@@ -108,7 +108,7 @@ struct RuleListTable: View {
             TableColumn("Agents") { rule in
                 AgentsChipRow(agents: rule.agents)
             }
-            .width(100)
+            .width(min: 140, ideal: 160, max: 220)
             .customizationID("agents")
 
             TableColumn("Hits (30d)") { rule in
