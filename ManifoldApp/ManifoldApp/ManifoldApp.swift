@@ -59,10 +59,11 @@ struct ManifoldApp: App {
         Window("Manifold", id: "main") {
             AppRootView()
                 .environment(store)
-                // Sidebar min (220) + detail column min (720) = 940pt.
-                // The window minimum must clear that sum or SwiftUI
-                // centers the overflow and clips both edges.
-                .frame(minWidth: 960, minHeight: 600)
+                // Measured minimum at which no surface clips: the
+                // sidebar (min 220) plus the detail column's real
+                // intrinsic content width. Below this SwiftUI centers
+                // the overflow and clips both window edges.
+                .frame(minWidth: 1000, minHeight: 600)
                 .onAppear { configureApplicationIconImage() }
         }
         .defaultSize(width: 1100, height: 720)
