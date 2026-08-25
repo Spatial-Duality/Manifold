@@ -160,7 +160,7 @@ struct GeneralSettingsPane: View {
     private var runtimeStatusColor: Color {
         if store.isDemoModeEnabled { return Color.secondary }
         if !store.runtimeEnabled { return Color.secondary }
-        return store.isRuntimeConnected ? Color.green : Color.orange
+        return store.isRuntimeConnected ? ManifoldPalette.active : ManifoldPalette.attention
     }
 }
 
@@ -250,13 +250,13 @@ private struct ConfiguredSoftwareUpdateSettings: View {
     private var statusTint: Color {
         switch updater.state {
         case .updateAvailable, .downloaded:
-            return .accentColor
+            return ManifoldPalette.selection
         case .upToDate:
-            return .green
+            return ManifoldPalette.active
         case .failed:
-            return .red
+            return ManifoldPalette.danger
         case .skipped, .deferred:
-            return .orange
+            return ManifoldPalette.paused
         case .ready, .checking, .downloading, .installing, .relaunching:
             return .secondary
         }
@@ -265,7 +265,7 @@ private struct ConfiguredSoftwareUpdateSettings: View {
     private var statusTextColor: Color {
         switch updater.state {
         case .failed:
-            return .red
+            return ManifoldPalette.danger
         default:
             return .secondary
         }
