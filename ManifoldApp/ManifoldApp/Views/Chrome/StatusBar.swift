@@ -26,7 +26,7 @@ struct LedgerStatusBar: View {
         }
         if let summary = store.dataControlSummary {
             if summary.pendingApprovalCount > 0 {
-                return (.paused, "\(summary.pendingApprovalCount) request\(summary.pendingApprovalCount == 1 ? "" : "s") waiting.")
+                return (.paused, "\(summary.pendingApprovalCount) request\(summary.pendingApprovalCount == 1 ? "" : "s") waiting")
             }
             if let block = summary.activeWorkBlock {
                 return (.active, "\(AgentMeta.label(block.agent)) session live · \(block.sourceIDs.count) folder\(block.sourceIDs.count == 1 ? "" : "s")")
@@ -45,7 +45,7 @@ struct LedgerStatusBar: View {
         let agents = [store.isClaudeConnected ? "Claude" : nil, store.isCodexConnected ? "Codex" : nil]
             .compactMap { $0 }
         if agents.isEmpty {
-            return (.paused, "No agents connected.")
+            return (.paused, "No agents connected")
         }
         return (.active, "\(agents.joined(separator: " · ")) connected · no session")
     }
