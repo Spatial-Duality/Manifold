@@ -78,7 +78,7 @@ struct ConnectAgentPanel: View {
                         .buttonStyle(.bordered)
                     Spacer()
                     Button(anyAgentConnected ? "Continue" : "Skip for now") { finish() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.borderedProminent).saffronProminent()
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("onboarding.connectAgent.continue")

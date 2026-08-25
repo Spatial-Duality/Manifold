@@ -78,6 +78,12 @@ enum ManifoldPalette {
                                            dark: 0xFFC940,  darkAlpha: 0.16)
     static let accentSoft2   = dynamicColor(light: 0xF5B400, lightAlpha: 0.18,
                                            dark: 0xFFC940,  darkAlpha: 0.26)
+    /// Foreground for content sitting ON an accent fill. Fixed warm
+    /// charcoal in both schemes — the saffron fills stay light
+    /// (F5B400 / FFC940), so the same charcoal holds ≥10:1 everywhere,
+    /// per the doctrine above ("foreground content sits in `text`
+    /// (warm-charcoal) on top of the saffron").
+    static let onAccent      = dynamicColor(light: 0x1D1D1F, dark: 0x1D1D1F)
     /// Lighter highlight for atmospheric mesh gradients — "sun catching the cloud".
     static let accentLift    = dynamicColor(light: 0xFFD755, dark: 0xFFE08A)
     /// Deeper shadow for atmospheric mesh gradients — "the side of the cloud
@@ -368,6 +374,19 @@ extension View {
     /// Toast notification.
     func toastElevation() -> some View {
         shadow(color: .black.opacity(0.10), radius: 4, y: 2)
+    }
+}
+
+// MARK: - Primary CTA
+
+extension View {
+    /// Saffron primary CTA: accent fill with fixed-charcoal label, so
+    /// prominent buttons carry Manifold's identity instead of the
+    /// user's system accent (Principle 6). White-on-saffron would sit
+    /// at ~1.7:1; onAccent charcoal holds ≥10:1 in both schemes.
+    func saffronProminent() -> some View {
+        tint(ManifoldPalette.accent)
+            .foregroundStyle(ManifoldPalette.onAccent)
     }
 }
 
