@@ -47,7 +47,7 @@ struct AdvancedSettingsPane: View {
                         .font(ManifoldType.caption)
                         .foregroundStyle(.secondary)
                 }
-                Button("Restart runtime helper") {
+                Button("Restart Runtime") {
                     Task {
                         await store.restartRuntimeHelper()
                     }

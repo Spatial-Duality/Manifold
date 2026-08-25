@@ -36,7 +36,7 @@ struct GeneralSettingsPane: View {
                 HStack {
                     Spacer()
                     if store.runtimeEnabled {
-                        Button("Restart Runtime Helper") {
+                        Button("Restart Runtime") {
                             Task { await store.restartRuntimeHelper() }
                         }
                         .controlSize(.small)

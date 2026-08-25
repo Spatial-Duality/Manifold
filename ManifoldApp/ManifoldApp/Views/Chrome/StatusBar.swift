@@ -60,7 +60,7 @@ struct LedgerStatusBar: View {
                 .truncationMode(.tail)
             Spacer()
             if !store.isRuntimeConnected {
-                Button("Restart helper") {
+                Button("Restart runtime") {
                     Task {
                         await store.restartRuntimeHelper()
                     }

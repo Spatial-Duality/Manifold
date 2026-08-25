@@ -120,7 +120,7 @@ struct ManifoldApp: App {
                     presentMainLedger(destination: .work)
                 }
 
-                Button("Restart Runtime Helper") {
+                Button("Restart Runtime") {
                     Task { await store.restartRuntimeHelper() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
