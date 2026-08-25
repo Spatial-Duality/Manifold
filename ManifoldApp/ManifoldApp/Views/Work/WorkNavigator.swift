@@ -134,7 +134,7 @@ struct WorkNavigator: View {
             Image(systemName: isActive ? "circle.inset.filled" : "circle")
                 .foregroundStyle(isActive ? ManifoldPalette.active : .secondary)
                 .contentTransition(.symbolEffect(.replace))
-                .animation(.smooth(duration: 0.25), value: isActive)
+                .animation(ManifoldMotion.state, value: isActive)
                 .frame(width: 16)
             if renamingFocusID == focus.presetID {
                 TextField("Focus name", text: $renameDraft)

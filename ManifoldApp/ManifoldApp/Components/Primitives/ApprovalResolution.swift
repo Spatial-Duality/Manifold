@@ -58,7 +58,7 @@ struct ApprovalResolutionModifier: ViewModifier {
         if reduceMotion {
             content
                 .opacity(trigger == 0 ? 1.0 : 0.0)
-                .animation(.linear(duration: 0.20), value: trigger)
+                .animation(ManifoldMotion.state, value: trigger)
         } else {
             content
                 .keyframeAnimator(
